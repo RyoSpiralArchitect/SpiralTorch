@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Byte corpus training-only bias preparation</title>
+<h1>Byte corpus training-only bias preparation</h1>
+<p>Fits on preselected training batches 0, 1, 2, 3. This is initialization, not learning.</p>
+<p id="summary">Loading the frozen v3 source request...</p>
+<a id="download" hidden>Download opaque preparation packet</a>
+<pre id="result" data-status="running">No held-out evaluation or training update.</pre>
+<script type="module">
+const target = document.querySelector("#result");
+try {
+  const response = await fetch("/target/resident-byte-learning-web/source-v3.json", {cache:"no-store"});
+  if (!response.ok) throw Error("Frozen source is missing");
+  const input = await response.text();
+  const digest = async text => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), x => x.toString(16).padStart(2,"0")).join("");
+  const sourceHash = await digest(input);
+  const {default:init, prepare_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  await init();
+  const packetJson = await prepare_resident_byte_learning(input, new Uint32Array([0,1,2,3]));
+  const packet = JSON.parse(packetJson);
+  if (packet.schema !== "spiraltorch.byte_corpus.prepared.v1" || typeof packet.request_json !== "string" || typeof packet.report_json !== "string") throw Error("Invalid preparation packet");
+  const report = JSON.parse(packet.report_json);
+  if (report.schema !== "spiraltorch.byte_corpus.bias_preparation.v1" || report.bias_calibration.source_request_sha256 !== sourceHash
+      || report.request_sha256 !== await digest(packet.request_json)) throw Error("Preparation identity differs");
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([packetJson], {type:"application/json"}));
+  link.download = "resident-byte-corpus-prepared.json";
+  link.hidden = false;
+  target.dataset.status = "completed";
+  target.textContent = JSON.stringify({source_sha256:sourceHash, request_sha256:report.request_sha256, seeds:report.cases.length}, null, 2);
+  document.querySelector("#summary").textContent = "Prepared. Preserve the opaque request bytes. Verify provenance separately and select ONE request for every engine; do not substitute per-engine fitted weights in a comparison.";
+} catch (error) {
+  target.dataset.status = "error";
+  target.textContent = String(error.stack || error);
+  document.querySelector("#summary").textContent = "Preparation failed; no request is promoted.";
+}
+</script>

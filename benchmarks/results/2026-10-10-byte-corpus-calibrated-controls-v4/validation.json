@@ -1,0 +1,452 @@
+{
+  "schema": "spiraltorch.byte_corpus.calibrated_control_validation.v1",
+  "captured_date_jst": "2026-10-10",
+  "base_revision": "f8f176a93cec0170c871f60565a15fa8a9d6d4e8",
+  "scope": "Seven-arm initialization/metric/trainability pilot on fixed repository prose. Numerical correctness, fixed-input lineage and same-runtime continuation; no general language-quality, speed or runtime-attestation claim.",
+  "request_sha256": "276a2245277cc36995eef024a99614811fe12c5be1a0efd897eda2d27b11afff",
+  "source_request_sha256": "759ed1282bad72c2351fcc9c78fef0f661087bf57f578f96e741882763204849",
+  "design": {
+    "seeds": [
+      11,
+      23,
+      37
+    ],
+    "arms_per_seed": 7,
+    "updates": 128,
+    "rate": 0.05,
+    "batch": 2,
+    "positions": 32,
+    "width": 16,
+    "hidden": 32,
+    "heads": 2,
+    "blocks": 1,
+    "geometry_cols": 4,
+    "curvature": -0.75,
+    "topos": false,
+    "train_target_bytes_per_arm": 8192,
+    "heldout_target_bytes_per_arm": 2048,
+    "evaluation_revisions": [
+      0,
+      64,
+      128
+    ],
+    "training_calibration_batch_indices": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "calibration_valid_causal_pairs_per_head": 4224,
+    "first_step_control": 1,
+    "ordinary_scalars": 11216,
+    "geometry_scalars": 11290,
+    "source_revision": "01e12ac8cc9bb10a1b151a8d7b1fda6b157fea64",
+    "corpus_recipe": "source-preparation.json",
+    "treatments": [
+      "ordinary",
+      "poincare_trained_original",
+      "poincare_frozen_original",
+      "flat_trained_original",
+      "flat_frozen_original",
+      "flat_trained_matched_poincare_rms",
+      "flat_frozen_matched_poincare_rms"
+    ]
+  },
+  "protocol": {
+    "study_version": 4,
+    "maximum_cases": 21,
+    "maximum_complete_seed_groups": 3,
+    "legacy_v1_v2_v3_maximum_cases": 16,
+    "ordinary_model_checkpoint_version": 1,
+    "poincare_model_checkpoint_version": 1,
+    "flat_model_checkpoint_version": 2,
+    "semantic_owner": "Rust ByteCorpusBiasCalibration and resident learner",
+    "prepared_packet_schema": "spiraltorch.byte_corpus.prepared.v1",
+    "common_request_owner": "Native Rust preparation; exact bytes consumed by native, browser and independent CPU Torch.",
+    "source_old_15_arms_unchanged": true,
+    "new_pair_changes_only_raw_gains": true,
+    "new_trained_frozen_pair_identical_initial_f32_bits": true,
+    "runtime_revalidates_initial_rms_on_every_segment": true,
+    "resume_revalidation": "Temporary initial models only; no refit, resumed-weight change, additional evaluation or learner update."
+  },
+  "gates": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_delta_relative_l2": 0.002,
+    "minimum_reference_geometry_delta_l2": 1e-8,
+    "measured_trained_geometry_delta": "nonzero",
+    "initial_rms_relative_error": 0.00001,
+    "frozen_weights": "exact initial float32 bits",
+    "resume": "exact signed-zero-sensitive same-runtime report and saved parameter/history equality",
+    "retuned_after_measurement": false
+  },
+  "preparation": {
+    "native": {
+      "request_sha256": "276a2245277cc36995eef024a99614811fe12c5be1a0efd897eda2d27b11afff",
+      "packet_sha256": "e861945733770ed8c9179efd04db89934aee703d85f636bcb1581cfc4e893645",
+      "common_learning_input": true,
+      "source_arms_unchanged": 15,
+      "gain_only_transformation": true,
+      "initial_checkpoint_bits_bound": true,
+      "valid_pairs_per_head": 4224,
+      "max_realized_relative_rms_error": 2.0909285103343223e-7
+    },
+    "browser": {
+      "request_sha256": "9f9b56ada4589f5bb309b05baba910ca71a4d30b52d2bfb327ea5692dcb27d49",
+      "packet_sha256": "1900e245bb3603721cdb0db9f9f6e7a57fb7f21484f23d6b65d595483b77c57b",
+      "common_learning_input": false,
+      "source_arms_unchanged": 15,
+      "gain_only_transformation": true,
+      "initial_checkpoint_bits_bound": true,
+      "valid_pairs_per_head": 4224,
+      "max_realized_relative_rms_error": 2.1105778835739386e-7
+    }
+  },
+  "reference": {
+    "engine": "independent_pytorch",
+    "torch_version": "2.12.1",
+    "dtype": "float32",
+    "device": "cpu",
+    "threads": 1,
+    "initial_rms_max_relative_error": 9.859249394672531e-8,
+    "initial_rms_qualification_passed": true,
+    "python": "3.12.6",
+    "fits_gains": false,
+    "consumes_updates_for_calibration": false
+  },
+  "execution_order": {
+    "request_and_criteria_frozen_before_learning": true,
+    "torch_reference_completed_before_native_result_inspection": true,
+    "torch_reference_frozen_before_first_native_execution": false,
+    "note": "The successful CPU Torch reference overlapped the first native full GPU run. No timing comparison is made. The fixed request, selected windows, arms and numerical gates were not changed after observing results."
+  },
+  "tests": {
+    "rust_cpu_study": {
+      "passed": 27,
+      "failed": 0,
+      "scope": "Filtered byte_study tests, including CPU two-block/two-head materialization and last-head RMS rejection."
+    },
+    "native_cli": {
+      "passed": 5,
+      "failed": 0
+    },
+    "python_study_with_torch": {
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0
+    },
+    "python_artifact_resume_stdlib": {
+      "passed": 21,
+      "failed": 0
+    },
+    "python_study_stdlib_ci_route": {
+      "run": 33,
+      "passed": 27,
+      "skipped": 6,
+      "failed": 0
+    },
+    "pinned_rustfmt": true,
+    "diff_whitespace": true,
+    "native_release_build": true,
+    "wasm_release_build": true,
+    "html_module_syntax": {
+      "passed": 3
+    },
+    "license_metadata": {
+      "cargo_packages": 42,
+      "python_packages": 2,
+      "passed": true
+    },
+    "strict_wgpu_clippy_run": false,
+    "hosted_child_ci_run": false
+  },
+  "toolchains": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "host": "aarch64-apple-darwin",
+    "rustfmt": "nightly-2026-04-15",
+    "wasm_bindgen": "0.2.129"
+  },
+  "reviews": [
+    {
+      "finding": "Comparator ignored missing or failed Torch initial calibration qualification.",
+      "resolution": "Validate flags, complete seed/block/head/pair coverage, strict scalar types and independently recomputed RMS arithmetic before comparison."
+    },
+    {
+      "finding": "Coordinated truncated or relabelled full and retained histories could pass controls.",
+      "resolution": "Bind each report to request-derived identities, counts, complete histories and evaluation cadence before cross-report equality."
+    },
+    {
+      "finding": "Preparation checkpoint comparison accepted boolean scalar values or float dimensions.",
+      "resolution": "Require numeric non-boolean values and positive integer shapes with exact product counts before comparing initial bits."
+    }
+  ],
+  "independent_review": {
+    "mode": "read-only local subagent",
+    "open_findings": 0,
+    "scope": "Rust, Python and browser protocol/reference/verifier code; focused re-review after all three fixes.",
+    "regression_suite": {
+      "run": 54,
+      "passed": 48,
+      "optional_torch_skipped": 6,
+      "failed": 0
+    },
+    "additional_mutation_probes_rejected": 11,
+    "limitation": "Reviewer did not execute device runs; device qualification was executed separately by the parent."
+  },
+  "retained_non_success": [
+    {
+      "file": "torch.log",
+      "status": "Stopped during initial RMS qualification, before training.",
+      "reason": "Loop variables shadowed the captured batch size for the second seed. Distinct variable names and explicit CPU factories fixed the reference; a three-seed regression now covers the path. The successful reference is torch.json with torch-fixed.log. No input or numerical gate was relaxed."
+    }
+  ],
+  "environment_notes": [
+    "An initial unisolated Python test invocation emitted local site-patch noise. Final qualification uses isolated Python (-I -B, plus -S for stdlib-only routes).",
+    "Release/test builds retain 161 existing vendored wgpu warnings and an existing block crate future-incompatibility warning; warning-free or strict-Clippy qualification is not claimed."
+  ],
+  "inherited_v3_full_reports_strictly_equal": {
+    "native": 15,
+    "browser": 15,
+    "torch": 15
+  },
+  "runtimes": {
+    "native": {
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "cases": 21,
+      "numerical_comparison_passed": true,
+      "resumed_numerical_comparison_passed": true,
+      "same_runtime_resume_report_exact": true,
+      "resume_path": [
+        37,
+        64,
+        128
+      ],
+      "completed_resume_report_and_checkpoint_exact": true,
+      "first_step_pairs_passed": 9,
+      "all_five_trained_geometry_families_move_at_step1": true,
+      "all_14_contrast_signs_per_seed_agree": true,
+      "max_contrast_torch_discrepancy": 3.0096964032111373e-7,
+      "train_ce_max_error": 9.5367431640625e-7,
+      "heldout_ce_max_error": 0.000001430511474609375,
+      "final_parameter_max_error": 5.960464477539062e-7,
+      "geometry_delta_relative_l2_max_error": 0.00001928224657832324
+    },
+    "browser": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "cases": 21,
+      "numerical_comparison_passed": true,
+      "resumed_numerical_comparison_passed": true,
+      "same_runtime_resume_report_exact": true,
+      "resume_path": [
+        37,
+        128
+      ],
+      "completed_resume_report_and_checkpoint_exact": true,
+      "first_step_pairs_passed": 9,
+      "all_five_trained_geometry_families_move_at_step1": true,
+      "all_14_contrast_signs_per_seed_agree": true,
+      "max_contrast_torch_discrepancy": 1.5048482016055686e-7,
+      "train_ce_max_error": 0.000001430511474609375,
+      "heldout_ce_max_error": 0.000001430511474609375,
+      "final_parameter_max_error": 3.5762786865234375e-7,
+      "geometry_delta_relative_l2_max_error": 0.000009870352922683123
+    }
+  },
+  "extra_native_boundaries": {
+    "zero_saved_initial_parameter_bits_exact": true,
+    "zero_initial_evaluation_prefix_exact": true,
+    "zero_to_one_first_step_control_passed": true,
+    "pause37_and_pause64_history_prefixes_exact": true,
+    "records": [
+      "native-zero-initialization.json",
+      "native-boundary-prefixes.json",
+      "native-resume-verification.json",
+      "native-resume-verification-64.json",
+      "native-controls.json"
+    ]
+  },
+  "provenance_limits": [
+    "Hashes identify retained artifacts, not signatures or independently trusted execution attestation.",
+    "Only scalar trajectories, verification records, source and hashes are public. Requests, weights, checkpoints, logs and binaries stay local.",
+    "Published native/browser/Torch reports omit final parameter arrays and are explicitly incomplete comparator inputs.",
+    "Browser preparation is qualified separately; its different fitted request is never substituted for the common native-prepared learning request.",
+    "Native and browser passed independent comparisons and same-runtime continuation checks; cross-runtime bitwise equality is not claimed.",
+    "The device study uses one block and two heads. Multi-block calibration is covered by CPU materialization/rejection tests, not a separate multi-block GPU corpus run.",
+    "Flat retains the causal wave and bounded coordinate chart; it is not a linear Euclidean encoder or curvature-to-zero limit.",
+    "Initial RMS matching does not match attention patterns, rowwise relationships with QK scores, conditioning or later dynamics.",
+    "The tiny fixed three-seed corpus pilot does not establish statistical significance, pretrained LLM FT quality, generation quality, general geometry superiority or necessity of geometric learning.",
+    "Ordinary has fewer parameters and less compute. No matched-compute or speed claim is made; startup RMS forward/readback overhead is explicit."
+  ],
+  "source_sha256": {
+    ".github/workflows/ci.yml": "ce8fd77394d33156cd673be7bda6704d7167bb073a109f2e165c9bc2edc16805",
+    "Cargo.lock": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62",
+    "Cargo.toml": "0a756da3b71ab178232acdac4e08bd29222d17530e645857edc143f03df3cc05",
+    "benchmarks/results/2026-10-10-byte-corpus-metric-controls-v3/test_controls.py": "52b652149973f30c108cc29a307484a125a67bd4efe78a8134809b662d94ef02",
+    "benchmarks/results/2026-10-10-byte-corpus-metric-controls-v3/verify_controls.py": "42ee018e8de11f659ca09ec8498f4e78c17b92e1eb1b33f6f47881fa01e284f8",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "760672c388a45f860b753183e14624e74e1c31f371df2df51573bba5791897d9",
+    "crates/st-backend-wgpu/src/resident_tensor/euclidean.rs": "74138da0ee05bb5cec152631f20448f38734393bbef8bd6ac7c828e91ac51a81",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "7fec74fd7f3dd9d6ebd39df70e927544366b50cce0646fa46d2f8c96809b1b19",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/pair_spec.rs": "6eb236c802239623dc0101f7e416e25ff8e06fac5f08f70cd0d3bc5b070fb531",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": "d5526e279a65a20f523697fe2964d78cac1ea5a54da0a1b2e1cd94b310fc9dd1",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": "d58c6dc08b1886ff5308e02800b3988214c131c66b704746d811cf2bdb1cb281",
+    "crates/st-kernel-contracts/src/causal_bias.rs": "af8d27eeec4046adde2c474ebcb7e109c4ced5f4cc7737e8b3fbe5d5da9d6af0",
+    "crates/st-kernel-contracts/src/causal_bias/tests.rs": "c26a2bcb228992625868a989546e2d5c00c5556f322e77dbd87b6cfd3b40c401",
+    "crates/st-kernel-contracts/src/euclidean.rs": "d0fe3a9b55128b4367b8601638f1c35661317d32522c2e472f08d8bb2335add3",
+    "crates/st-kernel-contracts/src/euclidean/tests.rs": "792a579e95bfe04ff0d426af45f5a1b718df6442d9bcad99af05c6e6aaa3331b",
+    "crates/st-kernel-contracts/src/lib.rs": "11d6abe4f56f17daec9d1a739d2e365f3f9341feb606b806435cece43ad0bb75",
+    "crates/st-kernel-contracts/src/pair_bias.rs": "748535c01a0c99f3c7af56548ef9261502b96c130338f555ec536d10fd12af58",
+    "crates/st-kernel-contracts/src/poincare.rs": "4a29003316cb97c09b3ab70dcb06c9d10e4e7e348f822d956d410e162a71f59b",
+    "crates/st-nn/Cargo.toml": "5cf480e20c0901fb9393586d04f0e3bc8d41e1bb19fcb242bcef9a0487114a7a",
+    "crates/st-nn/examples/resident_byte_decoder_browser.rs": "55f2cabadf6467eb12f23a25e567994410bfe4d1eea3348d9e48498e7865a499",
+    "crates/st-nn/examples/resident_byte_flat_metric.rs": "d0f8fcefb2845edefc32f08fb9acf1c4e6edab9cea25c84bef09d4a3589269a3",
+    "crates/st-nn/examples/resident_byte_learning.rs": "0d4f182880a9aeec26f9644e65c8d793218dff6c3cb8000970aff0c3ab9a76ca",
+    "crates/st-nn/examples/resident_byte_learning_browser.rs": "5474108a74f3dc9ce0685e75e88798195709b5a90adcc6f624af4cb25292f8f5",
+    "crates/st-nn/examples/support/byte_decoder.rs": "11684fb440e7941d44c858beac11953cd63c57f1d71d35d5549138c765de48cf",
+    "crates/st-nn/examples/support/byte_decoder/bias_scale_controls.rs": "5142d103d8432217e96fbf1c19c8d0262d384f87c25f0ed735fde825e1727ef4",
+    "crates/st-nn/examples/support/byte_decoder/checkpoint_controls.rs": "4f0c5cadc18476b23e8c8b356a96dd6fcd71a8ca4052bf1355d3aa6760440128",
+    "crates/st-nn/src/resident.rs": "68dcb967cef9e01dd95a9d728fdcf5ccdd56db039bfea6e9bbf56c29c67d211e",
+    "crates/st-nn/src/resident/byte_decoder.rs": "c0826415208488b5abf4d987a68de73c0530b960f676eb0231896e314a0e9be2",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint.rs": "63c9fcc1b4bbe076df31fe535dfc5a0373666fee52f3eda6c2a9f1e05f5a3577",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs": "853d515ce4396f2108321ee8ab861a07feea922acb2be0a33a2a52bd88abc814",
+    "crates/st-nn/src/resident/byte_decoder/geometry.rs": "0d41b533b89525995085dba331278ce33a8454f81e72d3710c642490a2a00050",
+    "crates/st-nn/src/resident/byte_decoder/training.rs": "981e53b88e27bcb89a0d859fdeefe259c9388081d3428787257db75336ae9ea6",
+    "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "0195b15eea88aaf9515ef739b9772c23147eeca04d1e37c8da7dcbd39647663c",
+    "crates/st-nn/src/resident/byte_study.rs": "e0815f6dcb41d717bd896377db7fcbe633a965b799dc30671fd793482a238bef",
+    "crates/st-nn/src/resident/byte_study/calibration.rs": "279defffdeb3586f09a4c6452979c9295a872c56b110deb2d2a850e4422d0ef6",
+    "crates/st-nn/src/resident/byte_study/calibration/tests.rs": "843646f1c77f27c08f440f9131c446576cff65bd241f0c9b666dd79a89789cf1",
+    "crates/st-nn/src/resident/byte_study/policy.rs": "36f23d822466838ae8ce4d6221297178e31729bda76e8691f370f6d42fba81d9",
+    "crates/st-nn/src/resident/byte_study/policy/metric_tests.rs": "fc509910fae90b74c6c20a2301efe9bf3e89f4840774c2f78dca58ee1b28aaaa",
+    "crates/st-nn/tests/byte_bias_scale_browser.html": "017b5539874ebfbe181c67aa6687534497400f6bf1345b9b7d52547d1cf3c2cd",
+    "crates/st-nn/tests/byte_learning_browser.html": "5b68710706c4498e062809e5ad6c770cea1a7af1073e1b51e17841a3db99b2f1",
+    "crates/st-nn/tests/byte_learning_prepare_browser.html": "68308c7959cf937be95f76db9fad85aa70b28e3e42d290f15dd9c08667ba20c1",
+    "crates/st-nn/tests/byte_learning_resume_browser.html": "1d73cf0c3a48e84c0efa9df19b750d648263537b4ed8e4003bf7b7698a480621",
+    "docs/byte_corpus_calibration.md": "b937ba71a5d45fc0ac5dd37df4b942927135069edc656a79ea1e2d2000044402",
+    "docs/byte_corpus_learning.md": "056674d23eeccbeef30b4747cb4f6bc50b0f108fc8ed5292086483aa2a292520",
+    "docs/causal_bias_calibration.md": "bd45044b1907f69879ab4601f2aa4f36353b2dddd9d6e73fcc0b609377f591d7",
+    "docs/resident_byte_decoder.md": "7bed48166f72e4a42891133131da63a89d52411df008e436e3b5f045ebef9dd8",
+    "rust-toolchain.toml": "a6a0bbd29ffaa8182dc22d1d9149709f1091e47df40ed96eb8a78a711c66a4ce",
+    "tools/byte_bias_scale_reference.py": "f288eca2b7abbfaf3db95945b09b4af85311d1339b8f1175fb580c9a3de5d54f",
+    "tools/byte_corpus_calibration.py": "e9fc4e2caccced3ee02e1d2f67d10077593d06ecca44d94cb3e84ab9b4bd6c6a",
+    "tools/byte_corpus_study.py": "6fb6fb150f8f6eb1885f988407a2a9aac40534de2b671bdc66a20c2921bbc081",
+    "tools/generate_causal_zspace_wave_torch_fixture.py": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa",
+    "tools/generate_poincare_bias_torch_fixture.py": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18",
+    "tools/generate_resident_byte_decoder_torch_fixture.py": "47b5af2f4bfbf5ce6bf367d9d32f762db86d6b5ac2117c8e5a264376dcd78430",
+    "tools/generate_resident_byte_geometry_torch_fixture.py": "36febf75ed2c2ea1af1fb9b5c4fb58820740cf45c9cc7c4a47debf88e5995f5c",
+    "tools/test_byte_corpus_calibration.py": "2a7d111224964eb178ca56b5a266e84f27c5c3ae9605243b9cf3306b47436e0a",
+    "tools/test_byte_corpus_study.py": "7e99499f6e7a09c6cdf385e1a27c6a4172d5fcef5a5c30a152e638ea7c27eab0",
+    "tools/test_verify_byte_bias_scale.py": "6c5edb9b08f69205a2bca45e926c39fc5f6c2c60639dade3ec2773f70cc1411c",
+    "tools/test_verify_byte_corpus_calibrated_controls.py": "72120d59cafac8899ea8f6b3ecf3663a043cd1c83b5a27a98222ae08868ff482",
+    "tools/test_verify_byte_corpus_preparation.py": "95cac00bc7454bc33e9d990f683f4009f59a982edd6c11ec247a08b1e8f83f93",
+    "tools/test_verify_byte_corpus_resume.py": "4dfb31906a9b29e901672971ebdfe6374a423c836a81ec6f9bffc0b7591c0de3",
+    "tools/test_verify_byte_flat_metric.py": "47544c325d053e3bcd36616111a1c92b8844a7877b16ede53b58f453e64268a6",
+    "tools/verify_byte_bias_scale.py": "e5aa990481b936e6bc75161c415f9aceb8819362c8fc3f0b4061af9720073525",
+    "tools/verify_byte_corpus_calibrated_controls.py": "d86144717fabfd326f3b0f04da01e7c8578a45cbb5df6c27613ea77f04229ccb",
+    "tools/verify_byte_corpus_preparation.py": "0534ade1ab926f22c601a78e711dd56ff8cc4af0e18d6697bc165a88b8f70caf",
+    "tools/verify_byte_corpus_resume.py": "5570a85184cd9e661ee3b8bef944237415730d2fb47d6b21401ac9033fa73c48",
+    "tools/verify_byte_flat_metric.py": "577af075e2e3e036079a513f07345eeac5975525316affa92d2b2f73f2388089",
+    "tools/verify_byte_parameter_rates.py": "b68e4a18d938a377d6665912e377cf1276bdd874b32e38ad824f863ecb0e2566"
+  },
+  "public_artifact_sha256": {
+    "README.md": "7f4740102ddaa5dcd54fa15de38193e72a52517265db8a509bb34d4076b5ea33",
+    "browser-comparison.json": "bfe3dd7f11bf7ae6d5e04ef4cb9f195e03eef5b55c505f36055353cb5dfe09a8",
+    "browser-controls.json": "da2b561ae58197e26f234e7f21797a7e7dcac661c2d078bf53ccfc8300d8427a",
+    "browser-noop-verification.json": "144ac78189271004e494b0e11a67ae55a1da0a44bf61c928dc7dda7988e2b2a9",
+    "browser-preparation.json": "45760e53ae6b1bfab45cd7293142f2ddfa6497e44f500980b592892049dd289f",
+    "browser-resume-verification.json": "180be646460b837e31cbfaf7e6e51e74560d7a99c5a50762e0289e19bca7e246",
+    "browser-resumed-comparison.json": "bfe3dd7f11bf7ae6d5e04ef4cb9f195e03eef5b55c505f36055353cb5dfe09a8",
+    "browser.json": "4a917d277541976a435c263b6ef32b7269fedd10c0514fe0708b9e0348edf8ea",
+    "inherited-reports.json": "ceab900301babe3bf39b991ffe2f5f012444b3ef0c58350173f96957b186ccb7",
+    "native-boundary-prefixes.json": "91bc040ea7ebd660449685389a055ff14705a44dc301baa0c25f35f3438477a6",
+    "native-comparison.json": "3dff025c2162cd8dc82fb1985d348f408be20d7b6c00e9d35fbe429fcfad3ae6",
+    "native-controls.json": "8a8529c2fa10784e2aec740b119e06b60391736f4ab765329118ef4a4bc0cdf0",
+    "native-noop-verification.json": "8e90f3db7d13ba28911b5542a51def14a3a0b3cfc30d19db565ea1966e155a08",
+    "native-preparation.json": "5187f0231b55fe6761ad40a883334e683fe31c9af08540f98f4b03d5e83ded97",
+    "native-resume-verification-64.json": "73d1d6d2d9bae1177985f0b14e2b36a2f7ffd2319996111cec0df4ae04dc7d53",
+    "native-resume-verification.json": "510ffd438ccae282a423d02e6e0b117e41a53f64c23071ebea0c170e9c9ca2a7",
+    "native-resumed-comparison.json": "3dff025c2162cd8dc82fb1985d348f408be20d7b6c00e9d35fbe429fcfad3ae6",
+    "native-zero-initialization.json": "e626370dd605080f42d9d32321b991b9e746ce589b54cdac3af39c158476c0c6",
+    "native.json": "4bd380f1b5e1d1c68b2e82fc87cf8bb8ae491b489b50b1bf9372258a17576a86",
+    "pre-registered.json": "94a1fe4c0ef209004d394edd7c05e0d2d7d184eec1e4b12d02902cf2a4d3e96a",
+    "source-preparation.json": "e9179e120db25ac0c41564d412a13554bba69cd0878fa073e8c092a113d99813",
+    "torch.json": "f5cc3e8b18154c01eef1e8ae9f72f801d3366cb077ffe865989364ba410f1449"
+  },
+  "retained_v3_artifact_sha256": {
+    "input/request.json": "759ed1282bad72c2351fcc9c78fef0f661087bf57f578f96e741882763204849",
+    "native.json": "76e1aabde9134ca7df8b3aef6adaf53b98fda8b706d83176ff4cc00467b931ea",
+    "browser.json": "d01902e17646baadea422984cc5819536ec730aae6379ca10b5bc5556136158f",
+    "torch.json": "253c53b21ffe4bb158e559efdf66a035444b222cf83d2d5e90a09964d45dc322"
+  },
+  "local_raw_artifact_sha256": {
+    "browser-checkpoint-1.json": "8759fbe85c0f114e21726df182e53efabdf0a20f7632b194fbd6a14045bf6d8b",
+    "browser-checkpoint-128.json": "6c2203abee0193b66ac20c6d0f7bd575064e362f595962f06692aa9b04763f93",
+    "browser-checkpoint-37.json": "de08995cb9f74e1bbcb605666e9169d5888922a9350b5947092cc2bcb208c2ac",
+    "browser-comparison-reviewed.json": "bfe3dd7f11bf7ae6d5e04ef4cb9f195e03eef5b55c505f36055353cb5dfe09a8",
+    "browser-comparison.json": "bfe3dd7f11bf7ae6d5e04ef4cb9f195e03eef5b55c505f36055353cb5dfe09a8",
+    "browser-comparison.log": "a1fbc67d16ec2bef41dcaf59f764c13d303118aa8eb78fb76cda6b597f36a97f",
+    "browser-controls.json": "da2b561ae58197e26f234e7f21797a7e7dcac661c2d078bf53ccfc8300d8427a",
+    "browser-first-step.json": "2f4dea873ae84737889f4ddeb8fdfc0838ce044355eff5a8590aeb007fa721e2",
+    "browser-noop-checkpoint.json": "6c2203abee0193b66ac20c6d0f7bd575064e362f595962f06692aa9b04763f93",
+    "browser-noop-verification.json": "144ac78189271004e494b0e11a67ae55a1da0a44bf61c928dc7dda7988e2b2a9",
+    "browser-noop.json": "7f02ec86718b25ad68d946c7888645b7ee2b4f7d3257e8347471e2d52d5cc571",
+    "browser-partial-37.json": "3c1018b7709ff696e92edeaa05c080f33f06e90d2ae6fa748270a9e64dbfe008",
+    "browser-preparation/preparation.json": "7d3934c28973b39ae32276fc8c1465b6c724cb661e7a9181a8d2cba080ff5a84",
+    "browser-preparation/request.json": "9f9b56ada4589f5bb309b05baba910ca71a4d30b52d2bfb327ea5692dcb27d49",
+    "browser-preparation/verification.json": "45760e53ae6b1bfab45cd7293142f2ddfa6497e44f500980b592892049dd289f",
+    "browser-preparation-reviewed.json": "45760e53ae6b1bfab45cd7293142f2ddfa6497e44f500980b592892049dd289f",
+    "browser-prepared-packet.json": "1900e245bb3603721cdb0db9f9f6e7a57fb7f21484f23d6b65d595483b77c57b",
+    "browser-resume-verification.json": "059cd76277842515f173dca00b0258515fb5580eeea33458e2e3a84f1bd59083",
+    "browser-resumed-comparison.json": "bfe3dd7f11bf7ae6d5e04ef4cb9f195e03eef5b55c505f36055353cb5dfe09a8",
+    "browser-resumed.json": "7f02ec86718b25ad68d946c7888645b7ee2b4f7d3257e8347471e2d52d5cc571",
+    "browser.json": "7f02ec86718b25ad68d946c7888645b7ee2b4f7d3257e8347471e2d52d5cc571",
+    "cli-tests.log": "a781f0bf72dfe6715944c08a554641a5618d4b1e30be77694ce5ee42b083332e",
+    "inherited-reports.json": "63209b555148e29edaba26659117273f4e71f9e5f167376ab056f7c3484f43bb",
+    "input/preparation.json": "c1269c16c96e187cef8fc21d2f2d98fc62d773b8293d257f3f46a40a1fd23dcc",
+    "input/request.json": "276a2245277cc36995eef024a99614811fe12c5be1a0efd897eda2d27b11afff",
+    "input/verification.json": "5187f0231b55fe6761ad40a883334e683fe31c9af08540f98f4b03d5e83ded97",
+    "native-binary": "4b278ccc31a93c1c9025d7e4052a17b46d4e57a933fe27c5f0bdb0a28270b22e",
+    "native-boundary-prefixes.json": "91bc040ea7ebd660449685389a055ff14705a44dc301baa0c25f35f3438477a6",
+    "native-build.log": "70a0d23913f3969b54121bd1dca68fd6df39f3b0ec17230ac8bc44d8416498bf",
+    "native-checkpoint-0.json": "08640474feadff177905bef678056fe1af98c96aa398ac53b524c935827a3f20",
+    "native-checkpoint-1.json": "7056b5155c940277a7ffd9dc3a407bb8d42d81ac692a9fa6818578f3fe7db68d",
+    "native-checkpoint-128.json": "0f18d292735bcf09efedbfe3c1b258e272b1fed0f941cdb1e9ff366aa256bde4",
+    "native-checkpoint-37.json": "7ee9f03b4c221b6296fc05f76d8c98d4d7ba5dd129ba3f06aa7883745c06ff9a",
+    "native-checkpoint-64.json": "cb515230a66cd4d312f301aec8312e4d7f8610f6d985604c27f13edc095ba24f",
+    "native-comparison-reviewed.json": "3dff025c2162cd8dc82fb1985d348f408be20d7b6c00e9d35fbe429fcfad3ae6",
+    "native-comparison.json": "3dff025c2162cd8dc82fb1985d348f408be20d7b6c00e9d35fbe429fcfad3ae6",
+    "native-controls.json": "8a8529c2fa10784e2aec740b119e06b60391736f4ab765329118ef4a4bc0cdf0",
+    "native-first-step.json": "ece37fabb7ec4f1c3920cb2551a16a240088f05a02ca973b9df259abf0b4cec5",
+    "native-first-step.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-initial.json": "d44c0ef5a90bf5a49e5a3a0663beccf13af8335f60a6e498c8491494ce7f1ba7",
+    "native-initial.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-noop-checkpoint.json": "0f18d292735bcf09efedbfe3c1b258e272b1fed0f941cdb1e9ff366aa256bde4",
+    "native-noop-verification.json": "8e90f3db7d13ba28911b5542a51def14a3a0b3cfc30d19db565ea1966e155a08",
+    "native-noop.json": "99661962b1df6fd60c97682a564f6d30acbe4c02178b3e6d394124d4b571316e",
+    "native-noop.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-partial-37.json": "efe548940be013abd901aaa560976c44722d782fed81502f9922533b2aabdfc0",
+    "native-partial-37.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-partial-64.json": "2c12bdcf8907df32fcf5649655c6cd48f9dcac3fa4c543c9d861d2e94f536d12",
+    "native-partial-64.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-preparation-reviewed.json": "5187f0231b55fe6761ad40a883334e683fe31c9af08540f98f4b03d5e83ded97",
+    "native-prepared-packet.json": "e861945733770ed8c9179efd04db89934aee703d85f636bcb1581cfc4e893645",
+    "native-prepared.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-resume-verification-64.json": "73d1d6d2d9bae1177985f0b14e2b36a2f7ffd2319996111cec0df4ae04dc7d53",
+    "native-resume-verification.json": "510ffd438ccae282a423d02e6e0b117e41a53f64c23071ebea0c170e9c9ca2a7",
+    "native-resumed-comparison.json": "3dff025c2162cd8dc82fb1985d348f408be20d7b6c00e9d35fbe429fcfad3ae6",
+    "native-resumed.json": "99661962b1df6fd60c97682a564f6d30acbe4c02178b3e6d394124d4b571316e",
+    "native-resumed.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-zero-initialization.json": "e626370dd605080f42d9d32321b991b9e746ce589b54cdac3af39c158476c0c6",
+    "native.json": "99661962b1df6fd60c97682a564f6d30acbe4c02178b3e6d394124d4b571316e",
+    "native.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pre-registered.json": "2e22aec7279b622f75311918df119e54215bc5fca3fdf4968bc863805ee697c2",
+    "python-artifact-tests.log": "5f25867711b347ce23a06df5dfcd0aa13803c1bd95ef93744a32f0366fb683ff",
+    "python-study-stdlib-tests.log": "24455fa62155277c87a29cd334fc522a75a00667b887f3e75ad185d8213d609a",
+    "python-study-tests.log": "a49eaecc6af89c6bcd8792044411af2e9feb6c63dd54c0d755fba95879c9d92c",
+    "resident_byte_learning_browser.js": "2b7b096cc93349f59e7b819df6cccd72800dac1e5f9f0e3df5f21bbb15fe31a2",
+    "resident_byte_learning_browser_bg.wasm": "20b448c9d623471a1339f1b904694f114f30aaef44c16632cbc245f4b34e4556",
+    "rust-study-tests.log": "eab767c5939a4fe5ed7dc737368edfa1bc88800f27aa1d300c59e3d7558e12a7",
+    "torch-fixed.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "torch.json": "1bc5e9cd115c8fbdd3f9bf701e3b7facf67818d8440f501ad5e4f265f541b135",
+    "torch.log": "2f6f14dd326f4b3aa839103a7172563e7c88ccf723222a80171827578ad48472",
+    "wasm-build.log": "ea3d097980f99f21b0fb37330c381ab27e7ddb3292b7b1c0167ed3ba1e12d087"
+  }
+}

@@ -15,7 +15,8 @@ try {
   const request = JSON.parse(input);
   const version = request.schema === "spiraltorch.byte_corpus.request.v1" ? 1
     : request.schema === "spiraltorch.byte_corpus.request.v2" ? 2
-    : request.schema === "spiraltorch.byte_corpus.request.v3" ? 3 : null;
+    : request.schema === "spiraltorch.byte_corpus.request.v3" ? 3
+    : request.schema === "spiraltorch.byte_corpus.request.v4" ? 4 : null;
   if (!version) throw Error("Unsupported study version");
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), x => x.toString(16).padStart(2,"0")).join("");
   const {default:init, run_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
@@ -28,12 +29,17 @@ try {
     if (i % request.checkpoint_every === 0 || i === request.train_batches.length) revisions.push(i);
   }
   const finite = v => Number.isFinite(v);
+  const sameCalibration = version !== 4 || (report.bias_calibration?.source_request_sha256 === request.bias_calibration.source_request_sha256
+    && report.bias_calibration.relative_tolerance === request.bias_calibration.relative_tolerance
+    && JSON.stringify(report.bias_calibration.train_batch_indices) === JSON.stringify(request.bias_calibration.train_batch_indices));
   if (report.schema !== `spiraltorch.byte_corpus.result.v${version}` || report.engine !== "spiraltorch" || report.request_sha256 !== hash
+      || !sameCalibration
       || report.cases.length !== request.cases.length
       || report.cases.some((c, i) => c.name !== request.cases[i].name
         || c.seed !== request.cases[i].seed || c.geometry !== request.cases[i].geometry
         || (version >= 2 && c.geometry_update !== request.cases[i].geometry_update)
-        || (version === 3 && c.pair_metric !== (request.cases[i].pair_metric ?? null))
+        || (version >= 3 && c.pair_metric !== (request.cases[i].pair_metric ?? null))
+        || (version === 4 && c.bias_initialization !== request.cases[i].bias_initialization)
         || c.parameter_tensors !== request.cases[i].parameters.length
         || c.training.length !== request.train_batches.length
         || c.training.some((s,j) => s.revision !== j+1 || !finite(s.ce))

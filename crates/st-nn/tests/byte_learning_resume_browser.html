@@ -21,7 +21,8 @@ try {
   const request = JSON.parse(input);
   const version = request.schema === "spiraltorch.byte_corpus.request.v1" ? 1
     : request.schema === "spiraltorch.byte_corpus.request.v2" ? 2
-    : request.schema === "spiraltorch.byte_corpus.request.v3" ? 3 : null;
+    : request.schema === "spiraltorch.byte_corpus.request.v3" ? 3
+    : request.schema === "spiraltorch.byte_corpus.request.v4" ? 4 : null;
   if (!version) throw Error("Unsupported study version");
   const query = new URLSearchParams(location.search);
   const stop = Number(query.get("stop") ?? request.train_batches.length);
@@ -37,6 +38,9 @@ try {
   if (typeof reportJson !== "string") throw Error("Missing Rust report JSON");
   const report = JSON.parse(reportJson);
   const complete = stop === request.train_batches.length;
+  const sameCalibration = version !== 4 || (report.bias_calibration?.source_request_sha256 === request.bias_calibration.source_request_sha256
+    && report.bias_calibration.relative_tolerance === request.bias_calibration.relative_tolerance
+    && JSON.stringify(report.bias_calibration.train_batch_indices) === JSON.stringify(request.bias_calibration.train_batch_indices));
   const revisions = [0];
   for (let i = 1; i <= stop; ++i) {
     if (i % request.checkpoint_every === 0 || i === request.train_batches.length) revisions.push(i);
@@ -45,11 +49,13 @@ try {
       || typeof segment.checkpoint_json !== "string" || !segment.checkpoint_json.length
       || report.schema !== `spiraltorch.byte_corpus.${complete ? "result" : "partial"}.v${version}`
       || report.engine !== "spiraltorch" || report.request_sha256 !== hash
+      || !sameCalibration
       || report.cases.length !== request.cases.length
       || report.cases.some((c, i) => c.name !== request.cases[i].name
         || c.seed !== request.cases[i].seed || c.geometry !== request.cases[i].geometry
         || (version >= 2 && c.geometry_update !== request.cases[i].geometry_update)
-        || (version === 3 && c.pair_metric !== (request.cases[i].pair_metric ?? null))
+        || (version >= 3 && c.pair_metric !== (request.cases[i].pair_metric ?? null))
+        || (version === 4 && c.bias_initialization !== request.cases[i].bias_initialization)
         || c.training.length !== stop || c.training.some((s,j) => s.revision !== j+1 || !Number.isFinite(s.ce))
         || c.validation.length !== revisions.length
         || c.validation.some((s,j) => s.revision !== revisions[j] || !Number.isFinite(s.mean_ce)

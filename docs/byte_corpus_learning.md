@@ -10,6 +10,11 @@ The runner is the public Rust `st_nn::resident::ByteCorpusStudy` API (feature
 or a tokenizer API. Its request-bound checkpoints include complete model values,
 the common data cursor and scalar histories for all cases.
 
+For training-only bias-strength controls, use the separate
+[v4 calibration recipe](byte_corpus_calibration.md). Rust prepares actual initial
+gains once; native, browser and independent Torch then consume one unchanged
+request. The older v1/v2/v3 protocols retain their original initialization rules.
+
 The [2026-10-09 pilot record](../benchmarks/results/2026-10-09-byte-corpus-matched-learning/README.md)
 publishes every arm's scalar trajectory, the fixed acceptance criteria and
 paired seed differences. Raw initial/final weights remain local with hashes.

@@ -18,7 +18,9 @@ REQUEST = "spiraltorch.byte_corpus.request.v1"
 RESULT = "spiraltorch.byte_corpus.result.v1"
 REQUEST_V2 = "spiraltorch.byte_corpus.request.v2"
 REQUEST_V3 = "spiraltorch.byte_corpus.request.v3"
+REQUEST_V4 = "spiraltorch.byte_corpus.request.v4"
 POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
+ORIGINAL, MATCHED = "original", "matched_poincare_rms"
 ATOL, RTOL, DELTA_RTOL = 3e-6, 5e-5, .002
 
 
@@ -64,24 +66,48 @@ def frozen(case):
     return case.get("geometry_update") == "frozen"
 
 
+def matched(case):
+    return case.get("bias_initialization") == MATCHED
+
+
 def trainable_scalars(case):
     return sum(len(p["values"]) for p in case["parameters"]
                if not frozen(case) or not p["name"].startswith("geometry."))
 
 
 def request_version(request):
-    if request["schema"] != REQUEST_V3 and any("pair_metric" in c for c in request["cases"]):
+    calibrated = request["schema"] == REQUEST_V4
+    if calibrated:
+        spec = request.get("bias_calibration")
+        if (not isinstance(spec, dict) or set(spec) != {"source_request_sha256", "train_batch_indices", "relative_tolerance"}
+                or type(spec["source_request_sha256"]) is not str or len(spec["source_request_sha256"]) != 64
+                or any(c not in "0123456789abcdef" for c in spec["source_request_sha256"])
+                or type(spec["relative_tolerance"]) not in (float, int) or spec["relative_tolerance"] != 1e-5):
+            raise ValueError("invalid frozen bias calibration metadata")
+        indices = spec["train_batch_indices"]
+        if (type(indices) is not list or not 1 <= len(indices) <= 16
+                or any(type(i) is not int or not 0 <= i < len(request["train_batches"]) for i in indices)
+                or len(set(indices)) != len(indices)):
+            raise ValueError("invalid training-only calibration selection")
+        if any(c.get("bias_initialization") not in (ORIGINAL, MATCHED) for c in request["cases"]):
+            raise ValueError("v4 requires explicit initialization treatments")
+    elif "bias_calibration" in request or any("bias_initialization" in c for c in request["cases"]):
+        raise ValueError("calibration metadata belongs to v4 only")
+    if request["schema"] not in (REQUEST_V3, REQUEST_V4) and any("pair_metric" in c for c in request["cases"]):
         raise ValueError("v1/v2 have no explicit pair metric")
     if request["schema"] == REQUEST:
         if any("geometry_update" in c for c in request["cases"]):
             raise ValueError("v1 has no explicit geometry update policy")
         return 1
-    if request["schema"] not in (REQUEST_V2, REQUEST_V3):
+    if request["schema"] not in (REQUEST_V2, REQUEST_V3, REQUEST_V4):
         raise ValueError("wrong request schema")
-    version = 3 if request["schema"] == REQUEST_V3 else 2
+    version = 4 if calibrated else 3 if request["schema"] == REQUEST_V3 else 2
     modes = {(False, "train", None), (True, "train", POINCARE), (True, "frozen", POINCARE),
-             (True, "train", FLAT), (True, "frozen", FLAT)} if version == 3 else {
+             (True, "train", FLAT), (True, "frozen", FLAT)} if version >= 3 else {
                  (False, "train", None), (True, "train", None), (True, "frozen", None)}
+    modes = {(*mode, ORIGINAL if calibrated else None) for mode in modes}
+    if calibrated:
+        modes.update({(True, "train", FLAT, MATCHED), (True, "frozen", FLAT, MATCHED)})
     def key(parameters):
         for p in parameters:
             if (not p["shape"] or any(type(d) is not int or d <= 0 for d in p["shape"])
@@ -89,20 +115,25 @@ def request_version(request):
                     or any(type(v) not in (int, float) or not math.isfinite(v) for v in p["values"])):
                 raise ValueError("invalid parameter shape or value")
         return [(p["name"], p["shape"], [struct.pack("<f", x) for x in p["values"]]) for p in parameters]
-    if not 2 <= len(request["cases"]) <= 16 or any(type(c["seed"]) is not int or not 0 <= c["seed"] <= (1 << 53) - 1 for c in request["cases"]):
+    if not 2 <= len(request["cases"]) <= (21 if calibrated else 16) or any(type(c["seed"]) is not int or not 0 <= c["seed"] <= (1 << 53) - 1 for c in request["cases"]):
         raise ValueError("invalid control study case count or seed")
     for seed in {c["seed"] for c in request["cases"]}:
         group = [c for c in request["cases"] if c["seed"] == seed]
         if (len(group) != len(modes) or any(type(c["geometry"]) is not bool for c in group)
-                or {(c["geometry"], c.get("geometry_update"), c.get("pair_metric")) for c in group} != modes
-                or (version == 3 and any(not c["geometry"] and "pair_metric" in c for c in group))):
+                or {(c["geometry"], c.get("geometry_update"), c.get("pair_metric"), c.get("bias_initialization")) for c in group} != modes
+                or (version >= 3 and any(not c["geometry"] and "pair_metric" in c for c in group))):
             raise ValueError("missing, duplicate or invalid metric/update arm per seed")
         core = [key([p for p in c["parameters"] if not p["name"].startswith("geometry.")]) for c in group]
         if any(c != core[0] for c in core[1:]):
             raise ValueError("control backbones differ")
-        geometric = [key(c["parameters"]) for c in group if c["geometry"]]
+        geometric = [key([p for p in c["parameters"] if not calibrated or not p["name"].startswith("geometry.raw_gain.")])
+                     for c in group if c["geometry"]]
         if any(g != geometric[0] for g in geometric[1:]):
             raise ValueError("metric/update arms have different initial geometry bits")
+        for treatment in (False, True):
+            initialized = [key(c["parameters"]) for c in group if c["geometry"] and matched(c) == treatment]
+            if any(g != initialized[0] for g in initialized[1:]):
+                raise ValueError("one initialization treatment must share all geometry bits")
     if not request["cases"]:
         raise ValueError("empty control study")
     return version
@@ -305,6 +336,9 @@ def reference(args):
                 torch.tensor([row[1:] for row in rows], device="cpu", dtype=torch.long))
 
     train = [batch(request["train_documents"], s) for s in request["train_batches"]]
+    calibration = None
+    if version == 4:
+        calibration = load_reference("byte_corpus_calibration").verify_initial_rms(request, wave, metric)
     valid = [batch(request["validation_documents"], s) for s in request["validation_batches"]]
     reports = []
     for case in request["cases"]:
@@ -361,10 +395,15 @@ def reference(args):
                             final_parameters=[v.detach().reshape(-1).tolist() for v in p]))
         if version >= 2:
             reports[-1].update(geometry_update=case["geometry_update"], trainable_parameter_scalars=trainable_scalars(case))
-        if version == 3:
+        if version >= 3:
             reports[-1]["pair_metric"] = case.get("pair_metric")
-    write_new(args.output, dict(schema=f"spiraltorch.byte_corpus.result.v{version}", engine="independent_pytorch", torch_version=torch.__version__,
-                               dtype="float32", device="cpu", threads=1, request_sha256=digest(raw), cases=reports))
+        if version == 4:
+            reports[-1]["bias_initialization"] = case["bias_initialization"]
+    report = dict(schema=f"spiraltorch.byte_corpus.result.v{version}", engine="independent_pytorch", torch_version=torch.__version__,
+                  dtype="float32", device="cpu", threads=1, request_sha256=digest(raw), cases=reports)
+    if version == 4:
+        report.update(bias_calibration=request["bias_calibration"], calibration_verification=calibration)
+    write_new(args.output, report)
 
 
 def close(actual, expected, label):
@@ -389,6 +428,8 @@ def heldout_bpb(point):
 def compare(request_raw, reference_report, actual):
     request = decode_json(request_raw)
     version = request_version(request)
+    if version == 4:
+        load_reference("byte_corpus_calibration").verify_qualification(request, reference_report.get("calibration_verification"))
     if (reference_report.get("engine") != "independent_pytorch"
             or actual.get("engine") != "spiraltorch" or not actual.get("adapter")):
         raise ValueError("wrong request, reference, or measured engine identity")
@@ -401,6 +442,8 @@ def compare(request_raw, reference_report, actual):
             raise ValueError("result source mismatch")
         if [c["name"] for c in report["cases"]] != names:
             raise ValueError("case identity/order mismatch")
+        if version == 4 and json.dumps(report.get("bias_calibration"), sort_keys=True, allow_nan=False) != json.dumps(request["bias_calibration"], sort_keys=True, allow_nan=False):
+            raise ValueError("calibration recipe identity mismatch")
     n = len(request["train_batches"])
     checkpoints = [0] + [i for i in range(1, n + 1) if i % request["checkpoint_every"] == 0 or i == n]
     summaries = []
@@ -413,8 +456,10 @@ def compare(request_raw, reference_report, actual):
                                 or type(row.get("trainable_parameter_scalars")) is not int
                                 or row["trainable_parameter_scalars"] != trainable_scalars(spec)):
                 raise ValueError("case update policy or trainable count mismatch")
-            if version == 3 and ("pair_metric" not in row or row["pair_metric"] != spec.get("pair_metric")):
+            if version >= 3 and ("pair_metric" not in row or row["pair_metric"] != spec.get("pair_metric")):
                 raise ValueError("case metric identity mismatch")
+            if version == 4 and row.get("bias_initialization") != spec["bias_initialization"]:
+                raise ValueError("case initialization identity mismatch")
             if row["parameter_tensors"] != len(spec["parameters"]) or row["parameter_scalars"] != sum(len(p["values"]) for p in spec["parameters"]):
                 raise ValueError("parameter count mismatch")
             if [s["revision"] for s in row["training"]] != list(range(1, n + 1)):
@@ -460,14 +505,16 @@ def compare(request_raw, reference_report, actual):
                               final_heldout_bpb=heldout_bpb(got["validation"][-1]), geometry_deltas=geometry_deltas))
         if version >= 2:
             summaries[-1].update(geometry_update=spec["geometry_update"], trainable_parameter_scalars=trainable_scalars(spec))
-        if version == 3:
+        if version >= 3:
             summaries[-1]["pair_metric"] = spec.get("pair_metric")
             summaries[-1]["reference_final_heldout_bpb"] = heldout_bpb(expected["validation"][-1])
             summaries[-1]["final_heldout_bpb_abs_error"] = abs(summaries[-1]["final_heldout_bpb"] - summaries[-1]["reference_final_heldout_bpb"])
+        if version == 4:
+            summaries[-1]["bias_initialization"] = spec["bias_initialization"]
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
-        if len(paired) != {1: 2, 2: 3, 3: 5}[version] or {c["geometry"] for c in paired} != {False, True}:
+        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7}[version] or {c["geometry"] for c in paired} != {False, True}:
             raise ValueError("incomplete paired seed")
         plain = next(c for c in paired if not c["geometry"])
         geometry = next(c for c in paired if c["geometry"] and not frozen(c) and c.get("pair_metric", POINCARE) == POINCARE)
@@ -476,9 +523,9 @@ def compare(request_raw, reference_report, actual):
             fixed = next(c for c in paired if frozen(c) and c.get("pair_metric", POINCARE) == POINCARE)
             pairs[-1].update(frozen_geometry_minus_ordinary_bpb=fixed["final_heldout_bpb"] - plain["final_heldout_bpb"],
                              learned_geometry_minus_frozen_bpb=geometry["final_heldout_bpb"] - fixed["final_heldout_bpb"])
-        if version == 3:
-            flat = next(c for c in paired if c.get("pair_metric") == FLAT and not frozen(c))
-            flat_frozen = next(c for c in paired if c.get("pair_metric") == FLAT and frozen(c))
+        if version >= 3:
+            flat = next(c for c in paired if c.get("pair_metric") == FLAT and not frozen(c) and not matched(c))
+            flat_frozen = next(c for c in paired if c.get("pair_metric") == FLAT and frozen(c) and not matched(c))
             flat_training = flat["final_heldout_bpb"] - flat_frozen["final_heldout_bpb"]
             pairs[-1].update(flat_minus_poincare_bpb=flat["final_heldout_bpb"] - geometry["final_heldout_bpb"],
                              flat_frozen_minus_poincare_frozen_bpb=flat_frozen["final_heldout_bpb"] - fixed["final_heldout_bpb"],
@@ -490,6 +537,20 @@ def compare(request_raw, reference_report, actual):
                 flat_minus_poincare_bpb=flat[r] - geometry[r], flat_frozen_minus_poincare_frozen_bpb=flat_frozen[r] - fixed[r],
                 flat_learned_minus_frozen_bpb=flat[r] - flat_frozen[r],
                 metric_by_training_interaction_bpb=(flat[r] - flat_frozen[r]) - (geometry[r] - fixed[r]))
+            if version == 4:
+                calibrated = next(c for c in paired if matched(c) and not frozen(c))
+                calibrated_frozen = next(c for c in paired if matched(c) and frozen(c))
+                def contrasts(key):
+                    training = calibrated[key] - calibrated_frozen[key]
+                    return dict(calibrated_flat_minus_flat_bpb=calibrated[key] - flat[key],
+                        calibrated_flat_frozen_minus_flat_frozen_bpb=calibrated_frozen[key] - flat_frozen[key],
+                        calibrated_flat_minus_poincare_bpb=calibrated[key] - geometry[key],
+                        calibrated_flat_frozen_minus_poincare_frozen_bpb=calibrated_frozen[key] - fixed[key],
+                        calibrated_flat_learned_minus_frozen_bpb=training,
+                        calibration_by_training_interaction_bpb=training - (flat[key] - flat_frozen[key]),
+                        calibrated_metric_by_training_interaction_bpb=training - (geometry[key] - fixed[key]))
+                pairs[-1].update(contrasts("final_heldout_bpb"))
+                reference_contrasts.update(contrasts(r))
             pairs[-1]["reference_contrasts"] = reference_contrasts
             pairs[-1]["absolute_torch_discrepancy"] = {k: abs(pairs[-1][k] - value) for k, value in reference_contrasts.items()}
             pairs[-1]["same_sign_as_torch"] = {k: ((pairs[-1][k] > 0) - (pairs[-1][k] < 0)) == ((v > 0) - (v < 0))
@@ -499,10 +560,13 @@ def compare(request_raw, reference_report, actual):
                 cases=summaries, paired_deltas=pairs,
                 mean_geometry_minus_ordinary_bpb=statistics.mean(p["geometry_minus_ordinary_bpb"] for p in pairs),
                 scope="Fixed small corpus/recipe/seeds; different parameter counts and compute, no general quality or speed claim")
-    if version == 3:
+    if version >= 3:
         for key in ("flat_minus_poincare_bpb", "flat_frozen_minus_poincare_frozen_bpb", "metric_by_training_interaction_bpb"):
             result["mean_" + key] = statistics.mean(p[key] for p in pairs)
         result["scope"] = "Poincare/flat geometric arms match parameters and SGD budget, not compute or initial functions; ordinary is a lower-parameter context arm; no general quality/speed claim"
+    if version == 4:
+        result["bias_calibration"] = request["bias_calibration"]
+        result["scope"] = "One frozen initial-weight request across engines; flat RMS calibration uses declared training windows only, not matched patterns or dynamics; seven arms/seed, no general quality or speed claim"
     return result
 
 

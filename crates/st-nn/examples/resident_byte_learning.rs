@@ -1,5 +1,5 @@
 #[cfg(not(target_arch = "wasm32"))]
-use st_nn::resident::{ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES};
+use st_nn::resident::{ByteCorpusBiasCalibration, ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_request(path: &std::path::Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -33,6 +33,7 @@ struct Args {
     resume: Option<std::path::PathBuf>,
     output: Option<std::path::PathBuf>,
     stop: Option<usize>,
+    calibrate: Option<Vec<usize>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -43,7 +44,7 @@ impl Args {
         let mut args = args.into_iter();
         let mut result = Self {
             request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json]")?.into(),
-            resume: None, output: None, stop: None,
+            resume: None, output: None, stop: None, calibrate: None,
         };
         while let Some(flag) = args.next() {
             let value = args.next().ok_or("missing flag value")?;
@@ -55,8 +56,25 @@ impl Args {
                 Some("--stop-after") if result.stop.is_none() => {
                     result.stop = Some(value.to_str().ok_or("invalid stop cursor")?.parse()?);
                 }
+                Some("--calibrate-flat") if result.calibrate.is_none() => {
+                    result.calibrate = Some(
+                        value
+                            .to_str()
+                            .ok_or("invalid calibration indices")?
+                            .split(',')
+                            .map(str::parse)
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
+                }
                 _ => return Err("unknown or duplicate flag".into()),
             }
+        }
+        if result.calibrate.is_some()
+            && (result.stop.is_some() || result.resume.is_some() || result.output.is_some())
+        {
+            return Err(
+                "calibration prepares a new request; it cannot run or resume learning".into(),
+            );
         }
         if (result.stop.is_some() || result.resume.is_some()) && result.output.is_none() {
             return Err("stop/resume requires --checkpoint-out with a new file path".into());
@@ -95,6 +113,18 @@ fn save_checkpoint(path: &std::path::Path, json: &str) -> Result<(), Box<dyn std
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(std::env::args_os().skip(1))?;
     let input = read_request(&args.request)?;
+    if let Some(indices) = args.calibrate {
+        let preparation = ByteCorpusBiasCalibration::from_json(&input, &indices)?;
+        let (runtime, _) =
+            st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.calibration")?;
+        let prepared = pollster::block_on(preparation.prepare(runtime))?;
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
     let study = ByteCorpusStudy::from_json(&input)?;
     let resume = args
         .resume
@@ -142,9 +172,37 @@ mod tests {
             vec!["request", "--stop-after", "1", "--stop-after", "2"],
             vec!["request", "--typo", "1"],
             vec!["request", "--resume"],
+            vec!["request", "--calibrate-flat", "0,1", "--stop-after", "1"],
+            vec!["request", "--calibrate-flat", "0,1", "--resume", "old.json"],
+            vec![
+                "request",
+                "--calibrate-flat",
+                "0,1",
+                "--checkpoint-out",
+                "new.json",
+            ],
+            vec![
+                "request",
+                "--calibrate-flat",
+                "0,1",
+                "--calibrate-flat",
+                "2",
+            ],
+            vec!["request", "--calibrate-flat", "0,,1"],
+            vec!["request", "--calibrate-flat", "-1"],
         ] {
             assert!(super::Args::parse(args.into_iter().map(std::ffi::OsString::from)).is_err());
         }
+        assert_eq!(
+            super::Args::parse(
+                ["request", "--calibrate-flat", "0,1,2,3"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+            )
+            .unwrap()
+            .calibrate,
+            Some(vec![0, 1, 2, 3])
+        );
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("new.json");
         let args = [

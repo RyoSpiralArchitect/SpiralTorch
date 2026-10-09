@@ -126,7 +126,57 @@ def metric_fixture():
     return args
 
 
+def calibrated_fixture():
+    args = metric_fixture()
+    request = args[0]
+    request["schema"] = RESUME.STUDY.REQUEST_V4
+    request["bias_calibration"] = dict(source_request_sha256="a" * 64, train_batch_indices=[0, 1], relative_tolerance=1e-5)
+    for value in [request, *args[2:]]:
+        value["cases"] += copy.deepcopy(value["cases"][3:5])
+        value["cases"][5]["name"], value["cases"][6]["name"] = "matched", "matched_frozen"
+    for i, case in enumerate(request["cases"]):
+        case["bias_initialization"] = RESUME.STUDY.MATCHED if i >= 5 else RESUME.STUDY.ORIGINAL
+        if case["geometry"]:
+            case["parameters"][6]["name"] = "geometry.raw_gain.0"
+        if i >= 5:
+            case["parameters"][6]["values"] = [.25]
+    for report in args[2:5]:
+        report["schema"] = report["schema"].removesuffix("v3") + "v4"
+        report["bias_calibration"] = copy.deepcopy(request["bias_calibration"])
+        for i, (case, spec) in enumerate(zip(report["cases"], request["cases"])):
+            case["bias_initialization"] = spec["bias_initialization"]
+            if i >= 5:
+                case["final_parameters"][6] = [.25]
+    args[5]["schema"] = "spiraltorch.byte_corpus.checkpoint.v4"
+    for case in args[5]["cases"][5:]:
+        model = json.loads(case["model_json"])
+        model["model"]["geometry"]["raw_gains"][0] = [.25]
+        case["model_json"] = json.dumps(model)
+    return args
+
+
 class ResumeVerifierTests(unittest.TestCase):
+    def test_calibrated_resume_binds_fitted_initial_gain_and_metadata(self):
+        self.assertTrue(RESUME.verify(*calibrated_fixture())["passed"])
+        for mutation in ("init", "metadata", "initial_gain", "checkpoint_gain", "schema"):
+            args = calibrated_fixture()
+            if mutation == "schema":
+                args[5]["schema"] = "spiraltorch.byte_corpus.checkpoint.v3"
+            elif mutation == "checkpoint_gain":
+                model = json.loads(args[5]["cases"][6]["model_json"])
+                model["model"]["geometry"]["raw_gains"][0] = [.1]
+                args[5]["cases"][6]["model_json"] = json.dumps(model)
+            else:
+                for report in args[2:5]:
+                    if mutation == "init":
+                        report["cases"][6]["bias_initialization"] = RESUME.STUDY.ORIGINAL
+                    elif mutation == "metadata":
+                        report["bias_calibration"]["train_batch_indices"] = [1, 0]
+                    else:
+                        report["cases"][6]["final_parameters"][6] = [.1]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                RESUME.verify(*args)
+
     def test_metric_resume_selects_model_schema_per_arm(self):
         result = RESUME.verify(*metric_fixture())
         self.assertEqual(result["schema"], "spiraltorch.byte_corpus.resume_verification.v3")

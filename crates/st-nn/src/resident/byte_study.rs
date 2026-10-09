@@ -25,12 +25,15 @@ type Result<T> = ByteCorpusStudyResult<T>;
 /// Input and checkpoint JSON are bounded before deserialization.
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
+mod calibration;
 mod policy;
-use policy::GeometryUpdate;
+pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
+use policy::{BiasInitialization, GeometryUpdate};
 
 /// A fixed request: documents, initial models, SGD rate and all selected windows.
 /// v1 pairs ordinary/learned geometry; v2 adds identical-initialization frozen
 /// geometry; v3 crosses learned/frozen with Poincare/flat pair distance.
+/// v4 adds a prepared, gain-only RMS-matched flat learned/frozen pair.
 /// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
@@ -138,6 +141,8 @@ struct Case {
     geometry_update: Option<GeometryUpdate>,
     #[serde(default, deserialize_with = "policy::explicit_metric")]
     pair_metric: Option<ByteDecoderPairMetric>,
+    #[serde(default, deserialize_with = "policy::explicit_initialization")]
+    bias_initialization: Option<BiasInitialization>,
     parameters: Vec<Parameter>,
 }
 
@@ -153,6 +158,8 @@ struct Request {
     checkpoint_every: usize,
     rate: f32,
     cases: Vec<Case>,
+    #[serde(default, deserialize_with = "calibration::explicit_spec")]
+    bias_calibration: Option<calibration::CalibrationSpec>,
 }
 
 fn parse(input: &[u8]) -> Result<Request> {
@@ -167,6 +174,7 @@ fn parse(input: &[u8]) -> Result<Request> {
         "spiraltorch.byte_corpus.request.v1"
             | "spiraltorch.byte_corpus.request.v2"
             | "spiraltorch.byte_corpus.request.v3"
+            | "spiraltorch.byte_corpus.request.v4"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
@@ -183,11 +191,12 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(1..=1024).contains(&r.train_batches.len())
         || !(1..=128).contains(&r.validation_batches.len())
         || !(1..=64).contains(&r.checkpoint_every)
-        || !(2..=16).contains(&r.cases.len())
+        || !(2..=if r.calibration_controls() { 21 } else { 16 }).contains(&r.cases.len())
         || r.cases.len() % r.arms_per_seed() != 0
     {
         return Err("invalid study configuration".into());
     }
+    calibration::validate_spec(&r)?;
     if r.train_documents.is_empty()
         || r.validation_documents.is_empty()
         || r.train_documents
@@ -603,6 +612,9 @@ impl ByteCorpusStudy {
             return Err("real GPU required for this resident learning study".into());
         }
         let r = &self.request;
+        // This only verifies the frozen initialization on the selected device.
+        // Fitting is a separate preparation API; resume never changes gains.
+        calibration::verify_initial(r, &runtime).await?;
         let start = resume.map_or(0, ByteCorpusStudyCheckpoint::completed_updates);
         let documents: Vec<_> = r.train_documents.iter().map(Vec::as_slice).collect();
         let mut reports = Vec::new();
@@ -711,6 +723,9 @@ impl ByteCorpusStudy {
             if r.metric_controls() {
                 report["pair_metric"] = json!(case.pair_metric);
             }
+            if r.calibration_controls() {
+                report["bias_initialization"] = json!(case.bias_initialization);
+            }
             reports.push(report);
             if capture {
                 let readback = model.checkpoint_snapshot()?;
@@ -727,9 +742,12 @@ impl ByteCorpusStudy {
             }
         }
         let schema = r.report_schema(stop_after == self.total_updates());
-        let report = json!({"schema":schema,"engine":"spiraltorch","request_sha256":self.request_sha256,
+        let mut report = json!({"schema":schema,"engine":"spiraltorch","request_sha256":self.request_sha256,
             "adapter":format!("{:?}",runtime.adapter_info()),"cases":reports,
             "scope":"Document-held-out byte corpus pilot; no language-quality superiority or speed claim"});
+        if r.calibration_controls() {
+            report["bias_calibration"] = json!(r.bias_calibration);
+        }
         let checkpoint = capture.then(|| ByteCorpusStudyCheckpoint {
             schema: r.checkpoint_schema().to_owned(),
             request_sha256: self.request_sha256.clone(),

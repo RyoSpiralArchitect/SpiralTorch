@@ -97,6 +97,8 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         require(report["engine"] == "spiraltorch", "foreign engine")
         require(report["request_sha256"] == request_hash, "report request identity")
         require(len(report["cases"]) == len(request["cases"]), "missing report cases")
+        if version == 4:
+            require(exact(report.get("bias_calibration"), request["bias_calibration"]), "calibration recipe differs")
     require(len(checkpoint["cases"]) == len(request["cases"]), "missing checkpoint cases")
     summaries = []
     for case, full, prefix, resumed_case, saved in zip(request["cases"], baseline["cases"],
@@ -110,8 +112,10 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 trainable = sum(len(p["values"]) for p in case["parameters"]
                                 if case["geometry_update"] != "frozen" or not p["name"].startswith("geometry."))
                 require(exact(report.get("trainable_parameter_scalars"), trainable), "trainable count differs")
-            if version == 3:
+            if version >= 3:
                 require("pair_metric" in report and exact(report["pair_metric"], case.get("pair_metric")), "report metric differs")
+            if version == 4:
+                require(report.get("bias_initialization") == case["bias_initialization"], "initialization differs")
             require(exact(report["parameter_tensors"], len(case["parameters"])), "parameter count")
             require(exact(report["parameter_scalars"], sum(len(p["values"]) for p in case["parameters"])),
                     "parameter scalar count")
@@ -162,8 +166,10 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         summaries.append({"name": case["name"], "updates": total,
                           "pause": cursor, "evaluation_revisions": evaluations,
                           "final_mean_ce": full["validation"][-1]["mean_ce"]})
-        if version == 3:
+        if version >= 3:
             summaries[-1].update(pair_metric=case.get("pair_metric"), geometry_update=case["geometry_update"])
+        if version == 4:
+            summaries[-1]["bias_initialization"] = case["bias_initialization"]
     return {"schema": f"spiraltorch.byte_corpus.resume_verification.v{version}", "passed": True,
             "request_sha256": request_hash, "exact_resumed_report_equal": True,
             "exact_training_and_evaluation_prefixes": True,

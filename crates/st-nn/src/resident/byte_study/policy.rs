@@ -7,6 +7,19 @@ pub(super) enum GeometryUpdate {
     Frozen,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum BiasInitialization {
+    Original,
+    MatchedPoincareRms,
+}
+
+pub(super) fn explicit_initialization<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<BiasInitialization>, D::Error> {
+    BiasInitialization::deserialize(deserializer).map(Some)
+}
+
 // Absence belongs to v1 only; explicit null must not silently select training.
 pub(super) fn explicit_update<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
@@ -29,6 +42,9 @@ pub(super) fn same_bits(left: &[f32], right: &[f32]) -> bool {
 }
 
 impl Case {
+    pub(super) fn matched(&self) -> bool {
+        self.bias_initialization == Some(BiasInitialization::MatchedPoincareRms)
+    }
     pub(super) fn frozen(&self) -> bool {
         self.geometry_update == Some(GeometryUpdate::Frozen)
     }
@@ -40,11 +56,20 @@ impl Request {
     }
 
     pub(super) fn metric_controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v3"
+        matches!(
+            self.schema.as_str(),
+            "spiraltorch.byte_corpus.request.v3" | "spiraltorch.byte_corpus.request.v4"
+        )
+    }
+
+    pub(super) fn calibration_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v4"
     }
 
     pub(super) fn arms_per_seed(&self) -> usize {
-        if self.metric_controls() {
+        if self.calibration_controls() {
+            7
+        } else if self.metric_controls() {
             5
         } else if self.controls() {
             3
@@ -54,7 +79,9 @@ impl Request {
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.metric_controls() {
+        if self.calibration_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v4"
+        } else if self.metric_controls() {
             "spiraltorch.byte_corpus.checkpoint.v3"
         } else if self.controls() {
             "spiraltorch.byte_corpus.checkpoint.v2"
@@ -64,6 +91,13 @@ impl Request {
     }
 
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.calibration_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v4"
+            } else {
+                "spiraltorch.byte_corpus.partial.v4"
+            };
+        }
         if self.metric_controls() {
             return if complete {
                 "spiraltorch.byte_corpus.result.v3"
@@ -80,6 +114,12 @@ impl Request {
     }
 
     pub(super) fn validate_modes(&self, cases: &[&Case]) -> Result<()> {
+        if cases
+            .iter()
+            .any(|c| c.bias_initialization.is_some() != self.calibration_controls())
+        {
+            return Err("only v4 requires explicit bias initialization on every arm".into());
+        }
         if !self.metric_controls() && cases.iter().any(|c| c.pair_metric.is_some()) {
             return Err("v1/v2 do not admit an explicit pair metric".into());
         }
@@ -98,29 +138,58 @@ impl Request {
                 "control study needs each required arm with an explicit update policy".into(),
             );
         }
-        let modes = if self.metric_controls() {
+        let original = self
+            .calibration_controls()
+            .then_some(BiasInitialization::Original);
+        let mut modes = if self.metric_controls() {
             use ByteDecoderPairMetric::{EuclideanChordSquared, PoincareSquared};
             vec![
-                (false, GeometryUpdate::Train, None),
-                (true, GeometryUpdate::Train, Some(PoincareSquared)),
-                (true, GeometryUpdate::Frozen, Some(PoincareSquared)),
-                (true, GeometryUpdate::Train, Some(EuclideanChordSquared)),
-                (true, GeometryUpdate::Frozen, Some(EuclideanChordSquared)),
+                (false, GeometryUpdate::Train, None, original),
+                (true, GeometryUpdate::Train, Some(PoincareSquared), original),
+                (
+                    true,
+                    GeometryUpdate::Frozen,
+                    Some(PoincareSquared),
+                    original,
+                ),
+                (
+                    true,
+                    GeometryUpdate::Train,
+                    Some(EuclideanChordSquared),
+                    original,
+                ),
+                (
+                    true,
+                    GeometryUpdate::Frozen,
+                    Some(EuclideanChordSquared),
+                    original,
+                ),
             ]
         } else {
             vec![
-                (false, GeometryUpdate::Train, None),
-                (true, GeometryUpdate::Train, None),
-                (true, GeometryUpdate::Frozen, None),
+                (false, GeometryUpdate::Train, None, None),
+                (true, GeometryUpdate::Train, None, None),
+                (true, GeometryUpdate::Frozen, None, None),
             ]
         };
-        for (geometry, update, metric) in modes {
+        if self.calibration_controls() {
+            for update in [GeometryUpdate::Train, GeometryUpdate::Frozen] {
+                modes.push((
+                    true,
+                    update,
+                    Some(ByteDecoderPairMetric::EuclideanChordSquared),
+                    Some(BiasInitialization::MatchedPoincareRms),
+                ));
+            }
+        }
+        for (geometry, update, metric, initialization) in modes {
             if cases
                 .iter()
                 .filter(|c| {
                     c.geometry == geometry
                         && c.geometry_update == Some(update)
                         && c.pair_metric == metric
+                        && c.bias_initialization == initialization
                 })
                 .count()
                 != 1
@@ -129,15 +198,33 @@ impl Request {
             }
         }
         let geometric = cases.iter().filter(|c| c.geometry).collect::<Vec<_>>();
-        let a = &geometric[0].parameters;
-        if geometric[1..].iter().any(|case| {
-            let b = &case.parameters;
-            a.len() != b.len()
-                || a.iter().zip(b).any(|(a, b)| {
-                    a.name != b.name || a.shape != b.shape || !same_bits(&a.values, &b.values)
+        let equal = |a: &Case, b: &Case, skip_gains: bool| {
+            let (a, b) = (&a.parameters, &b.parameters);
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(a, b)| {
+                    a.name == b.name
+                        && a.shape == b.shape
+                        && ((skip_gains && a.name.starts_with("geometry.raw_gain."))
+                            || same_bits(&a.values, &b.values))
                 })
-        }) {
-            return Err("all geometry metric/update arms must start bitwise identical".into());
+        };
+        if geometric[1..]
+            .iter()
+            .any(|b| !equal(geometric[0], b, self.calibration_controls()))
+        {
+            return Err("geometry arms differ outside the permitted initial gain treatment".into());
+        }
+        for matched in [false, true] {
+            let group: Vec<_> = geometric
+                .iter()
+                .filter(|c| c.matched() == matched)
+                .collect();
+            if group
+                .get(1..)
+                .is_some_and(|rest| rest.iter().any(|b| !equal(group[0], b, false)))
+            {
+                return Err("geometry arms within one initialization treatment must start bitwise identical".into());
+            }
         }
         Ok(())
     }
