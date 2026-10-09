@@ -1,0 +1,284 @@
+{
+  "schema": "spiraltorch.poincare_bias.evidence.v1",
+  "date_utc": "2026-10-09",
+  "status": "native_and_browser_correctness_passed",
+  "scope": "Causal Poincare squared-distance score bias and Euclidean-coordinate VJP; not integrated decoder learning, language quality, throughput or Riemannian optimization",
+  "source": {
+    "base_revision": "8e063343dfe2ce11d19aa622e453fa57f07f26ff",
+    "kind": "Tested worktree hashes, including reused extended arithmetic; excludes this manifest and unrelated human-deleted archives",
+    "sha256": {
+      "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+      ".github/workflows/ci.yml": "c5491bb49d07df1bcce33bca8ac134cd35a901a330d8e9fded0acc430d6eaf9c",
+      "crates/st-backend-wgpu/Cargo.toml": "481c1c19f10b4edf84e5264cc98607ca716ebf4ef7ef7eaf0b85902abcfd7fac",
+      "crates/st-backend-wgpu/src/resident_tensor.rs": "60b2821c46d1c67424475eb5bbca66f212f908ba8762c50e28b4db90c818ad22",
+      "crates/st-kernel-contracts/src/lib.rs": "43365483a51ee4fc448a1fcb52ed3a5e16b8c06996c8f051de771f2679c1822f",
+      "crates/st-kernel-contracts/src/poincare.rs": "6ca1659ab6ae3d74bb2fa4d29c4526918e36ea72a9c80ba314f80f823ee3ccda",
+      "crates/st-kernel-contracts/src/poincare/tests.rs": "cefcfd1ea3335223d6a33d5949c10de0b76f5d447ed99dafc10efeccdd7885a0",
+      "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "4860593c2ab67a750e6f14ca29f6f4925c4d420730bc202e69000460dae7e7e2",
+      "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": "813a59fbe9a744dc5175590c07d44c49c9107a77a6491952782c2bea2373d6bc",
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": "b5a94a501cdc245e2b8a18f51a069243852de80778e2213855ca55a2f6eebf03",
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl": "3a3f6672e90186dec80b0a9b27e08b2656dd7c1348c6111807c0966d5dfc6636",
+      "crates/st-backend-wgpu/src/shaders/rounded_add.wgsl": "00ce1de2d13f5cb6360066e6c4906af03daf0192fd7945c7fdc148f740890bb2",
+      "crates/st-backend-wgpu/tests/fixtures/poincare_bias_torch.json": "eceb17d0afefdaa0b01a7389978516e87aadd72a2975b65e2ed1484730d02255",
+      "crates/st-backend-wgpu/tests/support/poincare.rs": "7cdd390768f22f3558ff153e033cb73703948f48ecccb25243a7dc62a249542a",
+      "crates/st-backend-wgpu/tests/poincare_bias.rs": "efa7a8c2070a16c83c49ae11930873bd116a9986a893775ee97f6a60e7b2729a",
+      "crates/st-backend-wgpu/tests/poincare_bias_browser.html": "f1334dc91b971f71c2ef3ca751149cf30fa6ffbd517fd7ac65a35631156f7ed9",
+      "crates/st-backend-wgpu/examples/poincare_bias_browser.rs": "28c739459ac1de6e5cde6e834d9e10b5585676f3dd3961b24fb821bc5db08f9a",
+      "tools/generate_poincare_bias_torch_fixture.py": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18",
+      "docs/poincare_metric_attention.md": "3dd35ddc917eaf0441c245563b9d9dcb14909fb20d024e5a0758f0b354e64967",
+      "docs/causal_zspace_wave.md": "e1cc86716a9593e4dc2bd7c2d9317546f378d7b43fa407137b1cd3e7d25eb7c1",
+      "docs/ecosystem_roadmap.md": "03d87d7a6b0b07d8a82e20b33b233b7c3b31527ded768198ae2d5d3bd57972ac",
+      "benchmarks/results/2026-10-09-poincare-bias/README.md": "da743e0094c09f0231bb9ad9dc1eb4836e247b41c7c7f4552798499349a19b22"
+    }
+  },
+  "environment": {
+    "native": {
+      "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "aarch64-apple-darwin",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }"
+    },
+    "browser": {
+      "target": "wasm32-unknown-unknown",
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "wasm_bindgen_cli": "0.2.129"
+    },
+    "reference": {
+      "framework": "PyTorch",
+      "version": "2.12.1",
+      "device": "cpu",
+      "dtype": "float32",
+      "threads": 1,
+      "deterministic": true,
+      "imports_spiraltorch": false
+    }
+  },
+  "criteria": {
+    "absolute_tolerance": 0.000003,
+    "relative_tolerance": 0.00008,
+    "frozen_fixture_sha256": "eceb17d0afefdaa0b01a7389978516e87aadd72a2975b65e2ed1484730d02255",
+    "fixture_unchanged": true,
+    "numeric_tolerances_unchanged": true,
+    "torch_cases": 8,
+    "all_inputs_and_cotangents_strided": true,
+    "extended_nonzero_relative_controls": 7,
+    "strict_ball_margin": "u^3*(1-u), u=2^-24",
+    "atomic_rejection_rates": [
+      0,
+      0.125
+    ],
+    "rejection_validator_negative_controls": 4
+  },
+  "summary": {
+    "native": {
+      "score_max_abs": 0.000030517578125,
+      "coordinates_vjp_max_abs": 0.0001220703125,
+      "gain_vjp_max_abs": 0.000001430511474609375,
+      "extended_relative_max": 0.0000015999223001994523
+    },
+    "browser": {
+      "score_max_abs": 0.000030517578125,
+      "coordinates_vjp_max_abs": 0.0001220703125,
+      "gain_vjp_max_abs": 0.000001430511474609375,
+      "extended_relative_max": 0.0000015999223001994523
+    }
+  },
+  "checks": {
+    "cpu_contracts": {
+      "status": "passed",
+      "tests": 67,
+      "command": "cargo test --locked -p st-kernel-contracts"
+    },
+    "resident_tensor_regression": {
+      "status": "passed",
+      "tests": 105,
+      "ignored": 1,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1"
+    },
+    "native_metric": {
+      "status": "passed",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu --test poincare_bias -- --nocapture --test-threads=1",
+      "report": "native.json"
+    },
+    "native_integration_regression": {
+      "status": "passed",
+      "tests": 4,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu --test poincare_bias --test causal_zspace_wave --test resident_attention_vjp --test resident_embedding -- --nocapture --test-threads=1"
+    },
+    "browser_metric": {
+      "status": "passed",
+      "build": "cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example poincare_bias_browser",
+      "page": "crates/st-backend-wgpu/tests/poincare_bias_browser.html",
+      "report": "browser.json",
+      "built_with_empty_RUSTFLAGS": true,
+      "environment_unset": [
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_RUSTFLAGS",
+        "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+        "LIBRARY_PATH",
+        "PKG_CONFIG_PATH"
+      ],
+      "actually_executed": true
+    },
+    "byte_and_residual_regression": {
+      "status": "passed",
+      "tests": 2,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_byte_decoder --test resident_residual_attention -- --test-threads=1"
+    },
+    "strict_scoped_clippy": {
+      "status": "passed",
+      "toolchain": "1.99.0",
+      "command": "CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 cargo +1.99.0 clippy --locked -p st-kernel-contracts -p st-backend-wgpu --all-targets --no-deps -- -D warnings",
+      "scope": "These two crates only, dependencies excluded; dependency warnings remain; not a whole-workspace lint claim"
+    },
+    "formatting": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all -- --check"
+    },
+    "diff_whitespace": {
+      "status": "passed",
+      "command": "git diff --check"
+    }
+  },
+  "review": {
+    "type": "Independent read-only local source review",
+    "addressed": [
+      "CPU f64 norm-then-subtraction incorrectly rejected an exact-f32 interior point"
+    ],
+    "final_review": "No remaining actionable findings in bounded metric, GPU host/shader and CPU margin repair source scopes",
+    "runtime_checks_by": "Parent agent"
+  },
+  "rejected_candidates": [
+    {
+      "log": "cpu-boundary-before-fix.log",
+      "reason": "CPU lost a positive ball margin before subtraction; repaired exact squares/product residuals/compensated sum. GPU already passed this particular control."
+    },
+    {
+      "log": "clippy-initial.log",
+      "reason": "Needless Vec in the probe; replaced by array, no lint relaxation."
+    }
+  ],
+  "private_records": [
+    {
+      "name": "browser-final.js",
+      "bytes": 47513,
+      "sha256": "be1506d1362f241772ba7bac8c5ae861478a27e52f6c6629f3b31c0f433223ff"
+    },
+    {
+      "name": "browser-final.json",
+      "bytes": 3786,
+      "sha256": "d3e827c572393b24e24c28eae4411bd6562e3abfbae3aad2e2701772d6579185"
+    },
+    {
+      "name": "browser-final.wasm",
+      "bytes": 863425,
+      "sha256": "9d452e932afa8a2def597e9ec0a1e818f880b147cf6eea7cd50576cd04c8fc64"
+    },
+    {
+      "name": "browser-initial.json",
+      "bytes": 3680,
+      "sha256": "7cceade64ede844810b1881d6636e803b3f417c4166f3b138096a3c33f8acaa3"
+    },
+    {
+      "name": "byte-residual-final.log",
+      "bytes": 115722,
+      "sha256": "d121b273fdd69802e42efe107014682de4ab740bbaf166a9bb63a7496a30db30"
+    },
+    {
+      "name": "clippy-final.log",
+      "bytes": 116300,
+      "sha256": "c5079e4ad7a18ad9723dfc4b663c3e07ad913287953274df20dad0755ec3c349"
+    },
+    {
+      "name": "clippy-guarded.log",
+      "bytes": 116300,
+      "sha256": "b01a7f9aff2a77fea5a493396d5fd0c40abb430d9d20f5d8dd0949b2c56db1be"
+    },
+    {
+      "name": "clippy-initial.log",
+      "bytes": 116879,
+      "sha256": "49a397cd4e4049215c971edfecce7937c9e14e192102435cf298b46ea0a69831"
+    },
+    {
+      "name": "contract-initial.log",
+      "bytes": 788,
+      "sha256": "cdbff9469063bd17d01405aa9d7845c965ecd729da93b825908f5ac668a45ee5"
+    },
+    {
+      "name": "contracts-final.log",
+      "bytes": 6303,
+      "sha256": "1bd872b04413723e0de24aeeed3f357e85240f11fb1c4477b64a6dbc9ddd26b0"
+    },
+    {
+      "name": "cpu-boundary-before-fix.log",
+      "bytes": 978,
+      "sha256": "ce18538f926bee9d8db404541a54ca6152f1955768f0e2516cfb015c6308c4d0"
+    },
+    {
+      "name": "cpu-boundary-fixed.log",
+      "bytes": 871,
+      "sha256": "b74693d974354534a0e9dd12093beeab7e80655a7eb1390e117388a0ff64ef49"
+    },
+    {
+      "name": "fixture-generation.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "gpu-boundary-before-fix.log",
+      "bytes": 114457,
+      "sha256": "fb2f373b090b5c102b51cedd7f792e89dac72fd883fbb275eb1d205e5533a651"
+    },
+    {
+      "name": "gpu-initial.log",
+      "bytes": 114923,
+      "sha256": "de5b281b966ea720275010975e4282a10e941969c34f36bb5aa7b22b593c1e32"
+    },
+    {
+      "name": "native-final.log",
+      "bytes": 139345,
+      "sha256": "060f8fbf74c2f6c19d71536affbe01077ad0aeb385d754bf7f06a960bdb8a4ac"
+    },
+    {
+      "name": "native-guarded.log",
+      "bytes": 117236,
+      "sha256": "f9a56b6f6ee76d09cc30da3790b304ee26032b5eb7015f23eef4601986555e10"
+    },
+    {
+      "name": "native-initial.log",
+      "bytes": 117032,
+      "sha256": "cf2f08e7da273f4bbe93be451611206ceeffe0260a1854203e9c95b46832e893"
+    },
+    {
+      "name": "native-probe-final",
+      "bytes": 6057712,
+      "sha256": "fc31dcf286ab98ca6b306c3e19cf207d02467d5ac87d7d7d13a30e72ccece86f"
+    },
+    {
+      "name": "native-switch-controls.log",
+      "bytes": 117309,
+      "sha256": "b536ec298f8657445c73152d8357425e8370ebee4ce3b207f9c85c39b7eabc6b"
+    },
+    {
+      "name": "resident-tensor-final.log",
+      "bytes": 125743,
+      "sha256": "94f7e4b3bece097ec56aec89c690f152714f3c07fe1007fc6d19f5f45fb65bd4"
+    },
+    {
+      "name": "wasm-guarded.log",
+      "bytes": 110967,
+      "sha256": "81bf4f8544df2c51099f3651d6d941ed85da9b0bbe8ad9d124aa7369c5c27ce1"
+    },
+    {
+      "name": "wasm-initial.log",
+      "bytes": 111128,
+      "sha256": "ff3c7f45efaa39b370d5dbda941463eecef9f718768b8bccf56da52dc59e148a"
+    }
+  ],
+  "limitations": [
+    "A 64-byte-per-pair extended coefficient cache is materialized; no streaming or memory-efficiency claim.",
+    "No full-model metric training or language-quality experiment in this bundle.",
+    "Both endpoint VJPs are coordinate derivatives, not inverse-metric Riemannian optimizer directions.",
+    "Only the observed native and browser adapters were executed.",
+    "Curvature is frozen; raw gain zero is not a geometry-off mode."
+  ]
+}

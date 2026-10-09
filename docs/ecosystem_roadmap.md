@@ -376,9 +376,11 @@ controls rather than choosing between them:
    with document-bounded shifted targets and optional trainable Topos gates.
    The [causal Z-Space wave primitive](causal_zspace_wave.md) now exposes a
    learned causal state/filter, interior ball chart and explicit state BPTT in
-   Rust/WGPU. Genuine metric Attention and the encoder's integration under the
-   full-model owner remain the next missing learning mechanism; caller-owned
-   score bias or a standalone chart is not that integrated encoder.
+   Rust/WGPU. The [Poincare metric bias](poincare_metric_attention.md) provides
+   genuine squared-distance scores, both endpoint VJPs and learned head gains.
+   Integrating those primitives under the full-model owner remains the next
+   missing learning mechanism; caller-owned score bias or standalone
+   chart/metric operations are not that integrated encoder.
    These are source additions after 0.4.29, not APIs in that published wheel.
    The original host Modules remain unchanged; uncertainty outputs, KV-cache
    ownership, full-model Python/WASM facades and learning-quality gains remain open.

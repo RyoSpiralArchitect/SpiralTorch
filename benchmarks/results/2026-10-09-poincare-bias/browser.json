@@ -1,0 +1,134 @@
+{
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "analytic": {
+    "analytic_squared_distance": 10523.842841322641,
+    "extended_cases": [
+      {
+        "name": "tiny_separation",
+        "nonzero": true,
+        "relative_error": 0
+      },
+      {
+        "name": "tiny_gain_large_seed",
+        "nonzero": true,
+        "relative_error": 0.0000015999223001994523
+      },
+      {
+        "name": "large_gain_tiny_distance",
+        "nonzero": true,
+        "relative_error": 0
+      },
+      {
+        "name": "one_ulp_separation",
+        "nonzero": true,
+        "relative_error": 0
+      },
+      {
+        "name": "series_below",
+        "nonzero": true,
+        "relative_error": 0
+      },
+      {
+        "name": "series_at",
+        "nonzero": true,
+        "relative_error": 0.000001073232752446529
+      },
+      {
+        "name": "series_above",
+        "nonzero": true,
+        "relative_error": 9.539845549078052e-7
+      }
+    ],
+    "large_v": true,
+    "near_boundary": true
+  },
+  "checks": [
+    {
+      "coordinates_vjp_max_abs": 0,
+      "cpu_max_abs": 0,
+      "gain_vjp_max_abs": 0,
+      "name": "case0_single",
+      "score_max_abs": 0,
+      "shapes": true,
+      "strided": true
+    },
+    {
+      "coordinates_vjp_max_abs": 3.427267074584961e-7,
+      "cpu_max_abs": 0.000001430511474609375,
+      "gain_vjp_max_abs": 1.1920928955078125e-7,
+      "name": "case1_ordinary",
+      "score_max_abs": 0.000001430511474609375,
+      "shapes": true,
+      "strided": true
+    },
+    {
+      "coordinates_vjp_max_abs": 0.000003814697265625,
+      "cpu_max_abs": 0.000030517578125,
+      "gain_vjp_max_abs": 0.000001430511474609375,
+      "name": "case2_ordinary",
+      "score_max_abs": 0.000030517578125,
+      "shapes": true,
+      "strided": true
+    },
+    {
+      "coordinates_vjp_max_abs": 5.960464477539063e-8,
+      "cpu_max_abs": 2.9802322387695312e-8,
+      "gain_vjp_max_abs": 5.820766091346741e-10,
+      "name": "case3_ordinary",
+      "score_max_abs": 3.725290298461914e-9,
+      "shapes": true,
+      "strided": true
+    },
+    {
+      "coordinates_vjp_max_abs": 2.384185791015625e-7,
+      "cpu_max_abs": 4.76837158203125e-7,
+      "gain_vjp_max_abs": 2.9802322387695312e-8,
+      "name": "case4_coincident",
+      "score_max_abs": 7.152557373046875e-7,
+      "shapes": true,
+      "strided": true
+    },
+    {
+      "coordinates_vjp_max_abs": 3.5762786865234375e-7,
+      "cpu_max_abs": 1.1920928955078125e-7,
+      "gain_vjp_max_abs": 2.2351741790771484e-8,
+      "name": "case5_near",
+      "score_max_abs": 1.7881393432617188e-7,
+      "shapes": true,
+      "strided": true
+    },
+    {
+      "coordinates_vjp_max_abs": 0.0001220703125,
+      "cpu_max_abs": 0.0001068115234375,
+      "gain_vjp_max_abs": 2.384185791015625e-7,
+      "name": "case6_boundary",
+      "score_max_abs": 0.00000476837158203125,
+      "shapes": true,
+      "strided": true
+    },
+    {
+      "coordinates_vjp_max_abs": 0.000001430511474609375,
+      "cpu_max_abs": 0.000003814697265625,
+      "gain_vjp_max_abs": 4.172325134277344e-7,
+      "name": "case7_ordinary",
+      "score_max_abs": 0.000003814697265625,
+      "shapes": true,
+      "strided": true
+    }
+  ],
+  "guards": {
+    "atomic_rejections": 2,
+    "future_gradient_zero": true,
+    "good_bad_good": true,
+    "guarded_operands": 3,
+    "late_gradient_whole_family": true,
+    "outside_ball_rejections": 2,
+    "prefix_invariant": true,
+    "rejection_negative_controls": 4,
+    "retained": true,
+    "suffix_sensitive": true
+  },
+  "passed": true,
+  "schema": "spiraltorch.poincare_bias.validation.v1",
+  "scope": "Metric primitive correctness, not full-model learning, language quality or throughput"
+}

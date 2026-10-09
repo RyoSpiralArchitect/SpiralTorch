@@ -76,5 +76,9 @@ crate-type = ["cdylib"]
 name = "causal_zspace_wave_browser"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "poincare_bias_browser"
+crate-type = ["cdylib"]
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
