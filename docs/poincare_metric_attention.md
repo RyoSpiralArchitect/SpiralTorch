@@ -5,8 +5,8 @@ its Euclidean-coordinate VJP. `ResidentTensor::causal_poincare_bias` executes it
 without host readback on native WGPU and browser WASM/WebGPU. JavaScript only
 loads the compiled Rust probe; it does not reimplement metric semantics.
 
-This is a metric primitive ready for Attention's `pair_bias` input, not yet an
-integrated learned encoder in `ResidentByteDecoder`. The
+This metric primitive also participates in the optional learned encoder in
+[ResidentByteDecoder](resident_byte_decoder.md). The
 [causal wave](causal_zspace_wave.md) supplies suitable interior chart coordinates;
 the metric must not instead receive arbitrary projected/residual vectors.
 
@@ -118,10 +118,11 @@ switch. Prefix, suffix-sensitivity, guard and retained-tape controls are shared
 by native and browser probes. These tests do not establish language quality,
 an advantage over ordinary fine-tuning or full-model metric learning.
 
-The next required seam is one parameter owner for the byte/position tables,
-encoder projection, wave decay/phase, per-block/head metric gains, residual
-blocks and output head. Next-byte CE must reach the geometry through the metric
-path, not merely through a parallel Euclidean residual path.
+The byte decoder's `with_causal_geometry` composition places byte/position
+tables, encoder projection, wave decay/phase, per-block/head metric gains,
+residual blocks and output head under one parameter owner. Its full-model
+probe checks next-byte CE through the metric path; the standalone results below
+remain primitive-only evidence and are not retroactively full-model results.
 
 The [native/browser evidence bundle](../benchmarks/results/2026-10-09-poincare-bias/README.md)
 records frozen criteria, failures and repairs, runtime results and artifact hashes.

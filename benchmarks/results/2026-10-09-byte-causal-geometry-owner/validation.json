@@ -1,0 +1,462 @@
+{
+  "schema": "spiraltorch.byte_causal_geometry_owner.evidence.v1",
+  "date_utc": "2026-10-09",
+  "status": "native_and_browser_numerical_checks_passed_strict_lint_failed_on_unchanged_files",
+  "scope": "One Rust-owned byte decoder, including causal geometry, with complete-model VJP and guarded SGD; synthetic learning correctness only, not language quality or speed",
+  "source": {
+    "base_revision": "fb9f49274f96dcb2d39bb9241d1080b7d86611b8",
+    "kind": "Tested worktree SHA-256 values including reused numerical primitives; excludes this manifest and unrelated human-deleted archives",
+    "sha256": {
+      "benchmarks/results/2026-10-09-byte-causal-geometry-owner/README.md": "764c565ee757ca5bdd7e1afb46e1f1c4de25337926146756932cc39ed94cff94",
+      "crates/st-nn/examples/support/byte_decoder.rs": "bc4cb23998d416d0b6f1489342688e63fd244706a05fe2f56a0ce7cf6ee8162c",
+      "crates/st-nn/examples/support/byte_decoder/geometry_controls.rs": "78de7fb76b94c0f943eacd2c28bc80ee9a22748974d35378fae3c0e6993f9c83",
+      "crates/st-nn/src/resident.rs": "750c775a6a813a33961e535bfa091b5eb3734de9fe58ae42bcda3f9bf94569c9",
+      "crates/st-nn/src/resident/byte_decoder.rs": "701a92d27b1a57902345c7b9dbb843dc7d5ac382a825442eca7aa263a17da76c",
+      "crates/st-nn/src/resident/byte_decoder/geometry.rs": "b9942fa2d424514c339334f10a51c9960c5bff4c5a78c3a070abee8d496fb417",
+      "crates/st-nn/src/resident/byte_decoder/tests.rs": "75395555d8a834935b98917a6090579296ea6195ff7e5591d24bbcfc0f6a7295",
+      "crates/st-nn/src/resident/byte_decoder/training.rs": "78060dbfaa5ec03a64aa641be94281d934d46f9eea802e2693e89f91e96ecdbb",
+      "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "5b1d26a2bbab08d082ada7682912f2374b621e16b07dbf804b3603408b49864d",
+      "crates/st-nn/src/resident/byte_decoder/training/tests.rs": "fd655df3585adeecd9dc0322f5f682ed2ffdb3851b9522b0744ad4a1113251c1",
+      "crates/st-nn/tests/byte_decoder_browser.html": "55dede459cc5311045dbd9387752b0e64f4caca298554240576da0bf26af61d8",
+      "crates/st-nn/tests/fixtures/resident_byte_geometry_torch.json": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b",
+      "docs/causal_zspace_wave.md": "0961c495c8e41314bf1143bc373f683347cf99dd37f995872cafdcfaadfc3185",
+      "docs/ecosystem_roadmap.md": "e457b0d28776a65042c551e47bc5960e00b58a4522b5ec121884c799d28e0f3b",
+      "docs/poincare_metric_attention.md": "f2c5814ebbb1760db4336d4e90f519a007eb2a9595db690d5aaf365c64c1ed1f",
+      "docs/resident_byte_decoder.md": "b3914595a1169fa45bb6f68eefb4353308744e9e8b4220e3f4aa3064b897834b",
+      "tools/generate_resident_byte_decoder_torch_fixture.py": "47b5af2f4bfbf5ce6bf367d9d32f762db86d6b5ac2117c8e5a264376dcd78430",
+      "tools/generate_resident_byte_geometry_torch_fixture.py": "1e1ad19737664ffd25648446eb75b54096fe762a553e3453b1aa4ecf91f87ccf",
+      "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+      "crates/st-nn/Cargo.toml": "a081aa3dc2f14298ea4bc73c90e66836b3a5b653ec5add7c8576429105498f60",
+      "crates/st-nn/tests/resident_byte_decoder.rs": "349befd5eddefe5df5b48c3060b386436ee3744df71a7471d6510364f169b57e",
+      "crates/st-nn/examples/resident_byte_decoder_browser.rs": "0abef817822ad8f9aabb43861c67e51232bfc89c132cb18a05643f12802f1c39",
+      "crates/st-nn/tests/fixtures/resident_byte_decoder_torch.json": "ef9bc46892fce5591dc4b3f0ebd527a76b493b160faeb05887ff61daec389874",
+      "tools/generate_causal_zspace_wave_torch_fixture.py": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa",
+      "tools/generate_poincare_bias_torch_fixture.py": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18",
+      "crates/st-kernel-contracts/src/causal_wave.rs": "b4d5cbbd11c45a260c85bbd06bf523345ea36635c431eb529bc4a47cdb4d3c77",
+      "crates/st-kernel-contracts/src/poincare.rs": "6ca1659ab6ae3d74bb2fa4d29c4526918e36ea72a9c80ba314f80f823ee3ccda",
+      "crates/st-backend-wgpu/src/resident_tensor/causal_wave.rs": "67a6d32f452b9646481711903200509e002fd16f9b2d8d2130f4381e19cae3d9",
+      "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "4860593c2ab67a750e6f14ca29f6f4925c4d420730bc202e69000460dae7e7e2"
+    }
+  },
+  "environment": {
+    "native": {
+      "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "aarch64-apple-darwin",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }"
+    },
+    "browser": {
+      "target": "wasm32-unknown-unknown",
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "wasm_bindgen_cli": "0.2.129"
+    },
+    "reference": {
+      "framework": "PyTorch",
+      "version": "2.12.1",
+      "device": "cpu",
+      "dtype": "float32",
+      "threads": 1,
+      "deterministic": true,
+      "imports_spiraltorch": false
+    }
+  },
+  "criteria": {
+    "report_schema": "spiraltorch.resident_byte_decoder.validation.v2",
+    "absolute_tolerance": 0.000003,
+    "relative_tolerance": 0.00005,
+    "geometry_gradient_relative_l2_max": 0.002,
+    "geometry_reference_gradient_l2_min": 1e-8,
+    "numerical_tolerances_unchanged": true,
+    "ordinary_fixture_sha256": "ef9bc46892fce5591dc4b3f0ebd527a76b493b160faeb05887ff61daec389874",
+    "causal_geometry_fixture_sha256": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b",
+    "fixtures_not_regenerated_after_runtime_checks": true,
+    "parameter_tensor_counts": [
+      18,
+      31,
+      23,
+      37
+    ],
+    "sgd_updates_per_case": 16,
+    "all_updates_queued_before_loss_receipt_or_gradient_parameter_readback": true,
+    "controls": [
+      "Frozen ordinary fixture preserved, including plain and Topos/external-bias models",
+      "Initial Q/K weights and biases explicitly verified zero for the metric-only case",
+      "Geometry-off logit difference and coupled-versus-detached embedding VJP difference matched relatively to independent Torch",
+      "Three negative and one positive control for the relative comparison helper",
+      "Every geometry gradient nonzero and relatively checked initially and at all 16 CE updates",
+      "Prefix/suffix/document isolation and zero future-byte gradients in every model",
+      "All-block coordinate cotangents accumulated before wave BPTT and projection VJP",
+      "Foreign/stale/superseded tapes, retained gradients, invalid final-bias preflight and good/bad/good backwards",
+      "Native candidate fault injection visits 12 plain and 18 geometry-enabled owner slots",
+      "Late byte/position scatter overflow rejects the full gradient family at rates 0 and 0.125"
+    ]
+  },
+  "summary": {
+    "native": [
+      {
+        "name": "blocks1_geometryFalse",
+        "parameter_count": 18,
+        "output_max_abs_error": 6.332993507385254e-8,
+        "parameter_vjp_max_abs_error": 9.834766387939453e-7,
+        "update_max_abs_error": 4.6938657760620117e-7,
+        "geometry_ce_relative_l2_max": null,
+        "first_preupdate_ce": 5.465129852294922,
+        "sixteenth_preupdate_ce": 3.7238235473632812
+      },
+      {
+        "name": "blocks2_geometryTrue",
+        "parameter_count": 31,
+        "output_max_abs_error": 7.450580596923828e-8,
+        "parameter_vjp_max_abs_error": 2.2351741790771484e-7,
+        "update_max_abs_error": 1.341104507446289e-7,
+        "geometry_ce_relative_l2_max": null,
+        "first_preupdate_ce": 5.620514392852783,
+        "sixteenth_preupdate_ce": 4.100001335144043
+      },
+      {
+        "name": "causal_geometry_blocks1_metric_onlyTrue",
+        "parameter_count": 23,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 1.1920928955078125e-7,
+        "update_max_abs_error": 1.5087425708770752e-7,
+        "geometry_ce_relative_l2_max": 0.00002684338405497573,
+        "first_preupdate_ce": 5.551121711730957,
+        "sixteenth_preupdate_ce": 3.94242262840271
+      },
+      {
+        "name": "causal_geometry_blocks2_metric_onlyFalse",
+        "parameter_count": 37,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 4.76837158203125e-7,
+        "update_max_abs_error": 7.450580596923828e-7,
+        "geometry_ce_relative_l2_max": 0.0001424504062516748,
+        "first_preupdate_ce": 5.523756504058838,
+        "sixteenth_preupdate_ce": 3.916003704071045
+      }
+    ],
+    "browser": [
+      {
+        "name": "blocks1_geometryFalse",
+        "parameter_count": 18,
+        "output_max_abs_error": 6.332993507385254e-8,
+        "parameter_vjp_max_abs_error": 9.834766387939453e-7,
+        "update_max_abs_error": 4.6938657760620117e-7,
+        "geometry_ce_relative_l2_max": null,
+        "first_preupdate_ce": 5.465129852294922,
+        "sixteenth_preupdate_ce": 3.7238235473632812
+      },
+      {
+        "name": "blocks2_geometryTrue",
+        "parameter_count": 31,
+        "output_max_abs_error": 7.450580596923828e-8,
+        "parameter_vjp_max_abs_error": 2.2351741790771484e-7,
+        "update_max_abs_error": 1.341104507446289e-7,
+        "geometry_ce_relative_l2_max": null,
+        "first_preupdate_ce": 5.620514392852783,
+        "sixteenth_preupdate_ce": 4.100001335144043
+      },
+      {
+        "name": "causal_geometry_blocks1_metric_onlyTrue",
+        "parameter_count": 23,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 1.1920928955078125e-7,
+        "update_max_abs_error": 1.8998980522155762e-7,
+        "geometry_ce_relative_l2_max": 0.00003371658382291919,
+        "first_preupdate_ce": 5.551121711730957,
+        "sixteenth_preupdate_ce": 3.942422389984131
+      },
+      {
+        "name": "causal_geometry_blocks2_metric_onlyFalse",
+        "parameter_count": 37,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 4.76837158203125e-7,
+        "update_max_abs_error": 6.910413503646851e-7,
+        "geometry_ce_relative_l2_max": 0.00011459611139561884,
+        "first_preupdate_ce": 5.523756504058838,
+        "sixteenth_preupdate_ce": 3.916003942489624
+      }
+    ]
+  },
+  "checks": {
+    "frozen_reference_generation": {
+      "status": "passed",
+      "command": "python3 -I tools/generate_resident_byte_geometry_torch_fixture.py crates/st-nn/tests/fixtures/resident_byte_geometry_torch.json",
+      "note": "The isolated generator uses only independent Torch reference functions; the original ordinary fixture was not regenerated"
+    },
+    "native_full_model": {
+      "status": "passed",
+      "unit_tests": 8,
+      "integration_tests": 1,
+      "models": 4,
+      "updates_per_model": 16,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib --test resident_byte_decoder byte_decoder -- --nocapture --test-threads=1",
+      "log": "native-final.log",
+      "report": "native.json"
+    },
+    "browser_full_model": {
+      "status": "passed",
+      "models": 4,
+      "updates_per_model": 16,
+      "actually_executed": true,
+      "build": "cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --no-default-features --features wgpu --example resident_byte_decoder_browser",
+      "bindgen": "wasm-bindgen --target web --out-dir target/resident-byte-decoder-web target/wasm32-unknown-unknown/release/examples/resident_byte_decoder_browser.wasm",
+      "page": "crates/st-nn/tests/byte_decoder_browser.html",
+      "report": "browser.json",
+      "log": "wasm-build.log",
+      "built_with_empty_RUSTFLAGS": true,
+      "environment_unset": [
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_RUSTFLAGS",
+        "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+        "LIBRARY_PATH",
+        "PKG_CONFIG_PATH"
+      ]
+    },
+    "residual_attention_regression": {
+      "status": "passed",
+      "tests": 1,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_residual_attention -- --test-threads=1",
+      "log": "residual-regression.log"
+    },
+    "cpu_only_plan_contracts": {
+      "status": "passed",
+      "tests": 6,
+      "command": "cargo test --locked --release -p st-nn --no-default-features --lib resident::byte_decoder -- --test-threads=1",
+      "log": "cpu-only-contracts.log",
+      "scope": "GPU-disabled plan/data contract compatibility, not a CPU implementation of resident learning"
+    },
+    "strict_st_nn_clippy": {
+      "status": "failed",
+      "command": "CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 cargo +1.99.0 clippy --locked -p st-nn --no-default-features --features wgpu --all-targets --no-deps -- -D warnings",
+      "log": "clippy.log",
+      "exit_code": 101,
+      "library_findings": 23,
+      "library_test_findings_including_shared_library_findings": 40,
+      "error_bearing_unchanged_files": [
+        {
+          "path": "crates/st-nn/src/language/automation.rs",
+          "unchanged": true,
+          "sha256": "512af737b764a457f09cf93a6653375304c7b4b73757f5be2f604db5a57f3e8a"
+        },
+        {
+          "path": "crates/st-nn/src/language/gw.rs",
+          "unchanged": true,
+          "sha256": "06c50f67740212f9021c25105d09caf825c4fe54a07255c2a1ace07debcee501"
+        },
+        {
+          "path": "crates/st-nn/src/layers/activation.rs",
+          "unchanged": true,
+          "sha256": "8da5d8f6e95162994c3a80db9fb3bb8dcfdc47a3510c2819a8b728112653e19b"
+        },
+        {
+          "path": "crates/st-nn/src/layers/continuous_wavelet.rs",
+          "unchanged": true,
+          "sha256": "0bfd930d800c1c2e1a1598a814417aaed4006928a862596cad574f780dfa1e5a"
+        },
+        {
+          "path": "crates/st-nn/src/layers/conv.rs",
+          "unchanged": true,
+          "sha256": "92be43aadf68ad20af4b04ce16a451e6d894f40551165e543eef0314083b3191"
+        },
+        {
+          "path": "crates/st-nn/src/layers/dropout.rs",
+          "unchanged": true,
+          "sha256": "a3bd25992b85f4ea94c80c6e5170176d0f504d5e0b8734feea0149aee1b3f9dd"
+        },
+        {
+          "path": "crates/st-nn/src/layers/embedding.rs",
+          "unchanged": true,
+          "sha256": "ba74ed3f13020b63205ddf09dbffbf24ff20a9fd61e9d702f9bb2dc3da05a7d7"
+        },
+        {
+          "path": "crates/st-nn/src/layers/lstm.rs",
+          "unchanged": true,
+          "sha256": "79937c8e89703bcf23829916b5de3970915fc759c11c6fddcd7a97423936ad51"
+        },
+        {
+          "path": "crates/st-nn/src/layers/non_liner.rs",
+          "unchanged": true,
+          "sha256": "1841186902f4bfb8136ce3d9ab88179a8e3332b2561a492bd35c35e90c7852c0"
+        },
+        {
+          "path": "crates/st-nn/src/layers/normalization.rs",
+          "unchanged": true,
+          "sha256": "3ba7b2e19dc25a863a024abece39fce2a7ae28c87c4c228ed767541534bed5db"
+        },
+        {
+          "path": "crates/st-nn/src/layers/zspace_projector.rs",
+          "unchanged": true,
+          "sha256": "bd1e8d4facd2825ae114db4cfdfd3d76b1afd1fcbb9b80a8503c4dbe160ea7c0"
+        },
+        {
+          "path": "crates/st-nn/src/z_rba/cov_head.rs",
+          "unchanged": true,
+          "sha256": "379081fc954f0e28f5755bb3b30e5bfb22e05d5cb39e37afee5dca120cb8b631"
+        },
+        {
+          "path": "crates/st-nn/src/zspace_coherence/sequencer.rs",
+          "unchanged": true,
+          "sha256": "c05543b4b8ca48c21a933ac8aac0e1acbdb8380cf9f9fcef2741e60b86b9f766"
+        },
+        {
+          "path": "crates/st-nn/src/zspace_coherence/vae.rs",
+          "unchanged": true,
+          "sha256": "6a7c47c96504f29d6507d841997e7d147aeeca2b3f395eda70d7002a79561d96"
+        },
+        {
+          "path": "crates/st-nn/src/gnn/layer.rs",
+          "unchanged": true,
+          "sha256": "dcb451277798f9283f8999d261acb50f2fa2239d01d43707e57fbce7407b206d"
+        },
+        {
+          "path": "crates/st-nn/src/layers/linear.rs",
+          "unchanged": true,
+          "sha256": "0e175a6ef425f17e52ed0fb45815aa45c84f16d6757d825a795d1860e8ef60d1"
+        },
+        {
+          "path": "crates/st-nn/src/layers/spiral_rnn.rs",
+          "unchanged": true,
+          "sha256": "4f3cfb9f1036027ddb356c177f4baf89b2a97bcef70dbc4a6cd6f7fb65f62891"
+        },
+        {
+          "path": "crates/st-nn/src/layers/wave_gate/learning/radius.rs",
+          "unchanged": true,
+          "sha256": "fec346bce80348cb2956eeb89e0041720cfdefcbc55a67be934a8ec4a97cf282"
+        },
+        {
+          "path": "crates/st-nn/src/layers/wave_gate.rs",
+          "unchanged": true,
+          "sha256": "1edc78e1d602d3c553ff56ae872ffd0a84c18ec9da7c3830057665af839f675b"
+        },
+        {
+          "path": "crates/st-nn/src/layers/wave_rnn.rs",
+          "unchanged": true,
+          "sha256": "edcda204d8794c083bd37ef7d51e65b8f60e338980d76eea5a15f688610ed64f"
+        },
+        {
+          "path": "crates/st-nn/src/trainer.rs",
+          "unchanged": true,
+          "sha256": "90d7b8c0c913919e7ce8e1e111e5fb39b3b18e2b90f7017a34341481f5990ee1"
+        },
+        {
+          "path": "crates/st-nn/src/z_rba/attention.rs",
+          "unchanged": true,
+          "sha256": "387b29d7487642f730912bcd1e39976e54a908a27ebc4d93bb8e36a9719b73f0"
+        }
+      ],
+      "scope": "Reported library/library-test errors are in 22 files byte-identical to the base revision. No allowances or unrelated fixes were added. This failure prevents a complete all-target lint result; it is not a clean lint claim."
+    },
+    "formatting": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all -- --check"
+    },
+    "diff_whitespace": {
+      "status": "passed",
+      "command": "git diff --check"
+    },
+    "browser_script_syntax": {
+      "status": "passed",
+      "method": "Compile the inline async browser runner with Node without executing WebGPU"
+    }
+  },
+  "review": {
+    "type": "Independent read-only local source review",
+    "production": "No concrete findings in the bounded five-file model/geometry implementation scope",
+    "reference_and_tests": "No actionable findings in independent Torch fixture generation, full-model probe, controls and browser result gates",
+    "runtime_checks_by": "Parent agent"
+  },
+  "public_records": [
+    {
+      "name": "native.json",
+      "bytes": 37876,
+      "sha256": "8937e52e0baac68c1dd16c4dcb451b998e38e640336ebdc3059962e433c17ea9"
+    },
+    {
+      "name": "browser.json",
+      "bytes": 37831,
+      "sha256": "913e14cd47c7e25e6bf00a5a59b5479bdcc173bbf512d1eadc6c9d2bd7c0ce7e"
+    }
+  ],
+  "private_records": [
+    {
+      "name": "browser-final.js",
+      "bytes": 47517,
+      "sha256": "46792dd978071f61564c1f6a65e89aaacf22e4390ca9766f56c51feeb3d5d7d2"
+    },
+    {
+      "name": "browser-final.json",
+      "bytes": 37830,
+      "sha256": "a4c6a21a6607ddb15078870c8a0321adbe3bfc819bcc38537bded58d7c3bd9a5"
+    },
+    {
+      "name": "browser-final.wasm",
+      "bytes": 10400956,
+      "sha256": "75caefe7b926ca97c36acbd0b0f0beff5e16e1718af230e01dcec8796cc32e37"
+    },
+    {
+      "name": "clippy.log",
+      "bytes": 146309,
+      "sha256": "8c4396b22211b79907950421cb5726c068635741a0aedd2ba1fc7d6c14e261f4"
+    },
+    {
+      "name": "cpu-only-contracts.log",
+      "bytes": 1582,
+      "sha256": "10e2555bf8b84481180bc64e0a11b526579d6fc51e2e2d05965701d6bec0559d"
+    },
+    {
+      "name": "fixture-generation.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "initial-build.log",
+      "bytes": 115398,
+      "sha256": "9a77ba5054347b0f713d14967fd40bdceabd9d1d37ad5ea76923607ed6b07051"
+    },
+    {
+      "name": "native-final",
+      "bytes": 11250048,
+      "sha256": "5dfd7fab9bfb57063b927969ba4abba819a78e9a1bb807b6a6edb984c659af00"
+    },
+    {
+      "name": "native-final.log",
+      "bytes": 139270,
+      "sha256": "00090514c5e181327be3abf2503715ef3130988b2d37a48a0c86caab8330907b"
+    },
+    {
+      "name": "native-initial.log",
+      "bytes": 138200,
+      "sha256": "d7ec0708d86f299873bba2272ea0d962a4cce5bb62a18f8af3dc174bb7c5ae5b"
+    },
+    {
+      "name": "native-unit-final",
+      "bytes": 23965264,
+      "sha256": "f92fdd6ef6b7c186c6be39d9c52605c841854388bb1203b36b231f965f3a10c9"
+    },
+    {
+      "name": "owner-unit-tests.log",
+      "bytes": 115618,
+      "sha256": "3d97f7724dc0a3733df420e46acc1237a5380344f665b48140209189d045b3f4"
+    },
+    {
+      "name": "residual-regression.log",
+      "bytes": 114841,
+      "sha256": "e10de51d4b56578d89310f54b0f712931cbd9baffe1f7fb34c7981f4865e03bd"
+    },
+    {
+      "name": "wasm-build.log",
+      "bytes": 111954,
+      "sha256": "b3eb780d148e7ac8f71f23e2ab0946ca95d28b015c8c81737cd8bdfbe4024d04"
+    }
+  ],
+  "limitations": [
+    "Synthetic windows and 16 updates per model are numerical learning checks, not matched corpus training or language-quality evidence.",
+    "The 256-byte alphabet is dictionary-free, not continuous text with no discrete symbols.",
+    "Curvature is frozen; softplus gains are block/head parameters shared across positions, not context-conditioned routing. Raw gain zero is not geometry off.",
+    "Causal state resets for each selected document window. No complete-model streaming, KV-cache or cross-window gradient contract is added.",
+    "The metric uses a materialized extended coefficient cache. No speed or memory-efficiency claim is made.",
+    "Both endpoint pullbacks are coordinate derivatives, not inverse-metric Riemannian optimizer directions.",
+    "Only the observed native and browser adapters were executed.",
+    "This change exposes the Rust model builder and a shared WASM test runner, not a complete Python/WASM application-facing model facade.",
+    "Additional strict st-nn Clippy remains failed as recorded separately."
+  ]
+}

@@ -378,9 +378,11 @@ controls rather than choosing between them:
    learned causal state/filter, interior ball chart and explicit state BPTT in
    Rust/WGPU. The [Poincare metric bias](poincare_metric_attention.md) provides
    genuine squared-distance scores, both endpoint VJPs and learned head gains.
-   Integrating those primitives under the full-model owner remains the next
-   missing learning mechanism; caller-owned score bias or standalone
-   chart/metric operations are not that integrated encoder.
+   The optional `ByteDecoderGeometryPlan` now connects tokenwise projection,
+   wave BPTT and all-block metric cotangents under that same full-model owner.
+   Frozen Torch fixtures extend the full-model probe to 23/37 parameter tensors,
+   geometry-off/detached controls and zero-Q/K isolation. Corpus-scale utility,
+   conditional routing and decoder continuation remain separate open work.
    These are source additions after 0.4.29, not APIs in that published wheel.
    The original host Modules remain unchanged; uncertainty outputs, KV-cache
    ownership, full-model Python/WASM facades and learning-quality gains remain open.

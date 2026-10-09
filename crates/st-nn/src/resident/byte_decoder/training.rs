@@ -19,6 +19,9 @@ use st_backend_wgpu::{
 };
 use st_kernel_contracts::classification::CrossEntropySpec;
 
+mod geometry;
+use geometry::{GeometryAutograd, GeometryTape};
+
 #[derive(Clone)]
 pub struct ResidentByteBatch {
     indices: ResidentEmbeddingIndices,
@@ -61,6 +64,8 @@ pub struct ResidentByteDecoderForward {
     submission: u64,
     token: ResidentEmbeddingForward,
     position: ResidentEmbeddingForward,
+    geometry: Option<GeometryTape>,
+    external_pair_biases: Vec<bool>,
     blocks: Vec<ResidualTape>,
     head: GraphForward,
     targets: ResidentTensor,
@@ -107,6 +112,7 @@ pub struct ResidentByteDecoder {
     parameters: ResidentParameters,
     parameter_layout: ByteDecoderParameterLayout,
     positions: ResidentEmbeddingIndices,
+    geometry: Option<GeometryAutograd>,
     blocks: Vec<ResidualAutograd>,
     head: ResidentGraphAutograd,
     bound_revision: Option<u64>,
@@ -139,6 +145,23 @@ impl ByteDecoderPlan {
             device.upload(&self.token.shape, &self.token.values)?,
             device.upload(&self.position.shape, &self.position.values)?,
         ];
+        let geometry = match (&self.geometry, self.parameters.geometry()) {
+            (Some(plan), Some(layout)) => {
+                for p in plan.parameter_values()? {
+                    values.push(device.upload(&p.shape, &p.values)?);
+                }
+                Some(GeometryAutograd::new(
+                    plan,
+                    layout.clone(),
+                    &device,
+                    tile,
+                    kernel,
+                    accumulation,
+                )?)
+            }
+            (None, None) => None,
+            _ => return Err(TrainingError::ParameterLayout.into()),
+        };
         let mut blocks = Vec::new();
         for block in &self.blocks {
             for p in block.parameter_values()? {
@@ -169,6 +192,7 @@ impl ByteDecoderPlan {
             )?,
             parameters: ResidentParameters::new(values)?,
             parameter_layout: self.parameters.clone(),
+            geometry,
             blocks,
             head: ResidentGraphAutograd::new(runtime, head, tile, kernel, accumulation)?,
             bound_revision: None,
@@ -256,6 +280,9 @@ impl ResidentByteDecoder {
         self.latest = None;
         let parameters = self.parameters.snapshot();
         if self.bound_revision != Some(parameters.revision()) {
+            if let Some(geometry) = &mut self.geometry {
+                geometry.set_parameters(parameters.values())?;
+            }
             for (block, range) in self.blocks.iter_mut().zip(self.parameter_layout.blocks()) {
                 block.set_parameters(&parameters.values()[range.clone()])?;
             }
@@ -266,9 +293,19 @@ impl ResidentByteDecoder {
         let token = parameters.values()[0].embedding(&batch.indices)?;
         let position = parameters.values()[1].embedding(&self.positions)?;
         let mut input = token.prediction().add(position.prediction())?;
+        let geometry = self
+            .geometry
+            .as_mut()
+            .map(|g| g.forward(&input, parameters.values()))
+            .transpose()?;
         let mut blocks = Vec::new();
-        for (block, bias) in self.blocks.iter_mut().zip(biases) {
-            let tape = block.forward(&input, bias.z_bias, bias.pair_bias)?;
+        for (index, (block, bias)) in self.blocks.iter_mut().zip(biases).enumerate() {
+            let pair = match (&geometry, bias.pair_bias) {
+                (Some(g), Some(external)) => Some(g.bias(index).add(external)?),
+                (Some(g), None) => Some(g.bias(index).clone()),
+                (None, external) => external.cloned(),
+            };
+            let tape = block.forward(&input, bias.z_bias, pair.as_ref())?;
             input = tape.prediction().clone();
             blocks.push(tape);
         }
@@ -281,6 +318,8 @@ impl ResidentByteDecoder {
             submission,
             token,
             position,
+            geometry,
+            external_pair_biases: biases.iter().map(|b| b.pair_bias.is_some()).collect(),
             blocks,
             head,
             targets: batch.targets.clone(),
@@ -317,6 +356,20 @@ impl ResidentByteDecoder {
         block_parameters.reverse();
         biases.reverse();
         let mut parameters = Vec::new();
+        match (&mut self.geometry, &forward.geometry) {
+            (Some(geometry), Some(tape)) => {
+                let gradient = geometry.backward(tape, &biases)?;
+                input = input.add(&gradient.input)?;
+                parameters.extend(gradient.parameters);
+            }
+            (None, None) => {}
+            _ => return Err(TrainingError::ParameterLayout.into()),
+        }
+        for (bias, &external) in biases.iter_mut().zip(&forward.external_pair_biases) {
+            if !external {
+                bias.pair_bias = None;
+            }
+        }
         parameters.extend(block_parameters.into_iter().flatten());
         parameters.extend(head.parameter_gradients().iter().cloned());
         self.bind_vjp(forward, input, parameters, biases)

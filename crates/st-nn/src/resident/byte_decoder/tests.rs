@@ -97,3 +97,99 @@ fn tables_and_head_must_match_and_plans_freeze_tables() {
     plan.token.values.fill(8.);
     assert!(frozen.token.values.iter().all(|&v| v == 0.5));
 }
+
+pub(super) fn geometry_for(plan: &ByteDecoderPlan) -> ByteDecoderGeometryPlan {
+    let projection = InferencePlan::from_operations(
+        plan.input_layout().clone(),
+        vec![InferenceOp::Linear {
+            weight: Tensor::from_vec(4, 4, vec![0.1; 16]).unwrap(),
+            bias: Tensor::from_vec(1, 4, vec![0.01; 4]).unwrap(),
+        }],
+    )
+    .unwrap();
+    ByteDecoderGeometryPlan::new(
+        &projection,
+        &[-0.7, 0.4],
+        &[-0.2, 0.3],
+        &vec![vec![-0.6, 0.3]; plan.block_count()],
+        -0.75,
+    )
+    .unwrap()
+}
+
+#[test]
+fn causal_geometry_parameters_are_frozen_and_share_explicit_model_slots() {
+    let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = geometry_for(&p);
+    let mut decay = vec![-0.7, 0.4];
+    let mut gains = vec![vec![-0.6, 0.3]; 2];
+    let frozen =
+        ByteDecoderGeometryPlan::new(g.projection(), &decay, g.raw_phase(), &gains, -0.75).unwrap();
+    decay.fill(9.);
+    gains[0].fill(9.);
+    assert_eq!(frozen.raw_decay(), [-0.7, 0.4]);
+    assert_eq!(frozen.raw_gains()[0], [-0.6, 0.3]);
+    let p = p.with_causal_geometry(frozen).unwrap();
+    let slots = p.parameter_layout().geometry().unwrap();
+    assert_eq!(slots.projection(), 2..4);
+    assert_eq!((slots.raw_decay(), slots.raw_phase()), (4, 5));
+    assert_eq!(slots.raw_gains(), 6..8);
+    assert_eq!(p.parameter_layout().blocks(), [8..12, 12..16]);
+    assert_eq!(p.parameter_layout().head(), 16..18);
+    assert!(p.with_causal_geometry(g).is_err());
+}
+
+#[test]
+fn geometry_rejects_wrong_shapes_curvature_and_nonfinite_parameters() {
+    let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = geometry_for(&p);
+    for c in [0., 1., f32::NAN, f32::NEG_INFINITY] {
+        assert!(ByteDecoderGeometryPlan::new(
+            g.projection(),
+            g.raw_decay(),
+            g.raw_phase(),
+            g.raw_gains(),
+            c
+        )
+        .is_err());
+    }
+    for decay in [vec![0.], vec![0., f32::NAN]] {
+        assert!(ByteDecoderGeometryPlan::new(
+            g.projection(),
+            &decay,
+            g.raw_phase(),
+            g.raw_gains(),
+            -1.
+        )
+        .is_err());
+    }
+    for gain in [vec![], vec![vec![]], vec![vec![f32::INFINITY; 2]]] {
+        assert!(ByteDecoderGeometryPlan::new(
+            g.projection(),
+            g.raw_decay(),
+            g.raw_phase(),
+            &gain,
+            -1.
+        )
+        .is_err());
+    }
+    for gains in [vec![vec![0.; 2]], vec![vec![0.; 1]; 2]] {
+        let wrong =
+            ByteDecoderGeometryPlan::new(g.projection(), g.raw_decay(), g.raw_phase(), &gains, -1.)
+                .unwrap();
+        assert!(p.clone().with_causal_geometry(wrong).is_err());
+    }
+    let other = plan_with_shape([1, 3, 4], AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    assert!(other.with_causal_geometry(g).is_err());
+    let odd = InferencePlan::from_operations(
+        p.input_layout().clone(),
+        vec![InferenceOp::Linear {
+            weight: Tensor::from_vec(4, 3, vec![0.1; 12]).unwrap(),
+            bias: Tensor::from_vec(1, 3, vec![0.; 3]).unwrap(),
+        }],
+    )
+    .unwrap();
+    assert!(
+        ByteDecoderGeometryPlan::new(&odd, &[0.], &[0.], &[vec![0.; 2], vec![0.; 2]], -1.).is_err()
+    );
+}

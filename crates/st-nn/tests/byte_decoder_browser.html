@@ -12,11 +12,11 @@ try {
   const {default: init, run_resident_byte_decoder_checks} = await import("/target/resident-byte-decoder-web/resident_byte_decoder_browser.js");
   await init();
   const report = JSON.parse(await run_resident_byte_decoder_checks());
-  const counts = [18, 31];
-  const biasCounts = [0, 4];
+  const counts = [18, 31, 23, 37];
+  const biasCounts = [0, 4, 0, 4];
   const finite = value => Number.isFinite(value) && value >= 0;
-  if (report.schema !== "spiraltorch.resident_byte_decoder.validation.v1"
-      || report.passed !== true || report.checks.length !== 2
+  if (report.schema !== "spiraltorch.resident_byte_decoder.validation.v2"
+      || report.passed !== true || report.checks.length !== 4
       || report.checks.some((check, i) => check.parameter_count !== counts[i]
         || check.parameter_errors.length !== counts[i]
         || check.parameter_errors.some(error => !finite(error.max_abs_error))
@@ -28,14 +28,23 @@ try {
         || !finite(check.causality.other_document_max_abs_error)
         || !finite(check.causality.extension_max_abs_error)
         || Object.keys(check.tapes).length !== 9 || Object.values(check.tapes).some(v => v !== true)
+        || (i >= 2 && (check.metric_controls.relative_checker_negative_controls !== 3
+          || check.metric_controls.off_output_separation <= 1e-6
+          || check.metric_controls.detached_embedding_gradient_separation <= 1e-8
+          || check.metric_controls.qk_scores_zero !== (i === 2)
+          || !finite(check.metric_controls.output_contrast_relative_l2) || check.metric_controls.output_contrast_relative_l2 > 0.002
+          || !finite(check.metric_controls.pullback_contrast_relative_l2) || check.metric_controls.pullback_contrast_relative_l2 > 0.002
+          || check.parameter_errors.filter(e => e.name.startsWith("geometry.")).some(e => !finite(e.relative_l2_error) || e.relative_l2_error > 0.002)))
         || check.learning.steps !== 16 || check.learning.trace.length !== 16
         || check.learning.trace.some((step, j) => step.revision !== j + 1
-          || !finite(step.loss) || !finite(step.parameter_max_abs_error)))) {
+          || !finite(step.loss) || !finite(step.parameter_max_abs_error)
+          || step.geometry_gradient_relative_l2.length !== (i < 2 ? 0 : i === 2 ? 5 : 6)
+          || step.geometry_gradient_relative_l2.some(v => !finite(v) || v > 0.002)))) {
     throw Error("Incomplete byte decoder verification");
   }
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
-  document.querySelector("#summary").textContent = "Passed: 1-block plain and 2-block Topos/geometry models, all 18/31 parameter VJPs, 16 updates each, causal and ownership controls. Synthetic correctness only, not language quality or speed.";
+  document.querySelector("#summary").textContent = "Passed: four complete byte models, all 18/31/23/37 parameter VJPs, 16 updates each. Learned causal wave and Poincare gains share the full owner; geometry-off, detached and zero-QK controls distinguish real pullbacks. Synthetic correctness only, not language quality or speed.";
   const download = document.querySelector("#download");
   download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
   download.download = "resident-byte-decoder.json";

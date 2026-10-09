@@ -2,6 +2,9 @@
 use super::*;
 use std::ops::Range;
 
+mod geometry;
+pub use geometry::{ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan};
+
 #[cfg(feature = "wgpu")]
 mod training;
 #[cfg(feature = "wgpu")]
@@ -96,10 +99,11 @@ impl ByteLmBatch {
     }
 }
 
-/// Untied parameter order: token table, position table, each residual block in
-/// order, then the head graph. Ranges are explicit even when shapes coincide.
+/// Untied parameter order: token table, position table, optional geometry,
+/// each residual block in order, then the head graph. Ranges remain explicit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ByteDecoderParameterLayout {
+    geometry: Option<ByteDecoderGeometryParameterLayout>,
     blocks: Vec<Range<usize>>,
     head: Range<usize>,
 }
@@ -113,6 +117,9 @@ impl ByteDecoderParameterLayout {
     }
     pub fn blocks(&self) -> &[Range<usize>] {
         &self.blocks
+    }
+    pub fn geometry(&self) -> Option<&ByteDecoderGeometryParameterLayout> {
+        self.geometry.as_ref()
     }
     pub fn head(&self) -> Range<usize> {
         self.head.clone()
@@ -132,6 +139,7 @@ impl ByteDecoderParameterLayout {
 pub struct ByteDecoderPlan {
     token: GraphParameter,
     position: GraphParameter,
+    geometry: Option<ByteDecoderGeometryPlan>,
     blocks: Vec<ResidualAttentionPlan>,
     head: InferencePlan,
     parameters: ByteDecoderParameterLayout,
@@ -213,9 +221,11 @@ impl ByteDecoderPlan {
         Ok(Self {
             token: freeze_table(token_table)?,
             position: freeze_table(position_table)?,
+            geometry: None,
             blocks: blocks.to_vec(),
             head: head.clone(),
             parameters: ByteDecoderParameterLayout {
+                geometry: None,
                 blocks: ranges,
                 head: offset..end,
             },
