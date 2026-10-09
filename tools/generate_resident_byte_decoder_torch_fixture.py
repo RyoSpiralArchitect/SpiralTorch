@@ -19,7 +19,9 @@ def block_forward(x, p, heads, z, pair, topos):
     scale = torch.tensor(width // heads, dtype=torch.float32, device="cpu").sqrt().reciprocal()
     scores = (q @ k.transpose(-1, -2)) * scale
     if z is not None:
-        scores = scores + z.unsqueeze(-2) + pair
+        scores = scores + z.unsqueeze(-2)
+    if pair is not None:
+        scores = scores + pair
     mask = torch.ones(steps, steps, dtype=torch.bool, device="cpu").triu(1)
     scores = scores.masked_fill(mask, -float("inf"))
     attention = (scores.softmax(-1) @ v).transpose(1, 2).reshape(batch, steps, width)

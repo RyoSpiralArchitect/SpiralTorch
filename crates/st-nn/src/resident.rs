@@ -26,7 +26,10 @@ pub use byte_decoder::{
     ByteDecoderBias, ByteDecoderBiasGradient, ResidentByteBatch, ResidentByteDecoder,
     ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
-pub use byte_decoder::{ByteDecoderParameterLayout, ByteDecoderPlan, ByteLmBatch, BYTE_LM_VOCAB};
+pub use byte_decoder::{
+    ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan, ByteDecoderParameterLayout,
+    ByteDecoderPlan, ByteLmBatch, BYTE_LM_VOCAB,
+};
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]
 mod convolution;
@@ -137,6 +140,10 @@ pub enum InferenceError {
     Attention(&'static str),
     #[error(transparent)]
     AttentionContract(#[from] st_kernel_contracts::attention::AttentionError),
+    #[error(transparent)]
+    CausalWaveContract(#[from] st_kernel_contracts::causal_wave::CausalWaveError),
+    #[error(transparent)]
+    PoincareContract(#[from] st_kernel_contracts::poincare::PoincareError),
     #[error("resident Module forwarding cannot bypass a committed tensor execution plan")]
     ResidentForwardPolicy,
     #[error("resident module update rejected: {0}")]

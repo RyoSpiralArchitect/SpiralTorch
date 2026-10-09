@@ -155,10 +155,12 @@ unset for a wasm32 cross-build.
 
 The [Poincare metric primitive](poincare_metric_attention.md) provides genuine
 squared-distance pair bias on chart coordinates, with derivatives into both
-endpoints and learned per-head gains. The **next required learning mechanism**
-is full-model integration. Those metric cotangents must be summed across all
-heads/blocks before this wave's backward. It then belongs under the byte
-decoder's one owner, with next-byte CE reaching decay, phase and projection
-parameters. A direct Euclidean path must not disguise a disconnected metric
-path. This is not implemented by the primitive alone, and the present tests do
-not establish language quality, an advantage over ordinary FT, or throughput.
+endpoints and learned per-head gains. The optional
+[byte decoder geometry plan](resident_byte_decoder.md#the-geometry-boundary)
+now integrates them under one full-model owner. Metric cotangents are summed
+across all heads/blocks before this wave's backward, with next-byte CE reaching
+decay, phase and projection parameters. Its full-model probe includes a detached
+geometry control so a direct Euclidean path cannot disguise a missing pullback.
+The standalone wave evidence above remains primitive-only; neither that evidence
+nor the tiny full-model correctness probe establishes language-quality gains,
+an advantage over ordinary FT, or throughput.

@@ -8,8 +8,9 @@ use st_backend_wgpu::{
 use st_kernel_contracts::classification::{ClassReduction, CrossEntropySpec};
 use st_nn::{
     resident::{
-        AttentionInferencePlan, AttentionMask, ByteDecoderBias, ByteDecoderPlan, ByteLmBatch,
-        InferenceError, InferenceOp, InferencePlan, ResidualAttentionPlan, ToposResonatorKernel,
+        AttentionInferencePlan, AttentionMask, ByteDecoderBias, ByteDecoderGeometryPlan,
+        ByteDecoderPlan, ByteLmBatch, InferenceError, InferenceOp, InferencePlan,
+        ResidualAttentionPlan, ToposResonatorKernel,
     },
     Tensor,
 };
@@ -17,6 +18,9 @@ use st_tensor::NdLayout;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type OwnedBias = (Option<ResidentTensor>, Option<ResidentTensor>);
+
+#[path = "byte_decoder/geometry_controls.rs"]
+mod geometry_controls;
 
 fn data(v: &Value) -> Vec<f32> {
     v.as_array()
@@ -57,6 +61,28 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
     let layout = NdLayout::contiguous(&[b, steps, width])?;
     let parameters = case["parameters"].as_array().unwrap();
     let mut offset = 2;
+    let geometry = if !c["causal_geometry"].is_null() {
+        let projection = InferencePlan::from_operations(
+            layout.clone(),
+            vec![InferenceOp::Linear {
+                weight: tensor(&parameters[2])?,
+                bias: tensor(&parameters[3])?,
+            }],
+        )?;
+        offset = 6 + c["blocks"].as_array().unwrap().len();
+        Some(ByteDecoderGeometryPlan::new(
+            &projection,
+            &data(&parameters[4]["values"]),
+            &data(&parameters[5]["values"]),
+            &parameters[6..offset]
+                .iter()
+                .map(|p| data(&p["values"]))
+                .collect::<Vec<_>>(),
+            c["causal_geometry"]["curvature"].as_f64().unwrap() as f32,
+        )?)
+    } else {
+        None
+    };
     let mut blocks = Vec::new();
     for block in c["blocks"].as_array().unwrap() {
         let topos = block["topos"].as_bool().unwrap();
@@ -123,12 +149,16 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
             },
         ],
     )?;
-    Ok(ByteDecoderPlan::from_plans(
+    let plan = ByteDecoderPlan::from_plans(
         &tensor(&parameters[0])?,
         &tensor(&parameters[1])?,
         &blocks,
         &head,
-    )?)
+    )?;
+    Ok(match geometry {
+        Some(g) => plan.with_causal_geometry(g)?,
+        None => plan,
+    })
 }
 
 fn batch(windows: &[Vec<u8>], steps: usize) -> Result<ByteLmBatch> {
@@ -150,21 +180,26 @@ fn biases(device: &TensorDevice, case: &Value, steps: usize) -> Result<Vec<Owned
         .unwrap()
         .iter()
         .map(|bias| {
-            if bias["z"].is_null() {
-                return Ok((None, None));
-            }
             Ok((
-                Some(
-                    device
-                        .upload(&[b, h, full], &data(&bias["z"]))?
-                        .narrow(2, 0, steps)?,
-                ),
-                Some(
-                    device
-                        .upload(&[b, h, full, full], &data(&bias["pair"]))?
-                        .narrow(2, 0, steps)?
-                        .narrow(3, 0, steps)?,
-                ),
+                if bias["z"].is_null() {
+                    None
+                } else {
+                    Some(
+                        device
+                            .upload(&[b, h, full], &data(&bias["z"]))?
+                            .narrow(2, 0, steps)?,
+                    )
+                },
+                if bias["pair"].is_null() {
+                    None
+                } else {
+                    Some(
+                        device
+                            .upload(&[b, h, full, full], &data(&bias["pair"]))?
+                            .narrow(2, 0, steps)?
+                            .narrow(3, 0, steps)?,
+                    )
+                },
             ))
         })
         .collect()
@@ -440,10 +475,25 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     {
         return Err("incomplete byte decoder oracle".into());
     }
+    let geometry_fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/resident_byte_geometry_torch.json"
+    ))?;
+    if geometry_fixture["schema"] != "spiraltorch.resident_byte_geometry.torch_fixture.v1"
+        || geometry_fixture["cases"].as_array().map(Vec::len) != Some(2)
+        || geometry_fixture["tolerance"]["geometry_relative_l2"] != 0.002
+    {
+        return Err("incomplete causal geometry oracle".into());
+    }
     let mut checks = Vec::new();
-    for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
+    for (case_index, case) in fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(geometry_fixture["cases"].as_array().unwrap())
+        .enumerate()
+    {
         let p = plan(case, 4)?;
-        let expected_count = [18, 31][case_index];
+        let expected_count = [18, 31, 23, 37][case_index];
         if p.parameter_layout().len() != expected_count
             || case["parameter_gradients"].as_array().map(Vec::len) != Some(expected_count)
         {
@@ -480,8 +530,9 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         let resident = model.prepare_batch(&host)?;
         let geometry = biases(model.tensor_device(), case, 4)?;
         let forward = model.forward_with_external_biases(&resident, &borrowed(&geometry))?;
+        let output_values = read(forward.prediction()).await?;
         let output_error = close(
-            &read(forward.prediction()).await?,
+            &output_values,
             &data(&case["output"]),
             "byte decoder logits",
         )?;
@@ -512,6 +563,16 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 return Err("parameter gradient shape drift".into());
             }
             errors.push(json!({"name": parameters[i]["name"], "max_abs_error": close(value, &data(&case["parameter_gradients"][i]), parameters[i]["name"].as_str().unwrap())?}));
+            if p.parameter_layout()
+                .geometry()
+                .is_some_and(|g| g.all().contains(&i))
+            {
+                let relative = geometry_controls::relative_gradient(
+                    value,
+                    &data(&case["parameter_gradients"][i]),
+                )?;
+                errors.last_mut().unwrap()["relative_l2_error"] = json!(relative);
+            }
             if parameters[i]["name"]
                 .as_str()
                 .unwrap()
@@ -524,8 +585,9 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         if gradient.embedding_output_gradient().layout().shape() != p.input_layout().shape() {
             return Err("embedding output gradient shape drift".into());
         }
+        let input_values = read(gradient.embedding_output_gradient()).await?;
         let input_error = close(
-            &read(gradient.embedding_output_gradient()).await?,
+            &input_values,
             &data(&case["embedding_output_gradient"]),
             "embedding output gradient",
         )?;
@@ -559,6 +621,11 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         }
         let causal = causal_checks(&runtime, case).await?;
         let tapes = tape_checks(&runtime, case).await?;
+        let metric_controls = if p.parameter_layout().geometry().is_some() {
+            Some(geometry_controls::run(&runtime, case, &output_values, &input_values).await?)
+        } else {
+            None
+        };
         let learning = &case["learning"];
         if learning["steps"] != 16 || learning["trace"].as_array().map(Vec::len) != Some(16) {
             return Err("incomplete byte learning oracle".into());
@@ -570,11 +637,18 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 forward.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
             let gradient = model.backward(&forward, loss.prediction_gradient())?;
             let update = model.sgd(&gradient, learning["rate"].as_f64().unwrap() as f32)?;
-            pending.push((loss, update, model.parameter_snapshot()));
+            let geometry_gradients = p
+                .parameter_layout()
+                .geometry()
+                .map(|g| gradient.parameter_gradients()[g.all()].to_vec())
+                .unwrap_or_default();
+            pending.push((loss, update, model.parameter_snapshot(), geometry_gradients));
         }
         // No activation/gradient/receipt read until every update is queued.
         let mut trace = Vec::new();
-        for (step, (loss, update, parameters)) in pending.into_iter().enumerate() {
+        for (step, (loss, update, parameters, geometry_gradients)) in
+            pending.into_iter().enumerate()
+        {
             let receipt = update.snapshot()?;
             #[cfg(target_arch = "wasm32")]
             let revision = receipt.read_async().await?;
@@ -598,14 +672,29 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             for (i, (a, e)) in actual.iter().zip(expected).enumerate() {
                 maximum = maximum.max(close(a, &data(e), &format!("step {step} parameter {i}"))?);
             }
-            trace.push(json!({"revision": revision, "loss": loss_values[0], "parameter_max_abs_error": maximum}));
+            let mut geometry_relative = Vec::new();
+            if !geometry_gradients.is_empty() {
+                let actual = read_many(model.tensor_device(), &geometry_gradients).await?;
+                let expected = learning["trace"][step]["geometry_gradients"]
+                    .as_array()
+                    .ok_or("missing geometry CE derivatives")?;
+                if actual.len() != expected.len() {
+                    return Err("truncated geometry CE derivatives".into());
+                }
+                for (a, e) in actual.iter().zip(expected) {
+                    close(a, &data(e), "geometry CE derivative")?;
+                    geometry_relative.push(geometry_controls::relative_gradient(a, &data(e))?);
+                }
+            }
+            trace.push(json!({"revision": revision, "loss": loss_values[0], "parameter_max_abs_error": maximum,
+                "geometry_gradient_relative_l2": geometry_relative}));
         }
         checks.push(json!({"name": case["name"], "parameter_count": expected_count, "output_max_abs_error": output_error,
             "embedding_output_max_abs_error": input_error, "parameter_errors": errors, "bias_errors": bias_errors, "gradient_layouts": true,
-            "causality": causal, "tapes": tapes, "learning": {"steps":16, "trace":trace}}));
+            "causality": causal, "tapes": tapes, "metric_controls": metric_controls, "learning": {"steps":16, "trace":trace}}));
     }
     Ok(
-        json!({"schema":"spiraltorch.resident_byte_decoder.validation.v1", "passed":true,
+        json!({"schema":"spiraltorch.resident_byte_decoder.validation.v2", "passed":true,
         "adapter":format!("{:?}",runtime.adapter_info()), "checks":checks,
         "scope":"complete 256-way byte decoder correctness and synthetic training, not language quality or speed"}),
     )
