@@ -98,7 +98,10 @@ updates of Q/K/V and both biases. The Rust probe executes every update on the GP
 and reads outputs/parameters only after the update sequence for validation.
 Both probes also cover 12 inherited-failure cases, two wide-range cases and three
 adversarial cancellation cases across the forward specialization boundary. See
-the [dated evidence and remaining client-runtime gap](../benchmarks/results/2026-10-09-resident-attention-vjp/README.md).
+the [dated kernel and public-client evidence](../benchmarks/results/2026-10-09-resident-attention-vjp/README.md).
+The full WASM package passes all 18 public-client fixture conditions in the
+browser, and the default-feature Python wheel passes the three public API tests
+on macOS WGPU, including the same 18 conditions and parent-handle lifetime checks.
 
 ```bash
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release \

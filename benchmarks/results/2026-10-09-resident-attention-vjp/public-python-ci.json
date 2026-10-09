@@ -1,0 +1,120 @@
+{
+  "schema": "spiraltorch.resident_attention_vjp.public_python.v1",
+  "recorded_at": "2026-10-09T00:06:02Z",
+  "qualified_pr_head": "d7e1ffe2cc4a243d5d5818770eb8a0963ceece87",
+  "workflow_run": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/37855393243",
+  "gpu_job": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/37855393243/job/113578731406",
+  "ci_job_conclusion": "success",
+  "build": {
+    "default_features": true,
+    "wheel": "spiraltorch-0.4.29-cp38-abi3-macosx_11_0_arm64.whl",
+    "wheel_sha256": null,
+    "python": "3.12 (workflow selection)",
+    "command": "maturin build --release --locked -m bindings/st-py/Cargo.toml --out \"$RUNNER_TEMP/attention-wheel\"",
+    "published_release": false
+  },
+  "execution": {
+    "command": "python -I -B bindings/st-py/tests/test_wgpu_attention.py -v",
+    "workflow_environment": {
+      "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS": "1",
+      "SPIRALTORCH_STRICT_GPU": "1"
+    },
+    "tests": 3,
+    "skipped": 0,
+    "fixture_conditions": 18,
+    "elapsed_test_seconds": 2.181,
+    "adapter_model": null,
+    "adapter_requirement": "GPU test explicitly rejects device_type Cpu",
+    "tolerance": "abs(actual - expected) <= 3e-6 + 5e-5 * abs(expected)"
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "874be7e5effa4c9342eb531a82b96d737daca67da68049888dd294944aaccf6a",
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    "bindings/st-py/Cargo.toml": "e3490fd49872cb5f677996fe4bcffe7b1ab83681589d955bcef5176b633237f0",
+    "bindings/st-py/tests/test_wgpu_attention.py": "85311a8d9f77b91eaa4d4549e2a2858c787736de5ead64b7f4964caf3df40c55",
+    "bindings/st-py/src/wgpu_tensor/attention.rs": "c3ef0307955ea6f39d20684b793d45db57a1e609612d384e6ad603e85d00c829",
+    "bindings/st-py/src/wgpu_tensor.rs": "941ca5dfe5a2e098639256e07157b334a7fe8efb1caedf085683d70478cc24b6",
+    "bindings/st-py/src/wgpu.rs": "7129beb6f4c97bf54748dbefffc75ad0ef5059f2a08e648c1fd54ee70cab9adf",
+    "bindings/st-py/spiraltorch/__init__.py": "dc6f4fe51a16f0e268cd44d5d573b28128ae6d896f86d23e4feb4a9c5a0cd702",
+    "bindings/st-py/spiraltorch/__init__.pyi": "24db3babe8e6520cb4dfdec5803359fad19f8f120f170594b7cfd7dd20905fbe",
+    "crates/st-backend-wgpu/tests/fixtures/resident_attention_vjp_torch.json": "60fd7df22a1ce7641ffa614bfb2cf63082c11b2718017b1debd2523eb0654ef3"
+  },
+  "diagnostics": {
+    "source": "Codex pull-request CI diagnostics",
+    "full_log_truncated": true,
+    "test_result_block_visible": true,
+    "command_and_environment_source": "Pinned workflow; not present in the returned log excerpt",
+    "visible_test_log": [
+      "2026-10-08T23:42:21.0881100Z Successfully installed spiraltorch-0.4.29",
+      "2026-10-08T23:42:23.4843270Z test_all_bias_modes_and_logical_gradients (__main__.AttentionGpu.test_all_bias_modes_and_logical_gradients) ... ok",
+      "2026-10-08T23:42:23.4856750Z test_offsets_are_strict_and_upstream_shape_is_checked (__main__.AttentionGpu.test_offsets_are_strict_and_upstream_shape_is_checked) ... ok",
+      "2026-10-08T23:42:23.4858050Z test_gradient_alias_and_opaque_constructor (__main__.AttentionSurface.test_gradient_alias_and_opaque_constructor) ... ok",
+      "2026-10-08T23:42:23.4858570Z ",
+      "2026-10-08T23:42:23.4858890Z ----------------------------------------------------------------------",
+      "2026-10-08T23:42:23.4859300Z Ran 3 tests in 2.181s",
+      "2026-10-08T23:42:23.4859650Z ",
+      "2026-10-08T23:42:23.4880870Z OK"
+    ]
+  },
+  "ci_checks": [
+    {
+      "id": 113582216284,
+      "name": "vision input checkpoint (Python to WASM)",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578732025,
+      "name": "build & test (ubuntu / lint)",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731923,
+      "name": "bindings/st-py version consistency",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731808,
+      "name": "spiraltorch-wasm (wasm32 build)",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731780,
+      "name": "build & test (macos / stable)",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731721,
+      "name": "python docs smoke (README + hello_session)",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731689,
+      "name": "build & test (ubuntu / stable)",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731634,
+      "name": "build & test core (windows)",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731575,
+      "name": "workspace crate inventory",
+      "conclusion": "success"
+    },
+    {
+      "id": 113578731406,
+      "name": "st-tensor (wgpu / macOS)",
+      "conclusion": "success"
+    }
+  ],
+  "scope": {
+    "numerical_forward_and_vjp": true,
+    "handle_lifetime": true,
+    "strict_input_rejection": true,
+    "public_client_sgd": false,
+    "performance": false,
+    "language_quality": false,
+    "note": "Eighteen fixture conditions are enforced by the pinned test source; unittest logs one enclosing test, not each successful subtest. No per-element maximum error is reported by this Python test."
+  }
+}

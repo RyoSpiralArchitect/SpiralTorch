@@ -5,6 +5,10 @@ Metal and browser WebGPU run the same Rust kernel. The independent oracle is
 CPU float32 PyTorch 2.12.1: matmul, additive biases, structural causal mask,
 softmax, autograd and SGD. No models, external corpora or held-out text are used.
 
+Public-client follow-ups below also pass: the full WASM package in the browser
+and the default-feature Python wheel on macOS WGPU. Earlier pending statements
+are historical checkpoints, not the current client qualification status.
+
 ## Results
 
 - Both backends pass all 18 conditions in canonical and strided layouts: 36
@@ -46,9 +50,10 @@ See [the API/runbook](../../../docs/resident_attention_learning.md). The generat
 refuses fixture overwrites; a separate regeneration with Python startup hooks
 disabled was byte-identical. Preserve the committed fixture and its SHA-256.
 
-Python and full-WASM binding compilation passed, but their new public client
-runtime tests have not been executed locally: less than 1 GiB of disk remains,
-so full native relinking and full-WASM linking are deferred. The standalone
+At the initial checkpoint, Python and full-WASM binding compilation passed, but
+their new public client runtime tests had not been executed locally: less than
+1 GiB of disk remained, so full native relinking and full-WASM linking were
+deferred. The standalone
 browser result is real WebGPU kernel execution, not evidence that the full WASM
 package's public JS handles were exercised. Their regression tests are included.
 
@@ -105,3 +110,23 @@ kept locally. Rebuild the qualified source with the pinned lockfile/CLI to repea
 the check after expiry. The public-client test covers canonical forward/VJP and
 handle ownership, not another SGD/strided/wide-range or performance experiment.
 Public Python GPU execution is still pending in macOS CI at this checkpoint.
+
+## Full Python Client Follow-Up
+
+The macOS WGPU job in the same run completed successfully. It built and installed
+the full default-feature wheel, then ran all three public attention tests with
+no skips. The GPU fixture test checks all 18 conditions, rejects a CPU adapter,
+and reads retained outputs/gradients after dropping their parent handles. The
+other tests cover strict causal offsets, upstream shape and NaN scale
+rejection, root/submodule aliases and the opaque gradient constructor.
+
+[public-python-ci.json](public-python-ci.json) records the qualified head, source
+hashes, visible terminal test log and all ten successful CI check results.
+The diagnostic log was truncated, but the three individual results and final
+`Ran 3 tests` / `OK` summary were all visible. Exact adapter hardware and wheel
+hashes were not recorded; the fixture test asserts a non-CPU adapter.
+
+This closes both public-client runtime gates for `d7e1ffe2`. Evidence-only
+follow-up commits still require their own current-head CI before merge. The
+installed CI wheel uses version 0.4.29 but is a source build, not a replacement
+of the already-published PyPI wheel. No cache or historical evidence was deleted.
