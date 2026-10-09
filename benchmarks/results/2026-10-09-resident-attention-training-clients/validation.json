@@ -1,0 +1,205 @@
+{
+  "schema": "spiraltorch.resident_attention.training_clients_validation.v1",
+  "date_utc": "2026-10-09",
+  "source_base": "f8cb84aa82cb046a80650f0234571e15fa939d8b",
+  "source_status": "base plus content-hashed client delta",
+  "unreleased": true,
+  "package_version": "0.4.29",
+  "toolchain": {
+    "rust": "1.97.0 (2d8144b78 2026-07-07)",
+    "host": "aarch64-apple-darwin",
+    "python": "3.12",
+    "maturin": "1.11.5",
+    "wasm_bindgen_cli": "0.2.129",
+    "node": "v24.14.0",
+    "formatter": "nightly-2026-04-15"
+  },
+  "fixture": {
+    "path": "crates/st-nn/tests/fixtures/resident_attention_training_torch.json",
+    "sha256": "87d490a6f45664d86d4f1ebd081a8d77e3f57c59ddbf6027c07ef9e84bbcc58c",
+    "oracle": {
+      "torch": "2.12.1",
+      "device": "cpu",
+      "dtype": "float32",
+      "threads": 1
+    },
+    "absolute_tolerance": 0.000003,
+    "relative_tolerance": 0.00005,
+    "unchanged": true
+  },
+  "public_results": {
+    "browser_sha256": "a3e3cf480e0c9ab44ff480d303913d200bb27712d67d00c1c1131bee5dda355b"
+  },
+  "validation": {
+    "python_wgpu": {
+      "passed": true,
+      "methods_passed": 5,
+      "methods_skipped": 1,
+      "skip": "CPU-only feature gate",
+      "cases": 30,
+      "training_steps": 16,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      },
+      "isolated_environment": true
+    },
+    "python_cpu": {
+      "passed": true,
+      "methods_passed": 3,
+      "methods_skipped": 3,
+      "skip": "GPU opt-in",
+      "gpu_features_available": false,
+      "isolated_environment": true
+    },
+    "wasm_webgpu": {
+      "passed": true,
+      "cases": 30,
+      "training_steps": 16,
+      "guards": [
+        "strict_integers",
+        "all_four_projection_boundaries",
+        "compile_after_free",
+        "retained_tensors_after_owner_free",
+        "immutable_source_and_snapshots",
+        "receipt_after_free",
+        "repeated_cotangents",
+        "foreign_owner",
+        "strict_rate",
+        "all_or_none_nonfinite",
+        "stale_version",
+        "recovery_after_rejection"
+      ],
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "max_parameter_gradient_error": 2.9802322387695312e-8,
+      "final_parameter_error": 1.862645149230957e-9,
+      "final_output_error": 7.450580596923828e-9
+    },
+    "wasm_cpu": {
+      "passed": true,
+      "mode": "nn without webgpu, Node execution",
+      "composition_and_gpu_rejection": true
+    },
+    "rust_composition": {
+      "passed": true,
+      "tests": 1
+    },
+    "python_primitive_regression": {
+      "passed": true,
+      "tests": 3
+    },
+    "python_docs_example": {
+      "passed": true
+    },
+    "types": {
+      "generated": true,
+      "shipped": true,
+      "existing_attention_nn_vision_regressions": true
+    },
+    "feature_build_checks": {
+      "python_wgpu": true,
+      "python_cpu": true,
+      "wasm_nn": true,
+      "wasm_webgpu": true
+    },
+    "format_and_diff_check": true,
+    "independent_review": {
+      "kind": "read-only static review",
+      "actionable_introduced_findings": 0,
+      "runtime_independently_repeated": false
+    }
+  },
+  "scope": {
+    "performance_claim": false,
+    "language_quality_claim": false,
+    "full_decoder": false,
+    "geometry_biases_optimized": false,
+    "published_to_pypi": false
+  },
+  "probe_repairs": [
+    {
+      "lane": "python",
+      "initial": "missing WgpuTensor.scale method",
+      "fix": "upload the independent negative cotangent",
+      "core_changed": false
+    },
+    {
+      "lane": "browser",
+      "initial": "shape-error text mismatch",
+      "fix": "match the exact Rust error variant display",
+      "core_changed": false
+    }
+  ],
+  "source_sha256": {
+    ".github/workflows/ci.yml": "41689c8c15b507825678a12d169343875d7df2aefb689b4dfa6ab805b1979d37",
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    "bindings/st-py/src/nn.rs": "1ecb42de00e14adbd179118f7912a8002f62e65117e330ba60ba4a72093b87a3",
+    "bindings/st-py/src/nn_resident.rs": "5b8164d85982bb6ee1a03e0d2a8617020cd015f8c652d1db920cc965bac6274f",
+    "bindings/st-py/src/nn_resident/attention.rs": "ebfc59b47127f8b3a6ccd82f81de7f889460ad436c7607c5c4971aa8e2ae5357",
+    "bindings/st-py/src/nn_resident/parameters.rs": "1c0e9aae0f4e95f1f9bdd4cc7af1c3d1605c38f433491dde1ad157d5e611ffc9",
+    "bindings/st-py/tests/test_nn_attention_training.py": "6382696e7290f91c3c956b99b8447a274ff3ccc56642f7dfe5a6a0a24f54863c",
+    "bindings/st-wasm/src/nn_resident.rs": "117e9a9a0fd1630bd1e201db0eab1a264ff3529d5c5cfe49944c52af43bcaac9",
+    "bindings/st-wasm/src/nn_resident/attention.rs": "93d07c3db0abf7414abeb9bca70e2db34ed2f430ebc012591b0bee297be03999",
+    "bindings/st-wasm/src/nn_resident/parameters.rs": "209d35620e7ecb0793984eed65b49027c524aa12376266089203794f038e424e",
+    "bindings/st-wasm/src/wgpu_tensor/attention.rs": "ddcf8649b1957452e9de47186e1dee20b0654d86cbc0b4117354aa37b3488d8f",
+    "bindings/st-wasm/tests/nn_plan.cjs": "3ba27a8c4b7002f367bb045ecbc612e5a3edc572d18e6da99772083677c37ebc",
+    "bindings/st-wasm/tests/attention_training_types.cjs": "ebb4cf1e073947933fe79695b0c1da0cc57f64bc9abf554be21b1d3bf48ec20e",
+    "bindings/st-wasm/tests/resident_attention_training_clients.html": "f2eba83921cd3a7fbc951ab9b57bb4c96d999c05af0a45eb1e81336477e82d66",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "367c4b270f5217420700dc0743128a5c74f30d45e59dde74908c46f3e0994dd5",
+    "crates/st-nn/src/resident.rs": "3d99f3a238b9b2033eab6d77937d0215849db83078481c51f766bbae12586aec",
+    "crates/st-nn/src/resident/attention.rs": "428b4c3724c0e51e3cb690b702ff770ab43116e43bf830c46b7b7c73c1efffae",
+    "crates/st-nn/src/resident/attention/tests.rs": "14be8c32050c9e2ab420aec1ff6c01c1f2c4ed95ceb62718909d38fbafcf1a24"
+  },
+  "artifacts": {
+    "python_wgpu_wheel": {
+      "file": "wheels/spiraltorch-0.4.29-cp38-abi3-macosx_11_0_arm64.whl",
+      "sha256": "f3bed3471cec14557159a5af5acf52c651a2ef426cd607602effeb2cf5a392f5"
+    },
+    "python_cpu_wheel": {
+      "file": "cpu-wheels/spiraltorch-0.4.29-cp38-abi3-macosx_11_0_arm64.whl",
+      "sha256": "a54cd0b6fd73d2be5071cb09f2ee496ad455628d649c1f6991e239e01481b22f"
+    },
+    "wasm_web_binary": {
+      "file": "wasm-web/spiraltorch_wasm_bg.wasm",
+      "sha256": "03ff5c06c4b1bdb9a08de8e924f18e5960064c722e5e122be7325ff9d4f2e40d"
+    },
+    "wasm_web_glue": {
+      "file": "wasm-web/spiraltorch_wasm.js",
+      "sha256": "7655b09626213976499021a645fe93af8fff10f37e63e61c4203edf434ba086f"
+    },
+    "wasm_web_types": {
+      "file": "wasm-web/spiraltorch_wasm.d.ts",
+      "sha256": "8cd97a0889d04283b282b4b4601256a40accd90b4f5e3b6b65a587c89745fee4"
+    },
+    "wasm_cpu_binary": {
+      "file": "wasm-cpu/spiraltorch_wasm_bg.wasm",
+      "sha256": "6dbae51ec1366d9e4598f33b722b0ee9050498b68b333f596a4269fee310e21e"
+    },
+    "wasm_cpu_glue": {
+      "file": "wasm-cpu/spiraltorch_wasm.js",
+      "sha256": "380b433691c4033f679a02cd9b946fbb62053991612b4d489f6a26eff46457fd"
+    }
+  },
+  "private_log_sha256": {
+    "python-check.log": "56bf5225cd35c3622b4b5f7b12b2abc01f82ca5ee931a50f2621225bf669b4d7",
+    "python-wheel-build.log": "18ebc99399c1059a7b92ad191e6c626f0e46220e4095975695bad6843439f991",
+    "python-runtime.log": "7127b3b611f818da70268b710e55fc6b1501d0d9ea3ed850c21e37cf76a99f64",
+    "python-runtime-v2.log": "ba37e359322d1f10ef639ff222cdc9f61e54829c6f3c9fc9465413df7588a4bc",
+    "python-primitive-regression.log": "e61aaf5e3f5d2ae150ea00c8bb55f4e2abf9cf01fc80e64beabdb7c052770960",
+    "python-docs-smoke.log": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "python-cpu-check.log": "85c1f490cc93e5c4144c60328f4301ef834f5b08f3f42da23b0523c4d544f9f0",
+    "python-cpu-wheel-build.log": "058f279bf07e9f097f3445c0888c8461401190b9d87e40f87a94b31c6a9f2c27",
+    "python-cpu-runtime.log": "e0d23b55283676f4351ecb8c88c164256d1522c10f2e60c40aac72ff23d47986",
+    "wasm-build.log": "baeeff82d7eed3cc57e355ddb685ae54c39761f692490f8471e1c745a4a9549b",
+    "wasm-cpu-check.log": "3a20d8eaa5ecd6195605c618e4a88f263d893c33ccb8219ae292acd3e3ae392e",
+    "wasm-cpu-build.log": "51843caaf2171666f96208b97ac881fef08c08c11f5875582f10120e0e215130",
+    "wasm-cpu-runtime.log": "de12741aeb924f03681e69431971ab4ecffacb6bf753a60c4efa865278cae0ed",
+    "rust-composition.log": "af970bb77791876e705455e9c90cd96672a1b6b3cc80e6c7560abcd25b441d8c",
+    "types.log": "0f172f402b270f534233ff1bae70edaec21dbcfe66afd5b50bac6f58364e825f"
+  }
+}

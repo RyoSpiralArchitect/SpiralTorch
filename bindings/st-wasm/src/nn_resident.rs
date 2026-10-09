@@ -15,7 +15,13 @@ use st_backend_wgpu::{
 #[cfg(feature = "webgpu")]
 use wasm_bindgen_futures::future_to_promise;
 
+mod attention;
 mod autograd;
+mod parameters;
+pub use attention::{
+    WasmAttentionForward, WasmAttentionPlan, WasmAttentionTraining, WasmAttentionVjp,
+};
+pub use parameters::WasmResidentParameterUpdate;
 mod forward;
 pub use autograd::{WasmGraphForward, WasmGraphGradients, WasmResidentGraphAutograd};
 mod graph;

@@ -313,6 +313,7 @@ jobs:
           maturin build --release --locked -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/attention-wheel"
           python -m pip install --no-deps --force-reinstall --no-cache-dir "$RUNNER_TEMP/attention-wheel/"*.whl
           python -I -B bindings/st-py/tests/test_wgpu_attention.py -v
+          python -I -B bindings/st-py/tests/test_nn_attention_training.py -v
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
@@ -418,6 +419,7 @@ jobs:
             --target web --out-dir "$RUNNER_TEMP/spiraltorch-wasm-webgpu"
           node bindings/st-wasm/tests/resident_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/attention_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/attention_training_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"

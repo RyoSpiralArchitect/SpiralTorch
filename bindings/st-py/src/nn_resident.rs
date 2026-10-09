@@ -11,11 +11,13 @@ use pyo3::{
 use st_nn::resident::{InferenceError, InferencePlan, DEFAULT_MAX_PLAN_JSON_BYTES};
 use st_tensor::NdLayout;
 
+mod attention;
 mod autograd;
 mod forward;
 mod graph;
 mod learner;
 mod loss;
+mod parameters;
 pub(crate) use loss::{evaluate_loss, PyResidentLoss};
 mod training;
 
@@ -521,6 +523,8 @@ impl PyInferenceSnapshot {
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    attention::register(module)?;
+    parameters::register(module)?;
     module.add_class::<PyInferencePlan>()?;
     module.add_class::<PyResidentInference>()?;
     module.add_class::<PyInferenceSnapshot>()?;

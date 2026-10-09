@@ -179,6 +179,56 @@ declare module "spiraltorch-wasm" {
         free(): void;
     }
 
+    /** Four single-Linear snapshots composed by Rust; richer plans are rejected. */
+    export class AttentionInferencePlan {
+        private constructor();
+        static fromProjectionPlans(query: InferencePlan, key: InferencePlan, value: InferencePlan, output: InferencePlan, heads: number, causal_offset?: number | null): AttentionInferencePlan;
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        /** Separate trainable owner; this plan may be freed before compilation completes. */
+        compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentAttentionTraining>;
+        free(): void;
+    }
+    /** Fused QKV -> attention -> output. Requires webgpu, no implicit readback. */
+    export class ResidentAttentionTraining {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        /** Submission count, not proof of update acceptance. */
+        readonly attemptedUpdates: bigint;
+        /** Order: fused QKV weight/bias, output weight/bias. Owning immutable handles. */
+        parameterTensors(): WgpuTensor[];
+        tensorDevice(): WgpuTensorDevice;
+        forward(input: WgpuTensor, biases: WgpuAttentionBiases): AttentionForward;
+        /** Same owner/version and latest forward only. */
+        backward(forward: AttentionForward, cotangent: WgpuTensor): AttentionGradients;
+        /** All-or-none SGD of the four projection parameters, never runtime biases. */
+        sgd(gradients: AttentionGradients, rate: number): ResidentParameterUpdate;
+        free(): void;
+    }
+    export class AttentionForward {
+        private constructor();
+        readonly parameterRevision: bigint;
+        predictionTensor(): WgpuTensor;
+        free(): void;
+    }
+    export class AttentionGradients {
+        private constructor();
+        inputGradientTensor(): WgpuTensor;
+        parameterGradientTensors(): WgpuTensor[];
+        /** Logical bias derivatives; callers own broadcast/view adjoints and updates. */
+        zBiasGradientTensor(): WgpuTensor | undefined;
+        pairBiasGradientTensor(): WgpuTensor | undefined;
+        free(): void;
+    }
+    export class ResidentParameterUpdate {
+        private constructor();
+        readonly attemptedRevision: bigint;
+        /** Explicit flag readback; rejects on a numerically rejected transaction. */
+        read(): Promise<bigint>;
+        free(): void;
+    }
+
     /** Immutable N-D GPU storage; available with webgpu, never host Tensor storage. */
     export class WgpuTensorDevice {
         private constructor();

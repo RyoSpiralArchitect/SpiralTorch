@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::Linear;
-use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 
 #[cfg(feature = "wgpu")]
 mod training;
@@ -22,6 +21,44 @@ pub struct AttentionInferencePlan {
 }
 
 impl AttentionInferencePlan {
+    /// Compose existing portable projection snapshots without inventing a second
+    /// weight format. Each plan must contain exactly one unfused Linear with the
+    /// matching logical input layout; richer operations are never discarded.
+    pub fn from_projection_plans(
+        heads: usize,
+        mask: AttentionMask,
+        projections: [&InferencePlan; 4],
+    ) -> Result<Self, InferenceError> {
+        for plan in projections {
+            if plan.graph.is_some()
+                || plan.stages.len() != 1
+                || plan.stages[0].gelu
+                || plan.source_operations != 1
+            {
+                return Err(InferenceError::Attention(
+                    "each projection plan must contain exactly one unfused Linear",
+                ));
+            }
+        }
+        let plan = Self::from_parameters(
+            projections[0].input_layout().clone(),
+            heads,
+            mask,
+            projections.map(|p| (&p.stages[0].weight, &p.stages[0].bias)),
+        )?;
+        for (index, projection) in projections.into_iter().enumerate() {
+            let expected = if index == 3 {
+                plan.output.input_layout()
+            } else {
+                plan.input_layout()
+            };
+            if projection.input_layout() != expected {
+                return Err(InferenceError::Shape(index));
+            }
+        }
+        Ok(plan)
+    }
+
     /// Projections are ordered query, key, value, output. Weights use SpiralTorch
     /// Linear's `[input_features, output_features]` convention.
     pub fn from_linears(
