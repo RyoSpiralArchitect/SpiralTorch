@@ -16,6 +16,11 @@ use st_backend_wgpu::{
 use wasm_bindgen_futures::future_to_promise;
 
 mod attention;
+mod residual_attention;
+pub use residual_attention::{
+    WasmResidualAttentionForward, WasmResidualAttentionPlan, WasmResidualAttentionTraining,
+    WasmResidualAttentionVjp,
+};
 mod autograd;
 mod parameters;
 pub use attention::{

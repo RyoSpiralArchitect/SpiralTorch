@@ -1,55 +1,34 @@
-//! Plan conversion and owning handles; all attention/training semantics stay in Rust.
+//! Thin owning handles over the Rust residual attention training contract.
+use super::attention::PyAttentionPlan;
 #[cfg(feature = "wgpu")]
 use super::parameters::PyResidentParameterUpdate;
 use super::*;
 #[cfg(feature = "wgpu")]
 use crate::wgpu_tensor::{PyWgpuTensor, PyWgpuTensorDevice};
-use st_nn::resident::{AttentionInferencePlan, AttentionMask};
+use st_nn::resident::ResidualAttentionPlan;
 #[cfg(feature = "wgpu")]
-use st_nn::resident::{ResidentAttentionForward, ResidentAttentionTraining, ResidentAttentionVjp};
+use st_nn::resident::{
+    ResidentResidualAttentionForward, ResidentResidualAttentionTraining,
+    ResidentResidualAttentionVjp,
+};
 
-fn integer(value: &Bound<'_, PyAny>) -> PyResult<usize> {
-    if value.is_instance_of::<PyBool>() {
-        return Err(PyTypeError::new_err(
-            "heads/offset must be an integer, not bool",
-        ));
-    }
-    value.extract()
-}
-
-#[pyclass(name = "AttentionInferencePlan", module = "spiraltorch.nn", frozen)]
-pub(super) struct PyAttentionPlan {
-    pub(super) inner: AttentionInferencePlan,
+#[pyclass(name = "ResidualAttentionPlan", module = "spiraltorch.nn", frozen)]
+pub(super) struct PyResidualAttentionPlan {
+    inner: ResidualAttentionPlan,
 }
 
 #[pymethods]
-impl PyAttentionPlan {
+impl PyResidualAttentionPlan {
     #[staticmethod]
-    #[pyo3(signature = (query, key, value, output, *, heads, causal_offset=None))]
-    #[allow(clippy::too_many_arguments)]
-    fn from_projection_plans(
+    fn from_plans(
         py: Python<'_>,
-        query: &PyInferencePlan,
-        key: &PyInferencePlan,
-        value: &PyInferencePlan,
-        output: &PyInferencePlan,
-        heads: &Bound<'_, PyAny>,
-        causal_offset: Option<&Bound<'_, PyAny>>,
+        pre: &PyInferencePlan,
+        attention: &PyAttentionPlan,
+        feed_forward: &PyInferencePlan,
     ) -> PyResult<Self> {
-        let heads = integer(heads)?;
-        let mask = causal_offset
-            .map(integer)
-            .transpose()?
-            .map_or(AttentionMask::None, |query_offset| AttentionMask::Causal {
-                query_offset,
-            });
         let inner = py
             .detach(|| {
-                AttentionInferencePlan::from_projection_plans(
-                    heads,
-                    mask,
-                    [&query.inner, &key.inner, &value.inner, &output.inner],
-                )
+                ResidualAttentionPlan::from_plans(&pre.inner, &attention.inner, &feed_forward.inner)
             })
             .map_err(plan_error)?;
         Ok(Self { inner })
@@ -69,17 +48,17 @@ impl PyAttentionPlan {
         tile_mnk: Option<&Bound<'_, PyAny>>,
         kernel: &str,
         accumulation: &str,
-    ) -> PyResult<PyAttentionTraining> {
+    ) -> PyResult<PyResidualAttentionTraining> {
         #[cfg(feature = "wgpu")]
         {
             let (tile, kernel, accumulation) = gpu_options(tile_mnk, kernel, accumulation)?;
             let plan = self.inner.clone();
             py.detach(move || {
                 let (runtime, _) = st_backend_wgpu::runtime::ensure_default_runtime_blocking(
-                    "python.nn.attention_training",
+                    "python.nn.residual_attention_training",
                 )
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-                Ok(PyAttentionTraining {
+                Ok(PyResidualAttentionTraining {
                     inner: plan
                         .compile_training_wgpu_with_options(runtime, tile, kernel, accumulation)
                         .map_err(plan_error)?,
@@ -90,20 +69,20 @@ impl PyAttentionPlan {
         {
             let _ = (py, tile_mnk, kernel, accumulation);
             Err(pyo3::exceptions::PyNotImplementedError::new_err(
-                "resident attention training requires the 'wgpu' feature",
+                "resident residual attention training requires the 'wgpu' feature",
             ))
         }
     }
 }
 
-#[pyclass(name = "ResidentAttentionTraining", module = "spiraltorch.nn")]
-pub(super) struct PyAttentionTraining {
+#[pyclass(name = "ResidentResidualAttentionTraining", module = "spiraltorch.nn")]
+pub(super) struct PyResidualAttentionTraining {
     #[cfg(feature = "wgpu")]
-    inner: ResidentAttentionTraining,
+    inner: ResidentResidualAttentionTraining,
 }
 #[cfg(feature = "wgpu")]
 #[pymethods]
-impl PyAttentionTraining {
+impl PyResidualAttentionTraining {
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.inner.input_layout().shape().iter().copied())
@@ -137,8 +116,8 @@ impl PyAttentionTraining {
         input: &PyWgpuTensor,
         z_bias: Option<&PyWgpuTensor>,
         pair_bias: Option<&PyWgpuTensor>,
-    ) -> PyResult<PyAttentionForward> {
-        Ok(PyAttentionForward {
+    ) -> PyResult<PyResidualAttentionForward> {
+        Ok(PyResidualAttentionForward {
             inner: py
                 .detach(|| {
                     self.inner.forward(
@@ -153,10 +132,10 @@ impl PyAttentionTraining {
     fn backward(
         &mut self,
         py: Python<'_>,
-        forward: &PyAttentionForward,
+        forward: &PyResidualAttentionForward,
         cotangent: &PyWgpuTensor,
-    ) -> PyResult<PyAttentionGradients> {
-        Ok(PyAttentionGradients {
+    ) -> PyResult<PyResidualAttentionGradients> {
+        Ok(PyResidualAttentionGradients {
             inner: py
                 .detach(|| self.inner.backward(&forward.inner, &cotangent.inner))
                 .map_err(plan_error)?,
@@ -165,7 +144,7 @@ impl PyAttentionTraining {
     fn sgd(
         &mut self,
         py: Python<'_>,
-        gradients: &PyAttentionGradients,
+        gradients: &PyResidualAttentionGradients,
         rate: f32,
     ) -> PyResult<PyResidentParameterUpdate> {
         Ok(PyResidentParameterUpdate {
@@ -176,14 +155,14 @@ impl PyAttentionTraining {
     }
 }
 
-#[pyclass(name = "AttentionForward", module = "spiraltorch.nn", frozen)]
-pub(super) struct PyAttentionForward {
+#[pyclass(name = "ResidualAttentionForward", module = "spiraltorch.nn", frozen)]
+pub(super) struct PyResidualAttentionForward {
     #[cfg(feature = "wgpu")]
-    inner: ResidentAttentionForward,
+    inner: ResidentResidualAttentionForward,
 }
 #[cfg(feature = "wgpu")]
 #[pymethods]
-impl PyAttentionForward {
+impl PyResidualAttentionForward {
     #[getter]
     fn parameter_revision(&self) -> u64 {
         self.inner.parameter_revision()
@@ -195,14 +174,14 @@ impl PyAttentionForward {
     }
 }
 
-#[pyclass(name = "AttentionGradients", module = "spiraltorch.nn", frozen)]
-pub(super) struct PyAttentionGradients {
+#[pyclass(name = "ResidualAttentionGradients", module = "spiraltorch.nn", frozen)]
+pub(super) struct PyResidualAttentionGradients {
     #[cfg(feature = "wgpu")]
-    inner: ResidentAttentionVjp,
+    inner: ResidentResidualAttentionVjp,
 }
 #[cfg(feature = "wgpu")]
 #[pymethods]
-impl PyAttentionGradients {
+impl PyResidualAttentionGradients {
     fn input_gradient_tensor(&self) -> PyWgpuTensor {
         PyWgpuTensor {
             inner: self.inner.input_gradient().clone(),
@@ -231,9 +210,9 @@ impl PyAttentionGradients {
 }
 
 pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<PyAttentionPlan>()?;
-    module.add_class::<PyAttentionTraining>()?;
-    module.add_class::<PyAttentionForward>()?;
-    module.add_class::<PyAttentionGradients>()?;
+    module.add_class::<PyResidualAttentionPlan>()?;
+    module.add_class::<PyResidualAttentionTraining>()?;
+    module.add_class::<PyResidualAttentionForward>()?;
+    module.add_class::<PyResidualAttentionGradients>()?;
     Ok(())
 }

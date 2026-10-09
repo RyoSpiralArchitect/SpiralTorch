@@ -364,8 +364,10 @@ controls rather than choosing between them:
    pre-normalization, attention, both skip paths and an MLP (optionally Topos)
    under one all-or-none parameter owner. Native WGPU and the same Rust probe
    compiled to browser WASM cover 60 matched VJPs and two 32-update trajectories.
-   Whole-block guards include final prediction/input-gradient overflow; this
-   residual composition does not yet add Python/WASM public wrapper classes.
+   Whole-block guards include final prediction/input-gradient overflow. The
+   [Python/WASM wrappers](resident_residual_attention_clients.md) now expose the
+   same residual owner, including a browser LayerNorm construction path and
+   CPU-only plan composition with explicit GPU rejection.
    These are source additions after 0.4.29, not APIs in that published wheel.
    The original host Modules remain unchanged; uncertainty outputs, KV-cache
    ownership, complete decoder integration and learning-quality gains remain open.

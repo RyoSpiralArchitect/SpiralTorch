@@ -315,6 +315,7 @@ jobs:
           python -m pip install --no-deps --force-reinstall --no-cache-dir "$RUNNER_TEMP/attention-wheel/"*.whl
           python -I -B bindings/st-py/tests/test_wgpu_attention.py -v
           python -I -B bindings/st-py/tests/test_nn_attention_training.py -v
+          python -I -B bindings/st-py/tests/test_nn_residual_attention_training.py -v
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
@@ -405,6 +406,7 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu"
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/residual_attention_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
       - name: Host NN forward tapes compiled to scalar WASM
         run: |
           cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --example sequential_forward_tape_contract
@@ -412,6 +414,10 @@ jobs:
             --target nodejs --out-dir "$RUNNER_TEMP/sequential-forward-tape"
           node -e 'console.log(require(process.argv[1]).run_sequential_forward_tape_contract())' \
             "$RUNNER_TEMP/sequential-forward-tape/sequential_forward_tape_contract.js"
+      - name: Install pinned TypeScript declaration checker
+        run: |
+          npm install --prefix "$RUNNER_TEMP/typescript" --ignore-scripts --no-audit --no-fund typescript@5.9.2
+          echo "$RUNNER_TEMP/typescript/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Browser WebGPU binding build
         run: |
           cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --no-default-features --features wgpu --example resident_residual_attention_browser
@@ -422,6 +428,7 @@ jobs:
           node bindings/st-wasm/tests/resident_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/attention_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/attention_training_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/residual_attention_training_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
@@ -714,6 +721,7 @@ jobs:
           python -P bindings/st-py/tests/test_nn_resident_topos.py
           python -P bindings/st-py/tests/test_nn_resident_graph_forward.py
           python -P bindings/st-py/tests/test_nn_resident_exports.py
+          python -P bindings/st-py/tests/test_nn_residual_attention_training.py -v
           python -P bindings/st-py/tests/test_nn_resident_graph_autograd.py
           python -P bindings/st-py/tests/test_nn_resident_graph_learner.py
           python -P bindings/st-py/tests/test_nn_module_resident_forward.py

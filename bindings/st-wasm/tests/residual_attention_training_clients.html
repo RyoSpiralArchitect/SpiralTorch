@@ -1,0 +1,230 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Residual attention training public WASM API</title>
+<h1>Residual attention training public WASM API</h1>
+<p id="summary">Running frozen public-client checks...</p>
+<a id="download" hidden>Download residual client verification</a>
+<pre id="result" data-status="running">Checking...</pre>
+<script type="module">
+import {parts,makePlan} from "./residual_attention_plan.mjs";
+const result=document.querySelector("#result");
+try {
+  const moduleUrl=new URL(new URLSearchParams(location.search).get("module") || "./module/spiraltorch_wasm.js",location.href);
+  if(moduleUrl.origin!==location.origin) throw Error("Module must use this origin");
+  const st=await import(moduleUrl.href);await st.default();
+  const response=await fetch("../../../crates/st-nn/tests/fixtures/residual_attention_torch.json");
+  if(!response.ok) throw Error("Fixture fetch "+response.status);
+  const fixture=await response.json();
+  const assert=(ok,label)=>{if(!ok) throw Error(label);};
+  assert(fixture.schema==="spiraltorch.residual_attention_torch.v1" && fixture.cases.length===60 &&
+         fixture.training.length===2 && fixture.training.every(c=>c.losses.length===32),"Fixture contract");
+  const count=c=>c.topos?13:12;
+  const upload=(device,shape,values)=>device.upload(Array.from(shape),new Float32Array(values));
+  async function compile(c) {
+    const plan=makePlan(st,c),pending=plan.compileTrainingWebGpu();
+    plan.free();return await pending;
+  }
+  function biases(device,c) {
+    const bs=new st.WgpuAttentionBiases(),[b,t]=c.input_shape;
+    for(const [key,shape,setter] of [["z_bias",[b,c.heads,t],"setZBias"],["pair_bias",[b,c.heads,t,t],"setPairBias"]]) {
+      if(c[key]!==null) {const tensor=upload(device,shape,c[key]);bs[setter](tensor);tensor.free();}
+    }
+    return bs;
+  }
+  async function read(tensor) {
+    const snapshot=tensor.snapshot();
+    try {return Array.from(await snapshot.readValues());}
+    finally {snapshot.free();}
+  }
+  async function close(tensor,expected) {
+    const actual=await read(tensor);assert(actual.length===expected.length,"Value count");
+    let maximum=0;
+    for(let i=0;i<actual.length;i++) {
+      const error=Math.abs(actual[i]-expected[i]);
+      assert(Number.isFinite(actual[i]) && Number.isFinite(expected[i]) &&
+             error<=3e-6+5e-5*Math.abs(expected[i]),"Numerical mismatch at "+i);
+      maximum=Math.max(maximum,error);
+    }return maximum;
+  }
+  async function parameters(tensors,expected,n) {
+    assert(tensors.length===n && expected.length===n,"Parameter count");
+    const errors=[];for(let i=0;i<n;i++) errors.push(await close(tensors[i],expected[i]));
+    return errors;
+  }
+  async function reject(call,pattern,label) {
+    try {await call();} catch(error) {
+      assert(pattern.test(String(error)),label+": unexpected error "+error);return;
+    }throw Error(label+": missing rejection");
+  }
+  const release=items=>items.forEach(item=>item?.free());
+  const guards=[];
+  for(const c of fixture.training) {
+    const components=parts(st,c);
+    for(const index of [0,2]) {
+      const record=JSON.parse(components[index].toJson());record.input_shape.splice(0,2,1,6);
+      const changed=st.InferencePlan.fromJson(JSON.stringify(record)),inputs=components.slice();
+      inputs[index]=changed;
+      await reject(()=>st.ResidualAttentionPlan.fromPlans(...inputs),/layout|dimensions/,"Residual boundary");
+      changed.free();
+    }release(components);
+  }
+  guards.push("exact_residual_boundaries","compile_after_plan_free");
+
+  const checks=[];let adapter;
+  for(const c of fixture.cases) {
+    const model=await compile(c),device=model.tensorDevice();
+    adapter=device.adapterInfo();assert(adapter.device_type!=="Cpu","CPU fallback");
+    assert(JSON.stringify(Array.from(model.inputShape))===JSON.stringify(c.input_shape),"Input shape");
+    assert(JSON.stringify(Array.from(model.outputShape))===JSON.stringify(c.input_shape),"Output shape");
+    const x=upload(device,c.input_shape,c.input),seed=upload(device,c.input_shape,c.upstream),bs=biases(device,c);
+    const forward=model.forward(x,bs),g=model.backward(forward,seed);
+    const output=forward.predictionTensor(),dx=g.inputGradientTensor(),dp=g.parameterGradientTensors();
+    const dz=g.zBiasGradientTensor(),db=g.pairBiasGradientTensor();
+    assert(forward.parameterRevision===0n,"Initial revision");
+    release([forward,g,x,seed,bs,model,device]);
+    const errors={forward:await close(output,c.expected),input:await close(dx,c.input_gradient),
+                  parameters:await parameters(dp,c.parameter_gradients,count(c))};
+    for(const [tensor,key] of [[dz,"z_bias_gradient"],[db,"pair_bias_gradient"]]) {
+      if(c[key]===null) assert(tensor===undefined,"Unexpected geometry derivative");
+      else {assert(tensor!==undefined,"Missing geometry derivative");errors[key]=await close(tensor,c[key]);}
+    }
+    release([output,dx,...dp,dz,db]);checks.push({name:c.name,max_abs_error:errors});
+  }
+  guards.push("retained_handles_after_owner_free");
+  const training=[];
+  for(const c of fixture.training) {
+    const source=makePlan(st,c),model=await source.compileTrainingWebGpu(),device=model.tensorDevice();
+    const x=upload(device,c.input_shape,c.input),target=upload(device,c.input_shape,c.target),bs=biases(device,c);
+    const initial=model.parameterTensors(),lossFn=new st.MeanSquaredError(),pending=[];
+    for(let i=0;i<32;i++) {
+      const f=model.forward(x,bs),prediction=f.predictionTensor(),loss=lossFn.evaluateResident(prediction,target);
+      const scalar=loss.lossTensor(),seed=loss.predictionGradientTensor(),g=model.backward(f,seed);
+      const update=model.sgd(g,c.rate);
+      assert(update.attemptedRevision===BigInt(i+1),"Attempt counter");
+      pending.push([scalar,update]);
+      release([f,prediction,loss,seed,g]);
+    }
+    assert(model.attemptedUpdates===32n,"32 updates");
+    const updates=[];
+    for(let i=0;i<32;i++) {
+      const [scalar,update]=pending[i],error=await close(scalar,[c.losses[i]]);
+      const acceptance=update.read();update.free();
+      assert(await acceptance===BigInt(i+1),"Acceptance receipt");
+      updates.push({revision:i+1,max_abs_error:error});scalar.free();
+    }
+    const final=model.parameterTensors(),f=model.forward(x,bs),output=f.predictionTensor();
+    const final_parameter_errors=await parameters(final,c.final_parameters,count(c));
+    const final_prediction_error=await close(output,c.final_prediction);
+    await parameters(initial,c.initial_parameters,count(c));
+    const fresh=await source.compileTrainingWebGpu(),freshParameters=fresh.parameterTensors();
+    await parameters(freshParameters,c.initial_parameters,count(c));
+    release([...initial,...final,...freshParameters,source,fresh,f,output,x,target,bs,device,lossFn,model]);
+    training.push({topos:c.topos,updates,final_parameter_errors,final_prediction_error});
+  }
+  guards.push("32_updates_without_intermediate_readback","immutable_source_and_snapshots","receipt_after_free");
+
+  const c=fixture.training[1],model=await compile(c),foreign=await compile(c),device=model.tensorDevice();
+  function strided(data) {
+    const a=upload(device,c.input_shape,data),b=a.permute([0,2,1]),d=b.contiguous(),out=d.permute([0,2,1]);
+    release([a,b,d]);return out;
+  }
+  const x=strided(c.input),seed=strided(c.upstream),bs=biases(device,c);
+  const old=model.forward(x,bs),f=model.forward(x,bs),ff=foreign.forward(x,bs);ff.free();
+  await reject(()=>model.backward(old,seed),/latest forward/,"Old forward");
+  await reject(()=>foreign.backward(f,seed),/latest forward/,"Foreign forward");
+  const badShape=upload(device,[1],[1]);
+  await reject(()=>model.forward(badShape,bs),/nonempty contiguous last-axis input at offset zero/,"Input shape");
+  await reject(()=>model.backward(f,badShape),/layout|shape|dimensions/,"Cotangent shape");badShape.free();
+  const good=model.backward(f,seed),oppositeSeed=upload(device,c.input_shape,c.upstream.map(v=>-v));
+  const opposite=model.backward(f,oppositeSeed),dp=good.parameterGradientTensors(),op=opposite.parameterGradientTensors();
+  await parameters(dp,c.parameter_gradients,count(c));
+  await parameters(op,c.parameter_gradients.map(p=>p.map(v=>-v)),count(c));
+  release([...dp,...op,opposite,oppositeSeed]);
+  await reject(()=>foreign.sgd(good,c.rate),/owner's current version/,"Foreign gradients");
+  for(const rate of [-1,NaN,Infinity]) await reject(()=>model.sgd(good,rate),/finite and nonnegative/,"Invalid rate");
+  assert(model.attemptedUpdates===0n,"Invalid rate preserves clock");
+  const before=model.parameterTensors(),beforeValues=[];
+  for(const p of before) beforeValues.push(await read(p));
+  const huge=upload(device,c.input_shape,c.input.map(()=>3e38)),invalid=huge.mul(huge);
+  const bad=model.backward(f,invalid),rejected=model.sgd(bad,c.rate);
+  await reject(()=>rejected.read(),/non-finite training value.*no parameters were committed/,"Rejected transaction");
+  const unchanged=model.parameterTensors();
+  for(let i=0;i<count(c);i++) assert(JSON.stringify(await read(unchanged[i]))===JSON.stringify(beforeValues[i]),"Atomic preservation");
+  await reject(()=>model.sgd(good,0),/owner's current version/,"Stale gradient");
+  await reject(()=>model.backward(f,seed),/latest forward/,"Stale forward");
+  const current=model.forward(x,bs),recovered=model.backward(current,seed),receipt=model.sgd(recovered,0);
+  const retained=current.predictionTensor();
+  release([model,foreign,device,x,seed,bs,old,f,good,...before,...unchanged,huge,invalid,bad,rejected,current,recovered]);
+  const accepted=receipt.read();receipt.free();assert(await accepted===2n,"Recovery receipt after owner free");
+  await close(retained,c.expected);retained.free();
+  guards.push("strided_input_and_cotangent","owner_and_latest_tokens","repeated_cotangents",
+              "invalid_shape_preserves_tape","invalid_rate_preserves_clock","atomic_rejection_and_recovery");
+
+  for(const outputFailure of [true,false]) {
+    const linear=(w,b)=>st.InferencePlan.fromJson(JSON.stringify({
+      schema:"spiraltorch.nn.inference_plan.v1",input_shape:[1,1,1],
+      stages:[{inner:1,cols:1,weight:[w],bias:[b],gelu:false}]}));
+    const pre=linear(1,0),zero=linear(0,0),one=linear(1,0),out=linear(1,outputFailure?2e38:0);
+    const attention=st.AttentionInferencePlan.fromProjectionPlans(zero,zero,one,out,1);
+    const post=linear(0,outputFailure?2e38:0),plan=st.ResidualAttentionPlan.fromPlans(pre,attention,post);
+    const m=await plan.compileTrainingWebGpu();release([pre,zero,one,out,attention,post,plan]);
+    const d=m.tensorDevice(),x=upload(d,[1,1,1],[0]),u=upload(d,[1,1,1],[outputFailure?1:2e38]);
+    const z=upload(d,[1,1,1],[0]),pair=upload(d,[1,1,1,1],[0]),bs=new st.WgpuAttentionBiases();
+    bs.setZBias(z);bs.setPairBias(pair);release([z,pair]);
+    const initial=m.parameterTensors(),before=[];for(const p of initial) before.push(await read(p));
+    assert(initial.length===8,"Terminal parameter family");
+    const f=m.forward(x,bs),p=f.predictionTensor();
+    if(outputFailure) await reject(()=>read(p),/tensor contains a non-finite value/,"Terminal prediction");
+    else await close(p,[0]);
+    const g=m.backward(f,u),dp=g.parameterGradientTensors(),dx=g.inputGradientTensor();
+    assert(dp.length===8,"Terminal parameter gradient family");
+    const dz=g.zBiasGradientTensor(),db=g.pairBiasGradientTensor();
+    assert(dz!==undefined && db!==undefined,"Terminal optional derivatives");
+    for(const tensor of [dx,...dp,dz,db]) await reject(()=>read(tensor),/tensor contains a non-finite value/,"Whole VJP guard");
+    const update=m.sgd(g,.01);
+    await reject(()=>update.read(),/non-finite training value.*no parameters were committed/,"Terminal update");
+    const after=m.parameterTensors();
+    assert(after.length===initial.length,"Terminal parameter family preserved");
+    for(let i=0;i<8;i++) assert(JSON.stringify(await read(after[i]))===JSON.stringify(before[i]),"Terminal partial update");
+    release([m,d,x,u,bs,...initial,f,p,g,...dp,dx,dz,db,update,...after]);
+  }
+  guards.push("terminal_prediction_guard","terminal_input_gradient_guard");
+
+  const preModule=new st.Sequential();preModule.addLayerNorm("pre",4,-1,1e-5);
+  const beforePlan=preModule.inferencePlan([2,3,4]),beforeJSON=beforePlan.toJson();beforePlan.free();
+  for(const n of [true,0,-1,0.5,"4",2**33])
+    await reject(()=>preModule.addLayerNorm("bad",n,-1,1e-5),/features|dimension|integer|number/,"LayerNorm features");
+  for(const curvature of [0,1,NaN,Infinity])
+    await reject(()=>preModule.addLayerNorm("bad",4,curvature,1e-5),/curvature/,"LayerNorm curvature");
+  for(const epsilon of [0,-1,NaN,Infinity])
+    await reject(()=>preModule.addLayerNorm("bad",4,-1,epsilon),/layernorm_epsilon/,"LayerNorm epsilon");
+  const pre=preModule.inferencePlan([2,3,4]);assert(pre.toJson()===beforeJSON,"Rejected insertion mutated module");
+  const feed=new st.Sequential();feed.addLayerNorm("post",4,-1,1e-5);feed.addLinear("up",4,7);feed.addGelu();
+  const kernel=new st.ToposResonatorKernel(.2,4,.12,.3,42);
+  feed.addToposResonator("gate",new Float32Array(7).fill(.8),kernel);kernel.free();feed.addLinear("down",7,4);
+  const post=feed.inferencePlan([2,3,4]),components=parts(st,fixture.training[0]);
+  assert(post.toJson().includes("topos_resonator"),"Topos module lowered");
+  const recipe=st.ResidualAttentionPlan.fromPlans(pre,components[1],post);
+  release([preModule,feed,pre,post,...components]);
+  const pending=recipe.compileTrainingWebGpu();recipe.free();
+  const owner=await pending,device2=owner.tensorDevice(),input=upload(device2,[2,3,4],fixture.training[0].input);
+  const u=upload(device2,[2,3,4],fixture.training[0].upstream),emptyBias=new st.WgpuAttentionBiases();
+  const forward=owner.forward(input,emptyBias),g=owner.backward(forward,u),update=owner.sgd(g,.01);
+  const ps=owner.parameterTensors();assert(ps.length===13,"Module recipe parameter count");
+  assert(await update.read()===1n,"Module recipe update");for(const p of ps) await read(p);
+  release([owner,device2,input,u,emptyBias,forward,g,update,...ps]);
+  guards.push("native_module_layernorm_topos_recipe","strict_layernorm_constructor");
+  const report={schema:"spiraltorch.residual_attention.training_clients.v1",passed:true,
+    adapter,module_path:moduleUrl.pathname,checks,training,guards};
+  assert(checks.length===60 && training.every(t=>t.updates.length===32) && guards.length===16,"Complete report");
+  result.textContent=JSON.stringify(report,null,2);result.dataset.status="passed";
+  document.querySelector("#summary").textContent="Passed: 60 VJPs, two 32-update loops, 16 guard checks. Correctness only.";
+  const download=document.querySelector("#download");
+  download.href=URL.createObjectURL(new Blob([result.textContent],{type:"application/json"}));
+  download.download="residual-attention-public-clients.json";download.hidden=false;
+} catch(error) {
+  result.textContent=JSON.stringify({passed:false,error:String(error.stack||error)});
+  result.dataset.status="error";document.querySelector("#summary").textContent="Verification failed.";
+}
+</script>

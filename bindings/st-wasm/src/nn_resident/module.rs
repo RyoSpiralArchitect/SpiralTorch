@@ -92,6 +92,24 @@ impl WasmSequential {
         self.inner.push(Gelu::new());
     }
 
+    /// Construct the same Rust LayerNorm used by native modules and portable plans.
+    #[wasm_bindgen(js_name = addLayerNorm)]
+    pub fn add_layer_norm(
+        &mut self,
+        name: JsString,
+        features: Number,
+        curvature: f32,
+        epsilon: f32,
+    ) -> Result<(), JsValue> {
+        let name = name
+            .as_string()
+            .ok_or_else(|| js_error("name must be a string"))?;
+        let features = js_u32(features.as_ref(), "features")? as usize;
+        let layer = st_nn::LayerNorm::new(name, features, curvature, epsilon).map_err(js_error)?;
+        self.inner.push(layer);
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = addRelu)]
     pub fn add_relu(&mut self) {
         self.inner.push(Relu::new());
