@@ -178,6 +178,10 @@ Compare resumed and uninterrupted trajectories/final weights within each
 runtime, then run the same independent Torch gate. Native and browser remain
 separate evidence scopes; this contract does not promise bitwise agreement
 across hardware, kernel options or driver versions.
+The [same-host cross-client record](../benchmarks/results/2026-10-09-byte-corpus-cross-client-resume/README.md)
+also tests native-to-browser and browser-to-native handoffs at update 37.
+Both retain exact saved prefixes and pass the same Torch criteria through 128;
+their final reports are not bitwise equal to target-only uninterrupted runs.
 
 ```sh
 python3 -I -S -B tools/verify_byte_corpus_resume.py \
