@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident attention public WASM API</title>
+<pre id="result" data-status="running">Checking public attention handles...</pre>
+<a id="download" hidden>Download public-client verification</a>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const moduleUrl = new URL(new URLSearchParams(location.search).get("module") || "./module/spiraltorch_wasm.js", location.href);
+  if (moduleUrl.origin !== location.origin) throw Error("Module must be served from this origin");
+  const {default: init, WgpuTensorDevice, WgpuAttentionBiases} = await import(moduleUrl.href);
+  await init();
+  const device = await WgpuTensorDevice.create();
+  const response = await fetch("../../../crates/st-backend-wgpu/tests/fixtures/resident_attention_vjp_torch.json");
+  if (!response.ok) throw Error(`Fixture fetch: ${response.status}`);
+  const fixture = await response.json();
+  if (fixture.schema !== "spiraltorch.resident_attention_vjp_torch.v1" || fixture.cases.length !== 18) throw Error("Fixture contract");
+  async function check(tensor, expected) {
+    const snapshot = tensor.snapshot();
+    const actual = await snapshot.readValues();
+    if (actual.length !== expected.length) throw Error("Output length");
+    let maximum = 0;
+    for (let i = 0; i < actual.length; i++) {
+      const error = Math.abs(actual[i] - expected[i]);
+      if (!Number.isFinite(actual[i]) || error > 3e-6 + 5e-5 * Math.abs(expected[i])) throw Error(`Mismatch ${i}: ${actual[i]} != ${expected[i]}`);
+      maximum = Math.max(maximum, error);
+    }
+    snapshot.free();
+    return maximum;
+  }
+  const checks = [];
+  for (const c of fixture.cases) {
+    const q = device.upload(c.query_shape, new Float32Array(c.query));
+    const k = device.upload(c.key_shape, new Float32Array(c.key));
+    const v = device.upload(c.key_shape, new Float32Array(c.value));
+    const upstream = device.upload(c.query_shape, new Float32Array(c.upstream));
+    const biases = new WgpuAttentionBiases();
+    if (c.z_bias !== null) {
+      const z = device.upload(c.key_shape.slice(0,3), new Float32Array(c.z_bias));
+      biases.setZBias(z);
+      z.free(); // The container retains the immutable Rust handle.
+    }
+    if (c.pair_bias !== null) {
+      const pair = device.upload([...c.query_shape.slice(0,3), c.key_shape[2]], new Float32Array(c.pair_bias));
+      biases.setPairBias(pair);
+      pair.free();
+    }
+    const output = q.scaledDotAttention(k, v, c.scale, c.query_offset, biases);
+    const gradients = q.scaledDotAttentionVjp(k, v, upstream, c.scale, c.query_offset, biases);
+    // Another call must not consume biases or invalidate an earlier result.
+    const another = q.scaledDotAttention(k, v, c.scale, c.query_offset, biases);
+    another.free();
+    const tensors = [gradients.query, gradients.key, gradients.value, gradients.zBias, gradients.pairBias];
+    gradients.free(); biases.free(); q.free(); k.free(); v.free(); upstream.free();
+    const errors = {forward: await check(output, c.expected)};
+    output.free();
+    for (const [i,name] of ["query","key","value","z_bias","pair_bias"].entries()) {
+      if (c.gradients[name] === null) {
+        if (tensors[i] != null) throw Error(`Unexpected ${name}`);
+      } else {
+        errors[name] = await check(tensors[i], c.gradients[name]);
+        tensors[i].free();
+      }
+    }
+    checks.push({name:c.name, max_abs_error:errors});
+  }
+  const report = {schema:"spiraltorch.resident_attention.clients.v1", passed:true, checks, adapter:device.adapterInfo(), module_path:moduleUrl.pathname};
+  device.free();
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  const download = document.querySelector("#download");
+  download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
+  download.download = "resident-attention-public-clients.json";
+  download.hidden = false;
+} catch (error) {
+  result.textContent = JSON.stringify({passed:false, error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

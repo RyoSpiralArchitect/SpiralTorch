@@ -1,0 +1,65 @@
+{
+  "schema": "spiraltorch.resident_attention_vjp.evidence.v1",
+  "created_at": "2026-10-08T22:19:09.397Z",
+  "base_commit": "fc90f63f2898f2bc15d62c6631e59422d39afc5b",
+  "source_sha256": {
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "0043ae268e8a870f203f7c377f3c62ac1145e98c85c9da02fd7fbfa59362f02c",
+    "crates/st-backend-wgpu/src/resident_tensor/attention.rs": "77c501be89a5ea2bf949ea1c6b726379016d69ba594a79ea02948d4cfdb31420",
+    "crates/st-backend-wgpu/src/resident_tensor/attention/vjp.rs": "05957c8ca65adddb4372418859754a741325d40e168e02914a056e501422010d",
+    "crates/st-backend-wgpu/src/resident_tensor/attention/vjp/tests.rs": "c3d3d6afaf8b65ff04bdac6549d452197298affc934c73b7cde644d64773c1db",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention.wgsl": "f4337b1b6f61f714f461460c614d4cc155c860433bc720f17f4681739081fedd",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention_backward.wgsl": "595f5327cf526978e51b677c4ce39b5c579905225f9f84c7caa75f679dfa3754",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl": "3a3f6672e90186dec80b0a9b27e08b2656dd7c1348c6111807c0966d5dfc6636",
+    "crates/st-backend-wgpu/src/shaders/rounded_add.wgsl": "00ce1de2d13f5cb6360066e6c4906af03daf0192fd7945c7fdc148f740890bb2",
+    "crates/st-backend-wgpu/tests/support/attention_vjp.rs": "7cf860bfb3a3437ed3089a3318377d6fb2cc5de985ecad2a2139cb0007e3ece5",
+    "crates/st-backend-wgpu/tests/fixtures/resident_attention_vjp_torch.json": "60fd7df22a1ce7641ffa614bfb2cf63082c11b2718017b1debd2523eb0654ef3",
+    "tools/generate_resident_attention_vjp_torch_fixture.py": "a67f1b9cb9593845e609b216269d1f574d7e3d35a5d12aea67b6d22621915727",
+    "bindings/st-py/src/wgpu_tensor.rs": "941ca5dfe5a2e098639256e07157b334a7fe8efb1caedf085683d70478cc24b6",
+    "bindings/st-py/src/wgpu_tensor/attention.rs": "c3ef0307955ea6f39d20684b793d45db57a1e609612d384e6ad603e85d00c829",
+    "bindings/st-wasm/src/wgpu_tensor.rs": "45987366d675bb470226059a6185b13557d71613ce07f3009627b4771a9f9910",
+    "bindings/st-wasm/src/wgpu_tensor/attention.rs": "3d16bbf298a107e1630d3faa6463343dd20e4b1a99cd7ce01d4c449447ba4856"
+  },
+  "oracle_regeneration": {
+    "python_startup_hooks": false,
+    "byte_identical": true,
+    "sha256": "60fd7df22a1ce7641ffa614bfb2cf63082c11b2718017b1debd2523eb0654ef3"
+  },
+  "toolchain": {
+    "rustc": "rustc 1.92.0-nightly (6380899f3 2025-10-18)",
+    "clippy": "clippy 0.1.92 (6380899f32 2025-10-18)",
+    "wasm_bindgen": "0.2.129",
+    "wasm_bindgen_archive_sha256": "81d4a23d56b3c3eb8187658329116d50e0b228a93b343825fb71f70179051cd1"
+  },
+  "wasm_sha256": "c23beb5f9483c7772d171d5238aa021cd51d756fbe14b21d5c971331a4b0bb0f",
+  "outputs": {
+    "native.json": "3c921bf3aaf75c3335844f9b0a1ad75eb64a235ebc448ec5288f5860f25cc61a",
+    "browser.json": "744fc1c627843f6474b96e6f6e7b27d0c627836d0d62973f49ab0273f3f0a4ce"
+  },
+  "scope": {
+    "native_gpu": "Apple M4 / Metal",
+    "browser": "BrowserWebGpu; standalone backend example, not full binding package",
+    "python_binding": "cargo check passed; runtime not run locally",
+    "wasm_binding": "webgpu cargo check passed; full package runtime not run locally",
+    "reason_for_deferred_clients": "disk space below 1 GiB; cleanup approval requested, no source/weight/evidence deletion",
+    "performance": false,
+    "model_quality": false
+  },
+  "native_attention_tests": {
+    "passed": 25,
+    "failed": 0,
+    "ignored": 1,
+    "new_vjp_tests": 8,
+    "runtime_opt_in": true
+  },
+  "independent_review": {
+    "finding": "different forward/backward dot reduction when key_tile(spec)=8",
+    "fix": "derive VJP dot lanes from forward key_tile and retain identical lane order",
+    "post_fix": "no actionable P1/P2 in scoped static re-review; native/browser cancellation regressions pass"
+  },
+  "local_clippy": {
+    "strict_exit_code": 101,
+    "reason": "pre-existing unknown chunks_exact_to_as_chunks lint on local toolchain",
+    "focused_with_allow_unknown_lints_exit_code": 0
+  }
+}

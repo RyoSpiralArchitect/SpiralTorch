@@ -1,0 +1,196 @@
+{
+  "schema": "spiraltorch.resident_attention.clients.v1",
+  "passed": true,
+  "checks": [
+    {
+      "name": "mask_None_bias_0",
+      "max_abs_error": {
+        "forward": 3.725290298461914e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 7.450580596923828e-9,
+        "value": 2.9802322387695312e-8
+      }
+    },
+    {
+      "name": "mask_None_bias_1",
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "query": 1.1175870895385742e-8,
+        "key": 1.1175870895385742e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "mask_None_bias_2",
+      "max_abs_error": {
+        "forward": 5.21540641784668e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 7.450580596923828e-9,
+        "value": 2.9802322387695312e-8,
+        "pair_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "mask_None_bias_3",
+      "max_abs_error": {
+        "forward": 3.725290298461914e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 7.450580596923828e-9,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8,
+        "pair_bias": 2.9802322387695312e-8
+      }
+    },
+    {
+      "name": "mask_0_bias_0",
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "mask_0_bias_1",
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 7.450580596923828e-9,
+        "value": 5.960464477539063e-8,
+        "z_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "mask_0_bias_2",
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 7.450580596923828e-9,
+        "value": 5.960464477539063e-8,
+        "pair_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "mask_0_bias_3",
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 7.450580596923828e-9,
+        "value": 5.960464477539063e-8,
+        "z_bias": 5.960464477539063e-8,
+        "pair_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "mask_2_bias_0",
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "query": 2.2351741790771484e-8,
+        "key": 7.450580596923828e-9,
+        "value": 2.9802322387695312e-8
+      }
+    },
+    {
+      "name": "mask_2_bias_1",
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "query": 1.4901161193847656e-8,
+        "key": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "mask_2_bias_2",
+      "max_abs_error": {
+        "forward": 5.21540641784668e-8,
+        "query": 9.313225746154785e-9,
+        "key": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8,
+        "pair_bias": 4.470348358154297e-8
+      }
+    },
+    {
+      "name": "mask_2_bias_3",
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "query": 2.2351741790771484e-8,
+        "key": 7.450580596923828e-9,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8,
+        "pair_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "head_tail",
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "query": 2.9802322387695312e-8,
+        "key": 2.60770320892334e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 3.5762786865234375e-7,
+        "pair_bias": 3.5762786865234375e-7
+      }
+    },
+    {
+      "name": "max_head",
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "query": 3.1403033062815666e-8,
+        "key": 2.2351741790771484e-8,
+        "value": 2.9802322387695312e-8
+      }
+    },
+    {
+      "name": "key_tile_tail",
+      "max_abs_error": {
+        "forward": 1.1175870895385742e-7,
+        "query": 3.725290298461914e-8,
+        "key": 9.313225746154785e-10,
+        "value": 1.862645149230957e-9,
+        "z_bias": 5.587935447692871e-9,
+        "pair_bias": 5.587935447692871e-9
+      }
+    },
+    {
+      "name": "zero_scale",
+      "max_abs_error": {
+        "forward": 3.3527612686157227e-8,
+        "query": 0,
+        "key": 0,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8,
+        "pair_bias": 2.9802322387695312e-8
+      }
+    },
+    {
+      "name": "negative_scale",
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "query": 1.1175870895385742e-8,
+        "key": 7.450580596923828e-9,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8,
+        "pair_bias": 5.960464477539063e-8
+      }
+    },
+    {
+      "name": "empty_query",
+      "max_abs_error": {
+        "forward": 0,
+        "query": 0,
+        "key": 0,
+        "value": 0,
+        "z_bias": 0,
+        "pair_bias": 0
+      }
+    }
+  ],
+  "adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "module_path": "/target/attention-client-ci-37855393243/spiraltorch_wasm.js"
+}

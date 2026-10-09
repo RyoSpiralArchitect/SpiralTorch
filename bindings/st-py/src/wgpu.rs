@@ -342,6 +342,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "WgpuTensorDevice",
             "WgpuTensor",
             "WgpuTensorSnapshot",
+            "WgpuAttentionGradients",
             "wgpu_kernel_reports_available",
             "wgpu_kernel_catalog",
             "wgpu_kernel_descriptor",

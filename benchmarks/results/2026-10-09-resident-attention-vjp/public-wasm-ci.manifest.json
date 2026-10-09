@@ -1,0 +1,94 @@
+{
+  "schema": "spiraltorch.resident_attention_vjp.public_wasm.v1",
+  "recorded_at": "2026-10-08T23:16:14.559Z",
+  "qualified_pr_head": "d7e1ffe2cc4a243d5d5818770eb8a0963ceece87",
+  "workflow_run": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/37855393243",
+  "wasm_job": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/37855393243/job/113578731808",
+  "ci_job_conclusion": "success",
+  "build": {
+    "package": "spiraltorch-wasm",
+    "target": "wasm32-unknown-unknown",
+    "profile": "release",
+    "features": [
+      "webgpu"
+    ],
+    "rust_toolchain_selector": "stable",
+    "wasm_bindgen_cli": "0.2.129",
+    "note": "Workflow checkout/build of the qualified PR; no claim that this is a published PyPI or npm package"
+  },
+  "artifact": {
+    "id": 11583937677,
+    "name": "resident-attention-webgpu",
+    "zip_bytes": 2813468,
+    "uncompressed_bytes": 11203386,
+    "zip_sha256": "494115c30c4540bf563c6969040c6f2467001137b75261521fb8af52a334d5c9",
+    "file_sha256": {
+      "snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "spiraltorch_wasm.d.ts": "386680006422d7fd8b706d58014c6406390d346005b1103dc17a9e314e91c400",
+      "spiraltorch_wasm.js": "12dcb4ea8719956904512d420b04dd99e92ff8fb353e583661b494fe6b839de4",
+      "spiraltorch_wasm_bg.wasm": "732af2e544bfa7af375c271640fbdba6e2e09f85c3ff839f95ca00debaa4b09a",
+      "spiraltorch_wasm_bg.wasm.d.ts": "8dc969b5bb3e492f52c148c6c4a4769e1249079d75c0859a13e1c2ee41672501"
+    },
+    "retention_days": 1
+  },
+  "source_sha256": {
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    "bindings/st-wasm/src/wgpu_tensor.rs": "45987366d675bb470226059a6185b13557d71613ce07f3009627b4771a9f9910",
+    "bindings/st-wasm/src/wgpu_tensor/attention.rs": "3d16bbf298a107e1630d3faa6463343dd20e4b1a99cd7ce01d4c449447ba4856",
+    "bindings/st-wasm/tests/resident_attention_clients.html": "9b7a6d041585fed9bb46110175155f105d00b3b30b4082ad4fde5696a148c10d",
+    "bindings/st-wasm/tests/attention_types.cjs": "f6fed3e5c0c363a793fff94b460c798dc5e2da63898177a616cde721aaa409af",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "9ec6b46acf42dc1316cf7634052b315b51b275f21afc2cd6bac3667e22d9a009",
+    "crates/st-backend-wgpu/tests/fixtures/resident_attention_vjp_torch.json": "60fd7df22a1ce7641ffa614bfb2cf63082c11b2718017b1debd2523eb0654ef3"
+  },
+  "initial_evidence_source_hashes_rechecked": {
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "0043ae268e8a870f203f7c377f3c62ac1145e98c85c9da02fd7fbfa59362f02c",
+    "crates/st-backend-wgpu/src/resident_tensor/attention.rs": "77c501be89a5ea2bf949ea1c6b726379016d69ba594a79ea02948d4cfdb31420",
+    "crates/st-backend-wgpu/src/resident_tensor/attention/vjp.rs": "05957c8ca65adddb4372418859754a741325d40e168e02914a056e501422010d",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention.wgsl": "f4337b1b6f61f714f461460c614d4cc155c860433bc720f17f4681739081fedd",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention_backward.wgsl": "595f5327cf526978e51b677c4ce39b5c579905225f9f84c7caa75f679dfa3754",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl": "3a3f6672e90186dec80b0a9b27e08b2656dd7c1348c6111807c0966d5dfc6636",
+    "crates/st-backend-wgpu/src/shaders/rounded_add.wgsl": "00ce1de2d13f5cb6360066e6c4906af03daf0192fd7945c7fdc148f740890bb2",
+    "crates/st-backend-wgpu/tests/support/attention_vjp.rs": "7cf860bfb3a3437ed3089a3318377d6fb2cc5de985ecad2a2139cb0007e3ece5",
+    "crates/st-backend-wgpu/tests/fixtures/resident_attention_vjp_torch.json": "60fd7df22a1ce7641ffa614bfb2cf63082c11b2718017b1debd2523eb0654ef3",
+    "tools/generate_resident_attention_vjp_torch_fixture.py": "a67f1b9cb9593845e609b216269d1f574d7e3d35a5d12aea67b6d22621915727",
+    "bindings/st-py/src/wgpu_tensor.rs": "941ca5dfe5a2e098639256e07157b334a7fe8efb1caedf085683d70478cc24b6",
+    "bindings/st-py/src/wgpu_tensor/attention.rs": "c3ef0307955ea6f39d20684b793d45db57a1e609612d384e6ad603e85d00c829",
+    "bindings/st-wasm/src/wgpu_tensor.rs": "45987366d675bb470226059a6185b13557d71613ce07f3009627b4771a9f9910",
+    "bindings/st-wasm/src/wgpu_tensor/attention.rs": "3d16bbf298a107e1630d3faa6463343dd20e4b1a99cd7ce01d4c449447ba4856"
+  },
+  "result": {
+    "file": "public-wasm-ci.json",
+    "sha256": "fa0cc482b7d3358e05024c4fbad34cf8a21ba5619bad5d68a4165c5b0b457a0b",
+    "passed": true,
+    "conditions": 18,
+    "max_gradient_absolute_error": 3.5762786865234375e-7,
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    }
+  },
+  "declarations": {
+    "generated": "passed",
+    "shipped": "passed",
+    "local_command": "node bindings/st-wasm/tests/attention_types.cjs <same-run-artifact>/spiraltorch_wasm.js"
+  },
+  "public_handle_checks": [
+    "Optional bias container retains handles after original bias wrappers are freed",
+    "Subsequent calls do not consume the borrowed container",
+    "Gradient tensor handles remain readable after freeing the gradient container and input wrappers"
+  ],
+  "negative_page_checks": [
+    "Missing module renders passed=false and hides the download link",
+    "Cross-origin module URL is rejected before import"
+  ],
+  "scope": {
+    "python_gpu": "Pending in the still-running macOS CI job at the time of this record",
+    "public_client_sgd": false,
+    "strided_and_range_tests": "Covered separately by the existing native/standalone-browser kernel probes, not repeated through this public client",
+    "performance": false,
+    "language_quality": false
+  },
+  "local_retention": "Original ZIP and exact browser JSON retained; no cache, source, weight or earlier evidence deletion"
+}

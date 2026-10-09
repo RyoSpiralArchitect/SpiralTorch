@@ -1,9 +1,11 @@
-//! Owning, forward-only attention. Q/K/V, optional score biases, strided reads,
+//! Owning attention. Q/K/V, optional score biases, strided reads,
 //! online softmax, and inherited validity guards stay on the same GPU queue.
 
 use super::*;
 use crate::runtime::timestamps::PassTimestampCursor;
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
+pub(crate) mod vjp;
+pub use vjp::{validate_vjp_limits, ResidentAttentionGradients};
 
 const SHADER_SOURCE: &str = include_str!("shaders/attention.wgsl");
 const MAX_HEAD_DIM: usize = 256;

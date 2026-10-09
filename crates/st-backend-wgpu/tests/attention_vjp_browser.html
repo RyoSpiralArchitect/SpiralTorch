@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident Attention Gradients and SGD vs PyTorch</title>
+<pre id="result" data-status="running">Checking WebGPU gradients and resident SGD...</pre>
+<a id="download" hidden download="resident-attention-vjp-browser.json">Download verification result</a>
+<script type="module">
+import init, {run_resident_attention_vjp_checks} from "../../../target/resident-attention-vjp-web/resident_attention_vjp_browser.js";
+const result = document.querySelector("#result");
+try {
+  await init();
+  const report = JSON.parse(await run_resident_attention_vjp_checks());
+  if (report.schema !== "spiraltorch.resident_attention_vjp.validation.v1" || !report.passed ||
+      report.checks.length !== 36 || report.learning.steps !== 16 || report.learning.trace.length !== 16 ||
+      report.edge_checks.inherited_guard_cases !== 12 || report.edge_checks.range_cases.length !== 2 ||
+      report.edge_checks.forward_reduction_cases !== 3 ||
+      [false, true].some(strided => report.checks.filter(c => c.strided === strided).length !== 18)) {
+    throw Error("Incomplete attention VJP fixture");
+  }
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  const download = document.querySelector("#download");
+  download.href = URL.createObjectURL(new Blob([result.textContent + "\n"], {type: "application/json"}));
+  download.hidden = false;
+} catch (error) {
+  result.textContent = JSON.stringify({passed: false, error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

@@ -69,8 +69,10 @@ point reduction orders are not promised to be bitwise identical.
 Empty batch/head/query axes are accepted; keys and head dimension must be
 nonzero. The initial GPU kernel supports `head_dim <= 256`, float32, no dropout,
 no implicit GQA expansion, and no backward tape. Unsupported shapes or devices
-return an error rather than silently executing on CPU. Python bindings and a
-complete decoder graph remain follow-up work. The browser examples exercise the
+return an error rather than silently executing on CPU. A standalone first-order
+[resident VJP and client APIs](resident_attention_learning.md) now complement
+this forward, without an implicit tape. A complete decoder graph remains
+follow-up work. The browser examples exercise the
 same Rust implementation, not a separate JavaScript attention implementation.
 
 ## Existing NN Parameters And Z-RBF Geometry
