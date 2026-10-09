@@ -62,6 +62,10 @@ This composition reuses the same private attention autograd execution as
 not mutate the original Modules/plans, migrate optimizer history, synchronize
 host parameters or introduce a checkpoint format.
 
+The [Python/WASM clients](resident_residual_attention_clients.md) expose this
+same owner and VJP through thin handles, including browser LayerNorm/Topos
+module construction. They are also unreleased source additions after 0.4.29.
+
 ## Verification
 
 `tools/generate_residual_attention_torch_fixture.py` is an independent CPU-f32

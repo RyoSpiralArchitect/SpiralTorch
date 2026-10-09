@@ -130,11 +130,44 @@ declare module "spiraltorch-wasm" {
         readonly rawMix: number;
         free(): void;
     }
+    export class ToposResonatorKernel {
+        free(): void;
+        /**
+         * Returns per-element `grad_input` and `grad_gate`; callers reduce broadcasts.
+         */
+        backward(input: Float32Array, gate: Float32Array, grad_output: Float32Array, rows: number, features: number): any;
+        captureSharedRows(input: Float32Array, gate: Float32Array, rows: number, features: number): ToposResonatorLearningBatch;
+        capture(input: Float32Array, gate: Float32Array, rows: number, features: number): ToposResonatorLearningBatch;
+        forwardSharedRows(input: Float32Array, gate: Float32Array, rows: number, features: number): Float32Array;
+        forward(input: Float32Array, gate: Float32Array, rows: number, features: number): Float32Array;
+        constructor(coupling: number, iterations: number, saturation: number, porosity: number, max_values: number);
+        readonly executionBackend: string;
+    }
+
+    export class ToposResonatorLearningBatch {
+        private constructor();
+        free(): void;
+        audit_json(): string;
+        vjp(upstream: Float32Array): ToposResonatorPullback;
+        readonly gateLayout: string;
+        readonly gateValues: number;
+        readonly output: Float32Array;
+    }
+
+    export class ToposResonatorPullback {
+        private constructor();
+        free(): void;
+        readonly grad_gate: Float32Array;
+        readonly grad_input: Float32Array;
+    }
+
     /** Original Rust NN Module. Requires webgpu; inputs/outputs stay resident. */
     export class Sequential {
         constructor();
         addLinear(name: string, input_dim: number, output_dim: number): void;
         addScaler(name: string, gain: Float32Array): void;
+        addLayerNorm(name: string, features: number, curvature: number, epsilon: number): void;
+        addToposResonator(name: string, gate: Float32Array, kernel: ToposResonatorKernel): void;
         addGelu(): void;
         addRelu(): void;
         forward(input: WgpuTensor): WgpuTensor;
@@ -213,6 +246,47 @@ declare module "spiraltorch-wasm" {
         free(): void;
     }
     export class AttentionGradients {
+        private constructor();
+        inputGradientTensor(): WgpuTensor;
+        parameterGradientTensors(): WgpuTensor[];
+        /** Logical bias derivatives; callers own broadcast/view adjoints and updates. */
+        zBiasGradientTensor(): WgpuTensor | undefined;
+        pairBiasGradientTensor(): WgpuTensor | undefined;
+        free(): void;
+    }
+    export class ResidualAttentionPlan {
+        private constructor();
+        static fromPlans(pre: InferencePlan, attention: AttentionInferencePlan, feed_forward: InferencePlan): ResidualAttentionPlan;
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        /** Separate trainable owner; this plan may be freed before compilation completes. */
+        compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentResidualAttentionTraining>;
+        free(): void;
+    }
+    /** Pre-graph -> residual attention -> residual feed-forward. Requires webgpu, no implicit readback. */
+    export class ResidentResidualAttentionTraining {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        /** Submission count, not proof of update acceptance. */
+        readonly attemptedUpdates: bigint;
+        /** Order: pre, fused QKV, output projection, then feed-forward parameters. Owning immutable handles. */
+        parameterTensors(): WgpuTensor[];
+        tensorDevice(): WgpuTensorDevice;
+        forward(input: WgpuTensor, biases: WgpuAttentionBiases): ResidualAttentionForward;
+        /** Same owner/version and latest forward only. */
+        backward(forward: ResidualAttentionForward, cotangent: WgpuTensor): ResidualAttentionGradients;
+        /** All-or-none SGD of every block parameter, never runtime biases. */
+        sgd(gradients: ResidualAttentionGradients, rate: number): ResidentParameterUpdate;
+        free(): void;
+    }
+    export class ResidualAttentionForward {
+        private constructor();
+        readonly parameterRevision: bigint;
+        predictionTensor(): WgpuTensor;
+        free(): void;
+    }
+    export class ResidualAttentionGradients {
         private constructor();
         inputGradientTensor(): WgpuTensor;
         parameterGradientTensors(): WgpuTensor[];

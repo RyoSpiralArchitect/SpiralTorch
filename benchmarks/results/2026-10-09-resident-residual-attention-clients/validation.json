@@ -1,0 +1,194 @@
+{
+  "schema": "spiraltorch.residual_attention_clients.validation.v1",
+  "date": "2026-10-09",
+  "base_commit": "bcddb25c76ada9f6b616bd0461e421555cafae64",
+  "scope": "Public-client correctness and feature gates; not LM quality or throughput",
+  "source_status": "Unreleased source after 0.4.29; local test wheels retain the source package version and are not release artifacts",
+  "tools": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "python": "3.12.6",
+    "node": "24.14.0",
+    "typescript": "5.9.2",
+    "wasm_bindgen": "0.2.129",
+    "rustfmt": "nightly-2026-04-15"
+  },
+  "platform": "macOS 26.4.1 arm64",
+  "fixture": {
+    "path": "crates/st-nn/tests/fixtures/residual_attention_torch.json",
+    "sha256": "2dfec722e484bdbd840fb0000096765ac1b1dbdb7cefa544af053e144016d3f3",
+    "unchanged": true,
+    "tolerance": {
+      "absolute": 0.000003,
+      "relative": 0.00005
+    }
+  },
+  "python_wgpu": {
+    "passed": 7,
+    "skipped": 1,
+    "total_methods": 8,
+    "skip_reason": "CPU-only artifact test",
+    "vjp_conditions": 60,
+    "training_updates": [
+      32,
+      32
+    ],
+    "intermediate_training_readback": false,
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    },
+    "final_log": "python-runtime-reviewed.log"
+  },
+  "python_cpu": {
+    "passed": 4,
+    "skipped": 4,
+    "total_methods": 8,
+    "skip_reason": "GPU runtime tests are intentionally not opted in",
+    "wgpu_available": false,
+    "explicit_compile_rejection": true,
+    "final_log": "python-cpu-runtime.log"
+  },
+  "browser": {
+    "report": "browser.json",
+    "sha256": "f8bbbb0259cd947b4257c43614a450fb48ccbafcfdf5c83a1b482adf101d67de",
+    "passed": true,
+    "vjp_conditions": 60,
+    "training_updates": [
+      32,
+      32
+    ],
+    "guard_checks": 16,
+    "intermediate_training_readback": false,
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "max_abs_error": {
+      "forward": 1.1920928955078125e-7,
+      "input": 5.960464477539063e-8,
+      "parameters": 1.1920928955078125e-7,
+      "z_bias_gradient": 8.381903171539307e-9,
+      "pair_bias_gradient": 7.450580596923828e-9
+    },
+    "training": [
+      {
+        "topos": false,
+        "updates": 32,
+        "loss_error": 2.9802322387695312e-8,
+        "parameter_error": 2.9802322387695312e-8,
+        "prediction_error": 5.960464477539063e-8
+      },
+      {
+        "topos": true,
+        "updates": 32,
+        "loss_error": 4.470348358154297e-8,
+        "parameter_error": 2.9802322387695312e-8,
+        "prediction_error": 1.1920928955078125e-7
+      }
+    ]
+  },
+  "node_cpu": {
+    "passed": true,
+    "recipes": [
+      {
+        "topos": false
+      },
+      {
+        "topos": true
+      }
+    ],
+    "explicit_compile_rejection": true,
+    "final_log": "wasm-cpu-runtime.log"
+  },
+  "regression": {
+    "python_attention": {
+      "passed": 5,
+      "skipped": 1,
+      "total_methods": 6,
+      "vjp_conditions": 30,
+      "training_updates": 16
+    },
+    "python_documentation_recipe": "passed",
+    "node_existing_nn_plan": "passed",
+    "existing_attention_types": "passed",
+    "residual_types": {
+      "generated": "passed",
+      "shipped": "passed",
+      "whole_file_syntax": "passed",
+      "malformed_class_negative_control": "rejected as expected",
+      "skip_lib_check": true
+    },
+    "python_wheel_stubs_match_source": true,
+    "workspace_rustfmt": "passed",
+    "git_diff_check": "passed"
+  },
+  "review": {
+    "mode": "independent read-only local source review",
+    "runtime_repeated_by_reviewer": false,
+    "resolved_findings": [
+      "Unclosed class in shipped TypeScript declarations; real compiler check and negative control added",
+      "Terminal overflow probes could accept truncated parameter families; both clients now require all eight tensors and preservation counts"
+    ],
+    "remaining_actionable_findings": 0
+  },
+  "retained_failures": [
+    {
+      "log": "python-runtime.log",
+      "reason": "Initial wheel omitted trainer/forward/gradient names from spiraltorch.nn.__all__; fixed in nn.rs and rebuilt before accepted runs"
+    }
+  ],
+  "source_sha256": {
+    ".github/workflows/ci.yml": "413f2c5fd3ba0ea21c27ae95e3bad10a693d25768eefef59340695b8f06b7416",
+    "bindings/st-py/spiraltorch/__init__.pyi": "70b974e0efaa74884d4122f1995d77eab82a54430c7333d4291338d127b3bcc6",
+    "bindings/st-py/src/nn.rs": "4da429a3a762009b9a10264ffa319c0e50fa9d8c74c749fcdf62c2254e04881c",
+    "bindings/st-py/src/nn_resident.rs": "992d1fc6f4737e5eb11ddab6ba2fa3ce288fa483e0b5ebab4c91781cef3d6961",
+    "bindings/st-py/src/nn_resident/attention.rs": "6378cbcd9bd6ebee7e268a17bb6c740075410166591f8ad933c5a2a0845208bf",
+    "bindings/st-py/src/nn_resident/residual_attention.rs": "7c6da5f13bb4c039553431cecaff792d35a2be3cb06ef1f1638cc924bc5b9b9a",
+    "bindings/st-py/tests/test_nn_residual_attention_training.py": "07dcf700b3869940d71c4dfc650d06b5c52eb147914d4d8d87b4719232eb1faa",
+    "bindings/st-wasm/src/nn_resident.rs": "34521f60777abf0a2ba866168176acb849dc1e354381c3b878df9c50d4b79642",
+    "bindings/st-wasm/src/nn_resident/attention.rs": "d7ab8f943de228da1d52dc1bdbed8189436990fac1611f484ac70a88616ea7b8",
+    "bindings/st-wasm/src/nn_resident/module.rs": "480871eb65ffcf7265144e262929178df3f2f2de14500d9b85803cb6df040d80",
+    "bindings/st-wasm/src/nn_resident/residual_attention.rs": "ae3be095a708dff34f83c3953c16f3aa1ac7ffff18d2c529c9ac82ecd1fc4562",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "72a974bc5edc496d797ceab97e2f675ec0957eb1a32b05ed85b98e9ff7a66bb0",
+    "bindings/st-wasm/tests/residual_attention_plan.cjs": "cf211c71fcbaf2a557e093baea83f1f9c4c9159aa719a161af4d04b60e72e483",
+    "bindings/st-wasm/tests/residual_attention_plan.mjs": "a4cf6e5685bc03e3c70f7ab1c7911cf1f5646ea467d27089a4a01c06cc3b1ae8",
+    "bindings/st-wasm/tests/residual_attention_training_clients.html": "e0bacfe9845461bcf7079ef8edc32683ed101b7c58f318ee7c464738ba9bffa8",
+    "bindings/st-wasm/tests/residual_attention_training_types.cjs": "b641f9b3117b9a920b7f6a04fbfa3b8fac0e1ddca80b8bc4c4ad0bd0eaa73d44"
+  },
+  "local_artifacts_sha256": {
+    "wheels-final/spiraltorch-0.4.29-cp38-abi3-macosx_11_0_arm64.whl": "89993430cc66c2281d0bf4d48997fc07d6d91fd11abd6cf5c6c8b3b4cee1dbdc",
+    "cpu-wheels/spiraltorch-0.4.29-cp38-abi3-macosx_11_0_arm64.whl": "ce8becf95887d67cdaf891ef9b9a0bb845d9c396c11cdc32d15c415653fb6e4a",
+    "wasm-web/spiraltorch_wasm.js": "3f3ff05a887f3ceaa779d580a5d318f9d05759b782bcd9e5d0cb00b75d8430e4",
+    "wasm-web/spiraltorch_wasm.d.ts": "7e890491dfdf01ac54ac4475f598e864a2a0affbd0c7470fb248868b8b79ecf1",
+    "wasm-web/spiraltorch_wasm_bg.wasm": "d434ba37c99b30e8f92296d323dc399e311303491d62689e8ef15b5e43d6201c",
+    "wasm-cpu/spiraltorch_wasm.js": "9bb7821b1842d5fab10bd44993abe0cf27ef25cbd64793b54181db4a78d1f379",
+    "wasm-cpu/spiraltorch_wasm.d.ts": "c36a9945b2bb0efea4e581b285afb58ec05dac1263792bff1d1a2301923434b7",
+    "wasm-cpu/spiraltorch_wasm_bg.wasm": "91867112e56c6ef8f8ad2b6a686897b7614a7a3677c0250beccd07c5fdef91ea",
+    "python-check.log": "29c9f986b71786bea12129601dcf27955367f436206e31016774bb49fb6f760a",
+    "python-wheel-final.log": "9e2774cbc09e075f9f872b9649e4d387c374dfe25e9325a65777c14ad07ce211",
+    "python-cpu-build.log": "9a7f60f2f8ec0c11d36f41aaaf887aa81930967895c846c5951291b4c17db6b2",
+    "python-runtime.log": "2f4a24f9a3212d530488d212bea92c9f0a21da9cfe855a0206ee8068dad7def5",
+    "python-runtime-final.log": "fe48b66e8950b5828644cc3169019fe2b18d4ae8bf81fb72f566db9b6f14c09c",
+    "python-runtime-reviewed.log": "3189c5767d67e0f30b729cf92dbaa4e8bd32b9b8a336da33babec41cf299a37e",
+    "python-cpu-runtime.log": "6e98acf4dde649da92ab63d362bbe9a109301fe746e85990e73e9214922417af",
+    "python-attention-regression.log": "b917fd9d072f79b97370761f0cff850e17f6f54d28174405894ed8fa5aed9cd5",
+    "python-docs-smoke.log": "655dfd3e736ed6a712b0106402afeef398c79289fe7b101004d9544e70b36c60",
+    "wasm-check.log": "5a0192805f9e3927731351e544b40f9d47fb93e786cf2e74487733ac98ed9044",
+    "wasm-build.log": "2199888f19509af9df5ff8fd41199e48b0a22d47ea18468e56ef27b783d7aea9",
+    "wasm-cpu-build.log": "dd278ac3d9af0704ada9028598837de0ce52b718cb725d38eba5853d872a9ea1",
+    "wasm-cpu-runtime.log": "e66794ce2b0a4dd7f52deff45635e43f895793e6754a56da0db69a24f7028a1b",
+    "wasm-cpu-plan-regression.log": "de12741aeb924f03681e69431971ab4ecffacb6bf753a60c4efa865278cae0ed",
+    "typescript-reviewed.log": "cb62702b1d87d512e34ccefb02a210ea16a7cf13ecd067c9b1c510524691fbfb",
+    "typescript-attention-regression.log": "0f172f402b270f534233ff1bae70edaec21dbcfe66afd5b50bac6f58364e825f"
+  },
+  "boundaries": [
+    "No full decoder, KV-cache, checkpoint or global multi-block optimizer is introduced",
+    "Geometry bias gradients are returned; their parameters and updates remain caller-owned",
+    "Plain and Topos trajectories use different fixture initialization draws and are not a matched quality ablation",
+    "The browser does not expose a hardware model name; do not infer one from its adapter metadata",
+    "CPU-only surface tests are not GPU runtime evidence; compile/type checks are not browser execution",
+    "No released wheel was replaced, published or relabeled"
+  ]
+}

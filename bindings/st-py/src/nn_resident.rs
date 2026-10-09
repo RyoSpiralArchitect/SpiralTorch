@@ -18,6 +18,7 @@ mod graph;
 mod learner;
 mod loss;
 mod parameters;
+mod residual_attention;
 pub(crate) use loss::{evaluate_loss, PyResidentLoss};
 mod training;
 
@@ -524,6 +525,7 @@ impl PyInferenceSnapshot {
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     attention::register(module)?;
+    residual_attention::register(module)?;
     parameters::register(module)?;
     module.add_class::<PyInferencePlan>()?;
     module.add_class::<PyResidentInference>()?;

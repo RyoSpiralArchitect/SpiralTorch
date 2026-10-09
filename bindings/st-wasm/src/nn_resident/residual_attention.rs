@@ -1,39 +1,32 @@
-//! Browser handles over Rust-owned projection composition, VJP and shared SGD.
+//! Browser handles over the same residual block and atomic update as native.
 use super::*;
 #[cfg(feature = "webgpu")]
 use crate::wgpu_tensor::{WasmAttentionBiases, WasmWgpuTensor, WasmWgpuTensorDevice};
-use st_nn::resident::{AttentionInferencePlan, AttentionMask};
+use st_nn::resident::ResidualAttentionPlan;
 #[cfg(feature = "webgpu")]
-use st_nn::resident::{ResidentAttentionForward, ResidentAttentionTraining, ResidentAttentionVjp};
+use st_nn::resident::{
+    ResidentResidualAttentionForward, ResidentResidualAttentionTraining,
+    ResidentResidualAttentionVjp,
+};
 
-#[wasm_bindgen(js_name = AttentionInferencePlan)]
-pub struct WasmAttentionPlan {
-    pub(super) inner: AttentionInferencePlan,
+#[wasm_bindgen(js_name = ResidualAttentionPlan)]
+pub struct WasmResidualAttentionPlan {
+    inner: ResidualAttentionPlan,
 }
 
-#[wasm_bindgen(js_class = AttentionInferencePlan)]
-impl WasmAttentionPlan {
-    #[wasm_bindgen(js_name = fromProjectionPlans)]
-    pub fn from_projection_plans(
-        query: &WasmInferencePlan,
-        key: &WasmInferencePlan,
-        value: &WasmInferencePlan,
-        output: &WasmInferencePlan,
-        heads: Number,
-        causal_offset: Option<Number>,
-    ) -> Result<WasmAttentionPlan, JsValue> {
-        let heads = js_u32(heads.as_ref(), "heads")? as usize;
-        let mask = causal_offset
-            .map(|v| js_u32(v.as_ref(), "causal_offset").map(|n| n as usize))
-            .transpose()?
-            .map_or(AttentionMask::None, |query_offset| AttentionMask::Causal {
-                query_offset,
-            });
+#[wasm_bindgen(js_class = ResidualAttentionPlan)]
+impl WasmResidualAttentionPlan {
+    #[wasm_bindgen(js_name = fromPlans)]
+    pub fn from_plans(
+        pre: &WasmInferencePlan,
+        attention: &WasmAttentionPlan,
+        feed_forward: &WasmInferencePlan,
+    ) -> Result<WasmResidualAttentionPlan, JsValue> {
         Ok(Self {
-            inner: AttentionInferencePlan::from_projection_plans(
-                heads,
-                mask,
-                [&query.inner, &key.inner, &value.inner, &output.inner],
+            inner: ResidualAttentionPlan::from_plans(
+                &pre.inner,
+                &attention.inner,
+                &feed_forward.inner,
             )
             .map_err(js_error)?,
         })
@@ -56,7 +49,7 @@ impl WasmAttentionPlan {
             .map(|&v| v as u32)
             .collect()
     }
-    #[wasm_bindgen(js_name = compileTrainingWebGpu, unchecked_return_type = "Promise<ResidentAttentionTraining>")]
+    #[wasm_bindgen(js_name = compileTrainingWebGpu, unchecked_return_type = "Promise<ResidentResidualAttentionTraining>")]
     pub fn compile_training_webgpu(
         &self,
         tile_mnk: Option<Array>,
@@ -73,28 +66,28 @@ impl WasmAttentionPlan {
                 let inner = plan
                     .compile_training_wgpu_with_options(runtime, tile, kernel, accumulation)
                     .map_err(js_error)?;
-                Ok(WasmAttentionTraining { inner }.into())
+                Ok(WasmResidualAttentionTraining { inner }.into())
             }))
         }
         #[cfg(not(feature = "webgpu"))]
         {
             let _ = (tile_mnk, kernel, accumulation);
             Err(js_error(
-                "resident attention training requires the webgpu build feature",
+                "resident residual attention training requires the webgpu build feature",
             ))
         }
     }
 }
 
-#[wasm_bindgen(js_name = ResidentAttentionTraining)]
-pub struct WasmAttentionTraining {
+#[wasm_bindgen(js_name = ResidentResidualAttentionTraining)]
+pub struct WasmResidualAttentionTraining {
     #[cfg(feature = "webgpu")]
-    inner: ResidentAttentionTraining,
+    inner: ResidentResidualAttentionTraining,
 }
 
 #[cfg(feature = "webgpu")]
-#[wasm_bindgen(js_class = ResidentAttentionTraining)]
-impl WasmAttentionTraining {
+#[wasm_bindgen(js_class = ResidentResidualAttentionTraining)]
+impl WasmResidualAttentionTraining {
     #[wasm_bindgen(getter, js_name = inputShape)]
     pub fn input_shape(&self) -> Vec<u32> {
         self.inner
@@ -137,8 +130,8 @@ impl WasmAttentionTraining {
         &mut self,
         input: &WasmWgpuTensor,
         biases: &WasmAttentionBiases,
-    ) -> Result<WasmAttentionForward, JsValue> {
-        Ok(WasmAttentionForward {
+    ) -> Result<WasmResidualAttentionForward, JsValue> {
+        Ok(WasmResidualAttentionForward {
             inner: self
                 .inner
                 .forward(
@@ -151,10 +144,10 @@ impl WasmAttentionTraining {
     }
     pub fn backward(
         &mut self,
-        forward: &WasmAttentionForward,
+        forward: &WasmResidualAttentionForward,
         cotangent: &WasmWgpuTensor,
-    ) -> Result<WasmAttentionVjp, JsValue> {
-        Ok(WasmAttentionVjp {
+    ) -> Result<WasmResidualAttentionVjp, JsValue> {
+        Ok(WasmResidualAttentionVjp {
             inner: self
                 .inner
                 .backward(&forward.inner, &cotangent.inner)
@@ -163,7 +156,7 @@ impl WasmAttentionTraining {
     }
     pub fn sgd(
         &mut self,
-        gradients: &WasmAttentionVjp,
+        gradients: &WasmResidualAttentionVjp,
         rate: f32,
     ) -> Result<WasmResidentParameterUpdate, JsValue> {
         Ok(WasmResidentParameterUpdate {
@@ -172,14 +165,14 @@ impl WasmAttentionTraining {
     }
 }
 
-#[wasm_bindgen(js_name = AttentionForward)]
-pub struct WasmAttentionForward {
+#[wasm_bindgen(js_name = ResidualAttentionForward)]
+pub struct WasmResidualAttentionForward {
     #[cfg(feature = "webgpu")]
-    inner: ResidentAttentionForward,
+    inner: ResidentResidualAttentionForward,
 }
 #[cfg(feature = "webgpu")]
-#[wasm_bindgen(js_class = AttentionForward)]
-impl WasmAttentionForward {
+#[wasm_bindgen(js_class = ResidualAttentionForward)]
+impl WasmResidualAttentionForward {
     #[wasm_bindgen(getter, js_name = parameterRevision)]
     pub fn parameter_revision(&self) -> u64 {
         self.inner.parameter_revision()
@@ -192,14 +185,14 @@ impl WasmAttentionForward {
     }
 }
 
-#[wasm_bindgen(js_name = AttentionGradients)]
-pub struct WasmAttentionVjp {
+#[wasm_bindgen(js_name = ResidualAttentionGradients)]
+pub struct WasmResidualAttentionVjp {
     #[cfg(feature = "webgpu")]
-    inner: ResidentAttentionVjp,
+    inner: ResidentResidualAttentionVjp,
 }
 #[cfg(feature = "webgpu")]
-#[wasm_bindgen(js_class = AttentionGradients)]
-impl WasmAttentionVjp {
+#[wasm_bindgen(js_class = ResidualAttentionGradients)]
+impl WasmResidualAttentionVjp {
     #[wasm_bindgen(js_name = inputGradientTensor)]
     pub fn input_gradient_tensor(&self) -> WasmWgpuTensor {
         WasmWgpuTensor {
