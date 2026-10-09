@@ -112,6 +112,12 @@ independent PyTorch with the predeclared `3e-6 + 5e-5 * abs(reference)` gate.
 Every geometry parameter must actually change; the final change-vector relative
 L2 error must be at most 0.002, with reference norm greater than 1e-8. Merely
 passing a scalar loss check cannot promote a disconnected small derivative.
+The change vector starts from the effective float32 initial weights, not their
+unrounded JSON spelling. Decimal-to-float32 conversion alone is not learning.
+The independent reference explicitly constructs float32 parameter tensors,
+including values written as JSON integers. The
+[float32 review record](../benchmarks/results/2026-10-09-byte-corpus-f32-review/README.md)
+preserves the failing controls and unchanged frozen-pilot comparisons.
 All revisions, parameter shapes and held-out coverage must be present. The
 request hash and distinct reference/measured engine identities are mandatory;
 these detect accidental record mixups, not cryptographic runtime attestation.
