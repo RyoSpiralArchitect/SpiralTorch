@@ -1,0 +1,123 @@
+{
+  "schema": "spiraltorch.resident_attention_projection_training_validation.v1",
+  "observed_at_utc": "2026-10-09T00:58:06.369Z",
+  "base_head": "9e15a54319083b146bde52aa9139a49d9f69084c",
+  "source_state": "local additive branch; exact source hashes below captured before initial commit",
+  "scope": "synthetic correctness and update connectivity, not throughput, LLM quality, complete decoder or public training bindings",
+  "admission": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "finite": true,
+    "conditions": 30,
+    "steps": 16,
+    "parameter_tensors": 4
+  },
+  "runtime_toolchain": "rustc 1.97.0 (2d8144b78 2026-07-07), checkout-scoped",
+  "native": {
+    "profile": "release",
+    "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "tests": {
+      "integration": 2,
+      "training_unit": 5,
+      "concatenation": 4,
+      "shape_contract": 1
+    },
+    "environment": {
+      "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS": "1",
+      "SPIRALTORCH_STRICT_GPU": "1"
+    },
+    "command": "cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_attention_training -- --nocapture --test-threads=1"
+  },
+  "wasm": {
+    "profile": "dev",
+    "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+    "hardware_model": "not reported",
+    "wasm_bindgen_cli": "0.2.129",
+    "build": "cargo build --locked -p st-nn --no-default-features --features wgpu --example resident_attention_training_browser --target wasm32-unknown-unknown",
+    "cleared_environment": [
+      "CARGO_ENCODED_RUSTFLAGS",
+      "CARGO_BUILD_RUSTFLAGS",
+      "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+      "LIBRARY_PATH",
+      "PKG_CONFIG_PATH"
+    ],
+    "RUSTFLAGS": "",
+    "glue": "wasm-bindgen target/wasm32-unknown-unknown/debug/examples/resident_attention_training_browser.wasm --target web --out-dir target/attention-projection-training-web",
+    "page": "crates/st-nn/tests/attention_training_browser.html",
+    "result_capture": "exact browser download after rebuilt module and reload"
+  },
+  "oracle": {
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 1,
+    "torch": "2.12.1",
+    "fixture_sha256": "87d490a6f45664d86d4f1ebd081a8d77e3f57c59ddbf6027c07ef9e84bbcc58c",
+    "isolated_regeneration_byte_identical": true,
+    "startup": "isolated Python -I -S -B; installed Torch framework site-packages appended explicitly; no sitecustomize"
+  },
+  "review": {
+    "mode": "independent read-only static review",
+    "runtime_implementation_findings": 0,
+    "probe_findings_fixed": 2,
+    "re_review": "closed; no new actionable findings",
+    "strengthened_regressions": [
+      "finite gradients overflow only QKV or only output while the other group would change",
+      "held original VJP survives opposite cotangent and can still be applied",
+      "last-axis strided concatenation exceeds one workgroup; empty outer dimension preserves failures",
+      "14 missing/extra reference mutations fail preflight; expected rejection error variants are exact"
+    ],
+    "numerical_artifacts": "native and browser rerun after review fixes, same fixture and tolerances"
+  },
+  "lint": {
+    "format": "cargo +nightly-2026-04-15 fmt --all -- --check: passed",
+    "backend_strict": "cargo +1.99.0 clippy --locked -p st-backend-wgpu --all-targets -- -D warnings: passed",
+    "st_nn_strict": "attempted with 1.99.0; fails on 23 diagnostics in unchanged files",
+    "st_nn_diagnostic_only": "same scoped targets without -D warnings: exit 0, no diagnostics in new files; not a strict pass",
+    "old_default_clippy": "1.97.0 strict attempt fails on unrecognized existing chunks_exact_to_as_chunks allowances; not suppressed",
+    "license_preflight": "42 Cargo and 2 Python license records passed"
+  },
+  "public_artifact_sha256": {
+    "native.json": "e67b8464550ff2cd55e48a765efaf68d61ebe94c8305b2d4896e25ebd0782e5b",
+    "browser.json": "0f1b1c97b2d9d166e07e9ff2fc0f15d2797fed6c2d74383286cfa96621693180"
+  },
+  "source_sha256": {
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    ".github/workflows/ci.yml": "0063fbe19553632ecd29be46f70eb55ed6830243d3549e3de3bbc346d26a53c3",
+    "crates/st-kernel-contracts/src/layout.rs": "62d1487ad1b87845546a2239cbb4528c79e7ace8b9cbcce095f596b110593447",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "7d85b32c3714d6696e19f558d19d70abdd0e362186b79782e99c9797d5887461",
+    "crates/st-backend-wgpu/src/resident_tensor/concatenate.rs": "298246f968e4b10fa1e2a25fc49847c6d2d49125f31e46eebe36fc736eb83bcd",
+    "crates/st-backend-wgpu/src/resident_tensor/concatenate/tests.rs": "61a6381025a945bb974a8f1c9aafee09e3d9da87f65730052b894fd58ef8cc7c",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/concatenate.wgsl": "94368ba404002c77ee7b25b34fdad3c893e3594d093b3ff92976013b316ff45c",
+    "crates/st-nn/Cargo.toml": "d578bbb64641399a9f0a27fe1c258224802ec2b4b838c4dd53792577f4bd8a5f",
+    "crates/st-nn/src/resident.rs": "9b079e0de419e4b78cb9b1f74880aef70ea7f74d496285fc35181e2628058096",
+    "crates/st-nn/src/resident/attention.rs": "bde354bf8acb2c4501e6c67d9c86965b0117238c39c11b734c310bbd727c46fc",
+    "crates/st-nn/src/resident/attention/training.rs": "ee3c0fbb2954446a423aaa23b273a639d87df2985976ada4dd42e73006dc4269",
+    "crates/st-nn/src/resident/attention/training/tests.rs": "c553c4016f8acfbdb0c4ffce39c50090ad9392be319411da399c583e0d8f2df1",
+    "crates/st-nn/examples/support/attention_training.rs": "219e2e15c316828948d1210421fbbb59548310816804a4998f0bd65e71472955",
+    "crates/st-nn/examples/resident_attention_training_browser.rs": "ca8556ea953badb014c70ef6996baa437dceaea56ff3392221bdebd4592affd7",
+    "crates/st-nn/tests/resident_attention_training.rs": "dcf66e5084446461d03d75961cd0d61bf03b9499569ed949fe63c247c2346071",
+    "crates/st-nn/tests/attention_training_browser.html": "7633aea8396539448fc6520555bea7fd83b32a71f98a28b7044f327788f20646",
+    "crates/st-nn/tests/fixtures/resident_attention_training_torch.json": "87d490a6f45664d86d4f1ebd081a8d77e3f57c59ddbf6027c07ef9e84bbcc58c",
+    "tools/generate_resident_attention_training_torch_fixture.py": "7e88c297d4e142a8b27d8bfb06bf4ef2be75b2ab293d86ddac3b4b229ecead8f"
+  },
+  "locally_preserved_artifact_sha256": {
+    "attention-projection-training-native-reviewed.log": "40b62d207dc2d6e418a55f2899970b29bdedd43c36aea4c4427c42eaac09d8fc",
+    "attention-projection-training-regressions-reviewed.log": "600f00a932151fcb7fe4969ea936fd44b6c03d5b51d0e7538b3696e22dc10ebc",
+    "attention-concatenate-regressions-v2.log": "c67723b08b82c13e31ddc71c6c45a98c427877161cae29c8a18466b6a3935b78",
+    "attention-projection-training-wasm-reviewed-build.log": "32c7b679b4f012c8dcb2ab9446379b1b94c5b2ec30cd67b62b92478c3238f1d2",
+    "attention-projection-training-clippy-native.log": "4977571f5ca81874a3ccba149b4661af56cd161d7db295b81f6324d048ef9a92",
+    "attention-projection-training-clippy-1.99.log": "c32c9ecdbca5f0c24e8fef51911d9b78875b802bfc46589d8d377dd641d98ada",
+    "attention-concatenate-clippy-1.99.log": "dd1b7467aa90fca42bf65eef4ad96f98223e78d6a5ffb26471609e2f4edf641e",
+    "resident_attention_training_browser.js": "c0326e9da26dddf0713a2644f18a9a31402d168fa03a929da33fece647b468f6",
+    "resident_attention_training_browser_bg.wasm": "23c276719d097574c6ac075f86a9895747afeeb7aa608025dbb744fc76a96e98",
+    "resident_attention_training_browser.d.ts": "c8b085226ae0c7a1d8723f77d76018a620b9081289c1bee05304d8a690839a15",
+    "native-test-executable": "8545e4bb4832e06e761f05def4033006b63393245f29a8683acc941c03ccc398"
+  },
+  "limitations": [
+    "small synthetic f32 shapes; no independent hardware replication",
+    "browser adapter does not report hardware identity",
+    "Z and pair biases fixed during the projection SGD trajectory; their VJPs are verified separately",
+    "standalone Rust WASM probe, not a newly exposed JavaScript or Python training API",
+    "no performance claim and no changes to already published 0.4.29"
+  ]
+}
