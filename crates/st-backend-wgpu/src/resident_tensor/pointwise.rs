@@ -589,6 +589,7 @@ impl PointwisePlan {
                 }),
                 layout,
                 device: self.device.clone(),
+                validation: None,
             }
         };
         context.queue().submit(Some(encoder.finish()));

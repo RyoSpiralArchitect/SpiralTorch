@@ -149,6 +149,70 @@ fn outputs_at_the_byte_budget_are_not_retained_on_the_real_device() {
 }
 
 #[test]
+fn cached_value_bindings_always_consume_the_current_alias_guard() {
+    let Some(runtime) = runtime() else { return };
+    let device = TensorDevice::new(runtime.clone()).unwrap();
+    let huge = device.upload(&[1], &[f32::MAX]).unwrap();
+    let invalid = huge.mul(&huge).unwrap();
+    let views = [
+        device.upload(&[2, 3, 3], &[1.; 18]).unwrap(),
+        device
+            .upload(&[4, 3, 3], &[2.; 36])
+            .unwrap()
+            .narrow(0, 1, 2)
+            .unwrap(),
+        device
+            .upload(&[3, 2, 3], &[3.; 18])
+            .unwrap()
+            .permute(&[1, 0, 2])
+            .unwrap(),
+    ];
+    for kinds in ["p", "l", "pp", "pl", "lp", "ll"] {
+        for (view_index, input) in views.iter().enumerate() {
+            let mut graph = graph(&runtime, definition(kinds, false));
+            let failed = device.guard_together(&[input, &invalid]).unwrap().remove(0);
+            assert!(failed.shares_storage_with(input));
+            assert_eq!(failed.layout(), input.layout());
+            let healthy = graph.forward_tensor(input).unwrap();
+            let expected = read(&healthy);
+            let bindings = graph.direct_stats.input_bindings;
+            let direct = graph
+                .input_source
+                .as_ref()
+                .unwrap()
+                .shares_storage_with(input);
+            if view_index == 0 || kinds.starts_with('p') {
+                assert!(direct, "expected direct input for {kinds}/{view_index}");
+            }
+            let mut rejected = Vec::new();
+            for _ in 0..3 {
+                rejected.push(graph.forward_tensor(&failed).unwrap());
+                graph.dispatch().unwrap();
+                assert!(graph.snapshot().unwrap().read().is_err());
+                assert_eq!(read(&graph.forward_tensor(input).unwrap()), expected);
+                assert_eq!(read(&healthy), expected);
+            }
+            if direct {
+                assert!(graph
+                    .input_source
+                    .as_ref()
+                    .unwrap()
+                    .shares_storage_with(input));
+                assert_eq!(graph.direct_stats.input_bindings, bindings);
+            }
+            drop(graph);
+            for tensor in rejected {
+                assert!(matches!(
+                    tensor.snapshot().unwrap().read(),
+                    Err(crate::resident_tensor::TensorError::NonFinite)
+                ));
+            }
+            assert!(read(input).iter().all(|value| value.is_finite()));
+        }
+    }
+}
+
+#[test]
 fn fixed_input_reuses_outputs_and_bindings_but_rejects_stale_binding_keys() {
     let Some(runtime) = runtime() else { return };
     let mut graph = graph(&runtime, definition("pp", false));

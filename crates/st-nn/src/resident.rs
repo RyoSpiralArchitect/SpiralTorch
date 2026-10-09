@@ -24,8 +24,15 @@ pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]
 mod convolution;
 mod graph;
+mod residual_attention;
 #[cfg(feature = "wgpu")]
 pub use convolution::ResidentConvolutionSpec;
+pub use residual_attention::ResidualAttentionPlan;
+#[cfg(feature = "wgpu")]
+pub use residual_attention::{
+    ResidentResidualAttentionForward, ResidentResidualAttentionTraining,
+    ResidentResidualAttentionVjp,
+};
 #[cfg(feature = "wgpu")]
 mod module_autograd;
 #[cfg(feature = "wgpu")]

@@ -360,6 +360,12 @@ controls rather than choosing between them:
    decision. The [Python/WASM clients](resident_attention_training_clients.md)
    expose the same Rust training contract, with 30 matched numerical conditions
    and a 16-update synthetic trajectory checked through both public APIs.
+   [Residual attention training](resident_residual_attention.md) composes
+   pre-normalization, attention, both skip paths and an MLP (optionally Topos)
+   under one all-or-none parameter owner. Native WGPU and the same Rust probe
+   compiled to browser WASM cover 60 matched VJPs and two 32-update trajectories.
+   Whole-block guards include final prediction/input-gradient overflow; this
+   residual composition does not yet add Python/WASM public wrapper classes.
    These are source additions after 0.4.29, not APIs in that published wheel.
    The original host Modules remain unchanged; uncertainty outputs, KV-cache
    ownership, complete decoder integration and learning-quality gains remain open.

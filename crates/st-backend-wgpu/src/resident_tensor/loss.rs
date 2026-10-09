@@ -135,6 +135,7 @@ impl ResidentTensor {
             }),
             layout: NdLayout::contiguous(&[1, 1])?,
             device: self.device.clone(),
+            validation: None,
         };
         let partials = runtime::empty_buffer::<f32>(
             device,
