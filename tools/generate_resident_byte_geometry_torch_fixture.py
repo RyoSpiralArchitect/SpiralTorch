@@ -21,12 +21,16 @@ metric = load("generate_poincare_bias_torch_fixture").metric
 flat = base.values
 
 
-def case(block_count, external, metric_only, seed, freeze_geometry=False):
+def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False):
+    if freeze_geometry and flat_metric:
+        raise ValueError("freeze and flat controls are separate experiments")
     original = base.case(block_count, external, seed)
     config = original["config"]
     batch, steps, width = config["batch"], config["steps"], config["width"]
     cols, curvature = 4, -.75
     config["causal_geometry"] = {"cols": cols, "curvature": curvature, "metric_only_scores": metric_only}
+    if flat_metric:
+        config["causal_geometry"]["pair_metric"] = "euclidean_chord_squared.v1"
     rng = torch.Generator(device="cpu").manual_seed(seed + 1047)
     projection = (torch.rand((width, cols), generator=rng, device="cpu") - .5) * 1.6
     extra = [("projection.weight", projection),
@@ -63,7 +67,12 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False):
         x, offset, combined = embedded, end, []
         for i, (block, (z, pair)) in enumerate(zip(config["blocks"], biases)):
             if enabled:
-                geometric = metric(coordinates, p[6 + i], curvature)
+                if flat_metric:
+                    distance = 4 * (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
+                    causal = torch.ones((steps, steps), device="cpu", dtype=torch.bool).tril()
+                    geometric = (-F.softplus(p[6 + i])[None, :, None, None] * distance[:, None]).masked_fill(~causal, 0.)
+                else:
+                    geometric = metric(coordinates, p[6 + i], curvature)
                 if detach:
                     geometric = geometric.detach()
                 pair = geometric if pair is None else geometric + pair
@@ -95,14 +104,14 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False):
     for _ in range(16):
         logits, embedded, _ = forward()
         loss = F.cross_entropy(logits.reshape(-1, 256), target.reshape(-1))
-        gradient = torch.autograd.grad(loss, [*p, embedded] if freeze_geometry else p)
+        gradient = torch.autograd.grad(loss, [*p, embedded] if freeze_geometry or flat_metric else p)
         with torch.no_grad():
             for value, g, rate in zip(p, gradient, rates):
                 if rate != 0.:
                     value -= rate * g
         trace.append({"loss": loss.item(), "parameters": [flat(t) for t in p],
                       "geometry_gradients": [flat(g) for g in gradient[2:end]]})
-        if freeze_geometry:
+        if freeze_geometry or flat_metric:
             trace[-1]["embedding_output_gradient"] = flat(gradient[-1])
     result["learning"] = {"steps": 16, "rate": .125, "trace": trace}
     if freeze_geometry:
@@ -113,16 +122,20 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--freeze-geometry", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--freeze-geometry", action="store_true")
+    mode.add_argument("--flat-metric", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     torch.set_default_dtype(torch.float32)
-    payload = {"schema": ("spiraltorch.resident_byte_geometry_frozen.torch_fixture.v1" if args.freeze_geometry
+    payload = {"schema": ("spiraltorch.resident_byte_geometry_flat.torch_fixture.v1" if args.flat_metric else
+                         "spiraltorch.resident_byte_geometry_frozen.torch_fixture.v1" if args.freeze_geometry
                           else "spiraltorch.resident_byte_geometry.torch_fixture.v1"),
                "torch_version": torch.__version__, "device": "cpu", "dtype": "float32", "threads": 1,
                "tolerance": {"atol": 3e-6, "rtol": 5e-5, "geometry_relative_l2": .002},
-               "cases": [case(1, False, True, 1761, args.freeze_geometry), case(2, True, False, 1863, args.freeze_geometry)]}
+               "cases": [case(1, False, True, 1761, args.freeze_geometry, args.flat_metric),
+                         case(2, True, False, 1863, args.freeze_geometry, args.flat_metric)]}
     with args.output.open("x", encoding="utf-8") as out:
         json.dump(payload, out, separators=(",", ":"), allow_nan=False)
         out.write("\n")

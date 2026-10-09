@@ -2,6 +2,117 @@
 use super::*;
 use st_nn::resident::{ByteDecoderCheckpoint, ResidentByteDecoder};
 
+pub(super) async fn resume_trajectory(
+    runtime: &WgpuRuntime,
+    case: &Value,
+    expected: &[Value],
+) -> Result<Value> {
+    if expected.len() != 16 {
+        return Err("incomplete resume reference".into());
+    }
+    let p = plan(case, 4)?;
+    let windows = case["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            sizes(row)
+                .into_iter()
+                .map(|v| u8::try_from(v).unwrap())
+                .collect()
+        })
+        .collect::<Vec<Vec<u8>>>();
+    let host = batch(&windows, 4)?;
+    let mut model = p.compile_training_wgpu(runtime.clone())?;
+    let slots = p
+        .parameter_layout()
+        .geometry()
+        .ok_or("missing metric owner")?
+        .all();
+    let mut saved = String::new();
+    let mut observed = Vec::new();
+    for (step, expected) in expected.iter().enumerate() {
+        if step == 7 {
+            saved = checkpoint(&model).await?.to_json()?;
+            let record: Value = serde_json::from_str(&saved)?;
+            if record["schema"] != st_nn::resident::BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA
+                || record["model"]["geometry"]["pair_metric"] != "euclidean_chord_squared.v1"
+                || record["attempted_revision"] != "7"
+            {
+                return Err("flat checkpoint lost metric identity or clock".into());
+            }
+            let imported = ByteDecoderCheckpoint::from_json(&saved)?;
+            if imported.to_json()? != saved {
+                return Err("flat checkpoint changed during JSON transport".into());
+            }
+            model = imported.restore_wgpu(runtime.clone())?;
+            if checkpoint(&model).await?.to_json()? != saved {
+                return Err("fresh flat owner changed checkpoint".into());
+            }
+        }
+        let resident = model.prepare_batch(&host)?;
+        let external = biases(model.tensor_device(), case, 4)?;
+        let forward = model.forward_with_external_biases(&resident, &borrowed(&external))?;
+        let loss =
+            forward.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
+        let gradient = model.backward(&forward, loss.prediction_gradient())?;
+        let update = model.sgd(&gradient, 0.125)?;
+        let receipt = update.snapshot()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let revision = receipt.read()?;
+        #[cfg(target_arch = "wasm32")]
+        let revision = receipt.read_async().await?;
+        let parameters =
+            read_many(model.tensor_device(), model.parameter_snapshot().values()).await?;
+        let loss_values = read(loss.value()).await?;
+        let embedding_values = read(gradient.embedding_output_gradient()).await?;
+        let want = expected["parameters"]
+            .as_array()
+            .ok_or("missing trajectory parameters")?;
+        if revision != (step + 1) as u64
+            || parameters.len() != want.len()
+            || parameters
+                .iter()
+                .zip(want)
+                .any(|(a, b)| !same_bits(a, &data(b)))
+            || !same_bits(&loss_values, &[expected["loss"].as_f64().unwrap() as f32])
+            || !same_bits(
+                &embedding_values,
+                &data(&expected["embedding_output_gradient"]),
+            )
+        {
+            return Err("flat fresh-owner resume differs from uninterrupted trajectory".into());
+        }
+        let geometry = read_many(
+            model.tensor_device(),
+            &gradient.parameter_gradients()[slots.clone()],
+        )
+        .await?;
+        let want = expected["geometry_gradients"]
+            .as_array()
+            .ok_or("missing trajectory gradients")?;
+        if geometry.len() != want.len()
+            || geometry
+                .iter()
+                .zip(want)
+                .any(|(a, b)| !same_bits(a, &data(b)))
+        {
+            return Err("resumed geometry derivatives differ".into());
+        }
+        observed.push(
+            json!({"revision":revision, "loss":loss_values[0], "parameters":parameters,
+            "geometry_gradients":geometry, "embedding_output_gradient":embedding_values}),
+        );
+    }
+    Ok(
+        json!({"split_revision":7, "final_revision":16, "verified_steps":16,
+        "exact_losses":true, "exact_parameters":true, "exact_geometry_gradients":true,
+        "exact_embedding_gradients":true, "fresh_owner":true,
+        "checkpoint_json":saved, "final_checkpoint_json":checkpoint(&model).await?.to_json()?,
+        "trace":observed}),
+    )
+}
+
 async fn checkpoint(model: &ResidentByteDecoder) -> Result<ByteDecoderCheckpoint> {
     let capture = model.checkpoint_snapshot()?;
     #[cfg(not(target_arch = "wasm32"))]

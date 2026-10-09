@@ -4,6 +4,7 @@ use crate::resident::portable::GraphRecord;
 use serde::{Deserialize, Serialize};
 
 pub const BYTE_DECODER_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v1";
+pub const BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v2";
 
 /// A complete fixed-window byte model and its attempted SGD revision.
 /// Plain SGD has no momentum slots. Data cursors, learning-rate schedules,
@@ -70,6 +71,18 @@ struct GeometryRecord {
     raw_decay: Vec<f32>,
     raw_phase: Vec<f32>,
     raw_gains: Vec<Vec<f32>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "explicit_metric"
+    )]
+    pair_metric: Option<ByteDecoderPairMetric>,
+}
+
+fn explicit_metric<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<ByteDecoderPairMetric>, D::Error> {
+    ByteDecoderPairMetric::deserialize(d).map(Some)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -97,6 +110,17 @@ fn graph_record(plan: &InferencePlan) -> Result<GraphRecord, InferenceError> {
 }
 
 impl ModelRecord {
+    fn checkpoint_schema(&self) -> &'static str {
+        if self
+            .geometry
+            .as_ref()
+            .is_some_and(|g| g.pair_metric.is_some())
+        {
+            BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA
+        } else {
+            BYTE_DECODER_CHECKPOINT_SCHEMA
+        }
+    }
     fn from_plan(plan: &ByteDecoderPlan) -> Result<Self, InferenceError> {
         Ok(Self {
             token: Table::from_parameter(&plan.token)?,
@@ -111,6 +135,8 @@ impl ModelRecord {
                         raw_decay: g.raw_decay().to_vec(),
                         raw_phase: g.raw_phase().to_vec(),
                         raw_gains: g.raw_gains().to_vec(),
+                        pair_metric: (g.pair_metric() != ByteDecoderPairMetric::PoincareSquared)
+                            .then_some(g.pair_metric()),
                     })
                 })
                 .transpose()?,
@@ -175,13 +201,19 @@ impl ModelRecord {
         )?;
         match self.geometry {
             None => Ok(plan),
-            Some(g) => plan.with_causal_geometry(ByteDecoderGeometryPlan::new(
-                &g.projection.into_plan()?,
-                &g.raw_decay,
-                &g.raw_phase,
-                &g.raw_gains,
-                g.curvature,
-            )?),
+            Some(g) => plan.with_causal_geometry(
+                ByteDecoderGeometryPlan::new(
+                    &g.projection.into_plan()?,
+                    &g.raw_decay,
+                    &g.raw_phase,
+                    &g.raw_gains,
+                    g.curvature,
+                )?
+                .with_pair_metric(
+                    g.pair_metric
+                        .unwrap_or(ByteDecoderPairMetric::PoincareSquared),
+                ),
+            ),
         }
     }
 
@@ -248,7 +280,7 @@ impl ByteDecoderCheckpoint {
             values.clear();
         }
         let empty = serde_json::to_string(&CheckpointRecord {
-            schema: BYTE_DECODER_CHECKPOINT_SCHEMA.to_owned(),
+            schema: model.checkpoint_schema().to_owned(),
             update_rule: "stateless_sgd.v1".to_owned(),
             window_state: "reset_positions_and_geometry.v1".to_owned(),
             attempted_revision: u64::MAX.to_string(),
@@ -282,12 +314,13 @@ impl ByteDecoderCheckpoint {
     }
 
     pub fn to_json(&self) -> Result<String, InferenceError> {
+        let model = ModelRecord::from_plan(&self.plan)?;
         Ok(serde_json::to_string(&CheckpointRecord {
-            schema: BYTE_DECODER_CHECKPOINT_SCHEMA.to_owned(),
+            schema: model.checkpoint_schema().to_owned(),
             update_rule: "stateless_sgd.v1".to_owned(),
             window_state: "reset_positions_and_geometry.v1".to_owned(),
             attempted_revision: self.attempted_revision.to_string(),
-            model: ModelRecord::from_plan(&self.plan)?,
+            model,
         })?)
     }
 
@@ -305,7 +338,13 @@ impl ByteDecoderCheckpoint {
             });
         }
         let record: CheckpointRecord = serde_json::from_str(payload)?;
-        if record.schema != BYTE_DECODER_CHECKPOINT_SCHEMA {
+        if record.schema != record.model.checkpoint_schema()
+            || record
+                .model
+                .geometry
+                .as_ref()
+                .is_some_and(|g| g.pair_metric == Some(ByteDecoderPairMetric::PoincareSquared))
+        {
             return Err(InferenceError::Schema(record.schema));
         }
         if record.update_rule != "stateless_sgd.v1"

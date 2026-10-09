@@ -1,5 +1,108 @@
 use super::*;
+use st_kernel_contracts::euclidean::{EuclideanBiasForward, EuclideanBiasSpec};
 use st_kernel_contracts::poincare::PoincareBiasForward;
+
+#[test]
+fn euclidean_strided_both_endpoints_gains_and_wide_values() {
+    let Some(d) = device() else { return };
+    for shape in [[1, 1, 1], [2, 3, 4], [2, 7, 3], [1, 17, 2]] {
+        for scale in [1., 4.] {
+            let s = EuclideanBiasSpec::new(shape, 3, scale).unwrap();
+            let x: Vec<_> = (0..s.coordinates_len())
+                .map(|i| ((i * 7 % 29) as f32 - 14.) * 0.25)
+                .collect();
+            let gains = [-7., 0.2, 4.];
+            let seed: Vec<_> = (0..s.scores_len())
+                .map(|i| ((i * 11 % 23) as f32 - 11.) * 0.07)
+                .collect();
+            let cpu = EuclideanBiasForward::new(s, &x, &gains).unwrap();
+            let want = cpu.backward(&seed).unwrap();
+            let f = strided(&d, &shape, &x)
+                .causal_euclidean_bias(&strided(&d, &[3], &gains), scale)
+                .unwrap();
+            let g = f.backward(&strided(&d, &s.score_shape(), &seed)).unwrap();
+            assert_eq!(f.spec(), s);
+            close(&read(f.scores()), cpu.scores());
+            close(&read(g.coordinates()), &want.coordinates);
+            close(&read(g.raw_gain()), &want.raw_gain);
+        }
+    }
+    for (x, raw, seed) in [(1e-25, 0., 1e30), (2e14, -110., 1.), (1e-20, 1e20, 1.)] {
+        let s = EuclideanBiasSpec::new([1, 2, 1], 1, 4.).unwrap();
+        let cpu = EuclideanBiasForward::new(s, &[0., x], &[raw])
+            .unwrap()
+            .backward(&[0., 0., seed, 0.])
+            .unwrap();
+        let f = d
+            .upload(&[1, 2, 1], &[0., x])
+            .unwrap()
+            .causal_euclidean_bias(&d.upload(&[1], &[raw]).unwrap(), 4.)
+            .unwrap();
+        let g = f
+            .backward(&d.upload(&[1, 1, 2, 2], &[0., 0., seed, 0.]).unwrap())
+            .unwrap();
+        for (a, b) in [
+            (read(g.coordinates()), cpu.coordinates),
+            (read(g.raw_gain()), cpu.raw_gain),
+        ] {
+            for (a, b) in a.iter().zip(b) {
+                assert!(
+                    *a != 0. && (f64::from(*a) / f64::from(b) - 1.).abs() < 8e-5,
+                    "{a} != {b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn euclidean_guards_and_retained_tapes_remain_atomic() {
+    let Some(d) = device() else { return };
+    let x = d.upload(&[1, 2, 1], &[0., 2.]).unwrap();
+    let gain = d.upload(&[1], &[0.]).unwrap();
+    for scale in [0., -1., f32::NAN, f32::INFINITY] {
+        assert!(x.causal_euclidean_bias(&gain, scale).is_err());
+    }
+    let f = x.causal_euclidean_bias(&gain, 4.).unwrap();
+    let seed = d.upload(&[1, 1, 2, 2], &[0., 0., 1., 0.]).unwrap();
+    let g = f.backward(&seed).unwrap();
+    let saved = read(g.coordinates());
+    assert!(matches!(
+        d.upload(&[1, 1, 2, 2], &[0., f32::NAN, 0., 0.]),
+        Err(TensorError::NonFinite)
+    ));
+    let masked_overflow = d
+        .upload(&[1, 1, 2, 2], &[0., f32::MAX, 0., 0.])
+        .unwrap()
+        .mul(&d.upload(&[1, 1, 2, 2], &[2.; 4]).unwrap())
+        .unwrap();
+    let late_overflow = d.upload(&[1, 1, 2, 2], &[0., 0., f32::MAX, 0.]).unwrap();
+    for seed in [masked_overflow, late_overflow] {
+        let bad = f.backward(&seed).unwrap();
+        for v in [bad.coordinates(), bad.raw_gain()] {
+            assert!(matches!(
+                v.snapshot().unwrap().read(),
+                Err(TensorError::NonFinite)
+            ));
+        }
+    }
+    let finite = d.upload(&[1, 2, 1], &[0., 0.]).unwrap();
+    let overflow = d
+        .upload(&[1, 2, 1], &[f32::MAX; 2])
+        .unwrap()
+        .mul(&d.upload(&[1, 2, 1], &[2.; 2]).unwrap())
+        .unwrap();
+    let invalid = d.guard_together(&[&finite, &overflow]).unwrap().remove(0);
+    assert!(invalid.shares_storage_with(&finite));
+    assert_eq!(read(&finite), [0., 0.]);
+    let bad = invalid.causal_euclidean_bias(&gain, 4.).unwrap();
+    assert!(matches!(
+        bad.scores().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    assert_eq!(read(g.coordinates()), saved);
+    assert_eq!(read(f.backward(&seed).unwrap().coordinates()), saved);
+}
 
 #[test]
 fn shader_and_preflight_validate_without_optional_features() {

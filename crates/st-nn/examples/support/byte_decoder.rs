@@ -9,8 +9,8 @@ use st_kernel_contracts::classification::{ClassReduction, CrossEntropySpec};
 use st_nn::{
     resident::{
         AttentionInferencePlan, AttentionMask, ByteDecoderBias, ByteDecoderGeometryPlan,
-        ByteDecoderPlan, ByteLmBatch, InferenceError, InferenceOp, InferencePlan,
-        ResidualAttentionPlan, ToposResonatorKernel,
+        ByteDecoderPairMetric, ByteDecoderPlan, ByteLmBatch, InferenceError, InferenceOp,
+        InferencePlan, ResidualAttentionPlan, ToposResonatorKernel,
     },
     Tensor,
 };
@@ -78,16 +78,29 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
             }],
         )?;
         offset = 6 + c["blocks"].as_array().unwrap().len();
-        Some(ByteDecoderGeometryPlan::new(
-            &projection,
-            &data(&parameters[4]["values"]),
-            &data(&parameters[5]["values"]),
-            &parameters[6..offset]
-                .iter()
-                .map(|p| data(&p["values"]))
-                .collect::<Vec<_>>(),
-            c["causal_geometry"]["curvature"].as_f64().unwrap() as f32,
-        )?)
+        let metric = match c["causal_geometry"].get("pair_metric") {
+            None => ByteDecoderPairMetric::PoincareSquared,
+            Some(Value::String(s)) if s == "poincare_squared.v1" => {
+                ByteDecoderPairMetric::PoincareSquared
+            }
+            Some(Value::String(s)) if s == "euclidean_chord_squared.v1" => {
+                ByteDecoderPairMetric::EuclideanChordSquared
+            }
+            _ => return Err("unknown geometry pair metric".into()),
+        };
+        Some(
+            ByteDecoderGeometryPlan::new(
+                &projection,
+                &data(&parameters[4]["values"]),
+                &data(&parameters[5]["values"]),
+                &parameters[6..offset]
+                    .iter()
+                    .map(|p| data(&p["values"]))
+                    .collect::<Vec<_>>(),
+                c["causal_geometry"]["curvature"].as_f64().unwrap() as f32,
+            )?
+            .with_pair_metric(metric),
+        )
     } else {
         None
     };
@@ -492,16 +505,47 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     {
         return Err("incomplete causal geometry oracle".into());
     }
-    let mut checks = Vec::new();
-    for (case_index, case) in fixture["cases"]
+    let cases: Vec<_> = fixture["cases"]
         .as_array()
         .unwrap()
         .iter()
         .chain(geometry_fixture["cases"].as_array().unwrap())
-        .enumerate()
+        .cloned()
+        .collect();
+    run_cases(runtime, &cases, &[18, 31, 23, 37], false).await
+}
+
+/// A local, independent Torch fixture; raw observations are returned only for
+/// the new metric control, never added to previously published v3 reports.
+pub async fn run_flat_metric(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    let fixture: Value = serde_json::from_str(fixture_json)?;
+    if fixture["schema"] != "spiraltorch.resident_byte_geometry_flat.torch_fixture.v1"
+        || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
     {
+        return Err("invalid flat metric reference contract".into());
+    }
+    let cases = fixture["cases"]
+        .as_array()
+        .ok_or("missing flat metric cases")?;
+    if cases.len() != 2
+        || cases.iter().any(|case| {
+            case["config"]["causal_geometry"]["pair_metric"] != "euclidean_chord_squared.v1"
+        })
+    {
+        return Err("incomplete or mislabeled flat metric cases".into());
+    }
+    run_cases(runtime, cases, &[23, 37], true).await
+}
+
+async fn run_cases(
+    runtime: WgpuRuntime,
+    cases: &[Value],
+    counts: &[usize],
+    raw: bool,
+) -> Result<Value> {
+    let mut checks = Vec::new();
+    for (case, &expected_count) in cases.iter().zip(counts) {
         let p = plan(case, 4)?;
-        let expected_count = [18, 31, 23, 37][case_index];
         if p.parameter_layout().len() != expected_count
             || case["parameter_gradients"].as_array().map(Vec::len) != Some(expected_count)
         {
@@ -603,6 +647,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             return Err("incomplete block bias gradients".into());
         }
         let mut bias_errors = Vec::new();
+        let mut bias_values = Vec::new();
         let batch_size = case["config"]["batch"].as_u64().unwrap() as usize;
         let heads = case["config"]["heads"].as_u64().unwrap() as usize;
         for (block, bias) in gradient.bias_gradients().iter().enumerate() {
@@ -617,11 +662,13 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 if g.layout().shape() != shape {
                     return Err("external bias gradient shape drift".into());
                 }
+                let value = read(g).await?;
                 bias_errors.push(close(
-                    &read(g).await?,
+                    &value,
                     &data(&case["bias_gradients"][bias_errors.len()]),
                     "external bias gradient",
                 )?);
+                bias_values.push(value);
             }
         }
         if bias_errors.len() != case["bias_gradients"].as_array().unwrap().len() {
@@ -650,11 +697,17 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 .geometry()
                 .map(|g| gradient.parameter_gradients()[g.all()].to_vec())
                 .unwrap_or_default();
-            pending.push((loss, update, model.parameter_snapshot(), geometry_gradients));
+            pending.push((
+                loss,
+                update,
+                model.parameter_snapshot(),
+                geometry_gradients,
+                raw.then(|| gradient.embedding_output_gradient().clone()),
+            ));
         }
         // No activation/gradient/receipt read until every update is queued.
         let mut trace = Vec::new();
-        for (step, (loss, update, parameters, geometry_gradients)) in
+        for (step, (loss, update, parameters, geometry_gradients, embedded)) in
             pending.into_iter().enumerate()
         {
             let receipt = update.snapshot()?;
@@ -681,29 +734,58 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 maximum = maximum.max(close(a, &data(e), &format!("step {step} parameter {i}"))?);
             }
             let mut geometry_relative = Vec::new();
+            let geometry_values = if geometry_gradients.is_empty() {
+                Vec::new()
+            } else {
+                read_many(model.tensor_device(), &geometry_gradients).await?
+            };
             if !geometry_gradients.is_empty() {
-                let actual = read_many(model.tensor_device(), &geometry_gradients).await?;
                 let expected = learning["trace"][step]["geometry_gradients"]
                     .as_array()
                     .ok_or("missing geometry CE derivatives")?;
-                if actual.len() != expected.len() {
+                if geometry_values.len() != expected.len() {
                     return Err("truncated geometry CE derivatives".into());
                 }
-                for (a, e) in actual.iter().zip(expected) {
+                for (a, e) in geometry_values.iter().zip(expected) {
                     close(a, &data(e), "geometry CE derivative")?;
                     geometry_relative.push(geometry_controls::relative_gradient(a, &data(e))?);
                 }
             }
             trace.push(json!({"revision": revision, "loss": loss_values[0], "parameter_max_abs_error": maximum,
                 "geometry_gradient_relative_l2": geometry_relative}));
+            if let Some(embedded) = embedded {
+                let row = trace.last_mut().unwrap();
+                row["parameters"] = json!(actual);
+                row["geometry_gradients"] = json!(geometry_values);
+                row["embedding_output_gradient"] = json!(read(&embedded).await?);
+            }
         }
         let checkpoint = checkpoint_controls::run(&runtime, case).await?;
         checks.push(json!({"name": case["name"], "checkpoint":checkpoint, "parameter_count": expected_count, "output_max_abs_error": output_error,
             "embedding_output_max_abs_error": input_error, "parameter_errors": errors, "bias_errors": bias_errors, "gradient_layouts": true,
             "causality": causal, "tapes": tapes, "metric_controls": metric_controls, "learning": {"steps":16, "trace":trace}}));
+        if raw {
+            let check = checks.last_mut().unwrap();
+            check["metric"] = json!("euclidean_chord_squared.v1");
+            check["parameter_names"] =
+                json!(parameters.iter().map(|p| &p["name"]).collect::<Vec<_>>());
+            check["parameter_shapes"] =
+                json!(parameters.iter().map(|p| &p["shape"]).collect::<Vec<_>>());
+            check["output"] = json!(output_values);
+            check["parameter_gradients"] = json!(values);
+            check["embedding_output_gradient"] = json!(input_values);
+            check["bias_gradients"] = json!(bias_values);
+            check["resume_trajectory"] = checkpoint_controls::resume_trajectory(
+                &runtime,
+                case,
+                check["learning"]["trace"].as_array().unwrap(),
+            )
+            .await?;
+        }
     }
     Ok(
-        json!({"schema":"spiraltorch.resident_byte_decoder.validation.v3", "passed":true,
+        json!({"schema":if raw { "spiraltorch.resident_byte_geometry_flat.validation.v1" }
+            else { "spiraltorch.resident_byte_decoder.validation.v3" }, "passed":true,
         "adapter":format!("{:?}",runtime.adapter_info()), "checks":checks,
         "scope":"complete 256-way byte decoder correctness and synthetic training, not language quality or speed"}),
     )

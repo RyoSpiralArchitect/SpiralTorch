@@ -99,6 +99,10 @@ crate-type = ["cdylib"]
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_byte_flat_metric"
+required-features = ["wgpu"]
+
+[[example]]
 name = "resident_byte_learning"
 required-features = ["wgpu"]
 

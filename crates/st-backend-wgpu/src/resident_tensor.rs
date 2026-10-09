@@ -16,6 +16,7 @@ pub mod classification;
 mod concatenate;
 mod convolution;
 pub mod embedding;
+pub mod euclidean;
 pub(crate) mod guard_capture;
 pub mod loss;
 pub mod normalization;
@@ -31,6 +32,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 pub enum TensorError {
     #[error(transparent)]
     Poincare(#[from] st_kernel_contracts::poincare::PoincareError),
+    #[error(transparent)]
+    Euclidean(#[from] st_kernel_contracts::euclidean::EuclideanBiasError),
     #[error(transparent)]
     CausalWave(#[from] st_kernel_contracts::causal_wave::CausalWaveError),
     #[error(transparent)]

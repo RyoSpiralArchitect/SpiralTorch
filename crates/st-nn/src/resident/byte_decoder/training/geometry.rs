@@ -1,12 +1,33 @@
 use super::*;
 use st_backend_wgpu::resident_tensor::{
-    causal_wave::ResidentCausalWaveForward, poincare::ResidentPoincareBiasForward,
+    causal_wave::ResidentCausalWaveForward,
+    euclidean::{ResidentEuclideanBiasForward, ResidentPairBiasVjp},
+    poincare::ResidentPoincareBiasForward,
 };
+
+enum MetricTape {
+    Poincare(ResidentPoincareBiasForward),
+    Euclidean(ResidentEuclideanBiasForward),
+}
+impl MetricTape {
+    fn scores(&self) -> &ResidentTensor {
+        match self {
+            Self::Poincare(f) => f.scores(),
+            Self::Euclidean(f) => f.scores(),
+        }
+    }
+    fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, GpuTensorError> {
+        match self {
+            Self::Poincare(f) => f.backward(seed),
+            Self::Euclidean(f) => f.backward(seed),
+        }
+    }
+}
 
 pub(super) struct GeometryTape {
     projection: GraphForward,
     wave: ResidentCausalWaveForward,
-    metrics: Vec<ResidentPoincareBiasForward>,
+    metrics: Vec<MetricTape>,
 }
 
 impl GeometryTape {
@@ -25,6 +46,7 @@ pub(super) struct GeometryAutograd {
     layout: ByteDecoderGeometryParameterLayout,
     zero_state: ResidentTensor,
     curvature: f32,
+    metric: ByteDecoderPairMetric,
 }
 
 impl GeometryAutograd {
@@ -48,6 +70,7 @@ impl GeometryAutograd {
             layout,
             zero_state: device.upload(&[batch, cols], &vec![0.; plan.wave.state_len()])?,
             curvature: plan.curvature(),
+            metric: plan.pair_metric(),
         })
     }
 
@@ -75,7 +98,16 @@ impl GeometryAutograd {
         )?;
         let metrics = values[self.layout.raw_gains()]
             .iter()
-            .map(|gain| wave.features().causal_poincare_bias(gain, self.curvature))
+            .map(|gain| match self.metric {
+                ByteDecoderPairMetric::PoincareSquared => wave
+                    .features()
+                    .causal_poincare_bias(gain, self.curvature)
+                    .map(MetricTape::Poincare),
+                ByteDecoderPairMetric::EuclideanChordSquared => wave
+                    .features()
+                    .causal_euclidean_bias(gain, 4.)
+                    .map(MetricTape::Euclidean),
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(GeometryTape {
             projection,

@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Flat metric byte learner</title>
+<h1>Flat metric byte learner</h1>
+<p id="summary">Running the local frozen fixture through Rust/WebGPU...</p>
+<a id="download" hidden>Download flat metric result</a>
+<pre id="result" data-status="running"></pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_resident_byte_flat_metric} = await import("/target/resident-byte-decoder-web/resident_byte_decoder_browser.js");
+  const response = await fetch("/target/resident-byte-decoder-web/flat-reference.json");
+  if (!response.ok) throw Error("Local frozen flat-reference.json is missing");
+  const fixture = await response.text();
+  await init();
+  const raw = await run_resident_byte_flat_metric(fixture);
+  const report = JSON.parse(raw);
+  if (report.schema !== "spiraltorch.resident_byte_geometry_flat.validation.v1"
+      || report.passed !== true || report.checks.length !== 2
+      || report.checks.some((c, i) => c.metric !== "euclidean_chord_squared.v1"
+        || c.parameter_count !== [23, 37][i] || c.learning.trace.length !== 16
+        || c.resume_trajectory.verified_steps !== 16 || c.resume_trajectory.exact_parameters !== true)) {
+    throw Error("Incomplete flat metric verification");
+  }
+  result.textContent = JSON.stringify({passed:true, cases:report.checks.map(c => ({
+    name:c.name, metric:c.metric, parameters:c.parameter_count,
+    updates:c.learning.trace.length, exact_resume:c.resume_trajectory.exact_parameters
+  }))}, null, 2);
+  result.dataset.status = "passed";
+  document.querySelector("#summary").textContent = "Rust controls passed. Download raw observations for independent all-step Torch verification. Synthetic correctness only.";
+  const download = document.querySelector("#download");
+  // Keep Rust float serialization and checkpoint payloads opaque.
+  download.href = URL.createObjectURL(new Blob([raw], {type:"application/json"}));
+  download.download = "resident-byte-flat-metric.json";
+  download.hidden = false;
+} catch (error) {
+  result.textContent = String(error.stack || error);
+  result.dataset.status = "error";
+  document.querySelector("#summary").textContent = "Verification failed.";
+}
+</script>

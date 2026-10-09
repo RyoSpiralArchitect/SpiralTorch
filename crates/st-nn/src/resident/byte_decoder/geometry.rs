@@ -2,6 +2,16 @@
 use super::*;
 use st_kernel_contracts::{causal_wave::CausalWaveSpec, poincare::PoincareBiasSpec};
 
+/// Pair metric only: projection, causal wave, chart and parameter ownership stay
+/// identical. The flat control uses 4*||x-y||^2, the origin-local Poincare scale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ByteDecoderPairMetric {
+    #[serde(rename = "poincare_squared.v1")]
+    PoincareSquared,
+    #[serde(rename = "euclidean_chord_squared.v1")]
+    EuclideanChordSquared,
+}
+
 /// Projection parameters, two wave vectors and one head-gain vector per block.
 /// These are absolute slots in the byte model, not a separate optimizer owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,7 +40,7 @@ impl ByteDecoderGeometryParameterLayout {
     }
 }
 
-/// Tokenwise projection -> causal wave -> bounded chart -> Poincare pair bias.
+/// Tokenwise projection -> causal wave -> bounded chart -> selected pair bias.
 /// Each document/window starts at zero state. Curvature is frozen; decay,
 /// phase and per-head softplus gains are learned. Raw gain zero is not "off".
 #[derive(Clone, Debug)]
@@ -40,6 +50,7 @@ pub struct ByteDecoderGeometryPlan {
     raw_decay: Vec<f32>,
     raw_phase: Vec<f32>,
     raw_gains: Vec<Vec<f32>>,
+    metric: ByteDecoderPairMetric,
 }
 
 impl ByteDecoderGeometryPlan {
@@ -86,11 +97,21 @@ impl ByteDecoderGeometryPlan {
             raw_decay: raw_decay.to_vec(),
             raw_phase: raw_phase.to_vec(),
             raw_gains: raw_gains.to_vec(),
+            metric: ByteDecoderPairMetric::PoincareSquared,
         })
     }
 
     pub fn projection(&self) -> &InferencePlan {
         &self.projection
+    }
+    pub fn pair_metric(&self) -> ByteDecoderPairMetric {
+        self.metric
+    }
+    /// Select a metric without changing initial values or trainable scalar count.
+    /// The flat metric retains the nonlinear bounded chart, not a linear encoder.
+    pub fn with_pair_metric(mut self, metric: ByteDecoderPairMetric) -> Self {
+        self.metric = metric;
+        self
     }
     pub fn curvature(&self) -> f32 {
         self.wave.curvature()

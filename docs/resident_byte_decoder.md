@@ -187,6 +187,64 @@ between different devices, kernels or compiler versions.
 
 ## The geometry boundary
 
+### A parameter-matched flat distance control
+
+`ByteDecoderGeometryPlan::with_pair_metric(ByteDecoderPairMetric::EuclideanChordSquared)`
+selects `-softplus(raw_gain[h]) * 4 * ||x_q - x_k||^2` for causal pairs.
+The default remains `PoincareSquared`. Both use the same projection, causal
+complex wave, bounded chart, initial values, parameter slots, optimizer owner
+and full pullback to embeddings. The factor four matches the origin-local
+Poincare squared-distance scale; it does not match distances everywhere.
+Future pair entries are zero and the attention operator owns causal masking.
+
+This is a **flat pair metric on the existing nonlinear coordinates**, not a
+linear encoder, a curvature-to-zero limit, or a compute-matched comparison.
+The chart's fixed curvature still sets the coordinate radius. In this specific
+chart, rescaling curvature can be absorbed into the positive gain at the level
+of represented functions; it is not an independent distance-shape control or
+a promise of identical raw-parameter SGD trajectories.
+
+The flat choice exports model checkpoint
+`spiraltorch.nn.byte_decoder_checkpoint.v2` with explicit
+`model.geometry.pair_metric = "euclidean_chord_squared.v1"`.
+Ordinary and Poincare models retain their existing v1 serialization.
+Import rejects mismatched schema/metric identities, unknown metrics and explicit
+null. A restored flat model keeps the metric, not just its parameter arrays.
+The corpus-study v1/v2 request protocols are unchanged: they do **not** yet
+accept or schedule this flat arm.
+
+For synthetic correctness testing, generate a local independent Torch reference:
+
+```sh
+python3 -I -B tools/generate_resident_byte_geometry_torch_fixture.py \
+  /local/new-flat-reference.json --flat-metric
+cargo run --locked --release -p st-nn --no-default-features --features wgpu \
+  --example resident_byte_flat_metric -- /local/new-flat-reference.json \
+  > /local/native-flat.json
+python3 -I -S -B tools/verify_byte_flat_metric.py \
+  /local/new-flat-reference.json /local/native-flat.json /local/new-comparison.json
+```
+
+This harness consumes a trusted generated fixture, not arbitrary model input.
+It checks one geometry-only-score block and two blocks with external biases and
+Topos: initial logits, every parameter VJP, embedding and external-bias VJPs,
+off/detach controls, causal-prefix guards, 16 CE/SGD updates, and a fresh-owner
+restart at update 7. Resume checks are bit-exact within one runtime; independent
+Torch comparison uses the existing `3e-6 + 5e-5*abs(reference)` gate and
+geometry-gradient relative L2 at most `0.002`, with reference norm above
+`1e-8`. All raw arrays and checkpoint payloads should remain local.
+
+The browser uses the same Rust helper. Build `resident_byte_decoder_browser`
+and generate its web bindings into `target/resident-byte-decoder-web` as above.
+Place the frozen local reference there as `flat-reference.json`, serve the
+repository on loopback, and open
+`crates/st-nn/tests/byte_flat_metric_browser.html`. The downloaded Rust JSON
+stays opaque; compare it independently with the same Python verifier. Passing
+these controls does not establish a corpus quality gain or a speed result.
+The verifier also checks complete checkpoint topology and float32 parameter
+bits against updates 7 and 16, and rejects missing or failed runtime-control
+fields. Those report-consistency checks do not attest that a GPU executed them.
+
 Default `forward` has no external score bias. Topos can already be part of a
 tokenwise residual feed-forward graph, so its gate participates in the same
 byte-loss VJP and parameter update rather than only changing a report.

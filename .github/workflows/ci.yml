@@ -28,6 +28,7 @@ jobs:
           python3 -I -S -B tools/test_byte_corpus_study.py
           python3 -I -S -B tools/test_verify_byte_corpus_resume.py
           python3 -I -S -B tools/test_verify_byte_parameter_rates.py
+          python3 -I -S -B tools/test_verify_byte_flat_metric.py
           python3 -I tests/test_resident_rank_bench.py
           python3 -I tests/test_resident_rank_adaptation_bench.py
           python3 -I tests/test_matmul_rank_bench.py

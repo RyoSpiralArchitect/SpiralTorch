@@ -10,6 +10,57 @@ fn checkpoint() -> ByteDecoderCheckpoint {
 }
 
 #[test]
+fn flat_metric_checkpoint_is_explicit_and_keeps_the_same_parameter_owner() {
+    let old = checkpoint();
+    let mut flat = old.clone();
+    flat.plan.geometry = flat
+        .plan
+        .geometry
+        .take()
+        .map(|g| g.with_pair_metric(ByteDecoderPairMetric::EuclideanChordSquared));
+    let payload = flat.to_json().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(value["schema"], BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA);
+    assert_eq!(
+        value["model"]["geometry"]["pair_metric"],
+        "euclidean_chord_squared.v1"
+    );
+    assert_eq!(old.plan.parameter_layout(), flat.plan.parameter_layout());
+    let restored = ByteDecoderCheckpoint::from_json(&payload).unwrap();
+    assert_eq!(restored.to_json().unwrap(), payload);
+    assert_eq!(
+        restored.plan.geometry.unwrap().pair_metric(),
+        ByteDecoderPairMetric::EuclideanChordSquared
+    );
+    for variant in 0..5 {
+        let mut bad = value.clone();
+        match variant {
+            0 => bad["schema"] = json!(BYTE_DECODER_CHECKPOINT_SCHEMA),
+            1 => bad["model"]["geometry"]["pair_metric"] = json!("unknown"),
+            2 => bad["model"]["geometry"]["pair_metric"] = serde_json::Value::Null,
+            3 => {
+                bad["model"]["geometry"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("pair_metric");
+            }
+            _ => bad["model"]["geometry"]["pair_metric"] = json!("poincare_squared.v1"),
+        }
+        assert!(ByteDecoderCheckpoint::from_json(&bad.to_string()).is_err());
+    }
+    let old_json = old.to_json().unwrap();
+    assert!(!old_json.contains("pair_metric"));
+    assert!(old_json.contains(BYTE_DECODER_CHECKPOINT_SCHEMA));
+    assert_eq!(
+        ByteDecoderCheckpoint::from_json(&old_json)
+            .unwrap()
+            .to_json()
+            .unwrap(),
+        old_json
+    );
+}
+
+#[test]
 fn portable_checkpoint_roundtrip_preserves_full_geometry_and_parameter_order() {
     for mut checkpoint in [
         checkpoint(),

@@ -4,7 +4,7 @@ struct Params {
     batch:u32, steps:u32, cols:u32, heads:u32,
     coordinates:u32, pairs:u32, scores:u32, groups_x:u32,
     groups:u32, coordinates_offset:u32, gain_offset:u32, seed_offset:u32,
-    curvature_magnitude:f32, padding0:u32, padding1:u32, padding2:u32,
+    curvature_magnitude:f32, distance_scale:f32, metric_kind:u32, padding:u32,
 };
 @group(0) @binding(0) var<storage,read> coordinates:array<f32>;
 @group(0) @binding(1) var<storage,read> raw_gain:array<f32>;
@@ -70,6 +70,14 @@ fn prepare_pairs(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_in
         let delta=wide_sub(x,y);
         nx=wide_add(nx,wide_mul(x,x));ny=wide_add(ny,wide_mul(y,y));
         square=wide_add(square,wide_mul(delta,delta));
+    }
+    if (p.metric_kind==1u) {
+        let scale=parts(p.distance_scale);
+        cache[4u*id]=wide_mul(scale,square);
+        cache[4u*id+1u]=wide_mul(parts(2.0),scale);
+        cache[4u*id+2u]=parts(0.0);
+        cache[4u*id+3u]=parts(0.0);
+        return;
     }
     let a=margin(nx);let d=margin(ny);let ad=wide_mul(a,d);
     let c=parts(p.curvature_magnitude);
