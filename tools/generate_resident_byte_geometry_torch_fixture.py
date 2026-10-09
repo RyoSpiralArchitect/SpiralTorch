@@ -21,7 +21,7 @@ metric = load("generate_poincare_bias_torch_fixture").metric
 flat = base.values
 
 
-def case(block_count, external, metric_only, seed):
+def case(block_count, external, metric_only, seed, freeze_geometry=False):
     original = base.case(block_count, external, seed)
     config = original["config"]
     batch, steps, width = config["batch"], config["steps"], config["width"]
@@ -37,7 +37,7 @@ def case(block_count, external, metric_only, seed):
         extra.append((f"raw_gain.{i}", torch.tensor([-.6 + .3 * i, .3 - .7 * i], device="cpu")))
     extra = [{"name": "geometry." + n, "shape": list(t.shape), "values": flat(t)} for n, t in extra]
     descriptors = original["parameters"][:2] + extra + original["parameters"][2:]
-    p = [torch.tensor(d["values"], device="cpu").reshape(d["shape"]).requires_grad_() for d in descriptors]
+    p = [torch.tensor(d["values"], device="cpu", dtype=torch.float32).reshape(d["shape"]).requires_grad_() for d in descriptors]
     end = 2 + len(extra)
     if metric_only:
         with torch.no_grad():
@@ -91,30 +91,38 @@ def case(block_count, external, metric_only, seed):
     result["controls"] = {"off_output": flat(off), "detached_output": flat(detached),
                           "detached_embedding_gradient": flat(detached_gradient), "combined_biases": combined}
     trace = []
+    rates = [0. if freeze_geometry and d["name"].startswith("geometry.") else .125 for d in descriptors]
     for _ in range(16):
-        logits, _, _ = forward()
+        logits, embedded, _ = forward()
         loss = F.cross_entropy(logits.reshape(-1, 256), target.reshape(-1))
-        gradient = torch.autograd.grad(loss, p)
+        gradient = torch.autograd.grad(loss, [*p, embedded] if freeze_geometry else p)
         with torch.no_grad():
-            for value, g in zip(p, gradient):
-                value -= .125 * g
+            for value, g, rate in zip(p, gradient, rates):
+                if rate != 0.:
+                    value -= rate * g
         trace.append({"loss": loss.item(), "parameters": [flat(t) for t in p],
                       "geometry_gradients": [flat(g) for g in gradient[2:end]]})
+        if freeze_geometry:
+            trace[-1]["embedding_output_gradient"] = flat(gradient[-1])
     result["learning"] = {"steps": 16, "rate": .125, "trace": trace}
+    if freeze_geometry:
+        result["learning"]["rates"] = rates
     return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--freeze-geometry", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     torch.set_default_dtype(torch.float32)
-    payload = {"schema": "spiraltorch.resident_byte_geometry.torch_fixture.v1",
+    payload = {"schema": ("spiraltorch.resident_byte_geometry_frozen.torch_fixture.v1" if args.freeze_geometry
+                          else "spiraltorch.resident_byte_geometry.torch_fixture.v1"),
                "torch_version": torch.__version__, "device": "cpu", "dtype": "float32", "threads": 1,
                "tolerance": {"atol": 3e-6, "rtol": 5e-5, "geometry_relative_l2": .002},
-               "cases": [case(1, False, True, 1761), case(2, True, False, 1863)]}
+               "cases": [case(1, False, True, 1761, args.freeze_geometry), case(2, True, False, 1863, args.freeze_geometry)]}
     with args.output.open("x", encoding="utf-8") as out:
         json.dump(payload, out, separators=(",", ":"), allow_nan=False)
         out.write("\n")

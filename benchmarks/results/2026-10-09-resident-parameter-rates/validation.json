@@ -1,0 +1,106 @@
+{
+  "schema": "spiraltorch.resident_parameter_rates.validation_record.v1",
+  "passed": true,
+  "base_commit": "e9a32b991a0ada9f1802749cf557b9715fb1fa9d",
+  "environment": {
+    "host_processor": "Apple M4",
+    "rust": "1.97.0 (2d8144b78 2026-07-07)",
+    "torch": "2.12.1",
+    "torch_device": "cpu",
+    "torch_dtype": "float32",
+    "torch_threads": 1,
+    "wasm_bindgen": "0.2.129",
+    "browser_runtime_backend": "BrowserWebGpu"
+  },
+  "tests": {
+    "native_backend_parameter_tests": 5,
+    "native_complete_model_tests": 2,
+    "native_frozen_models": 2,
+    "browser_frozen_models": 2,
+    "updates_per_frozen_model": 16,
+    "browser_existing_global_rate_regression_models": 4,
+    "browser_shared_backend_contract": "passed",
+    "stdlib_comparator_tests": 10,
+    "pinned_nightly_fmt": "passed",
+    "default_reference_regeneration_byte_identical": true,
+    "finite_frozen_payload_inherited_guard_native": "passed",
+    "finite_frozen_payload_inherited_guard_browser": "passed"
+  },
+  "independent_review": {
+    "initial_findings": 1,
+    "finding": "P2: original frozen-gradient negative case did not isolate inherited guards from nonfinite values",
+    "fix": "Added a finite zero payload carrying an invalid inherited guard; require stage 1 and INVALID_TENSOR_FLAG with both parameter tensors bitwise preserved",
+    "focused_source_rereview": "no remaining findings",
+    "reviewer_gpu_execution": false,
+    "parent_backend_reruns": "native and actual browser passed",
+    "model_comparisons": "retained unchanged; numerical sources did not change"
+  },
+  "criteria": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_gradient_relative_l2": 0.002,
+    "minimum_reference_geometry_gradient_l2_exclusive": 1e-8,
+    "every_frozen_parameter_float32_bit": "equal to initial",
+    "every_update_receipt": "accepted with continuous attempted revision"
+  },
+  "source_sha256": {
+    "crates/st-backend-wgpu/src/resident_training/parameters.rs": "f2d7a3f3199cdc4aa5f5aa1d409f5d1fb445a63b78d4dcea5165e4758e971c55",
+    "crates/st-backend-wgpu/examples/support/resident_parameters_checks.rs": "5aab8e3c77a0f156026ced238704abeeba3713b862d6ab0d70f4f95e55b28fe8",
+    "crates/st-nn/src/resident/byte_decoder/training.rs": "43e74eed884685f8950f8c489eccadc6fa327140e8743fd31fd7da76b25187e6",
+    "crates/st-nn/examples/support/byte_decoder.rs": "e563ad23210c353e75ea971233c9bfff8dbf8ccf5b893b0a00611aadc801808f",
+    "crates/st-nn/examples/support/byte_decoder/parameter_rate_controls.rs": "83cae9962dabc7ab85e0c6b60c89bd9cd3ac51d93c5dfc60628ed578324aeb49",
+    "crates/st-nn/examples/resident_byte_decoder_browser.rs": "1b0499bdbb558b89ed93cbb577c567d477153d3324942c324181217e547f0777",
+    "crates/st-nn/tests/resident_byte_decoder.rs": "09930bc97f1ddc05cce9cc98d0671a5d44ebbfd2b61ad5245679dcb286030edf",
+    "crates/st-nn/tests/byte_parameter_rates_browser.html": "13b2406e8a331cf6b325d64e075f637b3220d562019b9b3bbaaf9882db171264",
+    "crates/st-backend-wgpu/tests/parameter_rates_browser.html": "f66b8a307f475498a1448ec0bbdec7ac1dd2467129b2a47efef8275423439b00",
+    "tools/generate_resident_byte_geometry_torch_fixture.py": "564081ed4219665b2ef1cdeb575a7f020de2de14fda30321c6d8c80877407891",
+    "tools/verify_byte_parameter_rates.py": "b68e4a18d938a377d6665912e377cf1276bdd874b32e38ad824f863ecb0e2566",
+    "tools/test_verify_byte_parameter_rates.py": "6cbf167bf35b0ef226931a9ddc737410dccc709f2731f265e298f6e6d8ee3aa5"
+  },
+  "public_result_sha256": {
+    "native-comparison.json": "f48fcde26c8dcaec0b61cc0c1a3a3d723aedfd358c8031244065db1444a5e246",
+    "browser-comparison.json": "e6e8d927fc44ea3c474d7c9c70230453d856792c58fcbc79c7c613754e7c9915"
+  },
+  "local_artifact_sha256": {
+    "browser-backend-reviewed.json": "4d0f54ed35b5f0f11d9b89dc043251fabd45931ae28c8fa95baa23b53950d120",
+    "browser-server-reviewed.log": "571c49e13cb3c62632c8afee43230cb30a30688e8bd0b264c1ba213b2b4f5863",
+    "native-backend-test-binary-reviewed": "5a790575a2353e6f821afbe86c0051576ebd12c7e6f069bc0a6dd48b0009b9bf",
+    "native-backend-tests-reviewed.log": "c02464133bb027c7b97e02eab5cdf1407d1365adb429951b0f9f2f69f8c6d2b6",
+    "resident_parameters_browser_reviewed.js": "79ea89bb10d7369d86f9cfa8a6d041af83c4af752213fddc1bec528862f51b1e",
+    "resident_parameters_browser_reviewed_bg.wasm": "88643418540d2d828e5ccd98f42963482a7b906935183de44054ce51d76e981e",
+    "wasm-backend-build-reviewed.log": "c30915c118f9d529758f65ed874abf7f597ddc168e4fa5eb62952325d31f07f8",
+    "browser-backend.json": "35f32588c85fbd17cc502492f9a8198961fa8999632f0fdcfa390845ccbdabb9",
+    "browser-regression.json": "e8ee8d5aface24441dc9d3a529a483efd9949b78e566cb9a3c460d0730996b1b",
+    "browser-server.log": "46a9131cf6ca1d52459483d03f6619e9b43f5144ee89194b388c44422bb627ed",
+    "browser.json": "625bd5c34e987bc146c0eb402e63b27f03f6a9e349b9bbfb43b36adf2b0f1365",
+    "default-torch.json": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b",
+    "frozen-geometry-torch.json": "410fbf4a377a05f7d7b9218e768708deecec117445ea94946af53127a8dffe61",
+    "native-backend-test-binary": "0c5d64e4439e36a56f951f501b98f2b2a95aae534e6b31f757d4d0c294dabde9",
+    "native-backend-tests.log": "dea1206cec3366ae5fbea39a2f0346c0a61f7c66d0bdbfa0ad36e9d2ce0e175e",
+    "native-build.log": "6f783545d8ef95779434e88c92a06b61378be012d45d1ad3e90be5e90dcc1f2f",
+    "native-regression.json": "e230881a6e1be2ba0d3197534d7992e526687c36184df89cbcb306f92c72d4a1",
+    "native-test-binary": "afc5168730a77629cce74e0e360eab4e9a0ae4c55adeed33c364dffb1ebb64cd",
+    "native-tests.log": "c358499cafd97b0741cf8796b17f4b1bb5f25cf02d8616ff65a014bf96ad9bfb",
+    "native.json": "29d01376269845389193a790b7c0df81afac6d8ba5e211f679978cd666f8b187",
+    "resident_byte_decoder_browser.js": "a092511043c599aa27931400649fd8507d5425ad6a4d2bf5dd60feacdc32c5bb",
+    "resident_byte_decoder_browser_bg.wasm": "026759d84dee0cd2cc4eb758dca95f32ef96dc7b3d2c3f638c251bfd8f204902",
+    "resident_parameters_browser.js": "79ea89bb10d7369d86f9cfa8a6d041af83c4af752213fddc1bec528862f51b1e",
+    "resident_parameters_browser_bg.wasm": "b70547b5f7e379b3f476894c0adeca0db742e5bae985333222b9ebb6956d04a2",
+    "verifier-tests.log": "b9d7052c300e421bb9648496d5a6ac2086a93c06cfe39fff6b2dd8289da952fd",
+    "wasm-backend-build.log": "277eb86400da7f5ce758c73c8b7879bdcf93ab7e460041df6f70b19118603a76",
+    "wasm-build.log": "3521189d19154db61fa9b67a541f799e1f4480a007f7603abe3a10309f4abb50"
+  },
+  "selected_backend_artifacts": [
+    "browser-backend-reviewed.json",
+    "native-backend-tests-reviewed.log",
+    "native-backend-test-binary-reviewed",
+    "resident_parameters_browser_reviewed_bg.wasm"
+  ],
+  "limits": [
+    "Two deterministic synthetic fixtures on one host, not corpus quality or speed evidence.",
+    "Freeze applies to weights, not coordinates or embedding pullbacks.",
+    "Rate vectors are caller-owned and not saved in model checkpoints.",
+    "Corpus-study v1 has not yet added frozen/capacity-matched arms.",
+    "Hashes identify retained artifacts; they are not runtime attestation."
+  ]
+}

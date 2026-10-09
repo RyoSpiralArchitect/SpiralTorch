@@ -13,3 +13,15 @@ fn complete_byte_decoder_matches_torch_and_preserves_causality() {
     let report = pollster::block_on(support::run(runtime)).unwrap();
     println!("{report}");
 }
+
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+#[test]
+fn frozen_geometry_parameters_keep_the_embedding_pullback() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte_decoder.rates").unwrap();
+    let report = pollster::block_on(support::run_parameter_rates(runtime)).unwrap();
+    println!("{report}");
+}

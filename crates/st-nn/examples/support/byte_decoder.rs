@@ -23,6 +23,12 @@ type OwnedBias = (Option<ResidentTensor>, Option<ResidentTensor>);
 mod checkpoint_controls;
 #[path = "byte_decoder/geometry_controls.rs"]
 mod geometry_controls;
+#[path = "byte_decoder/parameter_rate_controls.rs"]
+mod parameter_rate_controls;
+
+pub async fn run_parameter_rates(runtime: WgpuRuntime) -> Result<Value> {
+    parameter_rate_controls::run(runtime).await
+}
 
 fn data(v: &Value) -> Vec<f32> {
     v.as_array()
