@@ -454,6 +454,23 @@ impl ResidentByteDecoder {
         self.latest = None;
         Ok(update)
     }
+
+    /// Apply one rate per tensor in `parameter_layout()` order under the same
+    /// model-wide acceptance decision as `sgd`. Zero freezes values, not VJPs:
+    /// geometry can keep contributing to embedding gradients while its own
+    /// parameters remain unchanged. Frozen derivatives still participate in
+    /// finite-value/validity checks. Callers retain the rate policy for resume;
+    /// the model checkpoint stores values and revision, not per-step rates.
+    pub fn sgd_with_rates(
+        &mut self,
+        gradients: &ResidentByteDecoderVjp,
+        rates: &[f32],
+    ) -> Result<ResidentParameterUpdate, InferenceError> {
+        require_uncommitted_route()?;
+        let update = self.parameters.sgd_with_rates(&gradients.bound, rates)?;
+        self.latest = None;
+        Ok(update)
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

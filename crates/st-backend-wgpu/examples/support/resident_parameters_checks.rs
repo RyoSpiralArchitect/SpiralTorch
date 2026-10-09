@@ -67,8 +67,138 @@ fn same_bits(actual: &[Vec<f32>], expected: &[Vec<f32>]) -> Result<()> {
     Ok(())
 }
 
+async fn parameter_rates(device: &TensorDevice) -> Result<serde_json::Value> {
+    let values = vec![
+        device
+            .upload(&[2, 2], &[1., 2., 3., 4.])?
+            .permute(&[1, 0])?,
+        device.upload(&[2], &[-0., 2.])?,
+    ];
+    let derivatives = || -> Result<Vec<ResidentTensor>> {
+        Ok(vec![
+            device
+                .upload(&[2, 2], &[1., 2., 3., 4.])?
+                .permute(&[1, 0])?,
+            device.upload(&[2], &[1., -2.])?,
+        ])
+    };
+    let mut owner = ResidentParameters::new(values.clone())?;
+    let original = owner.snapshot();
+    let before = read_parameters(&original).await?;
+    let gradient = original.bind_gradients(derivatives()?)?;
+    for rates in [vec![], vec![0.1], vec![0.1; 3]] {
+        if !matches!(
+            owner.sgd_with_rates(&gradient, &rates),
+            Err(TrainingError::ParameterLayout)
+        ) || owner.snapshot().revision() != 0
+        {
+            return Err("rate count changed parameters or was accepted".into());
+        }
+    }
+    for bad in [-1., f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        if !matches!(
+            owner.sgd_with_rates(&gradient, &[0.25, bad]),
+            Err(TrainingError::LearningRate)
+        ) || owner.snapshot().revision() != 0
+        {
+            return Err("late invalid parameter rate changed ownership".into());
+        }
+    }
+    let mut foreign = ResidentParameters::new(values.clone())?;
+    if !matches!(
+        foreign.sgd_with_rates(&gradient, &[0.25, 0.]),
+        Err(TrainingError::ParameterVersion)
+    ) {
+        return Err("per-parameter rates accepted foreign gradients".into());
+    }
+    let first = owner.sgd_with_rates(&gradient, &[0.25, -0.])?;
+    if read_update(&first).await? != 1 {
+        return Err("mixed-rate revision".into());
+    }
+    let after = read_parameters(&owner.snapshot()).await?;
+    close(&after[0], &[0.75, 2.25, 1.5, 3.])?;
+    same_bits(&after[1..], &before[1..])?;
+    if !matches!(
+        owner.sgd_with_rates(&gradient, &[0., 0.]),
+        Err(TrainingError::ParameterVersion)
+    ) {
+        return Err("mixed-rate step left old gradients usable".into());
+    }
+    let gradient = owner.snapshot().bind_gradients(derivatives()?)?;
+    read_update(&owner.sgd_with_rates(&gradient, &[0., 0.5])?).await?;
+    let after_second = read_parameters(&owner.snapshot()).await?;
+    same_bits(&after_second[..1], &after[..1])?;
+    close(&after_second[1], &[-0.5, 3.])?;
+    for frozen in [false, true] {
+        let snapshot = owner.snapshot();
+        let bad = if frozen {
+            device
+                .upload(&[2], &[f32::MAX; 2])?
+                .mul(&device.upload(&[2], &[2.; 2])?)?
+        } else {
+            device.upload(&[2], &[f32::MAX; 2])?
+        };
+        let gradient = snapshot.bind_gradients(vec![device.upload(&[2, 2], &[1.; 4])?, bad])?;
+        let update = owner.sgd_with_rates(&gradient, &[0.25, if frozen { 0. } else { 2. }])?;
+        if !matches!(
+            read_update(&update).await,
+            Err(TrainingError::Rejected { stage: 1, .. })
+        ) {
+            return Err(
+                "mixed-rate update bypassed a late invalid candidate or frozen gradient".into(),
+            );
+        }
+        same_bits(&read_parameters(&owner.snapshot()).await?, &after_second)?;
+    }
+    let finite = device.upload(&[2], &[0.; 2])?;
+    let overflow = device
+        .upload(&[2], &[f32::MAX; 2])?
+        .mul(&device.upload(&[2], &[2.; 2])?)?;
+    let inherited = device.guard_together(&[&finite, &overflow])?.remove(0);
+    if !inherited.shares_storage_with(&finite) || read_tensor(&finite).await? != [0.; 2] {
+        return Err("inherited-guard control must keep a finite zero payload".into());
+    }
+    let gradient = owner
+        .snapshot()
+        .bind_gradients(vec![device.upload(&[2, 2], &[1.; 4])?, inherited])?;
+    let rejected = owner.sgd_with_rates(&gradient, &[0.25, 0.])?;
+    if !matches!(read_update(&rejected).await,
+        Err(TrainingError::Rejected { stage: 1, flags })
+        if flags & st_backend_wgpu::resident_tensor::INVALID_TENSOR_FLAG != 0)
+    {
+        return Err("finite frozen derivative lost an inherited invalid guard".into());
+    }
+    same_bits(&read_parameters(&owner.snapshot()).await?, &after_second)?;
+    let gradient = owner.snapshot().bind_gradients(derivatives()?)?;
+    if read_update(&owner.sgd_with_rates(&gradient, &[0., -0.])?).await? != 6
+        || read_update(&first).await? != 1
+    {
+        return Err("mixed-rate retry/retained revision".into());
+    }
+    same_bits(&read_parameters(&owner.snapshot()).await?, &after_second)?;
+    same_bits(&read_parameters(&original).await?, &before)?;
+
+    let mut uniform = ResidentParameters::new(values)?;
+    let uniform_gradient = uniform.snapshot().bind_gradients(derivatives()?)?;
+    let foreign_gradient = foreign.snapshot().bind_gradients(derivatives()?)?;
+    read_update(&uniform.sgd(&uniform_gradient, 0.125)?).await?;
+    read_update(&foreign.sgd_with_rates(&foreign_gradient, &[0.125; 2])?).await?;
+    same_bits(
+        &read_parameters(&uniform.snapshot()).await?,
+        &read_parameters(&foreign.snapshot()).await?,
+    )?;
+    Ok(
+        serde_json::json!({"passed":true, "uniform_rate_bits_equal":true,
+        "freeze_preserves_bits":true, "late_invalid_rate_preflight":true,
+        "whole_update_rejection":true, "frozen_gradient_still_guarded":true,
+        "finite_frozen_gradient_inherits_guard":true,
+        "foreign_and_stale_gradients_rejected":true, "retained_values_and_receipts":true}),
+    )
+}
+
 /// Native and browser execute this same Rust contract fixture.
 pub async fn run(device: &TensorDevice) -> Result<serde_json::Value> {
+    let parameter_rates = parameter_rates(device).await?;
     let strided = device
         .upload(&[3, 2], &[99.0, 99.0, 1.0, 2.0, 3.0, 4.0])?
         .narrow(0, 1, 2)?
@@ -300,6 +430,7 @@ pub async fn run(device: &TensorDevice) -> Result<serde_json::Value> {
     Ok(serde_json::json!({
         "schema": "spiraltorch.resident_parameters.contract.v1",
         "status": "passed",
+        "parameter_rates": parameter_rates,
         "parameter_checks": ["strided_offset_values", "strided_gradients", "signed_zero",
             "stale_gradients", "foreign_owner", "layout_validation", "rate_validation",
             "whole_update_overflow_rejection", "invalid_zero_rate", "valid_retry",

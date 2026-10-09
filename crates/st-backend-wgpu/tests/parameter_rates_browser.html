@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident parameter-rate contracts</title>
+<h1>Resident parameter-rate contracts</h1>
+<a id="download" hidden>Download parameter contract result</a>
+<pre id="result" data-status="running">Running Rust/WebGPU checks...</pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_parameter_checks} = await import("/target/resident-parameter-rates-web/resident_parameters_browser.js");
+  await init();
+  const raw = await run_parameter_checks();
+  const report = JSON.parse(raw);
+  const controls = ["passed", "uniform_rate_bits_equal", "freeze_preserves_bits",
+    "late_invalid_rate_preflight", "whole_update_rejection", "frozen_gradient_still_guarded",
+    "finite_frozen_gradient_inherits_guard",
+    "foreign_and_stale_gradients_rejected", "retained_values_and_receipts"];
+  if (report.schema !== "spiraltorch.resident_parameters.contract.v1"
+      || report.status !== "passed" || report.conv2d_steps !== 16
+      || report.conv2d_training_loop_readbacks !== 0
+      || !controls.every(k => report.parameter_rates?.[k] === true)) {
+    throw Error("Incomplete parameter-rate controls");
+  }
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([raw], {type:"application/json"}));
+  link.download = "resident-parameter-contracts.json";
+  link.hidden = false;
+} catch (error) {
+  result.textContent = String(error.stack || error);
+  result.dataset.status = "error";
+}
+</script>

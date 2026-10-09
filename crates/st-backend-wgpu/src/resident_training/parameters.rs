@@ -225,6 +225,34 @@ impl ResidentParameters {
         rate: f32,
     ) -> Result<ResidentParameterUpdate, TrainingError> {
         let rate = SgdStep::new(rate).map_err(|_| TrainingError::LearningRate)?;
+        self.sgd_validated(gradients, |_| rate.rate())
+    }
+
+    /// One rate per parameter tensor, in snapshot order, with one atomic decision.
+    /// A zero rate freezes that tensor's bits without detaching differentiation.
+    /// Frozen entries still validate their values, gradients and inherited guards.
+    /// Invalid rates or a wrong count fail before submission or revision changes.
+    /// Rates are caller-owned step inputs, not persistent optimizer state.
+    pub fn sgd_with_rates(
+        &mut self,
+        gradients: &ResidentParameterGradients,
+        rates: &[f32],
+    ) -> Result<ResidentParameterUpdate, TrainingError> {
+        if rates.len() != self.current.values.len() {
+            return Err(TrainingError::ParameterLayout);
+        }
+        let rates = rates
+            .iter()
+            .map(|&rate| SgdStep::new(rate).map_err(|_| TrainingError::LearningRate))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.sgd_validated(gradients, |index| rates[index].rate())
+    }
+
+    fn sgd_validated(
+        &mut self,
+        gradients: &ResidentParameterGradients,
+        rate: impl Fn(usize) -> f32,
+    ) -> Result<ResidentParameterUpdate, TrainingError> {
         if !self.current.version.matches(&gradients.version) {
             return Err(TrainingError::ParameterVersion);
         }
@@ -268,7 +296,7 @@ impl ResidentParameters {
                     groups_x: groups[0],
                     count: count as u32,
                     index: index as u32,
-                    rate: rate.rate(),
+                    rate: rate(index),
                     padding: [0; 3],
                 }],
                 wgpu::BufferUsages::UNIFORM,

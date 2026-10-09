@@ -82,6 +82,46 @@ block, table, embedding-output and external-bias derivative together. A rejected
 update preserves all parameter values, then the next forward rebinds them at the
 new attempted revision.
 
+### Per-parameter update rates
+
+`sgd_with_rates(&gradients, &rates)` takes one finite, nonnegative rate per
+parameter tensor in `parameter_layout()` order. The backend still prepares all
+candidates, makes one whole-model decision, and commits all or none. Zero
+preserves a tensor's original bits, including signed zero; it does not suppress
+invalid gradients or inherited guards. Bad rate counts or invalid rates fail
+before submission and preserve the current revision and forward tape.
+
+For example, after the ordinary forward/loss/backward above, freeze only the
+geometry parameters while training the rest:
+
+```rust
+let layout = model.parameter_layout();
+let mut rates = vec![0.125; layout.len()];
+if let Some(geometry) = layout.geometry() {
+    rates[geometry.all()].fill(0.);
+}
+let update = model.sgd_with_rates(&gradients, &rates)?;
+let accepted_revision = update.snapshot()?.read()?; // WASM: read_async().await?
+```
+
+This freezes the geometry **parameter values**, not the geometry coordinates:
+coordinates still respond to evolving byte/position embeddings. Geometry's VJP
+still reaches those embeddings. It is therefore different from detaching a
+geometry-produced score bias. Rates are ephemeral caller-owned step inputs;
+model checkpoints do not store the freeze policy or schedule. Reapply the same
+policy explicitly when restoring a model. The corpus-study v1 request continues
+to use its existing scalar SGD rate; this API alone does not add a frozen arm to
+that protocol.
+
+The shared native/browser controls queue 16 updates of both existing geometry
+fixtures, check frozen bits and embedding learning, and retain the complete local
+trace for independent CPU-f32 PyTorch comparison. Generate that reference with
+`tools/generate_resident_byte_geometry_torch_fixture.py --freeze-geometry` and
+compare it with `tools/verify_byte_parameter_rates.py`. These are synthetic
+correctness controls, not a matched-capacity quality study or a speed benchmark.
+The [native/browser validation record](../benchmarks/results/2026-10-09-resident-parameter-rates/README.md)
+includes scalar results, hashes and reproduction instructions; raw arrays stay local.
+
 ## Portable model checkpoint and resume
 
 `ResidentByteDecoder::checkpoint_snapshot()` captures the complete current

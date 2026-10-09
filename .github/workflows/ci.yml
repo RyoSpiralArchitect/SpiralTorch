@@ -26,6 +26,7 @@ jobs:
       - name: Test resident benchmark admission
         run: |
           python3 -I -S -B tools/test_byte_corpus_study.py
+          python3 -I -S -B tools/test_verify_byte_parameter_rates.py
           python3 -I tests/test_resident_rank_bench.py
           python3 -I tests/test_resident_rank_adaptation_bench.py
           python3 -I tests/test_matmul_rank_bench.py
