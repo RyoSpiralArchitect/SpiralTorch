@@ -28,6 +28,10 @@ pub struct ResidualAttentionPlan {
 }
 
 impl ResidualAttentionPlan {
+    pub(crate) fn plan_parts(&self) -> (&InferencePlan, &AttentionInferencePlan, &InferencePlan) {
+        (&self.pre, &self.attention, &self.feed_forward)
+    }
+
     /// Clone already frozen plans. Exact logical layouts must match at every
     /// edge and residual; equal flattened element counts are not sufficient.
     pub fn from_plans(

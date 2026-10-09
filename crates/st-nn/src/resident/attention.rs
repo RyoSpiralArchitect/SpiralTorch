@@ -25,6 +25,55 @@ pub struct AttentionInferencePlan {
 }
 
 impl AttentionInferencePlan {
+    pub(crate) fn projection_parts(&self) -> [&InferencePlan; 2] {
+        [&self.qkv, &self.output]
+    }
+
+    /// Import the trained fused layout without splitting/repacking its values.
+    /// Richer graph stages must not disappear behind the projection boundary.
+    pub(crate) fn from_fused_projection_plans(
+        heads: usize,
+        mask: AttentionMask,
+        qkv: InferencePlan,
+        output: InferencePlan,
+    ) -> Result<Self, InferenceError> {
+        for plan in [&qkv, &output] {
+            let graph = plan.graph_definition()?;
+            if graph.parameters().len() != 2
+                || !matches!(
+                    graph.stages(),
+                    [GraphStage::Linear {
+                        weight: 0,
+                        bias: 1,
+                        gelu: false
+                    }]
+                )
+            {
+                return Err(InferenceError::Attention(
+                    "expected one unfused Linear projection",
+                ));
+            }
+        }
+        let [batch, sequence, _] = <[usize; 3]>::try_from(qkv.input_layout().shape())
+            .map_err(|_| InferenceError::InvalidLayout)?;
+        let fused = qkv.output_layout().shape()[2];
+        if fused == 0 || !fused.is_multiple_of(3) || heads == 0 {
+            return Err(InferenceError::Attention(
+                "invalid fused QKV width or head count",
+            ));
+        }
+        let width = fused / 3;
+        if !width.is_multiple_of(heads) || output.input_layout().shape() != [batch, sequence, width]
+        {
+            return Err(InferenceError::Attention(
+                "fused QKV/output layout mismatch",
+            ));
+        }
+        let shape = [batch, heads, sequence, width / heads];
+        let spec = AttentionSpec::new(&shape, &shape, &shape, 1. / (shape[3] as f32).sqrt(), mask)?;
+        Ok(Self { qkv, output, spec })
+    }
+
     /// Compose existing portable projection snapshots without inventing a second
     /// weight format. Each plan must contain exactly one unfused Linear with the
     /// matching logical input layout; richer operations are never discarded.

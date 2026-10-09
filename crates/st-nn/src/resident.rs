@@ -23,12 +23,13 @@ pub use attention::{
 };
 #[cfg(feature = "wgpu")]
 pub use byte_decoder::{
-    ByteDecoderBias, ByteDecoderBiasGradient, ResidentByteBatch, ResidentByteDecoder,
-    ResidentByteDecoderForward, ResidentByteDecoderVjp,
+    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderCheckpointReadback, ResidentByteBatch,
+    ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
 pub use byte_decoder::{
-    ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan, ByteDecoderParameterLayout,
-    ByteDecoderPlan, ByteLmBatch, BYTE_LM_VOCAB,
+    ByteDecoderCheckpoint, ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan,
+    ByteDecoderParameterLayout, ByteDecoderPlan, ByteLmBatch, BYTE_DECODER_CHECKPOINT_SCHEMA,
+    BYTE_LM_VOCAB,
 };
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]

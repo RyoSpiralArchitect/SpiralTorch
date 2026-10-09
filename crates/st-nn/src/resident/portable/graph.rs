@@ -11,22 +11,22 @@ pub const GRAPH_PLAN_SCHEMA: &str = "spiraltorch.nn.inference_plan.v2";
 pub const GRAPH_PLAN_SCHEMA_V3: &str = "spiraltorch.nn.inference_plan.v3";
 pub const GRAPH_PLAN_SCHEMA_V4: &str = "spiraltorch.nn.inference_plan.v4";
 pub const GRAPH_PLAN_SCHEMA_V5: &str = "spiraltorch.nn.inference_plan.v5";
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Record {
+pub(crate) struct Record {
     schema: String,
     input_shape: Vec<u32>,
     parameters: Vec<Parameter>,
     stages: Vec<Stage>,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Parameter {
     role: Role,
     shape: Vec<u32>,
     values: Vec<f32>,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Role {
     Weight,
@@ -34,7 +34,7 @@ enum Role {
     Gain,
     Gate,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Stage {
     Linear {
@@ -60,13 +60,13 @@ enum Stage {
         max_volume: u32,
     },
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Step {
     op: Op,
     rhs: Option<u32>,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Op {
     Identity,
@@ -79,6 +79,33 @@ enum Op {
 }
 
 pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError> {
+    Ok(serde_json::to_string(&Record::from_graph(graph)?)?)
+}
+
+pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> {
+    serde_json::from_str::<Record>(payload)?.into_plan()
+}
+
+impl Record {
+    pub(crate) fn input_rank(&self) -> usize {
+        self.input_shape.len()
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut Vec<f32>> {
+        self.parameters.iter_mut().map(|p| &mut p.values)
+    }
+
+    pub(crate) fn from_graph(graph: &GraphDefinition) -> Result<Self, InferenceError> {
+        from_graph(graph)
+    }
+
+    pub(crate) fn into_plan(self) -> Result<InferencePlan, InferenceError> {
+        from_record(self)
+    }
+}
+
+fn from_graph(graph: &GraphDefinition) -> Result<Record, InferenceError> {
     let record = Record {
         schema: if graph
             .stages()
@@ -190,11 +217,10 @@ pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError>
             })
             .collect::<Result<_, InferenceError>>()?,
     };
-    Ok(serde_json::to_string(&record)?)
+    Ok(record)
 }
 
-pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> {
-    let record: Record = serde_json::from_str(payload)?;
+fn from_record(record: Record) -> Result<InferencePlan, InferenceError> {
     if ![
         GRAPH_PLAN_SCHEMA,
         GRAPH_PLAN_SCHEMA_V3,

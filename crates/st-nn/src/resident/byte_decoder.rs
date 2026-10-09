@@ -4,6 +4,10 @@ use std::ops::Range;
 
 mod geometry;
 pub use geometry::{ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan};
+mod checkpoint;
+#[cfg(feature = "wgpu")]
+pub use checkpoint::ByteDecoderCheckpointReadback;
+pub use checkpoint::{ByteDecoderCheckpoint, BYTE_DECODER_CHECKPOINT_SCHEMA};
 
 #[cfg(feature = "wgpu")]
 mod training;

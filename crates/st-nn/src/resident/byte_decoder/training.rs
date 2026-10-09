@@ -109,6 +109,7 @@ impl ResidentByteDecoderVjp {
 
 /// One owner/revision and one SGD decision across tables, all blocks and head.
 pub struct ResidentByteDecoder {
+    checkpoint_template: super::checkpoint::CheckpointTemplate,
     parameters: ResidentParameters,
     parameter_layout: ByteDecoderParameterLayout,
     positions: ResidentEmbeddingIndices,
@@ -139,7 +140,19 @@ impl ByteDecoderPlan {
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<ResidentByteDecoder, InferenceError> {
+        self.compile_training_wgpu_at_revision(runtime, tile, kernel, accumulation, 0)
+    }
+
+    pub(super) fn compile_training_wgpu_at_revision(
+        &self,
+        runtime: WgpuRuntime,
+        tile: MatmulTile,
+        kernel: MatmulKernel,
+        accumulation: MatmulAccumulation,
+        attempted_revision: u64,
+    ) -> Result<ResidentByteDecoder, InferenceError> {
         require_uncommitted_route()?;
+        let checkpoint_template = super::checkpoint::CheckpointTemplate::new(self)?;
         let device = TensorDevice::new(runtime.clone())?;
         let mut values = vec![
             device.upload(&self.token.shape, &self.token.values)?,
@@ -185,12 +198,13 @@ impl ByteDecoderPlan {
         let [batch, sequence, _] = <[usize; 3]>::try_from(self.input_layout().shape()).unwrap();
         let positions: Vec<_> = (0..batch).flat_map(|_| 0..sequence).collect();
         Ok(ResidentByteDecoder {
+            checkpoint_template,
             positions: device.upload_embedding_indices(
                 &[batch, sequence],
                 self.position.shape[0],
                 &positions,
             )?,
-            parameters: ResidentParameters::new(values)?,
+            parameters: ResidentParameters::from_restored_values(values, attempted_revision)?,
             parameter_layout: self.parameters.clone(),
             geometry,
             blocks,
@@ -203,6 +217,14 @@ impl ByteDecoderPlan {
 }
 
 impl ResidentByteDecoder {
+    /// Submit one complete immutable model capture without mapping GPU memory.
+    /// Read it explicitly (asynchronously in a browser) to obtain a checkpoint.
+    pub fn checkpoint_snapshot(&self) -> Result<ByteDecoderCheckpointReadback, InferenceError> {
+        require_uncommitted_route()?;
+        self.checkpoint_template
+            .capture(self.tensor_device(), self.parameter_snapshot())
+    }
+
     pub fn tensor_device(&self) -> &TensorDevice {
         self.parameters.tensor_device()
     }
