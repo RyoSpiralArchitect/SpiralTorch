@@ -1,0 +1,532 @@
+{
+  "schema": "spiraltorch.byte_geometry_pair_cache_integration.evidence.v1",
+  "date_utc": "2026-10-09",
+  "status": "native_and_actual_browser_full_model_regressions_passed",
+  "source": {
+    "owner_revision": "01e12ac8cc9bb10a1b151a8d7b1fda6b157fea64",
+    "merged_metric_revision": "8a4c83245bc81fa7b44f6738e5ad2ca31ab50c76",
+    "tested_worktree_files": {
+      "crates/st-nn/examples/support/byte_decoder.rs": {
+        "bytes": 28350,
+        "sha256": "bc4cb23998d416d0b6f1489342688e63fd244706a05fe2f56a0ce7cf6ee8162c"
+      },
+      "crates/st-nn/examples/support/byte_decoder/geometry_controls.rs": {
+        "bytes": 5917,
+        "sha256": "78de7fb76b94c0f943eacd2c28bc80ee9a22748974d35378fae3c0e6993f9c83"
+      },
+      "crates/st-nn/src/resident.rs": {
+        "bytes": 23130,
+        "sha256": "750c775a6a813a33961e535bfa091b5eb3734de9fe58ae42bcda3f9bf94569c9"
+      },
+      "crates/st-nn/src/resident/byte_decoder.rs": {
+        "bytes": 8649,
+        "sha256": "701a92d27b1a57902345c7b9dbb843dc7d5ac382a825442eca7aa263a17da76c"
+      },
+      "crates/st-nn/src/resident/byte_decoder/geometry.rs": {
+        "bytes": 6266,
+        "sha256": "b9942fa2d424514c339334f10a51c9960c5bff4c5a78c3a070abee8d496fb417"
+      },
+      "crates/st-nn/src/resident/byte_decoder/tests.rs": {
+        "bytes": 7316,
+        "sha256": "75395555d8a834935b98917a6090579296ea6195ff7e5591d24bbcfc0f6a7295"
+      },
+      "crates/st-nn/src/resident/byte_decoder/training.rs": {
+        "bytes": 15564,
+        "sha256": "78060dbfaa5ec03a64aa641be94281d934d46f9eea802e2693e89f91e96ecdbb"
+      },
+      "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": {
+        "bytes": 4046,
+        "sha256": "5b1d26a2bbab08d082ada7682912f2374b621e16b07dbf804b3603408b49864d"
+      },
+      "crates/st-nn/src/resident/byte_decoder/training/tests.rs": {
+        "bytes": 9653,
+        "sha256": "fd655df3585adeecd9dc0322f5f682ed2ffdb3851b9522b0744ad4a1113251c1"
+      },
+      "crates/st-nn/tests/byte_decoder_browser.html": {
+        "bytes": 3858,
+        "sha256": "55dede459cc5311045dbd9387752b0e64f4caca298554240576da0bf26af61d8"
+      },
+      "crates/st-nn/tests/fixtures/resident_byte_geometry_torch.json": {
+        "bytes": 2253798,
+        "sha256": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b"
+      },
+      "tools/generate_resident_byte_decoder_torch_fixture.py": {
+        "bytes": 7173,
+        "sha256": "47b5af2f4bfbf5ce6bf367d9d32f762db86d6b5ac2117c8e5a264376dcd78430"
+      },
+      "tools/generate_resident_byte_geometry_torch_fixture.py": {
+        "bytes": 6520,
+        "sha256": "1e1ad19737664ffd25648446eb75b54096fe762a553e3453b1aa4ecf91f87ccf"
+      },
+      "crates/st-nn/Cargo.toml": {
+        "bytes": 6011,
+        "sha256": "a081aa3dc2f14298ea4bc73c90e66836b3a5b653ec5add7c8576429105498f60"
+      },
+      "crates/st-nn/tests/resident_byte_decoder.rs": {
+        "bytes": 578,
+        "sha256": "349befd5eddefe5df5b48c3060b386436ee3744df71a7471d6510364f169b57e"
+      },
+      "crates/st-nn/examples/resident_byte_decoder_browser.rs": {
+        "bytes": 652,
+        "sha256": "0abef817822ad8f9aabb43861c67e51232bfc89c132cb18a05643f12802f1c39"
+      },
+      "crates/st-nn/tests/fixtures/resident_byte_decoder_torch.json": {
+        "bytes": 2053900,
+        "sha256": "ef9bc46892fce5591dc4b3f0ebd527a76b493b160faeb05887ff61daec389874"
+      },
+      "tools/generate_causal_zspace_wave_torch_fixture.py": {
+        "bytes": 4952,
+        "sha256": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa"
+      },
+      "tools/generate_poincare_bias_torch_fixture.py": {
+        "bytes": 3182,
+        "sha256": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18"
+      },
+      "crates/st-kernel-contracts/src/causal_wave.rs": {
+        "bytes": 11251,
+        "sha256": "b4d5cbbd11c45a260c85bbd06bf523345ea36635c431eb529bc4a47cdb4d3c77"
+      },
+      "crates/st-kernel-contracts/src/poincare.rs": {
+        "bytes": 9025,
+        "sha256": "6ca1659ab6ae3d74bb2fa4d29c4526918e36ea72a9c80ba314f80f823ee3ccda"
+      },
+      "crates/st-backend-wgpu/src/resident_tensor/causal_wave.rs": {
+        "bytes": 16101,
+        "sha256": "67a6d32f452b9646481711903200509e002fd16f9b2d8d2130f4381e19cae3d9"
+      },
+      "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": {
+        "bytes": 12810,
+        "sha256": "e38f46516f06ae7b80f2d3d429ea7955da4159515d4b3d4996cd6c95292068b4"
+      },
+      "Cargo.lock": {
+        "bytes": 119712,
+        "sha256": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4"
+      },
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": {
+        "bytes": 7543,
+        "sha256": "eb67b1249116219fcdbf76c4131f3f1277f7cbedd61aec6370167ba45255d07b"
+      },
+      "docs/resident_byte_decoder.md": {
+        "bytes": 11515,
+        "sha256": "602705b049d3bfe54a8bb5583bf9030ad2aa64dd194890e5912be31b7308ff93"
+      },
+      "docs/poincare_metric_attention.md": {
+        "bytes": 7095,
+        "sha256": "ccb255c0fa50cb26e43b0290155d5a2f63ea2cd4e6a93acc3bbe5e58b94646c0"
+      }
+    },
+    "model_math_changed_by_integration": false,
+    "fixtures_regenerated": false
+  },
+  "environment": {
+    "native": {
+      "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }"
+    },
+    "browser": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "actually_executed": true,
+      "wasm_bindgen_cli": "0.2.129"
+    }
+  },
+  "criteria": {
+    "elementwise_atol": 0.000003,
+    "elementwise_rtol": 0.00005,
+    "geometry_relative_l2_max": 0.002,
+    "geometry_reference_norm_min": 1e-8,
+    "unchanged": true
+  },
+  "checks": {
+    "native": {
+      "unit_tests": 8,
+      "integration_tests": 1,
+      "status": "passed",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib --test resident_byte_decoder byte_decoder -- --nocapture --test-threads=1",
+      "log": "native.log",
+      "report": "native.json"
+    },
+    "residual": {
+      "tests": 1,
+      "status": "passed",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_residual_attention -- --test-threads=1",
+      "log": "residual.log"
+    },
+    "browser": {
+      "status": "passed",
+      "build": "env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH RUSTFLAGS= cargo build --locked --release -p st-nn --no-default-features --features wgpu --target wasm32-unknown-unknown --example resident_byte_decoder_browser",
+      "bindgen": "wasm-bindgen target/wasm32-unknown-unknown/release/examples/resident_byte_decoder_browser.wasm --target web --out-dir target/resident-byte-decoder-web",
+      "page": "crates/st-nn/tests/byte_decoder_browser.html",
+      "log": "wasm-build.log",
+      "report": "browser.json"
+    },
+    "format": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all -- --check",
+      "log": "fmt.log"
+    },
+    "cpu_only_and_strict_lint": {
+      "status": "not_rerun",
+      "parent_record": "../2026-10-09-byte-causal-geometry-owner/validation.json"
+    }
+  },
+  "summary": {
+    "native": [
+      {
+        "name": "blocks1_geometryFalse",
+        "parameter_tensors": 18,
+        "updates": 16,
+        "output_max_abs_error": 6.332993507385254e-8,
+        "parameter_vjp_max_abs_error": 9.834766387939453e-7,
+        "update_parameter_max_abs_error": 4.6938657760620117e-7,
+        "geometry_gradient_relative_l2_max": null,
+        "first_preupdate_ce": 5.465129852294922,
+        "last_preupdate_ce": 3.7238235473632812,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": null
+      },
+      {
+        "name": "blocks2_geometryTrue",
+        "parameter_tensors": 31,
+        "updates": 16,
+        "output_max_abs_error": 7.450580596923828e-8,
+        "parameter_vjp_max_abs_error": 2.2351741790771484e-7,
+        "update_parameter_max_abs_error": 1.341104507446289e-7,
+        "geometry_gradient_relative_l2_max": null,
+        "first_preupdate_ce": 5.620514392852783,
+        "last_preupdate_ce": 4.100001335144043,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": null
+      },
+      {
+        "name": "causal_geometry_blocks1_metric_onlyTrue",
+        "parameter_tensors": 23,
+        "updates": 16,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 1.1920928955078125e-7,
+        "update_parameter_max_abs_error": 1.5087425708770752e-7,
+        "geometry_gradient_relative_l2_max": 0.00002684338405497573,
+        "first_preupdate_ce": 5.551121711730957,
+        "last_preupdate_ce": 3.94242262840271,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": {
+          "detached_embedding_gradient_separation": 0.0018730461597442627,
+          "detached_output_max_abs_error": 5.960464477539063e-8,
+          "geometry_parameter_slots": [
+            2,
+            7
+          ],
+          "off_output_max_abs_error": 5.960464477539063e-8,
+          "off_output_separation": 0.0015886211767792702,
+          "output_contrast_relative_l2": 0.0000600341356397038,
+          "pullback_contrast_relative_l2": 0.0000019970770642117956,
+          "qk_scores_zero": true,
+          "relative_checker_negative_controls": 3
+        }
+      },
+      {
+        "name": "causal_geometry_blocks2_metric_onlyFalse",
+        "parameter_tensors": 37,
+        "updates": 16,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 4.76837158203125e-7,
+        "update_parameter_max_abs_error": 7.450580596923828e-7,
+        "geometry_gradient_relative_l2_max": 0.0001424504062516748,
+        "first_preupdate_ce": 5.523756504058838,
+        "last_preupdate_ce": 3.916003704071045,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": {
+          "detached_embedding_gradient_separation": 0.006779864430427551,
+          "detached_output_max_abs_error": 5.960464477539063e-8,
+          "geometry_parameter_slots": [
+            2,
+            8
+          ],
+          "off_output_max_abs_error": 5.960464477539063e-8,
+          "off_output_separation": 0.00618666410446167,
+          "output_contrast_relative_l2": 0.00001794789593352927,
+          "pullback_contrast_relative_l2": 0.000009710079003948535,
+          "qk_scores_zero": false,
+          "relative_checker_negative_controls": 3
+        }
+      }
+    ],
+    "browser": [
+      {
+        "name": "blocks1_geometryFalse",
+        "parameter_tensors": 18,
+        "updates": 16,
+        "output_max_abs_error": 6.332993507385254e-8,
+        "parameter_vjp_max_abs_error": 9.834766387939453e-7,
+        "update_parameter_max_abs_error": 4.6938657760620117e-7,
+        "geometry_gradient_relative_l2_max": null,
+        "first_preupdate_ce": 5.465129852294922,
+        "last_preupdate_ce": 3.7238235473632812,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": null
+      },
+      {
+        "name": "blocks2_geometryTrue",
+        "parameter_tensors": 31,
+        "updates": 16,
+        "output_max_abs_error": 7.450580596923828e-8,
+        "parameter_vjp_max_abs_error": 2.2351741790771484e-7,
+        "update_parameter_max_abs_error": 1.341104507446289e-7,
+        "geometry_gradient_relative_l2_max": null,
+        "first_preupdate_ce": 5.620514392852783,
+        "last_preupdate_ce": 4.100001335144043,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": null
+      },
+      {
+        "name": "causal_geometry_blocks1_metric_onlyTrue",
+        "parameter_tensors": 23,
+        "updates": 16,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 1.1920928955078125e-7,
+        "update_parameter_max_abs_error": 1.8998980522155762e-7,
+        "geometry_gradient_relative_l2_max": 0.00003371658382291919,
+        "first_preupdate_ce": 5.551121711730957,
+        "last_preupdate_ce": 3.942422389984131,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": {
+          "detached_embedding_gradient_separation": 0.0018730461597442627,
+          "detached_output_max_abs_error": 5.960464477539063e-8,
+          "geometry_parameter_slots": [
+            2,
+            7
+          ],
+          "off_output_max_abs_error": 5.960464477539063e-8,
+          "off_output_separation": 0.0015886211767792702,
+          "output_contrast_relative_l2": 0.00005958418887317622,
+          "pullback_contrast_relative_l2": 4.843623340143328e-7,
+          "qk_scores_zero": true,
+          "relative_checker_negative_controls": 3
+        }
+      },
+      {
+        "name": "causal_geometry_blocks2_metric_onlyFalse",
+        "parameter_tensors": 37,
+        "updates": 16,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "parameter_vjp_max_abs_error": 4.76837158203125e-7,
+        "update_parameter_max_abs_error": 6.910413503646851e-7,
+        "geometry_gradient_relative_l2_max": 0.00011459611139561884,
+        "first_preupdate_ce": 5.523756504058838,
+        "last_preupdate_ce": 3.916003942489624,
+        "causality": {
+          "extension_max_abs_error": 0,
+          "other_document_max_abs_error": 0,
+          "prefix_max_abs_error": 0,
+          "sensitivity_control": true,
+          "suffix_gradient_zero": true
+        },
+        "tapes": {
+          "atomic_rejection": true,
+          "foreign_tape": true,
+          "good_bad_good": true,
+          "invalid_bias_preserves_tape": true,
+          "recovery": true,
+          "retained_gradients": true,
+          "retained_output": true,
+          "stale_gradient": true,
+          "superseded_tape": true
+        },
+        "metric_controls": {
+          "detached_embedding_gradient_separation": 0.006779864430427551,
+          "detached_output_max_abs_error": 5.960464477539063e-8,
+          "geometry_parameter_slots": [
+            2,
+            8
+          ],
+          "off_output_max_abs_error": 5.960464477539063e-8,
+          "off_output_separation": 0.00618666410446167,
+          "output_contrast_relative_l2": 0.00001789568297252302,
+          "pullback_contrast_relative_l2": 0.000010265235299073097,
+          "qk_scores_zero": false,
+          "relative_checker_negative_controls": 3
+        }
+      }
+    ]
+  },
+  "report_equivalence": {
+    "meaning": "Decoded JSON reports are deeply equal in all keys and values to the unchanged previous reports, not a new bitwise-all-intermediate-tensors claim.",
+    "native": {
+      "previous": "../2026-10-09-byte-causal-geometry-owner/native.json",
+      "previous_file": {
+        "bytes": 37876,
+        "sha256": "8937e52e0baac68c1dd16c4dcb451b998e38e640336ebdc3059962e433c17ea9"
+      },
+      "semantically_identical": true
+    },
+    "browser": {
+      "previous": "../2026-10-09-byte-causal-geometry-owner/browser.json",
+      "previous_file": {
+        "bytes": 37831,
+        "sha256": "913e14cd47c7e25e6bf00a5a59b5479bdcc173bbf512d1eadc6c9d2bd7c0ce7e"
+      },
+      "semantically_identical": true
+    }
+  },
+  "local_artifacts": {
+    "browser.js": {
+      "bytes": 47517,
+      "sha256": "46792dd978071f61564c1f6a65e89aaacf22e4390ca9766f56c51feeb3d5d7d2"
+    },
+    "browser.json": {
+      "bytes": 37830,
+      "sha256": "a4c6a21a6607ddb15078870c8a0321adbe3bfc819bcc38537bded58d7c3bd9a5"
+    },
+    "browser.wasm": {
+      "bytes": 10402242,
+      "sha256": "47259555e396188942b20fcf5bd75fb852117a935af84731a462d9976edc87f5"
+    },
+    "fmt.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-integration-tests": {
+      "bytes": 11266272,
+      "sha256": "feb6742926cd6a92c5e08b7afa293f96ee17afe3d957374df34b7d1cae62e74b"
+    },
+    "native-unit-tests": {
+      "bytes": 23964672,
+      "sha256": "3091c4c4967ed9a346c6628937a7b4b6561fe30853420a64c787850cf20d7e29"
+    },
+    "native.json": {
+      "bytes": 37876,
+      "sha256": "8937e52e0baac68c1dd16c4dcb451b998e38e640336ebdc3059962e433c17ea9"
+    },
+    "native.log": {
+      "bytes": 139701,
+      "sha256": "04e9c01579524dacb74ff078dc29bb632d95177eba9b5ee47e6802127296a319"
+    },
+    "residual.log": {
+      "bytes": 114841,
+      "sha256": "87dc7cdaa406267710bcda678161a87afae8760f2b342ed6e65828b9bf47ec77"
+    },
+    "wasm-build.log": {
+      "bytes": 111793,
+      "sha256": "0c753ac5db1386abf9f17392c5d145a699d1deb16ffb4818e44048cd3ec4ca4b"
+    }
+  },
+  "scope": "Synthetic full-model correctness and regression after per-pair metric head reduction; no new corpus-quality, speed, large-sequence or checkpoint/resume claim. Raw artifacts remain local and prior published evidence is unchanged."
+}

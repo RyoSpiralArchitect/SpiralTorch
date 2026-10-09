@@ -10,6 +10,9 @@ This is a bounded pilot runner, not a new public checkpoint or tokenizer API.
 The [2026-10-09 pilot record](../benchmarks/results/2026-10-09-byte-corpus-matched-learning/README.md)
 publishes every arm's scalar trajectory, the fixed acceptance criteria and
 paired seed differences. Raw initial/final weights remain local with hashes.
+The [pair-cache replay](../benchmarks/results/2026-10-09-byte-corpus-pair-cache-replay/README.md)
+reuses those exact frozen inputs after the metric optimization; both native and
+browser raw outputs remain byte-identical to their own original pilot outputs.
 
 ## What is held constant
 

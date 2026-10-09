@@ -1,0 +1,254 @@
+{
+  "schema": "spiraltorch.poincare_pair_seed_cache.evidence.v1",
+  "date_utc": "2026-10-09",
+  "status": "native_and_actual_browser_regressions_passed",
+  "source": {
+    "base_revision": "fb9f49274f96dcb2d39bb9241d1080b7d86611b8",
+    "tested_worktree_files": {
+      "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": {
+        "bytes": 12810,
+        "sha256": "e38f46516f06ae7b80f2d3d429ea7955da4159515d4b3d4996cd6c95292068b4"
+      },
+      "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": {
+        "bytes": 7626,
+        "sha256": "a68fc5cdbd6d793dff581ec079aaa705044ab878b5799374625b7850d0da25b4"
+      },
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": {
+        "bytes": 7543,
+        "sha256": "eb67b1249116219fcdbf76c4131f3f1277f7cbedd61aec6370167ba45255d07b"
+      },
+      "crates/st-backend-wgpu/tests/poincare_bias_browser.html": {
+        "bytes": 2874,
+        "sha256": "356df41de2387b7a8577003853fdb2bf8c6d2e079b3236370763b3377c118dfb"
+      },
+      "crates/st-backend-wgpu/tests/support/poincare.rs": {
+        "bytes": 15183,
+        "sha256": "38d35fd474d58decf4458df445ed1727ce76d2ccc6eabbdac31465b04d961b72"
+      },
+      "docs/poincare_metric_attention.md": {
+        "bytes": 7015,
+        "sha256": "2e7ab6ada66112b3c710c7d7aa516ea9d98c3f2ec01270d312723beb91df2980"
+      },
+      "crates/st-backend-wgpu/tests/poincare_bias.rs": {
+        "bytes": 504,
+        "sha256": "efa7a8c2070a16c83c49ae11930873bd116a9986a893775ee97f6a60e7b2729a"
+      },
+      "crates/st-backend-wgpu/examples/poincare_bias_browser.rs": {
+        "bytes": 599,
+        "sha256": "28c739459ac1de6e5cde6e834d9e10b5585676f3dd3961b24fb821bc5db08f9a"
+      },
+      "crates/st-backend-wgpu/tests/fixtures/poincare_bias_torch.json": {
+        "bytes": 62495,
+        "sha256": "eceb17d0afefdaa0b01a7389978516e87aadd72a2975b65e2ed1484730d02255"
+      },
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl": {
+        "bytes": 9353,
+        "sha256": "3a3f6672e90186dec80b0a9b27e08b2656dd7c1348c6111807c0966d5dfc6636"
+      },
+      "crates/st-backend-wgpu/src/shaders/rounded_add.wgsl": {
+        "bytes": 2602,
+        "sha256": "00ce1de2d13f5cb6360066e6c4906af03daf0192fd7945c7fdc148f740890bb2"
+      },
+      "Cargo.lock": {
+        "bytes": 119712,
+        "sha256": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4"
+      }
+    },
+    "fixture_not_regenerated": true,
+    "original_evidence": "../2026-10-09-poincare-bias/validation.json"
+  },
+  "repair": {
+    "review": "https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2253#discussion_r4229217968",
+    "before": "O(B*T^2*C*H) head/gain reductions inside the coordinate pullback",
+    "after": "One head-reduction dispatch per backward, O(B*T^2*H), then O(B*T^2*C) coordinate pullback; gain VJP remains O(B*T^2*H)",
+    "extra_dispatches": 1,
+    "extra_scratch_bytes": "16*B*T*T",
+    "storage": "Private tail of this backward's packed allocation, retained with returned gradient views",
+    "wide_precision": "Four u32 words preserve hi, lo, exponent and tail bits; no f32 contraction of the accumulated pair seed",
+    "forward_cache_mutated": false,
+    "new_storage_bindings": 0,
+    "new_host_readbacks": 0,
+    "storage_and_index_bounds_preflighted": true
+  },
+  "environment": {
+    "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "native_target": "aarch64-apple-darwin",
+    "native_adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "browser_target": "wasm32-unknown-unknown",
+    "browser_adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+    "browser_actually_executed": true,
+    "wasm_bindgen_cli": "0.2.129"
+  },
+  "criteria": {
+    "regular": {
+      "atol": 0.000003,
+      "rtol": 0.00008
+    },
+    "extended": {
+      "nonzero_required": true,
+      "relative_error_max": 0.00008
+    },
+    "unchanged_from_parent": true,
+    "performance_timing_claim": false
+  },
+  "checks": {
+    "native": {
+      "status": "passed",
+      "unit_tests": 5,
+      "integration_tests": 1,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu poincare -- --test-threads=1 --nocapture",
+      "log": "native-final-test.log",
+      "report": "native-final.json"
+    },
+    "browser": {
+      "status": "passed",
+      "command": "env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH RUSTFLAGS= cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example poincare_bias_browser",
+      "log": "wasm-final-build.log",
+      "bindgen": "wasm-bindgen target/wasm32-unknown-unknown/release/examples/poincare_bias_browser.wasm --target web --out-dir target/poincare-bias-web",
+      "page": "crates/st-backend-wgpu/tests/poincare_bias_browser.html",
+      "report": "browser-final.json"
+    },
+    "fmt": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all -- --check",
+      "log": "fmt-final.log"
+    },
+    "existing_controls": {
+      "frozen_pytorch_cases": 8,
+      "extended_range_cases": 7,
+      "near_boundary": true,
+      "causality": true,
+      "whole_family_rejections": true
+    },
+    "new_controls": {
+      "shape": [
+        2,
+        17,
+        32
+      ],
+      "heads": 8,
+      "distinct_seeds": 2,
+      "queued_before_readback": true,
+      "repeat_bitwise_equal": true,
+      "bitwise_checker_negative_controls": [
+        "positive versus negative zero",
+        "unequal lengths"
+      ],
+      "cpu_vjp_max_abs_native": 6.705522537231445e-8,
+      "cpu_vjp_max_abs_browser": 6.705522537231445e-8,
+      "packed_scratch_limit_case": {
+        "shape": [
+          1,
+          2,
+          120
+        ],
+        "heads": 2,
+        "max_storage_buffer_binding_size": 1000,
+        "old_gradient_bytes": 968,
+        "new_gradient_and_scratch_bytes": 1032,
+        "status": "rejected"
+      }
+    }
+  },
+  "review": {
+    "mode": "Independent read-only local review",
+    "p1_p2_findings": 0,
+    "p3_found_and_repaired": "Repeat-bitwise equality originally used f32 numeric equality; replaced with length-sensitive to_bits comparison and signed-zero/length negative controls.",
+    "final_repair_findings": 0,
+    "reviewer_did_not_run_builds_or_gpu": true,
+    "parent_reran_final_native_and_browser": true
+  },
+  "evidence": {
+    "public_files": {
+      "README.md": {
+        "bytes": 2391,
+        "sha256": "1c08a27f444033fef7bb7a4ff0203042e34f078eaefe9ef52f18e8f2ec9d00ee"
+      },
+      "browser.json": {
+        "bytes": 4010,
+        "sha256": "8be96cdca800b7ea0f0a134b7e4b6d45364655013be0a3ca70268515b67d890d"
+      },
+      "native.json": {
+        "bytes": 4018,
+        "sha256": "e7ca2f98efe9060dddb2e4f2263673ccf17fd06b7a30b657c6ea70e199723822"
+      }
+    },
+    "local_only_files": {
+      "browser-final.js": {
+        "bytes": 47513,
+        "sha256": "ec6bb87fbdc5d93ee0e2c5ade3f0c4a91dc5fc125bc27c5616aee3c0c5624fa1"
+      },
+      "browser-final.json": {
+        "bytes": 4009,
+        "sha256": "4dbcb57f6e08994500e4d09f03f9c5db60e9947cc695d0f11b0d915f95633c0b"
+      },
+      "browser-final.wasm": {
+        "bytes": 893233,
+        "sha256": "2fc1221d2948fdd012b98c6ab2d1d16c497c95931b40d51d8bcbe8d4d6a02444"
+      },
+      "browser.js": {
+        "bytes": 47513,
+        "sha256": "65b3ac96dfb5fc3ec0e2bee450d3582dc856437590ce4b50b332455d3fcf3b71"
+      },
+      "browser.json": {
+        "bytes": 4009,
+        "sha256": "4dbcb57f6e08994500e4d09f03f9c5db60e9947cc695d0f11b0d915f95633c0b"
+      },
+      "browser.wasm": {
+        "bytes": 893145,
+        "sha256": "54f88f2c2cab64f6f667e5449c195271f311f70cd59ae729780624edb729e704"
+      },
+      "fmt-final.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "fmt.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "native-final-integration-tests": {
+        "bytes": 6076048,
+        "sha256": "8c6d531c5c25ce3c12ac016e8ab11e42b671e5ac3175e82377662fbef3707d07"
+      },
+      "native-final-test.log": {
+        "bytes": 119144,
+        "sha256": "ecef0a9cbdee54b0086604ed82f2b66829820cb4040fffaff3c58bc82d3e3486"
+      },
+      "native-final.json": {
+        "bytes": 4018,
+        "sha256": "e7ca2f98efe9060dddb2e4f2263673ccf17fd06b7a30b657c6ea70e199723822"
+      },
+      "native-integration-tests": {
+        "bytes": 6075248,
+        "sha256": "3c624be86c2065877097d32a9efef626d83e705cdff542e0ef07b2070686d1c7"
+      },
+      "native-test.log": {
+        "bytes": 119145,
+        "sha256": "83977f1ff7e7cca9a8f1b451935578897578ce0d0378a5ba21158470a8f76369"
+      },
+      "native-unit-tests": {
+        "bytes": 10239664,
+        "sha256": "334ae1ca2b3761b74f7fb967bd68f891b568faeb7174b0e66d4957b6e4187e5e"
+      },
+      "native.json": {
+        "bytes": 4018,
+        "sha256": "e7ca2f98efe9060dddb2e4f2263673ccf17fd06b7a30b657c6ea70e199723822"
+      },
+      "wasm-build.log": {
+        "bytes": 110967,
+        "sha256": "1556c4b795d17e679100b1e45fe781bed979800c71c661b97b09e5548077b21c"
+      },
+      "wasm-final-build.log": {
+        "bytes": 110967,
+        "sha256": "a8da7d3ce0ca8ec3adbd2fa103fea90799ab3b8376afb51a6cc683a0a6c89364"
+      }
+    },
+    "policy": "Retain logs and tested binaries locally; publish results, source/artifact hashes and reproduction. Historical pre-review raw reports are retained but only the final reports qualify the bitwise-repeat claim."
+  },
+  "limits": [
+    "No paired timing benchmark, speedup ratio or large-sequence watchdog qualification.",
+    "Forward still materializes 64 bytes per batch/query/key pair; backward adds 16 bytes per pair. This is not streaming attention.",
+    "One extra dispatch can cost more on tiny shapes; removal of redundant arithmetic is not a measured universal speed improvement.",
+    "Full byte-model and corpus records from the dependent branch were measured on their pinned earlier source, not retroactively relabelled as this kernel."
+  ]
+}

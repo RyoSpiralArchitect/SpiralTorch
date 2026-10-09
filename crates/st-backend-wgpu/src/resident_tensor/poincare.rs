@@ -60,6 +60,7 @@ pub(super) struct PoincareKernels {
     layout: wgpu::BindGroupLayout,
     pairs: wgpu::ComputePipeline,
     scores: wgpu::ComputePipeline,
+    pair_seeds: wgpu::ComputePipeline,
     coordinates_vjp: wgpu::ComputePipeline,
     gain_vjp: wgpu::ComputePipeline,
 }
@@ -108,6 +109,7 @@ impl PoincareKernels {
         Self {
             pairs: pipeline("prepare_pairs"),
             scores: pipeline("scores"),
+            pair_seeds: pipeline("prepare_pair_seeds"),
             coordinates_vjp: pipeline("coordinates_vjp"),
             gain_vjp: pipeline("gain_vjp"),
             layout,
@@ -130,6 +132,7 @@ fn sizes(spec: PoincareBiasSpec, limits: &wgpu::Limits) -> Result<(usize, usize)
     let gradients = spec
         .coordinates_len()
         .checked_add(spec.heads())
+        .and_then(|len| spec.pairs_len().checked_mul(4)?.checked_add(len))
         .ok_or(PoincareError::Overflow)?;
     for count in [cache, gradients, spec.scores_len()] {
         storage_limit(count, limits)?;
@@ -340,6 +343,17 @@ impl ResidentPoincareBiasForward {
             packed.values(),
             packed.flags(),
         ];
+        // The private tail belongs to this backward, never to the retained
+        // forward cache. Reduce heads once per pair without host readback.
+        dispatch(
+            device,
+            &mut encoder,
+            kernels,
+            &kernels.pair_seeds,
+            &buffers,
+            p,
+            s.pairs_len(),
+        )?;
         dispatch(
             device,
             &mut encoder,

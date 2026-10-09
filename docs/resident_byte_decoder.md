@@ -205,6 +205,10 @@ extend that original record with the integrated encoder, detached/off controls
 and per-update geometry-gradient comparisons. Historical primitive/model records
 remain unchanged and do not retroactively claim this integration.
 
+The [pair-cache integration regression](../benchmarks/results/2026-10-09-byte-causal-geometry-owner-pair-cache/README.md)
+reruns those full-model controls after the metric's head-reduction optimization;
+native and actual browser reports preserve every prior validation result.
+
 For data-driven training outside the synthetic fixtures, see the
 [paired corpus learning runner](byte_corpus_learning.md). It uses this same
 Rust model on native and browser WGPU, with document-held-out evaluation and

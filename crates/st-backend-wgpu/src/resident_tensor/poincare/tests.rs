@@ -13,7 +13,17 @@ fn shader_and_preflight_validate_without_optional_features() {
     .validate(&module)
     .unwrap();
     let s = PoincareBiasSpec::new([2, 7, 3], 2, -1.).unwrap();
-    assert_eq!(sizes(s, &wgpu::Limits::default()).unwrap(), (1568, 44));
+    assert_eq!(sizes(s, &wgpu::Limits::default()).unwrap(), (1568, 436));
+    // This shape is limited by packed gradients, not the forward pair cache.
+    let wide = PoincareBiasSpec::new([1, 2, 120], 2, -1.).unwrap();
+    assert!(sizes(
+        wide,
+        &wgpu::Limits {
+            max_storage_buffer_binding_size: 1000,
+            ..Default::default()
+        }
+    )
+    .is_err());
     for limits in [
         wgpu::Limits {
             max_storage_buffers_per_shader_stage: 5,
