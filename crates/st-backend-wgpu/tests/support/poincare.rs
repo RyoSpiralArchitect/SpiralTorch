@@ -264,6 +264,69 @@ async fn causality_and_guards(d: &TensorDevice) -> Result<Value> {
     )
 }
 
+fn same_bits(a: &[f32], b: &[f32]) -> bool {
+    a.iter()
+        .map(|v| v.to_bits())
+        .eq(b.iter().map(|v| v.to_bits()))
+}
+
+async fn reused_pair_scales(d: &TensorDevice) -> Result<Value> {
+    if same_bits(&[0.0], &[-0.0]) || same_bits(&[1.0], &[]) {
+        return Err("bitwise repeatability checker accepted unequal representations".into());
+    }
+    let shape = [2, 17, 32];
+    let heads = 8;
+    let spec = PoincareBiasSpec::new(shape, heads, -0.75)?;
+    let x: Vec<_> = (0..spec.coordinates_len())
+        .map(|i| ((i * 7 % 29) as f32 - 14.) * 0.003)
+        .collect();
+    let gains: Vec<_> = (0..heads).map(|h| h as f32 * 0.3 - 0.9).collect();
+    let first: Vec<_> = (0..spec.scores_len())
+        .map(|i| ((i * 11 % 23) as f32 - 11.) * 0.007)
+        .collect();
+    let second: Vec<_> = (0..spec.scores_len())
+        .map(|i| ((i * 13 % 19) as f32 - 9.) * -0.004)
+        .collect();
+    let cpu = PoincareBiasForward::new(spec, &x, &gains)?;
+    let f = strided(d, &shape, &x)?.causal_poincare_bias(&strided(d, &[heads], &gains)?, -0.75)?;
+    // Queue different backwards before observing either result. The second
+    // pair-scale preparation must not overwrite the first output or tape.
+    let a = f.backward(&strided(d, &spec.score_shape(), &first)?)?;
+    let b = f.backward(&strided(d, &spec.score_shape(), &second)?)?;
+    let mut error = 0f64;
+    for (got, seed) in [(&a, &first), (&b, &second)] {
+        let want = cpu.backward(seed)?;
+        error = error
+            .max(close(
+                &read(got.coordinates()).await?,
+                &want.coordinates,
+                "wide coordinate VJP",
+            )?)
+            .max(close(
+                &read(got.raw_gain()).await?,
+                &want.raw_gain,
+                "wide gain VJP",
+            )?);
+    }
+    let repeated = f.backward(&strided(d, &spec.score_shape(), &first)?)?;
+    if !same_bits(
+        &read(repeated.coordinates()).await?,
+        &read(a.coordinates()).await?,
+    ) || !same_bits(
+        &read(repeated.raw_gain()).await?,
+        &read(a.raw_gain()).await?,
+    ) {
+        return Err("repeated backward changed a retained pair-scale result".into());
+    }
+    close(
+        &read(f.scores()).await?,
+        cpu.scores(),
+        "retained wide scores",
+    )?;
+    Ok(json!({"shape":shape,"heads":heads,"distinct_seeds":2,
+        "retained_results":true,"repeat_bitwise_equal":true,"cpu_vjp_max_abs":error}))
+}
+
 pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     let adapter = format!("{:?}", runtime.adapter_info());
     let d = TensorDevice::new(runtime)?;
@@ -320,7 +383,8 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     }
     let analytic = analytic(&d).await?;
     let guards = causality_and_guards(&d).await?;
+    let pair_scales = reused_pair_scales(&d).await?;
     Ok(
-        json!({"schema":"spiraltorch.poincare_bias.validation.v1","adapter":adapter,"passed":true,"checks":checks,"analytic":analytic,"guards":guards,"scope":"Metric primitive correctness, not full-model learning, language quality or throughput"}),
+        json!({"schema":"spiraltorch.poincare_bias.validation.v1","adapter":adapter,"passed":true,"checks":checks,"analytic":analytic,"guards":guards,"pair_scales":pair_scales,"scope":"Metric primitive correctness, not full-model learning, language quality or throughput"}),
     )
 }

@@ -11,7 +11,9 @@ struct Params {
 // Four extended values per pair: squared distance, base and two radial factors.
 @group(0) @binding(2) var<storage,read_write> cache:array<Wide>;
 @group(0) @binding(3) var<storage,read> cotangent:array<f32>;
-@group(0) @binding(4) var<storage,read_write> output:array<f32>;
+// Float outputs followed, in backward only, by one Wide scale per pair.
+// Integer storage preserves the Wide exponent bits without a float roundtrip.
+@group(0) @binding(4) var<storage,read_write> output:array<u32>;
 @group(0) @binding(5) var<storage,read_write> flags:array<atomic<u32>>;
 @group(0) @binding(6) var<uniform> p:Params;
 fn checked(x:f32)->f32 {
@@ -97,7 +99,7 @@ fn scores(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) la
     let id=invocation(w,lane);if(id>=p.scores) { return; }
     let pair=id%(p.steps*p.steps);let h=(id/(p.steps*p.steps))%p.heads;
     let b=id/(p.heads*p.steps*p.steps);let g=gain(h);
-    output[id]=checked(wide_float(wide_neg(wide_mul(g.value,cache[4u*(b*p.steps*p.steps+pair)]))));
+    output[id]=bitcast<u32>(checked(wide_float(wide_neg(wide_mul(g.value,cache[4u*(b*p.steps*p.steps+pair)])))));
 }
 fn pair_seed(b:u32,q:u32,k:u32)->Wide {
     var scale=parts(0.0);
@@ -106,6 +108,23 @@ fn pair_seed(b:u32,q:u32,k:u32)->Wide {
         scale=wide_sub(scale,wide_mul(gain(h).value,seed));
     }
     return scale;
+}
+@compute @workgroup_size(256)
+fn prepare_pair_seeds(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
+    let id=invocation(w,lane);if(id>=p.pairs) { return; }
+    let k=id%p.steps;let q=(id/p.steps)%p.steps;let b=id/(p.steps*p.steps);
+    var scale=parts(0.0);
+    if(k<=q) { scale=pair_seed(b,q,k); }
+    let offset=p.coordinates+p.heads+4u*id;
+    output[offset]=bitcast<u32>(scale.hi);
+    output[offset+1u]=bitcast<u32>(scale.lo);
+    output[offset+2u]=bitcast<u32>(scale.exponent);
+    output[offset+3u]=bitcast<u32>(scale.tail);
+}
+fn pair_scale(pair:u32)->Wide {
+    let offset=p.coordinates+p.heads+4u*pair;
+    return Wide(bitcast<f32>(output[offset]),bitcast<f32>(output[offset+1u]),
+        bitcast<i32>(output[offset+2u]),bitcast<f32>(output[offset+3u]));
 }
 @compute @workgroup_size(256)
 fn coordinates_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
@@ -117,9 +136,9 @@ fn coordinates_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_
         let y=coordinate(b*p.steps+k,i);
         let radial=select(3u,2u,k<=t);
         let derivative=wide_add(wide_mul(cache[offset+1u],wide_sub(x,y)),wide_mul(cache[offset+radial],x));
-        gradient=wide_add(gradient,wide_mul(pair_seed(b,q,key),derivative));
+        gradient=wide_add(gradient,wide_mul(pair_scale(offset/4u),derivative));
     }
-    output[id]=checked(wide_float(gradient));
+    output[id]=bitcast<u32>(checked(wide_float(gradient)));
 }
 @compute @workgroup_size(256)
 fn gain_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
@@ -134,5 +153,5 @@ fn gain_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) 
             }
         }
     }
-    output[p.coordinates+h]=checked(wide_float(gradient));
+    output[p.coordinates+h]=bitcast<u32>(checked(wide_float(gradient)));
 }

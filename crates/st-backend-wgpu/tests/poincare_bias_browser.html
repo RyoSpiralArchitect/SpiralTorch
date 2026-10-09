@@ -24,7 +24,10 @@ try {
       || report.guards.suffix_sensitive !== true || report.guards.guarded_operands !== 3
       || report.guards.outside_ball_rejections !== 2 || report.guards.retained !== true
       || report.guards.good_bad_good !== true || report.guards.late_gradient_whole_family !== true
-      || report.guards.atomic_rejections !== 2 || report.guards.rejection_negative_controls !== 4) throw Error("Incomplete metric validation");
+      || report.guards.atomic_rejections !== 2 || report.guards.rejection_negative_controls !== 4
+      || JSON.stringify(report.pair_scales.shape) !== "[2,17,32]" || report.pair_scales.heads !== 8
+      || report.pair_scales.distinct_seeds !== 2 || report.pair_scales.retained_results !== true
+      || report.pair_scales.repeat_bitwise_equal !== true || !finite(report.pair_scales.cpu_vjp_max_abs)) throw Error("Incomplete metric validation");
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
   document.querySelector("#summary").textContent = "Passed: eight PyTorch cases, both endpoint/gain VJPs, near-boundary and extended-range controls, causality and failure isolation. Metric primitive only, not full-model learning, language quality or throughput.";
