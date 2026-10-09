@@ -40,6 +40,13 @@ These are two correctness recipes, **not** a matched Topos quality ablation:
 their initialization draws differ. No throughput, language-quality, full-model
 training or CPU/MPS/CUDA performance equivalence is claimed.
 
+An [additional integration check](integration-validation.json) compiled the
+existing default Python extension and the WASM `webgpu` binding against the
+committed Rust change. This is build compatibility, not a new wheel/runtime test.
+Offline inspection of the frozen Topos recipe finds a maximum gate change of
+`0.00345635` after 32 updates; the recorded native and browser final gate errors
+are both zero. The gate is active in this recipe, without implying quality gains.
+
 ## Regressions and Review
 
 - Full `st-nn` library: 874 passed; existing attention integrations: 2 passed;

@@ -1,0 +1,44 @@
+{
+  "schema": "spiraltorch.residual_attention.integration_validation.v1",
+  "date_utc": "2026-10-09",
+  "source_commit": "279abf2930dcbebd0fa9f6a5ca29aab94cbf9079",
+  "source_modified_before_checks": false,
+  "checks": [
+    {
+      "lane": "python_default_wgpu",
+      "command": "cargo check --locked --manifest-path bindings/st-py/Cargo.toml",
+      "exit_code": 0,
+      "elapsed_seconds": 37.1,
+      "scope": "Compile integration only; no wheel rebuild or new Python runtime validation"
+    },
+    {
+      "lane": "wasm_webgpu",
+      "command": "cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib",
+      "exit_code": 0,
+      "elapsed_seconds": 15.71,
+      "environment": "Host linker flags cleared for wasm32",
+      "scope": "Compile integration only; no public residual wrapper added"
+    }
+  ],
+  "frozen_reference_sensitivity": {
+    "fixture": "crates/st-nn/tests/fixtures/residual_attention_torch.json",
+    "sha256": "2dfec722e484bdbd840fb0000096765ac1b1dbdb7cefa544af053e144016d3f3",
+    "recipe": "training entry with topos=true",
+    "packed_gate_index": 10,
+    "gate_elements": 7,
+    "initial_arbitrary_cotangent_gate_vjp_max_abs": 0.036121584475040436,
+    "gate_max_abs_change_after_32_updates": 0.0034563541412353516,
+    "gate_l2_change_after_32_updates": 0.004166778392043504,
+    "recorded_native_final_gate_max_abs_error": 0,
+    "recorded_browser_final_gate_max_abs_error": 0,
+    "source_results": [
+      "native.json",
+      "browser.json"
+    ],
+    "interpretation": "Offline sensitivity of frozen correctness recipe, supported by recorded final gate agreement; not a new run or matched quality ablation"
+  },
+  "private_log_sha256": {
+    "python-integration-check.log": "c53d92494d6ff452ae884e5f7d93739b744f67652871cf100d15f1d1128c0a88",
+    "wasm-integration-check.log": "717911105dacd3a519bb6bb1e6f770009114200fa1037852ad9c9751fb5de202"
+  }
+}
