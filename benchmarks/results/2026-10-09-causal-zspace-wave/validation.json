@@ -1,0 +1,355 @@
+{
+  "schema": "spiraltorch.causal_zspace_wave.evidence.v1",
+  "date_utc": "2026-10-09",
+  "status": "native_and_browser_correctness_passed",
+  "scope": "causal state/chart primitive correctness and parameter learning; not full decoder streaming, geometric attention or language quality",
+  "source": {
+    "base_revision": "ab1109f5d02b25734f2411811b155a43abdb1ead",
+    "kind": "Tested worktree hashes relative to parent commit; includes reused Wide arithmetic; excludes unrelated human-deleted archives and this manifest",
+    "sha256": {
+      "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+      ".github/workflows/ci.yml": "9f079780135ba9589292a4abbf26f4d0304ad522ceaa5a0be33773005f92d9c5",
+      "crates/st-backend-wgpu/Cargo.toml": "0adc6e742e6b998841e69693c4f1e0000c5b35bac70c3c9fce21061073df070f",
+      "crates/st-kernel-contracts/src/lib.rs": "af8dc6df8eaedf8730e612aaa744a260997ff33cc3415a05d5c09cea20722f70",
+      "crates/st-kernel-contracts/src/causal_wave.rs": "b4d5cbbd11c45a260c85bbd06bf523345ea36635c431eb529bc4a47cdb4d3c77",
+      "crates/st-kernel-contracts/src/causal_wave/tests.rs": "02192ff06955bcb22d4af46d416eb735c03d3565c896fbb1c2bdf232b2b06c89",
+      "crates/st-backend-wgpu/src/resident_tensor.rs": "a1157eda1cf87c1def12d4a0610125b880bf0691f762af2204bc746a86807b08",
+      "crates/st-backend-wgpu/src/resident_tensor/causal_wave.rs": "67a6d32f452b9646481711903200509e002fd16f9b2d8d2130f4381e19cae3d9",
+      "crates/st-backend-wgpu/src/resident_tensor/causal_wave/tests.rs": "0c8c34663a17cfaa3f3e465432e78a8c948ec79616c1d1cd2fb31c63a239cf9e",
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/causal_wave.wgsl": "9e5a627d98a64feb298b1ccbf0d7db608c7589204faab552d7a50f6de7217f97",
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/causal_wave_backward.wgsl": "5cd61b9b3a62d7a0e2fca010550b29f1da4c4c5593def42df22285b08fd3630f",
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/causal_wave_common.wgsl": "8768bdf039bb419058a0efcf94e41daada9314126261e1feb1bc7ff6e20ce1a3",
+      "crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl": "3a3f6672e90186dec80b0a9b27e08b2656dd7c1348c6111807c0966d5dfc6636",
+      "crates/st-backend-wgpu/src/shaders/rounded_add.wgsl": "00ce1de2d13f5cb6360066e6c4906af03daf0192fd7945c7fdc148f740890bb2",
+      "crates/st-backend-wgpu/examples/causal_zspace_wave_browser.rs": "b6a143d2e855d277ac80f7edcf6f6dcced4e22d1e14e81807692fd3bd28375b3",
+      "crates/st-backend-wgpu/tests/causal_zspace_wave.rs": "b2beb5f908e17f8f60579ce7a1e1406683e9b9f1867d58d8fd399e038238c22b",
+      "crates/st-backend-wgpu/tests/causal_zspace_wave_browser.html": "dd95589287ffe7e20437e3d501a038779fb7ef94cc6dda43de8440e4aaaf462a",
+      "crates/st-backend-wgpu/tests/support/causal_wave.rs": "3b48839b3ef083b91ae4cd6ffb440ea82a5a6b021bf9650bce2b68e5836b2640",
+      "crates/st-backend-wgpu/tests/fixtures/causal_zspace_wave_torch.json": "6d999fa45310ada0514624a003712c699f5d81418b947e8722013cd038ece721",
+      "tools/generate_causal_zspace_wave_torch_fixture.py": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa",
+      "docs/causal_zspace_wave.md": "6c1e80c0395c40e68b68ae265bb544eda5caf02e853a4111f6a180dcd5833eca",
+      "docs/ecosystem_roadmap.md": "43637414c2f93d7263dc2f40666f79b4c1fc651e3f5cf0b2163a84ae8954fd44"
+    }
+  },
+  "environment": {
+    "native": {
+      "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "aarch64-apple-darwin",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }"
+    },
+    "browser": {
+      "target": "wasm32-unknown-unknown",
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "wasm_bindgen_cli": "0.2.129"
+    },
+    "reference": {
+      "framework": "PyTorch",
+      "version": "2.12.1",
+      "device": "cpu",
+      "dtype": "float32",
+      "threads": 1,
+      "deterministic": true,
+      "imports_spiraltorch": false
+    }
+  },
+  "criteria": {
+    "absolute_tolerance": 0.000003,
+    "relative_tolerance": 0.00008,
+    "frozen_fixture_sha256": "6d999fa45310ada0514624a003712c699f5d81418b947e8722013cd038ece721",
+    "fixture_unchanged": true,
+    "numeric_tolerances_unchanged": true,
+    "torch_cases": 10,
+    "outputs_per_case": 2,
+    "vjps_per_case": 4,
+    "all_inputs_and_cotangents_strided": true,
+    "f64_analytic_cases": 9,
+    "one_ulp_controls": 2,
+    "large_exponent_requires_nonzero_and_relative_gate": true,
+    "sgd_updates": 16,
+    "observation_after_all_updates": true
+  },
+  "summary": {
+    "native": {
+      "forward_max_abs": 4.76837158203125e-7,
+      "vjp_max_abs": 0.0000015497207641601562,
+      "parameter_gradient_max_abs": 1.1920928955078125e-7,
+      "first_preupdate_mse": 0.0654248520731926,
+      "sixteenth_preupdate_mse": 0.0050896694883704185
+    },
+    "browser": {
+      "forward_max_abs": 4.76837158203125e-7,
+      "vjp_max_abs": 0.0000015497207641601562,
+      "parameter_gradient_max_abs": 1.1920928955078125e-7,
+      "first_preupdate_mse": 0.0654248520731926,
+      "sixteenth_preupdate_mse": 0.005089669721201062
+    }
+  },
+  "checks": {
+    "cpu_contracts": {
+      "status": "passed",
+      "tests": 62,
+      "command": "cargo test --locked -p st-kernel-contracts"
+    },
+    "resident_tensor_regression": {
+      "status": "passed",
+      "tests": 100,
+      "ignored": 1,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1"
+    },
+    "native_wave": {
+      "status": "passed",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu --test causal_zspace_wave -- --nocapture --test-threads=1",
+      "report": "native.json"
+    },
+    "browser_wave": {
+      "status": "passed",
+      "build": "cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example causal_zspace_wave_browser",
+      "page": "crates/st-backend-wgpu/tests/causal_zspace_wave_browser.html",
+      "report": "browser.json",
+      "built_with_empty_RUSTFLAGS": true,
+      "environment_unset": [
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_RUSTFLAGS",
+        "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+        "LIBRARY_PATH",
+        "PKG_CONFIG_PATH"
+      ],
+      "actually_executed": true
+    },
+    "byte_and_residual_regression": {
+      "status": "passed",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_byte_decoder --test resident_residual_attention -- --test-threads=1"
+    },
+    "strict_scoped_clippy": {
+      "status": "passed",
+      "toolchain": "1.99.0",
+      "command": "CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 cargo +1.99.0 clippy --locked -p st-kernel-contracts -p st-backend-wgpu --all-targets --no-deps -- -D warnings",
+      "scope": "These two crates only, dependencies excluded; not a whole-workspace lint claim",
+      "older_toolchain": "Initial local 1.97 backend lint stopped on seven pre-existing unknown chunks_exact_to_as_chunks lint attributes. No allowances or unrelated fixes added."
+    },
+    "formatting": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all -- --check"
+    },
+    "diff_whitespace": {
+      "status": "passed",
+      "command": "git diff --check"
+    }
+  },
+  "review": {
+    "type": "Independent read-only local source review",
+    "addressed": [
+      "Global cotangent scaling erased small recoverable components",
+      "Narrowing chart components before rotation contraction invented a phase derivative"
+    ],
+    "final_review": "No remaining actionable findings in bounded source scope",
+    "runtime_checks_by": "Parent agent"
+  },
+  "rejected_candidates": [
+    {
+      "log": "native-initial.log",
+      "reason": "Symmetric changed-cotangent sensitivity control was inert; changed to asymmetric seed"
+    },
+    {
+      "log": "radial-before-fix.log",
+      "reason": "Direct chart VJP subtraction erased radial derivative"
+    },
+    {
+      "log": "native-radial-controls.log",
+      "reason": "Analytic test needed explicit float types; compile failure"
+    },
+    {
+      "log": "wasm-radial-build.log",
+      "reason": "Same analytic test compile failure"
+    },
+    {
+      "log": "extended-before-fix.log",
+      "reason": "Compensated f32 candidate invented nonzero oblique phase gradient; replaced by extended adjoints through BPTT"
+    }
+  ],
+  "private_records": [
+    {
+      "name": "backend-clippy-1.99.log",
+      "bytes": 118587,
+      "sha256": "5a472519e5694311bb4d87e476a05e930c7010e2dc73d9fe6dd2a45296369bd1"
+    },
+    {
+      "name": "backend-clippy.log",
+      "bytes": 116270,
+      "sha256": "ca65695841fc11255f01a48ade5105ee0cedb59dabd5c4e7241199dbbdfe0f07"
+    },
+    {
+      "name": "browser-extended.json",
+      "bytes": 10602,
+      "sha256": "8cef10e9d3e6adfdccad1c0c5c8ce2cc9d2b701206e0f2aa3e022f578c93571c"
+    },
+    {
+      "name": "browser-final.json",
+      "bytes": 10602,
+      "sha256": "8cef10e9d3e6adfdccad1c0c5c8ce2cc9d2b701206e0f2aa3e022f578c93571c"
+    },
+    {
+      "name": "browser-initial.json",
+      "bytes": 8864,
+      "sha256": "7d7691c58f394b4502a4d673bb64cceda88c171b9bcf3afd3b48a6ca7b0bdd84"
+    },
+    {
+      "name": "browser-radial.json",
+      "bytes": 10297,
+      "sha256": "472c09caa122384285f2c0b8b7be2d6a18b5e2749994142b592374b990776044"
+    },
+    {
+      "name": "byte-residual-final.log",
+      "bytes": 115722,
+      "sha256": "1399e935b14f7d1261b7fd0c565838130dc74c06bb8bf51cde94879c7e981880"
+    },
+    {
+      "name": "byte-residual-regression.log",
+      "bytes": 115722,
+      "sha256": "6716b2b89dd1febfad242ecb2b25d4b04ffb1c40e9f6ddfa48594b3403d3f538"
+    },
+    {
+      "name": "causal_zspace_wave_browser.js",
+      "bytes": 47538,
+      "sha256": "9fad7cc05595d13a26e4e13425640bfe257abf7f06437ed1c11f1143b1bff357"
+    },
+    {
+      "name": "causal_zspace_wave_browser_bg.wasm",
+      "bytes": 1030266,
+      "sha256": "eb5b16a6ac6fe6011a52268efdc506975bfdb276c25c2862ade3cc44acd6fda7"
+    },
+    {
+      "name": "clippy-extended-1.99.log",
+      "bytes": 116461,
+      "sha256": "9905c31f2daedd8e5b61bd34fd79de7bcc9a99babba2580dec3041d5f5798c19"
+    },
+    {
+      "name": "clippy-final-1.99.log",
+      "bytes": 116462,
+      "sha256": "50ee2505decfa663e86129368b3af4a32817d2139fc18bc32b5692ff1c0f54e9"
+    },
+    {
+      "name": "contract-clippy.log",
+      "bytes": 264,
+      "sha256": "9ed8cd1a599a00ab2e971d1cc360e4b9e900e96b6b4697ac32a06e4a8bb6e547"
+    },
+    {
+      "name": "contract-extended.log",
+      "bytes": 5774,
+      "sha256": "5de57c524d73a436a08a6294b0c42f2ba00e0001ec2107265f119bdb757b938c"
+    },
+    {
+      "name": "contract-final.log",
+      "bytes": 5871,
+      "sha256": "4a2616246bf92a861d1a5f5eb6f63200f54ee4ca8295c5dd58221c45b4eb810d"
+    },
+    {
+      "name": "contract-initial.log",
+      "bytes": 882,
+      "sha256": "6b23f25d612bf86b30205d03b751c012c5e28b651c660a9eb0426d9f50bc98e9"
+    },
+    {
+      "name": "extended-before-fix.log",
+      "bytes": 114909,
+      "sha256": "4ed98f75a18b4f06a8eff55b9f76804b8c6dc6e5908dfb2e444ff7e0584dc3ab"
+    },
+    {
+      "name": "gpu-initial.log",
+      "bytes": 114950,
+      "sha256": "f6ccadeada51539ea0506404820de5e7199a938be697599c0cc798834e679d46"
+    },
+    {
+      "name": "gpu-radial-first-fix.log",
+      "bytes": 116056,
+      "sha256": "ba7a77e47916e930e2510291c82d9cc3720809cbfb5ffecdfb989b4004baa7c1"
+    },
+    {
+      "name": "native-asymmetric-control.log",
+      "bytes": 121120,
+      "sha256": "a6829d8038d1f49f44f728e276740b799f19e9ea9c8769ca3145a702eab79961"
+    },
+    {
+      "name": "native-extended.log",
+      "bytes": 123980,
+      "sha256": "186fc095ba41af09bb9e26e7add6802347293619319c8a6bd778d26877b2aea2"
+    },
+    {
+      "name": "native-final.log",
+      "bytes": 122349,
+      "sha256": "9020eab0b0fd9a95ce93978ff904ad6a48f9ad86f97e3638b8b23e200038f326"
+    },
+    {
+      "name": "native-initial.log",
+      "bytes": 114887,
+      "sha256": "c4b619bae3d25d15bda5b6be3bf56cdc89e9c9fd6f952f0bd9898fe719150d68"
+    },
+    {
+      "name": "native-probe-final",
+      "bytes": 6169664,
+      "sha256": "4b34bfc3169494d4307cdf718181e3b35c575b605f9987c9ffa553dc0196b550"
+    },
+    {
+      "name": "native-radial-controls-typed.log",
+      "bytes": 122145,
+      "sha256": "f49c85a4ff8911e2834840ba57991789b40d480cfad6097011d3bb361edd80d1"
+    },
+    {
+      "name": "native-radial-controls.log",
+      "bytes": 114425,
+      "sha256": "3324a4669e441d349c79ee864489ac0d916ffd5d2a9c28cc698bbbee5b13ee4e"
+    },
+    {
+      "name": "radial-before-fix.log",
+      "bytes": 979,
+      "sha256": "469eee0f75809c99f64d8a691e3ad91d3e28a966c36b326f6451acfa629881e8"
+    },
+    {
+      "name": "radial-first-fix.log",
+      "bytes": 959,
+      "sha256": "7e6f95243907f678b0f1feb52f95d0a5fc63b3fc00b184437999892f9460d9a9"
+    },
+    {
+      "name": "resident-tensor-final.log",
+      "bytes": 125400,
+      "sha256": "dd368946d1f523892e366f5fc5d94a68d46f0d75fa2d1bdae5be118e235d87da"
+    },
+    {
+      "name": "resident-tensor-regression.log",
+      "bytes": 125085,
+      "sha256": "d96a4201fe4975684c47dd16cbdc34fa9aa51895fda55a860c868ebb8a65e3c5"
+    },
+    {
+      "name": "wasm-build.log",
+      "bytes": 111128,
+      "sha256": "fb97086e83a7e742d981f103d820716db9f36757235d633aba90a95dc1fa4af8"
+    },
+    {
+      "name": "wasm-extended.log",
+      "bytes": 111128,
+      "sha256": "8c261e7f119f6c287041a8756f725fa93c1947d7b360bb65e82bbd7cdf2e844e"
+    },
+    {
+      "name": "wasm-final.log",
+      "bytes": 111128,
+      "sha256": "7db9ff161f50909d7ed5ad5491166d6511ef517a0ac2940ff71d1e97e7fe1a28"
+    },
+    {
+      "name": "wasm-radial-build-typed.log",
+      "bytes": 110967,
+      "sha256": "7d8253117d1723e5d543f1a2d8eaf332763534b0ba76c5b329781da85cb3e332"
+    },
+    {
+      "name": "wasm-radial-build.log",
+      "bytes": 111505,
+      "sha256": "4e3863e7684f62f55bf11f93b5dfb422549f0286b3de441f295ea3244b5cc0e4"
+    }
+  ],
+  "limitations": [
+    "Not geometric Attention or next-byte full-model training",
+    "No public Python or JavaScript primitive facade",
+    "No full decoder KV cache or streaming contract",
+    "CPU f64 and GPU extended-significand/exponent adjoints are not arbitrary precision",
+    "Public gradients and chunk seams remain f32; equivalence is tolerance-bounded",
+    "No language quality or throughput comparison; synthetic MSE is not a learning-quality result"
+  ]
+}

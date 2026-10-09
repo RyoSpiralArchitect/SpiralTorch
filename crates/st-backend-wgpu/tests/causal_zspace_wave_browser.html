@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Causal Z-Space wave learning</title>
+<h1>Causal Z-Space wave learning</h1>
+<p id="summary">Running the frozen Rust/WebGPU checks...</p>
+<a id="download" hidden>Download verification result</a>
+<pre id="result" data-status="running">Checking the causal state and chart primitive...</pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_causal_zspace_wave_checks} = await import("/target/causal-zspace-wave-web/causal_zspace_wave_browser.js");
+  await init();
+  const report = JSON.parse(await run_causal_zspace_wave_checks());
+  const finite = value => Number.isFinite(value) && value >= 0;
+  const errors = ["features", "final_state", "drive_vjp", "raw_decay_vjp", "raw_phase_vjp", "initial_state_vjp"];
+  const g = report.guards;
+  const s = report.streaming;
+  const radialNames = ["axis", "diagonal", "oblique", "oblique_up", "oblique_down", "oblique_negative", "large_exponent", "oblique_phase", "mixed_exponents"];
+  if (report.schema !== "spiraltorch.causal_zspace_wave.validation.v1"
+      || report.passed !== true || report.checks.length !== 10
+      || report.checks.some((check, i) => check.name !== `case${i}_${i === 0 ? "features" : i === 1 ? "terminal" : "both"}`
+        || check.logical_shapes !== true || check.all_inputs_and_cotangents_strided !== true
+        || !finite(check.cpu_max_abs_error) || Object.keys(check.errors).length !== errors.length
+        || errors.some(key => !finite(check.errors[key])))
+      || ![s.feature_max_abs_error, s.state_max_abs_error, s.vjp_max_abs_error, s.prefix_max_abs_error].every(finite)
+      || s.future_gradient_zero !== true || s.sensitivity_control !== true || s.retained_output !== true
+      || g.forward_operand_guards !== 4 || g.cotangent_guards !== 2
+      || g.atomic_rejections !== 2 || g.rejection_negative_controls !== 4
+      || g.good_bad_good !== true || g.retained_gradients !== true
+      || g.late_reduction_whole_family !== true || g.large_state_chart !== true
+      || report.radial.f64_analytic_reference !== true || report.radial.one_ulp_controls !== 2
+      || report.radial.large_exponent_nonzero !== true || report.radial.cases.length !== 9
+      || report.radial.cases.some((check, i) => check.name !== radialNames[i]
+        || check.all_four_vjps !== true || !finite(check.cpu_and_gpu_max_abs_error)
+        || !Number.isFinite(check.expected_phase_gradient))
+      || report.learning.steps !== 16 || report.learning.trace.length !== 16
+      || report.learning.observation_after_all_updates !== true
+      || report.learning.trace.some((step, i) => step.revision !== i + 1
+        || !finite(step.feature_loss) || !finite(step.terminal_loss)
+        || !finite(step.parameter_and_gradient_max_abs_error))) {
+    throw Error("Incomplete causal wave verification");
+  }
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  document.querySelector("#summary").textContent = "Passed: 10 PyTorch cases, 9 large-state analytic controls, all four VJPs, chunked BPTT, failure isolation, and 16 resident updates. State/chart primitive only: not geometric Attention, full decoder streaming, language quality, or speed.";
+  const download = document.querySelector("#download");
+  download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
+  download.download = "causal-zspace-wave.json";
+  download.hidden = false;
+} catch (error) {
+  result.textContent = JSON.stringify({passed:false, error:String(error.stack || error)});
+  result.dataset.status = "error";
+  document.querySelector("#summary").textContent = "Verification failed. See the diagnostic below.";
+}
+</script>
