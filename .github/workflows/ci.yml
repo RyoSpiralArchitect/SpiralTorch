@@ -277,6 +277,7 @@ jobs:
           cargo test --locked --release -p st-backend-wgpu resident_training -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu --test resident_attention_vjp -- --test-threads=1
+          cargo test --locked --release -p st-backend-wgpu --test resident_embedding -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_graph:: -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward --test resident_attention_chain --test resident_attention_training --test resident_residual_attention -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::attention::training -- --test-threads=1
@@ -420,6 +421,7 @@ jobs:
           echo "$RUNNER_TEMP/typescript/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Browser WebGPU binding build
         run: |
+          cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example resident_embedding_browser
           cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --no-default-features --features wgpu --example resident_residual_attention_browser
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features webgpu

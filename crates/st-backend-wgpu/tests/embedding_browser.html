@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident Embedding and CE Training vs PyTorch</title>
+<pre id="result" data-status="running">Checking WebGPU embedding gradients and CE/SGD...</pre>
+<a id="download" hidden download="resident-embedding-browser.json">Download verification result</a>
+<script type="module">
+import init, {run_resident_embedding_checks} from "../../../target/resident-embedding-web/resident_embedding_browser.js";
+const result = document.querySelector("#result");
+try {
+  await init();
+  const report = JSON.parse(await run_resident_embedding_checks());
+  if (report.schema !== "spiraltorch.resident_embedding.validation.v1" || !report.passed ||
+      report.checks.length !== 12 || report.learning.steps !== 16 || report.learning.trace.length !== 16 ||
+      report.edge_checks.rejected_shapes !== 10 || report.edge_checks.guard_cases !== 7 ||
+      report.edge_checks.atomic_rejections !== 2 || report.edge_checks.cross_device_rejections !== 2 ||
+      report.edge_checks.rejection_negative_controls !== 4 ||
+      !report.edge_checks.broadcast || !report.edge_checks.stable_order || !report.edge_checks.subnormals ||
+      [false, true].some(strided => report.checks.filter(c => c.strided === strided).length !== 6)) {
+    throw Error("Incomplete embedding verification");
+  }
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  const download = document.querySelector("#download");
+  download.href = URL.createObjectURL(new Blob([result.textContent + "\n"], {type: "application/json"}));
+  download.hidden = false;
+} catch (error) {
+  result.textContent = JSON.stringify({passed: false, error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

@@ -1,0 +1,128 @@
+{
+  "schema": "spiraltorch.resident_embedding.evidence.v1",
+  "observed_at_utc": "2026-10-09T04:10:11Z",
+  "source_base": "251b0f7ce894fd7e3ed9507901fd7531d001f999",
+  "source_base_note": "Embedding changes are additional to this already-reviewed residual-client base; hashes below pin the tested edits.",
+  "host": {
+    "os": "macOS 26.4.1",
+    "architecture": "arm64",
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "0.2.129",
+    "torch": "2.12.1",
+    "oracle_device": "cpu",
+    "oracle_threads": 1,
+    "oracle_dtype": "float32"
+  },
+  "tolerance": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "changed_after_measurement": false
+  },
+  "observations": {
+    "native": {
+      "report": "native.json",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "forward_vjp_cases": 12,
+      "ce_sgd_steps": 16,
+      "final_parameter_max_abs_error": 1.4901161193847656e-8
+    },
+    "browser": {
+      "report": "browser.json",
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "forward_vjp_cases": 12,
+      "ce_sgd_steps": 16,
+      "final_parameter_max_abs_error": 1.4901161193847656e-8
+    }
+  },
+  "edge_checks": {
+    "atomic_rejections": 2,
+    "broadcast": true,
+    "cross_device_rejections": 2,
+    "guard_cases": 7,
+    "rejected_shapes": 10,
+    "rejection_negative_controls": 4,
+    "stable_order": true,
+    "subnormals": true
+  },
+  "regressions": {
+    "kernel_contracts": {
+      "passed": 55,
+      "failed": 0
+    },
+    "resident_tensor": {
+      "passed": 96,
+      "failed": 0,
+      "ignored": 1,
+      "ignored_reason": "Explicit GPU timestamp experiment, not correctness coverage."
+    },
+    "legacy_row_indexing": {
+      "passed": 7,
+      "failed": 0,
+      "features": "wgpu",
+      "runtime_opt_in": true,
+      "strict_gpu": true
+    },
+    "rustfmt": "nightly-2026-04-15 check passed"
+  },
+  "sources": {
+    ".github/workflows/ci.yml": "35ef244796f64d824bec8ddf38cb178dcc76193e3fc49e8c6523271f0f2397c0",
+    "crates/st-backend-wgpu/Cargo.toml": "30a03612e77a5efb65db774f41f08a21e1f868a5300508d66cc0d8e79ca8cfed",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "e46706fb2b0c8444f745f65eff436b3ef2df65e8ea841167f2ecdabfeba6ac76",
+    "crates/st-backend-wgpu/src/resident_tensor/embedding.rs": "61542ae6f655765cadc2cb7673228334dfcb2840360f28b48dcbfd78dd48ffe5",
+    "crates/st-backend-wgpu/src/resident_tensor/embedding/tests.rs": "9af3a7c5886167b8ce97b511649364f89812b97f45e406a64da1e9954754a1a3",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/embedding.wgsl": "8408f28fc2595836d990de8dc4bbeb1a1b446c80ae53da230578446f7e02e6cc",
+    "crates/st-backend-wgpu/tests/support/embedding.rs": "64694f5eaa891dc828dd9853b244521a3afd50ffd44970a219b3c21a2c8a4b79",
+    "crates/st-backend-wgpu/tests/resident_embedding.rs": "8f98abd6093cf98abf20e7e6d14e0f18a4e3bb594254bf6ecfa99ddf15bbbc44",
+    "crates/st-backend-wgpu/tests/embedding_browser.html": "8cc3a2d53a3b82df89b8fab05ffa6f181ff2418bf566ebea1eab4ccb5573bfa6",
+    "crates/st-backend-wgpu/examples/resident_embedding_browser.rs": "2ccbc22b900568ec26a7cca5cb9ff5c7af0a9c5f6badd08b5ebf380118b4bcc4",
+    "crates/st-backend-wgpu/tests/fixtures/resident_embedding_torch.json": "a0eef556b1f17b31701153fee4b40bfd90df24db079cdb390c143b168c21c573",
+    "crates/st-kernel-contracts/src/indexing.rs": "7a1720b800735253720630bf1782123faab180816b46fc312d456ffbbfc9532b",
+    "crates/st-kernel-contracts/src/lib.rs": "b1dde6d5135cf76dfac1365db12f601394f86fad826508e576f0706b5995b966",
+    "crates/st-tensor/src/indexing.rs": "e8de644c2511886ff0d0eb95493d5c33b7c2903e3e7ca936a0f0aa31b597dabc",
+    "tools/generate_resident_embedding_torch_fixture.py": "af44d3b39bf4fc41cc67e5921936dce71697f2b0a3ab7c7ec57db258be6ddb8c",
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    "docs/resident_embedding.md": "df057fffbb59cc9f47bffdf4f034c2dde1464460c835f26966f514b83d202c0a",
+    "docs/ecosystem_roadmap.md": "6a3788f9c6d5979c42f8996f653c6e2eb3e2cc6637be5d67179fef1248a1423e",
+    "crates/st-backend-wgpu/src/shaders/rounded_add.wgsl": "00ce1de2d13f5cb6360066e6c4906af03daf0192fd7945c7fdc148f740890bb2",
+    "crates/st-backend-wgpu/src/resident_tensor/classification.rs": "3b6907d524c839b8403e0d22f0809bedf506891924dbade465017470852d3e18",
+    "crates/st-backend-wgpu/src/resident_training/parameters.rs": "8ff59ff7fafbd32da44643098e6fe6903394b474280b4fac54bcdef4c84f769a",
+    "benchmarks/results/2026-10-09-resident-embedding/native.json": "063a049ef8c107105c958d4dd88dc3affb135a32dcd92ecdc789d5030c0f99f4",
+    "benchmarks/results/2026-10-09-resident-embedding/browser.json": "7463def13f13ad445274f5d6dd51e4fbc9f5e739f58fc5b67ae134548bd3226b"
+  },
+  "built_artifact_hashes": {
+    "target/release/deps/resident_embedding-e6f1b030420245be": "e8213bf0973a533f5fe97a0104e6b98b4a3dfb44b6cdce8dde50fe89ca753117",
+    "target/resident-embedding-web/resident_embedding_browser.js": "e7a61cb46a7697b09584ad18dc546946e2cf69a25b3650049eb2257ca84366ed",
+    "target/resident-embedding-web/resident_embedding_browser_bg.wasm": "2a4b0197bbd58c330ff868f95d9c9d8cd0b0385e501d86d520817726b401de56",
+    "target/resident-embedding-web/resident_embedding_browser.d.ts": "816eb739b818a08dd63b7f4a1367df12e08beeb1ebae97cfe41e1498f853ee74"
+  },
+  "retained_local_record_hashes": {
+    "native-initial.log": "9937420f33591a542e8c21ad3de00491442338ca0eea67ba1e273143367b287b",
+    "native-final.log": "78bef0cde00025bcd7fa38c24412f95ef43b8c5ebcf5ce6d0f9f6060871d9981",
+    "browser-initial.json": "5feb0fe8aab32a8da8b4be4edccf352704bf4d3501c5cc2f238c0fbe104f5757",
+    "browser-final.json": "5feb0fe8aab32a8da8b4be4edccf352704bf4d3501c5cc2f238c0fbe104f5757",
+    "wasm-build-initial.log": "d4cbc1afd9a489beec59c6141d1ddf2eb62c39c6baeac5a2578c1c93424f1474",
+    "wasm-build-final.log": "f1e6a2d97608076c43973d92477c1ab1e3e63a419a8fe5febf4d925d070c3395",
+    "kernel-contracts.log": "6f6994680ff219872bcaf4a2a638197196257549b8efbbe599e4f6414b132c39",
+    "resident-tensor-regression.log": "ac513851b590a1f8ded6622bd88fa158cc16abe285a05a91cf7acd7005f87f1c",
+    "resident-tensor-regression-final.log": "e37c6e92d9aff3fe04e90866ccda25fcada56946894a512b6d7eb666c9f1b714",
+    "row-indexing-regression.log": "8e9ceb42a81f968506ff8507264d9c26859a331ed90d8f70d2dce6a38b2a7187",
+    "row-indexing-regression-final.log": "610ac2fc7c4f7b9cfdb5f1e21b3feda7088a9d51d0f6e465b1626db0fe2013d7",
+    "native-reviewed.log": "5717f9fbac8661f8720b8ab2b33c61c8605be2cf52fbed0108fc1c278f2d42f3",
+    "browser-reviewed.json": "7463def13f13ad445274f5d6dd51e4fbc9f5e739f58fc5b67ae134548bd3226b",
+    "wasm-build-reviewed.log": "a2285c796d8beac12a3964f18e74d2a4a8a16b91b49ecc25a36c35fe9729a83c"
+  },
+  "local_artifacts_note": "Raw logs and binaries retained locally only. No credential or private absolute path is part of this manifest.",
+  "review_fix": {
+    "finding": "Missing uniform-buffer binding-count preflight could trigger WGPU validation on a custom runtime.",
+    "resolution": "Check count and size before kernel creation; test empty/nonempty outputs and dispatch bounds; rerun native and browser probes.",
+    "follow_up": "Require typed stage-zero inherited-tensor SGD rejection; unrelated errors propagate, with four negative and one positive classifier controls.",
+    "verification": "Independent read-only follow-up reported no actionable findings in the bounded fixes. Native and browser were rerun after the stronger assertions."
+  },
+  "boundaries": [
+    "Host-prepared exact integer ID plan, not GPU-generated indices.",
+    "Resident checked f32 accumulation, not the host Tensor f64 intermediate policy.",
+    "Embedding/CE/SGD correctness, not a complete language model.",
+    "No speedup, tokenizerless quality or trainable Z-Space encoder claim.",
+    "No Python/WASM model facade or release/version bump."
+  ]
+}

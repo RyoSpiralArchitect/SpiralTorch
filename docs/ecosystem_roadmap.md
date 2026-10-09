@@ -368,6 +368,11 @@ controls rather than choosing between them:
    [Python/WASM wrappers](resident_residual_attention_clients.md) now expose the
    same residual owner, including a browser LayerNorm construction path and
    CPU-only plan composition with explicit GPU rejection.
+   [Resident embeddings](resident_embedding.md) now prepare exact integer IDs
+   once and keep lookup values and stable duplicate-ID pullbacks on GPU. Native
+   and browser probes compare 12 Torch forward/VJP cases and 16 CE/SGD updates.
+   This is the byte-input foundation, not yet a complete causal byte decoder or
+   a trainable causal Z-Space encoder; those must share one full-model owner.
    These are source additions after 0.4.29, not APIs in that published wheel.
    The original host Modules remain unchanged; uncertainty outputs, KV-cache
    ownership, complete decoder integration and learning-quality gains remain open.

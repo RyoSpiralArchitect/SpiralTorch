@@ -136,37 +136,16 @@ impl Tensor {
     }
 }
 
-// Stable CSR grouping avoids scanning all tokens for each vocabulary row.
-// IDs must already have been bounds-checked by the caller.
+// Share the exact stable index contract with resident embeddings.
 pub(crate) fn grouped_rows(indices: &[usize], rows: usize) -> PureResult<(Vec<usize>, Vec<usize>)> {
-    let count = rows.checked_add(1).ok_or(TensorError::InvalidValue {
-        label: "row_index_offset_overflow",
-    })?;
-    let allocate = |len| -> PureResult<Vec<usize>> {
-        let mut values = Vec::new();
-        values
-            .try_reserve_exact(len)
-            .map_err(|_| TensorError::InvalidValue {
-                label: "row_index_allocation",
-            })?;
-        values.resize(len, 0);
-        Ok(values)
-    };
-    let mut offsets = allocate(count)?;
-    for &index in indices {
-        offsets[index + 1] += 1;
-    }
-    for row in 1..count {
-        offsets[row] += offsets[row - 1];
-    }
-    let mut cursor = allocate(rows)?;
-    cursor.copy_from_slice(&offsets[..rows]);
-    let mut positions = allocate(indices.len())?;
-    for (position, &index) in indices.iter().enumerate() {
-        positions[cursor[index]] = position;
-        cursor[index] += 1;
-    }
-    Ok((offsets, positions))
+    st_kernel_contracts::indexing::grouped_rows(indices, rows).map_err(|error| {
+        TensorError::InvalidValue {
+            label: match error {
+                st_kernel_contracts::indexing::IndexingError::Bounds => "row_index_out_of_bounds",
+                _ => "row_index_allocation",
+            },
+        }
+    })
 }
 
 fn emit(op: &'static str, input: (usize, usize), output: (usize, usize), gpu: bool, scale: f32) {
