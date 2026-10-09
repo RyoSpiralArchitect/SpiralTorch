@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Byte corpus checkpoint and resume</title>
+<h1>Byte corpus checkpoint and resume</h1>
+<p>Use ?stop=37 to pause. For a fresh-page resume, place the downloaded checkpoint
+at target/resident-byte-learning-web/checkpoint.json and open ?resume=1.</p>
+<p id="summary">Loading the frozen request...</p>
+<p><a id="checkpoint" hidden>Download checkpoint</a></p>
+<p><a id="download" hidden>Download learning report</a></p>
+<pre id="result" data-status="running">Numerical comparison is a separate step.</pre>
+<script type="module">
+const target = document.querySelector("#result");
+try {
+  const read = async name => {
+    const response = await fetch(`/target/resident-byte-learning-web/${name}`, {cache:"no-store"});
+    if (!response.ok) throw Error(`Missing ${name}`);
+    return response.text();
+  };
+  const input = await read("request.json");
+  const request = JSON.parse(input);
+  const query = new URLSearchParams(location.search);
+  const stop = Number(query.get("stop") ?? request.train_batches.length);
+  if (!Number.isInteger(stop) || stop < 0 || stop > request.train_batches.length) throw Error("Invalid stop cursor");
+  // Keep checkpoint/model JSON opaque; JS must not round or rebuild model values.
+  const checkpoint = query.get("resume") === "1" ? await read("checkpoint.json") : undefined;
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), x => x.toString(16).padStart(2,"0")).join("");
+  const {default:init, advance_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  await init();
+  document.querySelector("#summary").textContent = `Advancing ${request.cases.length} cases to update ${stop}. Request ${hash}`;
+  const segment = JSON.parse(await advance_resident_byte_learning(input, checkpoint, stop));
+  const reportJson = segment.report_json;
+  if (typeof reportJson !== "string") throw Error("Missing Rust report JSON");
+  const report = JSON.parse(reportJson);
+  const complete = stop === request.train_batches.length;
+  const revisions = [0];
+  for (let i = 1; i <= stop; ++i) {
+    if (i % request.checkpoint_every === 0 || i === request.train_batches.length) revisions.push(i);
+  }
+  if (segment.schema !== "spiraltorch.byte_corpus.segment.v1" || segment.completed_updates !== stop
+      || typeof segment.checkpoint_json !== "string" || !segment.checkpoint_json.length
+      || report.schema !== (complete ? "spiraltorch.byte_corpus.result.v1" : "spiraltorch.byte_corpus.partial.v1")
+      || report.engine !== "spiraltorch" || report.request_sha256 !== hash
+      || report.cases.length !== request.cases.length
+      || report.cases.some((c, i) => c.name !== request.cases[i].name
+        || c.seed !== request.cases[i].seed || c.geometry !== request.cases[i].geometry
+        || c.training.length !== stop || c.training.some((s,j) => s.revision !== j+1 || !Number.isFinite(s.ce))
+        || c.validation.length !== revisions.length
+        || c.validation.some((s,j) => s.revision !== revisions[j] || !Number.isFinite(s.mean_ce)
+          || !Number.isFinite(s.bits_per_byte) || s.batch_losses.length !== request.validation_batches.length
+          || !s.batch_losses.every(Number.isFinite))
+        || c.final_parameters.length !== request.cases[i].parameters.length
+        || c.final_parameters.some((p,j) => p.length !== request.cases[i].parameters[j].values.length || !p.every(Number.isFinite)))) {
+    throw Error("Incomplete or mismatched segment");
+  }
+  for (const [id, filename, text] of [
+    ["checkpoint", `resident-byte-corpus-checkpoint-${stop}.json`, segment.checkpoint_json],
+    ["download", `resident-byte-corpus-${stop}.json`, reportJson],
+  ]) {
+    const link = document.querySelector(`#${id}`);
+    link.href = URL.createObjectURL(new Blob([text], {type:"application/json"}));
+    link.download = filename;
+    link.hidden = false;
+  }
+  target.dataset.status = complete ? "completed" : "paused";
+  target.textContent = JSON.stringify({request_sha256:hash, completed_updates:stop,
+    case_count:report.cases.length, evaluation_revisions:revisions}, null, 2);
+  document.querySelector("#summary").textContent = `${complete ? "Completed" : "Paused"} all cases at update ${stop}. Numerical equivalence must still be checked against uninterrupted learning and Torch.`;
+} catch (error) {
+  target.dataset.status = "error";
+  target.textContent = String(error.stack || error);
+  document.querySelector("#summary").textContent = "Segment failed; no new checkpoint is promoted.";
+}
+</script>

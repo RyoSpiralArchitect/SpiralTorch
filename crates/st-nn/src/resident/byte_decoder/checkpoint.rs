@@ -217,6 +217,41 @@ impl ByteDecoderPlan {
 }
 
 impl ByteDecoderCheckpoint {
+    #[cfg(feature = "wgpu")]
+    pub(crate) fn escaped_json_size_bound(&self) -> Result<usize, InferenceError> {
+        let mut model = ModelRecord::from_plan(&self.plan)?;
+        let mut count = 0usize;
+        for values in model.values_mut() {
+            count = count
+                .checked_add(values.len())
+                .ok_or(InferenceError::PortableAddressSpace)?;
+            values.clear();
+        }
+        let empty = serde_json::to_string(&CheckpointRecord {
+            schema: BYTE_DECODER_CHECKPOINT_SCHEMA.to_owned(),
+            update_rule: "stateless_sgd.v1".to_owned(),
+            window_state: "reset_positions_and_geometry.v1".to_owned(),
+            attempted_revision: u64::MAX.to_string(),
+            model,
+        })?;
+        // serde_json's finite-float formatter has a 24-byte buffer. Reserve 32
+        // per value including separators; digits never need string escaping.
+        let escaped_bytes = serde_json::to_string(&empty)?.len();
+        count
+            .checked_mul(32)
+            .and_then(|n| n.checked_add(escaped_bytes))
+            .ok_or(InferenceError::PortableAddressSpace)
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub(crate) fn topology_json(&self) -> Result<String, InferenceError> {
+        let mut record = ModelRecord::from_plan(&self.plan)?;
+        for values in record.values_mut() {
+            values.clear();
+        }
+        Ok(serde_json::to_string(&record)?)
+    }
+
     pub fn plan(&self) -> &ByteDecoderPlan {
         &self.plan
     }

@@ -15,6 +15,8 @@ use thiserror::Error;
 
 mod attention;
 mod byte_decoder;
+#[cfg(feature = "wgpu")]
+mod byte_study;
 pub use attention::AttentionInferencePlan;
 #[cfg(feature = "wgpu")]
 pub use attention::{
@@ -30,6 +32,11 @@ pub use byte_decoder::{
     ByteDecoderCheckpoint, ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan,
     ByteDecoderParameterLayout, ByteDecoderPlan, ByteLmBatch, BYTE_DECODER_CHECKPOINT_SCHEMA,
     BYTE_LM_VOCAB,
+};
+#[cfg(feature = "wgpu")]
+pub use byte_study::{
+    ByteCorpusStudy, ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment,
+    BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]
