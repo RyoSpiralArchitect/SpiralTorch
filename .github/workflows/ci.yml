@@ -26,6 +26,7 @@ jobs:
       - name: Test resident benchmark admission
         run: |
           python3 -I -S -B tools/test_byte_corpus_study.py
+          python3 -I -S -B tools/test_verify_byte_corpus_resume.py
           python3 -I -S -B tools/test_verify_byte_parameter_rates.py
           python3 -I tests/test_resident_rank_bench.py
           python3 -I tests/test_resident_rank_adaptation_bench.py
@@ -287,6 +288,7 @@ jobs:
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::attention::training -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::residual_attention -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::byte_decoder -- --test-threads=1
+          cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::byte_study -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --example resident_byte_learning
           cargo test --locked --release -p st-nn --features wgpu --lib conv2d_resident_matches_host_and_refreshes_parameters -- --test-threads=1
           cargo test --locked --release -p st-nn --features wgpu --lib conv2d_resident_vjp_matches_module_backward_and_refreshes_parameters -- --test-threads=1

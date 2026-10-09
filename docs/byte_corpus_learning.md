@@ -193,6 +193,10 @@ python3 -I -S -B tools/verify_byte_corpus_resume.py \
 The verifier requires type-aware, signed-zero-sensitive equality of the entire
 resumed/uninterrupted report and checks paused prefixes, stored float32 histories,
 and every saved tensor's shape and float32 bits against the paused readback.
+Reference, comparison and resume tools reject duplicate JSON keys and non-finite
+numbers; raw JSON `-0` retains its negative float32 zero sign. Resume verification
+also checks the versioned study policies before comparing artifacts, rather than
+accepting mutually consistent artifacts for an invalid control configuration.
 Full graph/operation validity remains the Rust preflight's responsibility.
 It writes a new
 small hash/result record, not raw weights. Use the corresponding browser files
@@ -200,9 +204,52 @@ for a separate browser record. Retain raw reports and checkpoints locally.
 
 ## Acceptance And Limits
 
+### Explicit Frozen-Geometry Control (v2)
+
+Add `--frozen-geometry-control` to `prepare` for
+`spiraltorch.byte_corpus.request.v2`. v1 retains its original two cases per seed
+and rejects the new policy field. v2 requires exactly three cases per seed,
+with `geometry_update` explicitly set to `train` or `frozen`:
+
+- Ordinary: `geometry: false`, `geometry_update: "train"`.
+- Learned geometry: `geometry: true`, `geometry_update: "train"`.
+- Frozen geometry: `geometry: true`, `geometry_update: "frozen"`.
+
+All three share bit-identical initial backbone tensors. Learned and frozen
+geometry share **every** initial tensor bit, including geometry. v2 uses the same
+data order, scalar rate and evaluation schedule; at most five triplets fit the
+existing 16-case budget. Rust rejects missing/null/unknown policies, duplicate
+modes and unequal initial tensors before requesting a GPU.
+
+The frozen case still computes the complete geometry VJP into the embeddings.
+Only its geometry tensor rates become zero in the shared all-or-none SGD owner.
+Coordinates may change as embeddings learn. Reports include the policy and the
+number of trainable scalars, not only total parameter count. Result, partial and
+study-checkpoint schemas become `v2`; the outer opaque segment transport remains
+`segment.v1`. Both browser pages accept either request version explicitly.
+
+The request hash binds the freeze policy across resume. Before GPU allocation,
+the checkpoint loader also compares every frozen geometry tensor's bits against
+the initial model at **any** saved cursor. Final readback performs the same check.
+The generic model checkpoint remains unchanged and does not itself own a freeze
+policy; the study request does. Changing a policy requires a new study, not a
+silent continuation of the old checkpoint.
+
+The comparator reports all three per-seed contrasts: learned minus ordinary,
+frozen minus ordinary, and learned minus frozen. Frozen tensors must be bitwise
+unchanged in both Rust and the independent reference; the nonzero/relative-change
+gate below still applies to learned geometry only. These contrasts isolate the
+value of **training this particular mechanism**, not the superiority of geometry
+over an equally sized generic trainable mechanism. A parameter/compute-matched
+non-geometric control remains separate work. No favorable contrast changes the
+fixed acceptance criteria or warrants a general language-quality claim.
+The [three-arm pilot record](../benchmarks/results/2026-10-09-byte-corpus-frozen-geometry-v2/README.md)
+retains every seed and both native/browser comparisons, including the small,
+mixed learned-versus-frozen differences.
+
 Every training CE, held-out batch CE and final parameter is compared against
 independent PyTorch with the predeclared `3e-6 + 5e-5 * abs(reference)` gate.
-Every geometry parameter must actually change; the final change-vector relative
+Every learned geometry parameter must actually change; the final change-vector relative
 L2 error must be at most 0.002, with reference norm greater than 1e-8. Merely
 passing a scalar loss check cannot promote a disconnected small derivative.
 The change vector starts from the effective float32 initial weights, not their

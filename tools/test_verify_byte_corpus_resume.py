@@ -51,7 +51,7 @@ def model_fixture(geometry):
 
 
 def fixture():
-    request = {"config": {"batch": 1, "steps": 2}, "train_batches": [0, 1],
+    request = {"schema": "spiraltorch.byte_corpus.request.v1", "config": {"batch": 1, "steps": 2}, "train_batches": [0, 1],
                "checkpoint_every": 2, "validation_batches": [0], "cases": []}
     full = {"schema": "spiraltorch.byte_corpus.result.v1", "engine": "spiraltorch",
             "request_sha256": "hash", "adapter": "same", "cases": []}
@@ -80,7 +80,93 @@ def fixture():
     return [request, "hash", full, partial, copy.deepcopy(full), checkpoint]
 
 
+def frozen_fixture():
+    args = fixture()
+    request = args[0]
+    request["schema"] = "spiraltorch.byte_corpus.request.v2"
+    for value in [request, *args[2:]]:
+        value["cases"].append(copy.deepcopy(value["cases"][1]))
+        value["cases"][2]["name"] = "frozen"
+    for index, case in enumerate(request["cases"]):
+        case["geometry_update"] = "frozen" if index == 2 else "train"
+        for i, parameter in enumerate(case["parameters"]):
+            if case["geometry"] and 2 <= i < 7:
+                parameter["name"] = "geometry." + str(i)
+            else:
+                parameter["name"] = "other." + str(i - 5 if case["geometry"] and i >= 7 else i)
+    for report in args[2:5]:
+        report["schema"] = report["schema"].removesuffix("v1") + "v2"
+        for spec, case in zip(request["cases"], report["cases"]):
+            case["geometry_update"] = spec["geometry_update"]
+            case["trainable_parameter_scalars"] = sum(len(p["values"]) for p in spec["parameters"]
+                if spec["geometry_update"] != "frozen" or not p["name"].startswith("geometry."))
+    args[5]["schema"] = "spiraltorch.byte_corpus.checkpoint.v2"
+    return args
+
+
 class ResumeVerifierTests(unittest.TestCase):
+    def test_invalid_request_policy_cannot_pass_even_with_matching_artifacts(self):
+        for variant in ("missing_arm", "duplicate_mode", "ordinary_frozen", "geometry_init", "core_init", "v1_policy"):
+            args = frozen_fixture()
+            cases = args[0]["cases"]
+            if variant == "missing_arm":
+                for value in [args[0], *args[2:]]:
+                    value["cases"].pop()
+            elif variant == "duplicate_mode":
+                cases[2]["geometry_update"] = "train"
+            elif variant == "ordinary_frozen":
+                cases[0]["geometry_update"] = "frozen"
+            elif variant in ("geometry_init", "core_init"):
+                cases[2]["parameters"][2 if variant == "geometry_init" else 0]["values"][0] += .01
+            else:
+                args[0]["schema"] = "spiraltorch.byte_corpus.request.v1"
+                for value in args[2:]:
+                    value["schema"] = value["schema"].removesuffix("v2") + "v1"
+            for report in args[2:5]:
+                for spec, case in zip(cases, report["cases"]):
+                    case["geometry_update"] = spec["geometry_update"]
+                    case["trainable_parameter_scalars"] = RESUME.STUDY.trainable_scalars(spec)
+            with self.subTest(variant=variant), self.assertRaises(ValueError):
+                RESUME.verify(*args)
+
+    def test_negative_zero_literal_survives_request_and_nested_checkpoint(self):
+        args = frozen_fixture()
+        for case in args[0]["cases"][1:]:
+            case["parameters"][2]["values"][0] = -0.0
+        for report in args[2:5]:
+            for case in report["cases"][1:]:
+                case["final_parameters"][2][0] = -0.0
+        for case in args[5]["cases"][1:]:
+            model = json.loads(case["model_json"])
+            model["model"]["geometry"]["projection"]["parameters"][0]["values"][0] = -0.0
+            case["model_json"] = json.dumps(model).replace("-0.0", "-0")
+        args[0] = RESUME.STUDY.decode_json(json.dumps(args[0]).replace("-0.0", "-0"))
+        self.assertTrue(RESUME.verify(*args)["passed"])
+
+    def test_duplicate_nested_checkpoint_keys_are_rejected(self):
+        args = frozen_fixture()
+        case = args[5]["cases"][0]
+        case["model_json"] = case["model_json"].replace('"schema":', '"schema":"ignored", "schema":', 1)
+        with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+            RESUME.verify(*args)
+
+    def test_frozen_resume_has_explicit_v2_policy(self):
+        self.assertEqual(RESUME.verify(*frozen_fixture())["schema"], "spiraltorch.byte_corpus.resume_verification.v2")
+
+    def test_frozen_resume_rejects_policy_schema_and_even_matched_weight_drift(self):
+        for variant in ("policy", "schema", "weight"):
+            args = frozen_fixture()
+            if variant == "schema":
+                args[5]["schema"] = "spiraltorch.byte_corpus.checkpoint.v1"
+            elif variant == "policy":
+                for report in args[2:5]:
+                    report["cases"][2]["geometry_update"] = "train"
+            else:
+                for report in args[2:5]:
+                    report["cases"][2]["final_parameters"][2][0] += .01
+            with self.subTest(variant=variant), self.assertRaises(ValueError):
+                RESUME.verify(*args)
+
     def test_exact_resume_and_prefix(self):
         self.assertTrue(RESUME.verify(*fixture())["passed"])
 

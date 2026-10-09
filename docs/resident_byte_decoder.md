@@ -112,6 +112,8 @@ model checkpoints do not store the freeze policy or schedule. Reapply the same
 policy explicitly when restoring a model. The corpus-study v1 request continues
 to use its existing scalar SGD rate; this API alone does not add a frozen arm to
 that protocol.
+For explicit ordinary/learned/frozen triplets with request-bound resume, use
+[corpus-study v2](byte_corpus_learning.md#explicit-frozen-geometry-control-v2).
 
 The shared native/browser controls queue 16 updates of both existing geometry
 fixtures, check frozen bits and embedding learning, and retain the complete local

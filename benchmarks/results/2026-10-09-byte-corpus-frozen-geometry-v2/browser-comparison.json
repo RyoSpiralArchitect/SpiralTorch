@@ -1,0 +1,316 @@
+{
+  "schema": "spiraltorch.byte_corpus.comparison.v2",
+  "request_sha256": "0782ac7a078005b6b4b20c4c7e56c9629363a995228d2d0cd654541623e456ee",
+  "numerical_checks_passed": true,
+  "criteria": {
+    "atol": 3e-06,
+    "rtol": 5e-05,
+    "geometry_delta_relative_l2": 0.002
+  },
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "seed": 11,
+      "geometry": false,
+      "parameter_scalars": 11216,
+      "train_ce_max_error": 9.5367431640625e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 1.1920928955078125e-07,
+      "initial_heldout_bpb": 8.110596518312065,
+      "final_heldout_bpb": 5.136337583379822,
+      "geometry_deltas": [],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11216
+    },
+    {
+      "name": "seed11_geometry",
+      "seed": 11,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 4.76837158203125e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 1.1920928955078125e-07,
+      "initial_heldout_bpb": 8.11361042827711,
+      "final_heldout_bpb": 5.136364692145165,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "actual_delta_l2": 0.023211901750927858,
+          "reference_delta_l2": 0.02321190362982451,
+          "relative_l2_error": 3.939635511235493e-06
+        },
+        {
+          "name": "geometry.projection.bias",
+          "actual_delta_l2": 0.0010716745280659246,
+          "reference_delta_l2": 0.0010716730360191262,
+          "relative_l2_error": 9.870352922683123e-06
+        },
+        {
+          "name": "geometry.raw_decay",
+          "actual_delta_l2": 0.003917062720432672,
+          "reference_delta_l2": 0.0039170751867961704,
+          "relative_l2_error": 7.6083100186981705e-06
+        },
+        {
+          "name": "geometry.raw_phase",
+          "actual_delta_l2": 0.0007727917560497996,
+          "reference_delta_l2": 0.0007727917560497996,
+          "relative_l2_error": 0.0
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "actual_delta_l2": 0.004077921414685821,
+          "reference_delta_l2": 0.00407792877535057,
+          "relative_l2_error": 1.8270502030245292e-06
+        }
+      ],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11290
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "seed": 11,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 9.5367431640625e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 3.5762786865234375e-07,
+      "initial_heldout_bpb": 8.11361042827711,
+      "final_heldout_bpb": 5.136452424794936,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.projection.bias",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_decay",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_phase",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "frozen_bits_preserved": true
+        }
+      ],
+      "geometry_update": "frozen",
+      "trainable_parameter_scalars": 11216
+    },
+    {
+      "name": "seed23_ordinary",
+      "seed": 23,
+      "geometry": false,
+      "parameter_scalars": 11216,
+      "train_ce_max_error": 7.152557373046875e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 1.1920928955078125e-07,
+      "initial_heldout_bpb": 8.09755842755883,
+      "final_heldout_bpb": 5.128048105599561,
+      "geometry_deltas": [],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11216
+    },
+    {
+      "name": "seed23_geometry",
+      "seed": 23,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 7.152557373046875e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 2.384185791015625e-07,
+      "initial_heldout_bpb": 8.091849979411391,
+      "final_heldout_bpb": 5.124975528052739,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "actual_delta_l2": 0.03244521928669206,
+          "reference_delta_l2": 0.03244524222961314,
+          "relative_l2_error": 3.4061663836473168e-06
+        },
+        {
+          "name": "geometry.projection.bias",
+          "actual_delta_l2": 0.004772610939291899,
+          "reference_delta_l2": 0.00477261094637057,
+          "relative_l2_error": 2.373968514990721e-06
+        },
+        {
+          "name": "geometry.raw_decay",
+          "actual_delta_l2": 0.0076227297381484035,
+          "reference_delta_l2": 0.0076227297381484035,
+          "relative_l2_error": 0.0
+        },
+        {
+          "name": "geometry.raw_phase",
+          "actual_delta_l2": 0.008143303922514646,
+          "reference_delta_l2": 0.00814330414663434,
+          "relative_l2_error": 4.574666783140589e-07
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "actual_delta_l2": 0.011499354358845115,
+          "reference_delta_l2": 0.011499358068057483,
+          "relative_l2_error": 3.239563701220763e-07
+        }
+      ],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11290
+    },
+    {
+      "name": "seed23_geometry_frozen",
+      "seed": 23,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 9.5367431640625e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 2.384185791015625e-07,
+      "initial_heldout_bpb": 8.091849979411391,
+      "final_heldout_bpb": 5.1248632771263045,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.projection.bias",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_decay",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_phase",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "frozen_bits_preserved": true
+        }
+      ],
+      "geometry_update": "frozen",
+      "trainable_parameter_scalars": 11216
+    },
+    {
+      "name": "seed37_ordinary",
+      "seed": 37,
+      "geometry": false,
+      "parameter_scalars": 11216,
+      "train_ce_max_error": 7.152557373046875e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 1.1920928955078125e-07,
+      "initial_heldout_bpb": 8.083900876795019,
+      "final_heldout_bpb": 5.128101936169281,
+      "geometry_deltas": [],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11216
+    },
+    {
+      "name": "seed37_geometry",
+      "seed": 37,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 9.5367431640625e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 2.384185791015625e-07,
+      "initial_heldout_bpb": 8.094770653281838,
+      "final_heldout_bpb": 5.126100144104563,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "actual_delta_l2": 0.03749716367473344,
+          "reference_delta_l2": 0.03749717400557485,
+          "relative_l2_error": 2.2552615825538765e-06
+        },
+        {
+          "name": "geometry.projection.bias",
+          "actual_delta_l2": 0.004241830983764341,
+          "reference_delta_l2": 0.0042418278437344695,
+          "relative_l2_error": 2.543924621875858e-06
+        },
+        {
+          "name": "geometry.raw_decay",
+          "actual_delta_l2": 0.003937761247569353,
+          "reference_delta_l2": 0.003937761247569353,
+          "relative_l2_error": 0.0
+        },
+        {
+          "name": "geometry.raw_phase",
+          "actual_delta_l2": 0.010244132156112064,
+          "reference_delta_l2": 0.010244104448759448,
+          "relative_l2_error": 2.90921695857019e-06
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "actual_delta_l2": 0.007203945110342712,
+          "reference_delta_l2": 0.007203945110342712,
+          "relative_l2_error": 0.0
+        }
+      ],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11290
+    },
+    {
+      "name": "seed37_geometry_frozen",
+      "seed": 37,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 9.5367431640625e-07,
+      "heldout_ce_max_error": 9.5367431640625e-07,
+      "final_parameter_max_error": 1.1920928955078125e-07,
+      "initial_heldout_bpb": 8.094770653281838,
+      "final_heldout_bpb": 5.126143720208725,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.projection.bias",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_decay",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_phase",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "frozen_bits_preserved": true
+        }
+      ],
+      "geometry_update": "frozen",
+      "trainable_parameter_scalars": 11216
+    }
+  ],
+  "paired_deltas": [
+    {
+      "seed": 11,
+      "geometry_minus_ordinary_bpb": 2.7108765342731544e-05,
+      "frozen_geometry_minus_ordinary_bpb": 0.00011484141511441948,
+      "learned_geometry_minus_frozen_bpb": -8.773264977168793e-05
+    },
+    {
+      "seed": 23,
+      "geometry_minus_ordinary_bpb": -0.0030725775468214422,
+      "frozen_geometry_minus_ordinary_bpb": -0.003184828473256296,
+      "learned_geometry_minus_frozen_bpb": 0.00011225092643485368
+    },
+    {
+      "seed": 37,
+      "geometry_minus_ordinary_bpb": -0.0020017920647177334,
+      "frozen_geometry_minus_ordinary_bpb": -0.001958215960555343,
+      "learned_geometry_minus_frozen_bpb": -4.357610416239055e-05
+    }
+  ],
+  "mean_geometry_minus_ordinary_bpb": -0.0016824202820654814,
+  "scope": "Fixed small corpus/recipe/seeds; different parameter counts and compute, no general quality or speed claim"
+}

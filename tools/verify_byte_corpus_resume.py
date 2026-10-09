@@ -3,10 +3,15 @@
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 from pathlib import Path
 import struct
+
+SPEC = importlib.util.spec_from_file_location("byte_corpus_study", Path(__file__).with_name("byte_corpus_study.py"))
+STUDY = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(STUDY)
 
 
 def require(condition, message):
@@ -70,16 +75,17 @@ def stored_parameters(record, cursor):
 
 
 def verify(request, request_hash, baseline, partial, resumed, checkpoint):
+    version = STUDY.request_version(request)
     total = len(request["train_batches"])
     cursor = checkpoint["completed_updates"]
     require(type(cursor) is int and 0 <= cursor <= total, "invalid saved cursor")
-    require(checkpoint["schema"] == "spiraltorch.byte_corpus.checkpoint.v1", "checkpoint schema")
+    require(checkpoint["schema"] == f"spiraltorch.byte_corpus.checkpoint.v{version}", "checkpoint schema")
     require(checkpoint["request_sha256"] == request_hash, "checkpoint request identity")
     require(exact(resumed, baseline), "resumed report differs from uninterrupted report")
-    require(baseline["schema"] == "spiraltorch.byte_corpus.result.v1", "baseline is not complete")
+    require(baseline["schema"] == f"spiraltorch.byte_corpus.result.v{version}", "baseline is not complete")
     require(partial["adapter"] == baseline["adapter"], "partial runtime differs")
-    require(partial["schema"] == ("spiraltorch.byte_corpus.result.v1" if cursor == total
-                                 else "spiraltorch.byte_corpus.partial.v1"), "partial schema")
+    require(partial["schema"] == (f"spiraltorch.byte_corpus.result.v{version}" if cursor == total
+                                 else f"spiraltorch.byte_corpus.partial.v{version}"), "partial schema")
     for report in (baseline, partial, resumed):
         require(report["engine"] == "spiraltorch", "foreign engine")
         require(report["request_sha256"] == request_hash, "report request identity")
@@ -91,6 +97,12 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         for report in (full, prefix, resumed_case):
             require(all(exact(report[key], case[key]) for key in ("name", "seed", "geometry")),
                     "case identity/order differs")
+            if version == 2:
+                require(case["geometry_update"] in {"train", "frozen"}
+                        and report.get("geometry_update") == case["geometry_update"], "case update policy differs")
+                trainable = sum(len(p["values"]) for p in case["parameters"]
+                                if case["geometry_update"] != "frozen" or not p["name"].startswith("geometry."))
+                require(exact(report.get("trainable_parameter_scalars"), trainable), "trainable count differs")
             require(exact(report["parameter_tensors"], len(case["parameters"])), "parameter count")
             require(exact(report["parameter_scalars"], sum(len(p["values"]) for p in case["parameters"])),
                     "parameter scalar count")
@@ -99,6 +111,8 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 require(len(values) == len(parameter["values"]), "weight shape")
                 for value in values:
                     f32(value)
+                if version == 2 and case["geometry_update"] == "frozen" and parameter["name"].startswith("geometry."):
+                    require(list(map(f32, values)) == list(map(f32, parameter["values"])), "frozen weight bits differ")
         require(len(full["training"]) == total, "incomplete baseline training")
         require(exact([p["revision"] for p in full["training"]], list(range(1, total + 1))),
                 "baseline revision sequence")
@@ -119,7 +133,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         require(exact(prefix["validation"], [p for p in full["validation"] if p["revision"] <= cursor]),
                 "evaluation prefix differs or extra pause evaluation")
         require(saved["name"] == case["name"], "saved case identity")
-        model = json.loads(saved["model_json"])
+        model = STUDY.decode_json(saved["model_json"])
         stored = stored_parameters(model, cursor)
         require((model["model"]["geometry"] is not None) is case["geometry"], "saved geometry mode")
         require(len(stored) == len(case["parameters"]), "saved tensor count")
@@ -139,7 +153,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         summaries.append({"name": case["name"], "updates": total,
                           "pause": cursor, "evaluation_revisions": evaluations,
                           "final_mean_ce": full["validation"][-1]["mean_ce"]})
-    return {"schema": "spiraltorch.byte_corpus.resume_verification.v1", "passed": True,
+    return {"schema": f"spiraltorch.byte_corpus.resume_verification.v{version}", "passed": True,
             "request_sha256": request_hash, "exact_resumed_report_equal": True,
             "exact_training_and_evaluation_prefixes": True,
             "saved_parameter_bits_match_paused_report": True, "cases": summaries,
@@ -154,7 +168,7 @@ def main():
     names = ("request", "baseline", "partial", "resumed", "checkpoint")
     raw = {name: getattr(args, name).read_bytes() for name in names}
     hashes = {name: hashlib.sha256(value).hexdigest() for name, value in raw.items()}
-    data = {name: json.loads(value) for name, value in raw.items()}
+    data = {name: STUDY.decode_json(value) for name, value in raw.items()}
     result = verify(data["request"], hashes["request"], data["baseline"], data["partial"],
                     data["resumed"], data["checkpoint"])
     result["input_sha256"] = hashes

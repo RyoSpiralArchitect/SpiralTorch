@@ -16,6 +16,7 @@ import subprocess
 
 REQUEST = "spiraltorch.byte_corpus.request.v1"
 RESULT = "spiraltorch.byte_corpus.result.v1"
+REQUEST_V2 = "spiraltorch.byte_corpus.request.v2"
 ATOL, RTOL, DELTA_RTOL = 3e-6, 5e-5, .002
 
 
@@ -34,6 +35,62 @@ def write_new(path, value):
 
 def f32(value):
     return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+def decode_json(raw):
+    """Preserve Rust's signed zero and reject ambiguous JSON before comparison."""
+    def object_value(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key: " + key)
+            result[key] = value
+        return result
+
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite JSON number")
+        return number
+
+    return json.loads(raw, object_pairs_hook=object_value, parse_float=finite_float,
+                      parse_int=lambda value: -0.0 if value == "-0" else int(value),
+                      parse_constant=finite_float)
+
+
+def frozen(case):
+    return case.get("geometry_update") == "frozen"
+
+
+def trainable_scalars(case):
+    return sum(len(p["values"]) for p in case["parameters"]
+               if not frozen(case) or not p["name"].startswith("geometry."))
+
+
+def request_version(request):
+    if request["schema"] == REQUEST:
+        if any("geometry_update" in c for c in request["cases"]):
+            raise ValueError("v1 has no explicit geometry update policy")
+        return 1
+    if request["schema"] != REQUEST_V2:
+        raise ValueError("wrong request schema")
+    def key(parameters):
+        return [(p["name"], p["shape"], [struct.pack("<f", x) for x in p["values"]]) for p in parameters]
+    for seed in {c["seed"] for c in request["cases"]}:
+        group = [c for c in request["cases"] if c["seed"] == seed]
+        if (len(group) != 3 or any(type(c["geometry"]) is not bool for c in group)
+                or {(c["geometry"], c.get("geometry_update")) for c in group}
+                != {(False, "train"), (True, "train"), (True, "frozen")}):
+            raise ValueError("v2 needs one ordinary, learned and frozen geometry case per seed")
+        core = [key([p for p in c["parameters"] if not p["name"].startswith("geometry.")]) for c in group]
+        if any(c != core[0] for c in core[1:]):
+            raise ValueError("v2 backbones differ")
+        geometric = [key(c["parameters"]) for c in group if c["geometry"]]
+        if geometric[0] != geometric[1]:
+            raise ValueError("learned/frozen initial geometry bits differ")
+    if not request["cases"]:
+        raise ValueError("empty control study")
+    return 2
 
 
 def validate_numbers(seeds, rate):
@@ -101,6 +158,9 @@ def windows(documents, steps):
 
 def prepare(args):
     rate = validate_numbers(args.seed, args.rate)
+    controls = getattr(args, "frozen_geometry_control", False)
+    if controls and len(args.seed) > 5:
+        raise ValueError("three-arm controls allow at most five seeds within the 16-case budget")
     revision = subprocess.check_output(["git", "rev-parse", "--verify", args.revision + "^{commit}"], text=True).strip()
     config = dict(batch=args.batch, steps=args.steps, width=args.width, hidden=args.hidden,
                   heads=args.heads, blocks=[False] * args.blocks, geometry_cols=4, curvature=-.75)
@@ -152,10 +212,15 @@ def prepare(args):
         for enabled, values in [(False, plain), (True, geometry)]:
             cases.append(dict(name=f"seed{seed}_{'geometry' if enabled else 'ordinary'}", seed=seed,
                               geometry=enabled, parameters=values))
-    request = dict(schema=REQUEST, config=config, train_documents=train, validation_documents=valid,
+            if controls:
+                cases[-1]["geometry_update"] = "train"
+        if controls:
+            cases.append(dict(name=f"seed{seed}_geometry_frozen", seed=seed, geometry=True,
+                              geometry_update="frozen", parameters=geometry))
+    request = dict(schema=REQUEST_V2 if controls else REQUEST, config=config, train_documents=train, validation_documents=valid,
                    train_batches=train_batches, validation_batches=valid_batches,
                    checkpoint_every=args.checkpoint_every, rate=rate, cases=cases)
-    manifest = dict(schema="spiraltorch.byte_corpus.preparation.v1", source_revision=revision,
+    manifest = dict(schema=f"spiraltorch.byte_corpus.preparation.v{2 if controls else 1}", source_revision=revision,
                     config=config, train_sources=train_info, validation_sources=valid_info,
                     training_window_selection="seed-20261009 shuffled complete windows, repeated only after an epoch",
                     validation_window_selection="evenly spaced, distinct complete windows, no score-based selection",
@@ -165,6 +230,9 @@ def prepare(args):
                     criteria=dict(atol=ATOL, rtol=RTOL, geometry_delta_relative_l2=DELTA_RTOL,
                                   minimum_geometry_reference_delta_l2=1e-8),
                     scope="Small document-held-out repository-prose pilot, not broad language quality or equal-parameter/equal-compute comparison")
+    request_version(request)
+    if controls:
+        manifest["geometry_control"] = "identical initial geometry weights; frozen tensors keep their full embedding pullback"
     args.output.mkdir(parents=True, exist_ok=False)
     write_new(args.output / "request.json", request)
     write_new(args.output / "preparation.json", manifest)
@@ -191,9 +259,8 @@ def reference(args):
     wave = load_reference("generate_causal_zspace_wave_torch_fixture").wave
     metric = load_reference("generate_poincare_bias_torch_fixture").metric
     raw = args.request.read_bytes()
-    request = json.loads(raw)
-    if request["schema"] != REQUEST:
-        raise ValueError("wrong request schema")
+    request = decode_json(raw)
+    version = request_version(request)
     config = request["config"]
     b, t, w = config["batch"], config["steps"], config["width"]
 
@@ -243,8 +310,9 @@ def reference(args):
             loss = functional.cross_entropy(forward(ids).reshape(-1, 256), targets.reshape(-1))
             gradients = torch.autograd.grad(loss, p)
             with torch.no_grad():
-                for value, gradient in zip(p, gradients):
-                    value -= request["rate"] * gradient
+                for descriptor, value, gradient in zip(case["parameters"], p, gradients):
+                    if not (frozen(case) and descriptor["name"].startswith("geometry.")):
+                        value -= request["rate"] * gradient
             training.append(dict(revision=step, ce=loss.item()))
             if step % request["checkpoint_every"] == 0 or step == len(train):
                 evaluation.append(evaluate(step))
@@ -252,7 +320,9 @@ def reference(args):
                             parameter_tensors=len(p), parameter_scalars=sum(v.numel() for v in p),
                             training=training, validation=evaluation,
                             final_parameters=[v.detach().reshape(-1).tolist() for v in p]))
-    write_new(args.output, dict(schema=RESULT, engine="independent_pytorch", torch_version=torch.__version__,
+        if version == 2:
+            reports[-1].update(geometry_update=case["geometry_update"], trainable_parameter_scalars=trainable_scalars(case))
+    write_new(args.output, dict(schema=f"spiraltorch.byte_corpus.result.v{version}", engine="independent_pytorch", torch_version=torch.__version__,
                                dtype="float32", device="cpu", threads=1, request_sha256=digest(raw), cases=reports))
 
 
@@ -269,8 +339,9 @@ def close(actual, expected, label):
 
 
 def compare(request_raw, reference_report, actual):
-    request = json.loads(request_raw)
-    if (request["schema"] != REQUEST or reference_report.get("engine") != "independent_pytorch"
+    request = decode_json(request_raw)
+    version = request_version(request)
+    if (reference_report.get("engine") != "independent_pytorch"
             or actual.get("engine") != "spiraltorch" or not actual.get("adapter")):
         raise ValueError("wrong request, reference, or measured engine identity")
     expected_cases = request["cases"]
@@ -278,7 +349,7 @@ def compare(request_raw, reference_report, actual):
     if len(set(names)) != len(names):
         raise ValueError("duplicate request case")
     for report in [reference_report, actual]:
-        if report["schema"] != RESULT or report["request_sha256"] != digest(request_raw):
+        if report["schema"] != f"spiraltorch.byte_corpus.result.v{version}" or report["request_sha256"] != digest(request_raw):
             raise ValueError("result source mismatch")
         if [c["name"] for c in report["cases"]] != names:
             raise ValueError("case identity/order mismatch")
@@ -290,6 +361,9 @@ def compare(request_raw, reference_report, actual):
         for row in [expected, got]:
             if row["seed"] != spec["seed"] or row["geometry"] != spec["geometry"]:
                 raise ValueError("case mode/seed mismatch")
+            if version == 2 and (row.get("geometry_update") != spec["geometry_update"]
+                                or row.get("trainable_parameter_scalars") != trainable_scalars(spec)):
+                raise ValueError("case update policy or trainable count mismatch")
             if row["parameter_tensors"] != len(spec["parameters"]) or row["parameter_scalars"] != sum(len(p["values"]) for p in spec["parameters"]):
                 raise ValueError("parameter count mismatch")
             if [s["revision"] for s in row["training"]] != list(range(1, n + 1)):
@@ -315,6 +389,12 @@ def compare(request_raw, reference_report, actual):
             if desc["name"].startswith("geometry."):
                 # Rust uploads float32 values; decimal conversion is not learning.
                 initial = [f32(x) for x in desc["values"]]
+                if frozen(spec):
+                    original = [struct.pack("<f", x) for x in initial]
+                    if any([struct.pack("<f", x) for x in values] != original for values in (a, e)):
+                        raise ValueError("frozen geometry parameter bits changed: " + desc["name"])
+                    geometry_deltas.append(dict(name=desc["name"], frozen_bits_preserved=True))
+                    continue
                 expected_norm = math.sqrt(math.fsum((x - y)**2 for x, y in zip(e, initial)))
                 actual_norm = math.sqrt(math.fsum((x - y)**2 for x, y in zip(a, initial)))
                 error = math.sqrt(math.fsum((x - y)**2 for x, y in zip(a, e)))
@@ -327,15 +407,21 @@ def compare(request_raw, reference_report, actual):
                               heldout_ce_max_error=eval_error, final_parameter_max_error=parameter_error,
                               initial_heldout_bpb=got["validation"][0]["bits_per_byte"],
                               final_heldout_bpb=got["validation"][-1]["bits_per_byte"], geometry_deltas=geometry_deltas))
+        if version == 2:
+            summaries[-1].update(geometry_update=spec["geometry_update"], trainable_parameter_scalars=trainable_scalars(spec))
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
-        if len(paired) != 2 or {c["geometry"] for c in paired} != {False, True}:
+        if len(paired) != (3 if version == 2 else 2) or {c["geometry"] for c in paired} != {False, True}:
             raise ValueError("incomplete paired seed")
         plain = next(c for c in paired if not c["geometry"])
-        geometry = next(c for c in paired if c["geometry"])
+        geometry = next(c for c in paired if c["geometry"] and not frozen(c))
         pairs.append(dict(seed=seed, geometry_minus_ordinary_bpb=geometry["final_heldout_bpb"] - plain["final_heldout_bpb"]))
-    return dict(schema="spiraltorch.byte_corpus.comparison.v1", request_sha256=digest(request_raw),
+        if version == 2:
+            fixed = next(c for c in paired if frozen(c))
+            pairs[-1].update(frozen_geometry_minus_ordinary_bpb=fixed["final_heldout_bpb"] - plain["final_heldout_bpb"],
+                             learned_geometry_minus_frozen_bpb=geometry["final_heldout_bpb"] - fixed["final_heldout_bpb"])
+    return dict(schema=f"spiraltorch.byte_corpus.comparison.v{version}", request_sha256=digest(request_raw),
                 numerical_checks_passed=True, criteria=dict(atol=ATOL, rtol=RTOL, geometry_delta_relative_l2=DELTA_RTOL),
                 cases=summaries, paired_deltas=pairs,
                 mean_geometry_minus_ordinary_bpb=statistics.mean(p["geometry_minus_ordinary_bpb"] for p in pairs),
@@ -355,6 +441,7 @@ def main():
                           ("blocks",1),("updates",128),("checkpoint-every",64),("validation-batches",32)]:
         p.add_argument("--" + name, type=int, default=default)
     p.add_argument("--rate", type=float, default=.05)
+    p.add_argument("--frozen-geometry-control", action="store_true", help="v2: add an identical-initialization geometry-frozen arm per seed")
     p = commands.add_parser("reference")
     p.add_argument("request", type=Path)
     p.add_argument("output", type=Path)
@@ -369,7 +456,7 @@ def main():
     elif args.command == "reference":
         reference(args)
     else:
-        result = compare(args.request.read_bytes(), json.loads(args.reference.read_bytes()), json.loads(args.actual.read_bytes()))
+        result = compare(args.request.read_bytes(), decode_json(args.reference.read_bytes()), decode_json(args.actual.read_bytes()))
         write_new(args.output, result)
         print(json.dumps({"numerical_checks_passed":True, "paired_deltas":result["paired_deltas"]}))
 

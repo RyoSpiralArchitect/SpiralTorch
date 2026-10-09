@@ -218,6 +218,26 @@ impl ByteDecoderPlan {
 
 impl ByteDecoderCheckpoint {
     #[cfg(feature = "wgpu")]
+    pub(crate) fn geometry_parameters_match(&self, other: &Self) -> Result<bool, InferenceError> {
+        match (&self.plan.geometry, &other.plan.geometry) {
+            (None, None) => Ok(true),
+            (Some(a), Some(b)) => {
+                let (a, b) = (a.parameter_values()?, b.parameter_values()?);
+                Ok(a.len() == b.len()
+                    && a.iter().zip(&b).all(|(a, b)| {
+                        a.shape == b.shape
+                            && a.values.len() == b.values.len()
+                            && a.values
+                                .iter()
+                                .zip(&b.values)
+                                .all(|(a, b)| a.to_bits() == b.to_bits())
+                    }))
+            }
+            _ => Ok(false),
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
     pub(crate) fn escaped_json_size_bound(&self) -> Result<usize, InferenceError> {
         let mut model = ModelRecord::from_plan(&self.plan)?;
         let mut count = 0usize;
