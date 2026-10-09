@@ -208,7 +208,7 @@ def reference(args):
     valid = [batch(request["validation_documents"], s) for s in request["validation_batches"]]
     reports = []
     for case in request["cases"]:
-        p = [torch.tensor(v["values"], device="cpu").reshape(v["shape"]).requires_grad_()
+        p = [torch.tensor(v["values"], device="cpu", dtype=torch.float32).reshape(v["shape"]).requires_grad_()
              for v in case["parameters"]]
 
         def forward(ids):
@@ -313,8 +313,10 @@ def compare(request_raw, reference_report, actual):
                 raise ValueError("parameter shape mismatch")
             parameter_error = max(parameter_error, close(a, e, name + "." + desc["name"]))
             if desc["name"].startswith("geometry."):
-                expected_norm = math.sqrt(math.fsum((x - y)**2 for x, y in zip(e, desc["values"])))
-                actual_norm = math.sqrt(math.fsum((x - y)**2 for x, y in zip(a, desc["values"])))
+                # Rust uploads float32 values; decimal conversion is not learning.
+                initial = [f32(x) for x in desc["values"]]
+                expected_norm = math.sqrt(math.fsum((x - y)**2 for x, y in zip(e, initial)))
+                actual_norm = math.sqrt(math.fsum((x - y)**2 for x, y in zip(a, initial)))
                 error = math.sqrt(math.fsum((x - y)**2 for x, y in zip(a, e)))
                 if expected_norm <= 1e-8 or actual_norm == 0 or error / expected_norm > DELTA_RTOL:
                     raise ValueError("unqualified geometry learning delta: " + desc["name"])
