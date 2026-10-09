@@ -153,9 +153,10 @@ server in a WebGPU browser. The browser is an actual execution check; compiling
 WASM alone is not equivalent. Native link environment flags may need to be
 unset for a wasm32 cross-build.
 
-The **next required learning mechanism** is a genuine Poincare squared-distance
-pair bias, evaluated on chart coordinates, with derivatives into both endpoints
-and learned per-head gains. Those metric cotangents must be summed across all
+The [Poincare metric primitive](poincare_metric_attention.md) provides genuine
+squared-distance pair bias on chart coordinates, with derivatives into both
+endpoints and learned per-head gains. The **next required learning mechanism**
+is full-model integration. Those metric cotangents must be summed across all
 heads/blocks before this wave's backward. It then belongs under the byte
 decoder's one owner, with next-byte CE reaching decay, phase and projection
 parameters. A direct Euclidean path must not disguise a disconnected metric

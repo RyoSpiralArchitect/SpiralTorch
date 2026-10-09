@@ -19,6 +19,7 @@ pub mod embedding;
 pub(crate) mod guard_capture;
 pub mod loss;
 pub mod normalization;
+pub mod poincare;
 pub mod pointwise;
 pub mod profile;
 mod validity;
@@ -28,6 +29,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    Poincare(#[from] st_kernel_contracts::poincare::PoincareError),
     #[error(transparent)]
     CausalWave(#[from] st_kernel_contracts::causal_wave::CausalWaveError),
     #[error(transparent)]
@@ -80,6 +83,7 @@ struct Kernels {
     concatenate: std::sync::OnceLock<concatenate::ConcatenateKernels>,
     embedding: std::sync::OnceLock<embedding::EmbeddingKernels>,
     causal_wave: std::sync::OnceLock<causal_wave::CausalWaveKernels>,
+    poincare: std::sync::OnceLock<poincare::PoincareKernels>,
     guard_capture: std::sync::OnceLock<guard_capture::GuardCapture>,
     convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
     depthwise_vjp: std::sync::OnceLock<convolution::vjp::DepthwiseVjpKernels>,
@@ -240,6 +244,7 @@ impl TensorDevice {
             concatenate: std::sync::OnceLock::new(),
             embedding: std::sync::OnceLock::new(),
             causal_wave: std::sync::OnceLock::new(),
+            poincare: std::sync::OnceLock::new(),
             guard_capture: std::sync::OnceLock::new(),
             convolution: std::sync::OnceLock::new(),
             depthwise_vjp: std::sync::OnceLock::new(),

@@ -19,6 +19,7 @@ pub mod indexing;
 pub mod layout;
 pub mod momentum;
 pub mod normalization;
+pub mod poincare;
 pub mod pointwise;
 pub mod rank;
 pub mod sgd;
