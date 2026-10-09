@@ -4,8 +4,10 @@
 multi-head attention, output projection, their VJPs, and one all-or-none plain-SGD
 update. The same Rust implementation runs on native WGPU and browser WebGPU. It
 extends the [attention VJP primitive](resident_attention_learning.md), not the
-host `Module::backward` path. This is a source addition after 0.4.29; no Python or
-JavaScript training wrapper, complete decoder, or language-quality claim is added.
+host `Module::backward` path. This is a source addition after 0.4.29.
+[Python and JavaScript training clients](resident_attention_training_clients.md)
+expose the same owner and transaction. No complete decoder or language-quality
+claim is added.
 
 ## Use and ownership
 

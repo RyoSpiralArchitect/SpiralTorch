@@ -20,6 +20,7 @@ pub use attention::{
     ResidentAttentionBlock, ResidentAttentionForward, ResidentAttentionTraining,
     ResidentAttentionVjp,
 };
+pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]
 mod convolution;
 mod graph;

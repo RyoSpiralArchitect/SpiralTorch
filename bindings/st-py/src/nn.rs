@@ -11034,6 +11034,11 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         "__all__",
         vec![
             "InferencePlan",
+            "AttentionInferencePlan",
+            "ResidentAttentionTraining",
+            "AttentionForward",
+            "AttentionGradients",
+            "ResidentParameterUpdate",
             "ResidentInference",
             "InferenceSnapshot",
             "ResidentTraining",

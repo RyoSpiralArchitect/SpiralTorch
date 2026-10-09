@@ -1,7 +1,7 @@
 // CPU-only WASM still transports the Rust plan, but cannot pretend to execute it.
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const {InferencePlan} = require(path.resolve(process.argv[2]));
+const {InferencePlan, AttentionInferencePlan} = require(path.resolve(process.argv[2]));
 const record = {schema:"spiraltorch.nn.inference_plan.v1", input_shape:[2,3,2],
   stages:[{inner:2, cols:2, weight:[1,0,0,1], bias:[0,0], gelu:true}]};
 const payload = JSON.stringify(record);
@@ -37,4 +37,23 @@ for(const policy of ["exact","module_compatible"]) assert.throws(() => rich.comp
 for(const policy of [undefined,null,true,1,"","auto","EXACT"," exact","module-compatible"])
   assert.throws(() => rich.compileGraphTrainingWebGpu(policy), /gradient_policy/);
 rich.free(); richRestored.free();
+const linearRecord = {...record, stages:[{...record.stages[0], gelu:false}]};
+const projections = Array.from({length:4}, () => InferencePlan.fromJson(JSON.stringify(linearRecord)));
+const attention = AttentionInferencePlan.fromProjectionPlans(...projections, 1, 0);
+assert.deepEqual([...attention.inputShape], [2,3,2]);
+assert.deepEqual([...attention.outputShape], [2,3,2]);
+for (const bad of [true, -1, 0.5, "1", 2**33]) {
+  assert.throws(() => AttentionInferencePlan.fromProjectionPlans(...projections, bad), /heads/);
+  assert.throws(() => AttentionInferencePlan.fromProjectionPlans(...projections, 1, bad), /causal_offset/);
+}
+assert.throws(() => AttentionInferencePlan.fromProjectionPlans(...projections, 0), /nonzero heads/);
+for (let index=0; index<4; index++) {
+  const gelu = InferencePlan.fromJson(payload);
+  const changed = projections.slice(); changed[index] = gelu;
+  assert.throws(() => AttentionInferencePlan.fromProjectionPlans(...changed, 1), /exactly one unfused Linear/);
+  gelu.free();
+}
+projections.forEach(p => p.free());
+assert.throws(() => attention.compileTrainingWebGpu(), /requires the webgpu build feature/);
+attention.free();
 console.log("CPU-only WASM NN transport and explicit GPU rejection passed");

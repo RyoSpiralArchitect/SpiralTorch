@@ -90,6 +90,63 @@ fn original_linears_lower_with_their_biases_not_a_new_parameter_set() {
     );
 }
 
+#[test]
+fn portable_projection_composition_preserves_values_and_rejects_dropped_operations() {
+    let params = parameters();
+    let projection = |index: usize, shape: &[usize], extra: Option<InferenceOp>| {
+        let mut ops = vec![InferenceOp::Linear {
+            weight: params[index].0.clone(),
+            bias: params[index].1.clone(),
+        }];
+        ops.extend(extra);
+        InferencePlan::from_operations(NdLayout::contiguous(shape).unwrap(), ops).unwrap()
+    };
+    let projections: [_; 4] = std::array::from_fn(|i| projection(i, &[2, 4, 6], None));
+    let composed = AttentionInferencePlan::from_projection_plans(
+        2,
+        AttentionMask::Causal { query_offset: 0 },
+        projections.each_ref(),
+    )
+    .unwrap();
+    let expected = plan(&params, AttentionMask::Causal { query_offset: 0 });
+    assert_eq!(
+        composed.qkv.stages[0].weight.data(),
+        expected.qkv.stages[0].weight.data()
+    );
+    assert_eq!(
+        composed.qkv.stages[0].bias.data(),
+        expected.qkv.stages[0].bias.data()
+    );
+    assert_eq!(
+        composed.output.stages[0].weight.data(),
+        expected.output.stages[0].weight.data()
+    );
+    for index in 0..4 {
+        for extra in [
+            InferenceOp::Gelu,
+            InferenceOp::Relu,
+            InferenceOp::Linear {
+                weight: params[0].0.clone(),
+                bias: params[0].1.clone(),
+            },
+        ] {
+            let richer = projection(index, &[2, 4, 6], Some(extra));
+            let mut inputs = projections.each_ref();
+            inputs[index] = &richer;
+            assert!(
+                AttentionInferencePlan::from_projection_plans(2, AttentionMask::None, inputs)
+                    .is_err()
+            );
+        }
+        let different_batch_layout = projection(index, &[1, 8, 6], None);
+        let mut inputs = projections.each_ref();
+        inputs[index] = &different_batch_layout;
+        assert!(
+            AttentionInferencePlan::from_projection_plans(2, AttentionMask::None, inputs).is_err()
+        );
+    }
+}
+
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 mod gpu {
     use super::*;

@@ -7,8 +7,8 @@ use st_backend_wgpu::resident_tensor::attention::{AttentionMask, ResidentAttenti
 #[wasm_bindgen(js_name = WgpuAttentionBiases)]
 #[derive(Default)]
 pub struct WasmAttentionBiases {
-    z_bias: Option<ResidentTensor>,
-    pair_bias: Option<ResidentTensor>,
+    pub(crate) z_bias: Option<ResidentTensor>,
+    pub(crate) pair_bias: Option<ResidentTensor>,
 }
 
 #[wasm_bindgen(js_class = WgpuAttentionBiases)]
