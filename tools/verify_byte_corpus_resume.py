@@ -45,9 +45,9 @@ def stored_parameters(record, cursor, pair_metric=None):
     """
     require(set(record) == {"schema", "update_rule", "window_state", "attempted_revision", "model"},
             "incomplete model envelope")
-    flat = pair_metric == STUDY.FLAT
-    require(pair_metric in (None, STUDY.POINCARE, STUDY.FLAT), "saved metric identity")
-    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{2 if flat else 1}", "model schema")
+    metric_aware = pair_metric in (STUDY.FLAT, STUDY.FISHER)
+    require(pair_metric in (None, STUDY.POINCARE, STUDY.FLAT, STUDY.FISHER), "saved metric identity")
+    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{2 if metric_aware else 1}", "model schema")
     require(record["update_rule"] == "stateless_sgd.v1", "model update rule")
     require(record["window_state"] == "reset_positions_and_geometry.v1", "model window state")
     require(record["attempted_revision"] == str(cursor), "model clock")
@@ -62,10 +62,10 @@ def stored_parameters(record, cursor, pair_metric=None):
         parameters.extend(value["parameters"])
 
     geometry = model["geometry"]
-    require(not flat or geometry is not None, "flat model requires geometry")
+    require(not metric_aware or geometry is not None, "metric-aware model requires geometry")
     if geometry is not None:
         fields = {"projection", "curvature", "raw_decay", "raw_phase", "raw_gains"}
-        if flat:
+        if metric_aware:
             fields.add("pair_metric")
             require(geometry.get("pair_metric") == pair_metric, "saved metric differs")
         require(set(geometry) == fields,
@@ -97,7 +97,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         require(report["engine"] == "spiraltorch", "foreign engine")
         require(report["request_sha256"] == request_hash, "report request identity")
         require(len(report["cases"]) == len(request["cases"]), "missing report cases")
-        if version == 4:
+        if version >= 4:
             require(exact(report.get("bias_calibration"), request["bias_calibration"]), "calibration recipe differs")
     require(len(checkpoint["cases"]) == len(request["cases"]), "missing checkpoint cases")
     summaries = []
@@ -114,7 +114,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 require(exact(report.get("trainable_parameter_scalars"), trainable), "trainable count differs")
             if version >= 3:
                 require("pair_metric" in report and exact(report["pair_metric"], case.get("pair_metric")), "report metric differs")
-            if version == 4:
+            if version >= 4:
                 require(report.get("bias_initialization") == case["bias_initialization"], "initialization differs")
             require(exact(report["parameter_tensors"], len(case["parameters"])), "parameter count")
             require(exact(report["parameter_scalars"], sum(len(p["values"]) for p in case["parameters"])),
@@ -168,7 +168,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                           "final_mean_ce": full["validation"][-1]["mean_ce"]})
         if version >= 3:
             summaries[-1].update(pair_metric=case.get("pair_metric"), geometry_update=case["geometry_update"])
-        if version == 4:
+        if version >= 4:
             summaries[-1]["bias_initialization"] = case["bias_initialization"]
     return {"schema": f"spiraltorch.byte_corpus.resume_verification.v{version}", "passed": True,
             "request_sha256": request_hash, "exact_resumed_report_equal": True,

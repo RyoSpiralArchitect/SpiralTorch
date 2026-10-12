@@ -109,3 +109,38 @@ calibration contrasts remain visible for every seed, including unfavorable ones.
 RMS matching is an initialization control, not proof of equivalent computation
 or superior geometry. The fixed small repository corpus is still not a large
 language benchmark, pretrained LLM fine-tuning or a generation-quality study.
+
+## Fisher-Rao Control (v5)
+
+Call `with_fisher_rao_control()?` on the Rust preparation builder, or use
+`--calibrate-fisher 0,1,2,3` instead of `--calibrate-flat`. v5 retains all seven
+v4 arms and adds categorical Fisher-Rao squared with trained and frozen geometry,
+for nine arms per seed and at most 27 cases. The
+[Fisher-Rao learner](fisher_rao_attention.md) differentiates through the simplex
+chart, causal wave, projection and embeddings. It is not a report-only score.
+
+Both flat and Fisher gains are fit independently to the original Poincare
+training-window RMS. Only gains differ between metric families; each trained /
+frozen pair has identical initial weights. Both fits must pass the same `1e-5`
+realized-RMS gate. A raw uncalibrated Fisher arm, geometry mixtures, extra
+hyperparameter tuning and matched compute are **not** part of this protocol.
+
+Preparation reports use `bias_preparation.v2`, identifying each seed/metric
+record explicitly. The opaque packet stays `prepared.v1`; request, result,
+partial and study checkpoint use v5. Fisher models use the existing metric-aware
+model checkpoint v2. All clients still consume one frozen prepared request;
+resume remeasures initial models without refitting resumed weights.
+
+The browser preparation page's `?fisher=1` option calls
+`prepare_resident_byte_learning_fisher(input, indices)`. Learning and resume
+pages accept the common v5 request without JavaScript model logic. The same
+preparation, Torch comparison and resume commands above apply. For first-step
+and inheritance checks, supply the retained **v4 request and result** to
+`verify_byte_corpus_calibrated_controls.py`; this checks the 21 unchanged reports
+and all four trained/frozen geometry pairs per seed.
+
+The comparison keeps every earlier contrast, then adds Fisher versus Poincare,
+Fisher versus RMS-matched flat, their frozen counterparts, Fisher train-minus-
+frozen and both metric-by-training interactions. Each is derived from checked
+batch losses, accompanied by independent Torch discrepancy and sign agreement.
+Small effects near numerical discrepancy are not evidence of a winning geometry.

@@ -4,6 +4,24 @@ pub async fn prepare_resident_byte_learning(
     input: &str,
     train_batch_indices: Vec<u32>,
 ) -> Result<String, wasm_bindgen::JsValue> {
+    prepare(input, train_batch_indices, false).await
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn prepare_resident_byte_learning_fisher(
+    input: &str,
+    train_batch_indices: Vec<u32>,
+) -> Result<String, wasm_bindgen::JsValue> {
+    prepare(input, train_batch_indices, true).await
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+async fn prepare(
+    input: &str,
+    train_batch_indices: Vec<u32>,
+    fisher: bool,
+) -> Result<String, wasm_bindgen::JsValue> {
     use st_nn::resident::ByteCorpusBiasCalibration;
     use wasm_bindgen::JsValue;
     let error = |e: Box<dyn std::error::Error>| JsValue::from_str(&e.to_string());
@@ -11,8 +29,11 @@ pub async fn prepare_resident_byte_learning(
         .into_iter()
         .map(|i| i as usize)
         .collect();
-    let preparation =
+    let mut preparation =
         ByteCorpusBiasCalibration::from_json(input.as_bytes(), &indices).map_err(error)?;
+    if fisher {
+        preparation = preparation.with_fisher_rao_control().map_err(error)?;
+    }
     let runtime =
         st_backend_wgpu::runtime::WgpuRuntime::request_headless("byte.corpus.calibration")
             .await

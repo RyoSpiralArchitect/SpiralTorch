@@ -58,16 +58,27 @@ impl Request {
     pub(super) fn metric_controls(&self) -> bool {
         matches!(
             self.schema.as_str(),
-            "spiraltorch.byte_corpus.request.v3" | "spiraltorch.byte_corpus.request.v4"
+            "spiraltorch.byte_corpus.request.v3"
+                | "spiraltorch.byte_corpus.request.v4"
+                | "spiraltorch.byte_corpus.request.v5"
         )
     }
 
     pub(super) fn calibration_controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v4"
+        matches!(
+            self.schema.as_str(),
+            "spiraltorch.byte_corpus.request.v4" | "spiraltorch.byte_corpus.request.v5"
+        )
+    }
+
+    pub(super) fn fisher_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v5"
     }
 
     pub(super) fn arms_per_seed(&self) -> usize {
-        if self.calibration_controls() {
+        if self.fisher_controls() {
+            9
+        } else if self.calibration_controls() {
             7
         } else if self.metric_controls() {
             5
@@ -79,7 +90,9 @@ impl Request {
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.calibration_controls() {
+        if self.fisher_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v5"
+        } else if self.calibration_controls() {
             "spiraltorch.byte_corpus.checkpoint.v4"
         } else if self.metric_controls() {
             "spiraltorch.byte_corpus.checkpoint.v3"
@@ -91,6 +104,13 @@ impl Request {
     }
 
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.fisher_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v5"
+            } else {
+                "spiraltorch.byte_corpus.partial.v5"
+            };
+        }
         if self.calibration_controls() {
             return if complete {
                 "spiraltorch.byte_corpus.result.v4"
@@ -118,7 +138,7 @@ impl Request {
             .iter()
             .any(|c| c.bias_initialization.is_some() != self.calibration_controls())
         {
-            return Err("only v4 requires explicit bias initialization on every arm".into());
+            return Err("v4/v5 require explicit bias initialization on every arm".into());
         }
         if !self.metric_controls() && cases.iter().any(|c| c.pair_metric.is_some()) {
             return Err("v1/v2 do not admit an explicit pair metric".into());
@@ -182,6 +202,16 @@ impl Request {
                 ));
             }
         }
+        if self.fisher_controls() {
+            for update in [GeometryUpdate::Train, GeometryUpdate::Frozen] {
+                modes.push((
+                    true,
+                    update,
+                    Some(ByteDecoderPairMetric::CategoricalFisherRaoSquared),
+                    Some(BiasInitialization::MatchedPoincareRms),
+                ));
+            }
+        }
         for (geometry, update, metric, initialization) in modes {
             if cases
                 .iter()
@@ -214,10 +244,19 @@ impl Request {
         {
             return Err("geometry arms differ outside the permitted initial gain treatment".into());
         }
-        for matched in [false, true] {
+        // Matched gains differ by metric, but each trained/frozen pair must be
+        // bit-identical. Original arms still share every initial geometry bit.
+        for (matched, metric) in [
+            (false, None),
+            (true, Some(ByteDecoderPairMetric::EuclideanChordSquared)),
+            (
+                true,
+                Some(ByteDecoderPairMetric::CategoricalFisherRaoSquared),
+            ),
+        ] {
             let group: Vec<_> = geometric
                 .iter()
-                .filter(|c| c.matched() == matched)
+                .filter(|c| c.matched() == matched && (!matched || c.pair_metric == metric))
                 .collect();
             if group
                 .get(1..)

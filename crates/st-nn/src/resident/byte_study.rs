@@ -34,6 +34,7 @@ use policy::{BiasInitialization, GeometryUpdate};
 /// v1 pairs ordinary/learned geometry; v2 adds identical-initialization frozen
 /// geometry; v3 crosses learned/frozen with Poincare/flat pair distance.
 /// v4 adds a prepared, gain-only RMS-matched flat learned/frozen pair.
+/// v5 retains those seven arms and adds a matched Fisher-Rao learned/frozen pair.
 /// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
@@ -123,7 +124,7 @@ struct Config {
     curvature: f32,
 }
 
-#[derive(Deserialize, PartialEq)]
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct Parameter {
     name: String,
@@ -131,7 +132,7 @@ struct Parameter {
     values: Vec<f32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Case {
     name: String,
@@ -175,6 +176,7 @@ fn parse(input: &[u8]) -> Result<Request> {
             | "spiraltorch.byte_corpus.request.v2"
             | "spiraltorch.byte_corpus.request.v3"
             | "spiraltorch.byte_corpus.request.v4"
+            | "spiraltorch.byte_corpus.request.v5"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
@@ -191,7 +193,14 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(1..=1024).contains(&r.train_batches.len())
         || !(1..=128).contains(&r.validation_batches.len())
         || !(1..=64).contains(&r.checkpoint_every)
-        || !(2..=if r.calibration_controls() { 21 } else { 16 }).contains(&r.cases.len())
+        || !(2..=if r.fisher_controls() {
+            27
+        } else if r.calibration_controls() {
+            21
+        } else {
+            16
+        })
+            .contains(&r.cases.len())
         || r.cases.len() % r.arms_per_seed() != 0
     {
         return Err("invalid study configuration".into());

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check retained v3 reports and separately executed first-update v4 controls."""
+"""Check retained reports and first-update controls for calibrated v4/v5 studies."""
 import argparse
 import importlib.util
 import math
@@ -35,13 +35,13 @@ def validate_report(report, request, request_hash, cursor):
             and report["engine"] == "spiraltorch" and report["request_sha256"] == request_hash,
             "request-derived report identity")
     require(len(report["cases"]) == len(request["cases"]), "request-derived case count")
-    if version == 4:
+    if version >= 4:
         require(resume.exact(report.get("bias_calibration"), request["bias_calibration"]), "request-derived calibration")
     revisions = [0] + [r for r in range(1, cursor + 1) if r % request["checkpoint_every"] == 0 or r == total]
     for row, spec in zip(report["cases"], request["cases"]):
         for key in ("name", "seed", "geometry", "geometry_update", "pair_metric"):
             require(key in row and resume.exact(row[key], spec.get(key)), "request-derived case metadata")
-        if version == 4:
+        if version >= 4:
             require(row.get("bias_initialization") == spec["bias_initialization"], "request-derived initialization")
         require(resume.exact(row["parameter_tensors"], len(spec["parameters"]))
                 and resume.exact(row["parameter_scalars"], sum(len(p["values"]) for p in spec["parameters"]))
@@ -67,25 +67,31 @@ def validate_report(report, request, request_hash, cursor):
 
 def verify(request_raw, source_raw, full, retained, first):
     request, source = map(study.decode_json, (request_raw, source_raw))
-    require(study.request_version(request) == 4 and study.request_version(source) == 3, "control schema")
-    require(request["bias_calibration"]["source_request_sha256"] == study.digest(source_raw), "source binding")
+    version, source_version = study.request_version(request), study.request_version(source)
+    require((version, source_version) in ((4, 3), (5, 4)), "control schema")
+    if version == 4:
+        require(request["bias_calibration"]["source_request_sha256"] == study.digest(source_raw), "source binding")
+    else:
+        require(resume.exact(request["bias_calibration"], source["bias_calibration"]), "shared v3 source and calibration recipe")
     validate_report(full, request, study.digest(request_raw), len(request["train_batches"]))
     validate_report(retained, source, study.digest(source_raw), len(source["train_batches"]))
     validate_report(first, request, study.digest(request_raw), 1)
-    require(full["schema"] == "spiraltorch.byte_corpus.result.v4"
-            and retained["schema"] == "spiraltorch.byte_corpus.result.v3"
+    require(full["schema"] == f"spiraltorch.byte_corpus.result.v{version}"
+            and retained["schema"] == f"spiraltorch.byte_corpus.result.v{source_version}"
             and retained["engine"] == "spiraltorch"
             and retained["request_sha256"] == study.digest(source_raw), "baseline identity")
     require(full["adapter"] == retained["adapter"] == first["adapter"], "runtime differs")
     for report in (full, first):
         require(report["engine"] == "spiraltorch" and report["request_sha256"] == study.digest(request_raw)
-                and resume.exact(report.get("bias_calibration"), request["bias_calibration"]), "v4 report identity")
+                and resume.exact(report.get("bias_calibration"), request["bias_calibration"]), "calibrated report identity")
         require([c["name"] for c in report["cases"]] == [c["name"] for c in request["cases"]], "report order/coverage")
     require(len(retained["cases"]) == len(source["cases"]), "retained case coverage")
     old_names = []
     for old, new, spec in zip(retained["cases"], full["cases"], source["cases"]):
         copy = dict(new)
-        require(copy.pop("bias_initialization") == study.ORIGINAL and copy["name"] == spec["name"], "inherited identity")
+        if source_version == 3:
+            require(copy.pop("bias_initialization") == study.ORIGINAL, "inherited initialization")
+        require(copy["name"] == spec["name"], "inherited identity")
         require(resume.exact(copy, old), "inherited full case report changed")
         old_names.append(old["name"])
     for spec, result, prefix in zip(request["cases"], full["cases"], first["cases"]):
@@ -99,7 +105,10 @@ def verify(request_raw, source_raw, full, retained, first):
             bits(value)
     pairs = []
     for seed in sorted({c["seed"] for c in request["cases"]}):
-        for metric, initialization in [(study.POINCARE, study.ORIGINAL), (study.FLAT, study.ORIGINAL), (study.FLAT, study.MATCHED)]:
+        modes = [(study.POINCARE, study.ORIGINAL), (study.FLAT, study.ORIGINAL), (study.FLAT, study.MATCHED)]
+        if version == 5:
+            modes.append((study.FISHER, study.MATCHED))
+        for metric, initialization in modes:
             indices = [i for i, c in enumerate(request["cases"]) if c["seed"] == seed
                        and c.get("pair_metric") == metric and c["bias_initialization"] == initialization]
             trained = next(i for i in indices if not study.frozen(request["cases"][i]))
@@ -121,7 +130,7 @@ def verify(request_raw, source_raw, full, retained, first):
             pairs.append(dict(seed=seed, pair_metric=metric, bias_initialization=initialization,
                               first_backbone_update_bits_identical=True, both_embeddings_moved=True,
                               frozen_initial_bits_preserved=True, moving_geometry_families=moving))
-    return dict(schema="spiraltorch.byte_corpus.calibrated_controls.v1", passed=True,
+    return dict(schema=f"spiraltorch.byte_corpus.calibrated_controls.v{2 if version == 5 else 1}", passed=True,
                 request_sha256=study.digest(request_raw), source_request_sha256=study.digest(source_raw),
                 inherited_full_reports_exact=old_names, pairs=pairs,
                 scope="Same-runtime inheritance and separately executed first-update controls, not quality or speed evidence")

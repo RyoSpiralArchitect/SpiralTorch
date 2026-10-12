@@ -34,6 +34,7 @@ struct Args {
     output: Option<std::path::PathBuf>,
     stop: Option<usize>,
     calibrate: Option<Vec<usize>>,
+    fisher: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,7 +45,7 @@ impl Args {
         let mut args = args.into_iter();
         let mut result = Self {
             request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json]")?.into(),
-            resume: None, output: None, stop: None, calibrate: None,
+            resume: None, output: None, stop: None, calibrate: None, fisher: false,
         };
         while let Some(flag) = args.next() {
             let value = args.next().ok_or("missing flag value")?;
@@ -56,7 +57,8 @@ impl Args {
                 Some("--stop-after") if result.stop.is_none() => {
                     result.stop = Some(value.to_str().ok_or("invalid stop cursor")?.parse()?);
                 }
-                Some("--calibrate-flat") if result.calibrate.is_none() => {
+                Some("--calibrate-flat" | "--calibrate-fisher") if result.calibrate.is_none() => {
+                    result.fisher = flag == "--calibrate-fisher";
                     result.calibrate = Some(
                         value
                             .to_str()
@@ -114,7 +116,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(std::env::args_os().skip(1))?;
     let input = read_request(&args.request)?;
     if let Some(indices) = args.calibrate {
-        let preparation = ByteCorpusBiasCalibration::from_json(&input, &indices)?;
+        let mut preparation = ByteCorpusBiasCalibration::from_json(&input, &indices)?;
+        if args.fisher {
+            preparation = preparation.with_fisher_rao_control()?;
+        }
         let (runtime, _) =
             st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.calibration")?;
         let prepared = pollster::block_on(preparation.prepare(runtime))?;
@@ -190,6 +195,14 @@ mod tests {
             ],
             vec!["request", "--calibrate-flat", "0,,1"],
             vec!["request", "--calibrate-flat", "-1"],
+            vec![
+                "request",
+                "--calibrate-fisher",
+                "0",
+                "--calibrate-flat",
+                "1",
+            ],
+            vec!["request", "--calibrate-fisher", "0", "--resume", "old.json"],
         ] {
             assert!(super::Args::parse(args.into_iter().map(std::ffi::OsString::from)).is_err());
         }
@@ -203,6 +216,14 @@ mod tests {
             .calibrate,
             Some(vec![0, 1, 2, 3])
         );
+        let fisher = super::Args::parse(
+            ["request", "--calibrate-fisher", "0,1"]
+                .into_iter()
+                .map(std::ffi::OsString::from),
+        )
+        .unwrap();
+        assert!(fisher.fisher);
+        assert_eq!(fisher.calibrate, Some(vec![0, 1]));
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("new.json");
         let args = [

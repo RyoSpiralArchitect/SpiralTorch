@@ -4,6 +4,10 @@ use st_kernel_contracts::causal_bias::{CausalBiasMoments, CausalBiasScaleMatch};
 use std::collections::BTreeMap;
 
 const TOLERANCE: f64 = 1e-5;
+const METRICS: [ByteDecoderPairMetric; 2] = [
+    ByteDecoderPairMetric::EuclideanChordSquared,
+    ByteDecoderPairMetric::CategoricalFisherRaoSquared,
+];
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,7 +35,7 @@ fn check_selection(indices: &[usize], total: usize) -> Result<()> {
 
 pub(super) fn validate_spec(r: &Request) -> Result<()> {
     if r.calibration_controls() != r.bias_calibration.is_some() {
-        return Err("only v4 requires a prepared bias calibration specification".into());
+        return Err("v4/v5 require a prepared bias calibration specification".into());
     }
     if let Some(spec) = &r.bias_calibration {
         if spec.relative_tolerance != TOLERANCE
@@ -59,6 +63,16 @@ fn case_for(r: &Request, seed: u64, metric: ByteDecoderPairMetric, matched: bool
                 && c.matched() == matched
         })
         .ok_or_else(|| "missing calibration control case".into())
+}
+
+fn candidate_plan(
+    r: &Request,
+    seed: u64,
+    metric: ByteDecoderPairMetric,
+) -> Result<ByteDecoderPlan> {
+    let mut case = case_for(r, seed, ByteDecoderPairMetric::EuclideanChordSquared, false)?.clone();
+    case.pair_metric = Some(metric);
+    plan(&r.config, &case)
 }
 
 async fn measure(
@@ -139,23 +153,23 @@ pub(super) async fn verify_initial(r: &Request, runtime: &WgpuRuntime) -> Result
             &r.config,
             case_for(r, seed, ByteDecoderPairMetric::PoincareSquared, false)?,
         )?;
-        let fitted = plan(
-            &r.config,
-            case_for(r, seed, ByteDecoderPairMetric::EuclideanChordSquared, true)?,
-        )?;
         let target = measure(r, &reference, runtime, &spec.train_batch_indices).await?;
-        let actual = measure(r, &fitted, runtime, &spec.train_batch_indices).await?;
-        checked_errors(&target, &actual)?;
+        for metric in &METRICS[..if r.fisher_controls() { 2 } else { 1 }] {
+            let fitted = plan(&r.config, case_for(r, seed, *metric, true)?)?;
+            let actual = measure(r, &fitted, runtime, &spec.train_batch_indices).await?;
+            checked_errors(&target, &actual)?;
+        }
     }
     Ok(())
 }
 
 /// A bounded CPU-preflighted v3 source and training-only calibration selection.
-/// The v4 request contains actual fitted weights, shared unchanged by all learners.
+/// The v4/v5 request contains fitted weights, shared unchanged by all learners.
 pub struct ByteCorpusBiasCalibration {
     source: ByteCorpusStudy,
     input: Vec<u8>,
     spec: CalibrationSpec,
+    fisher: bool,
 }
 
 /// Keep the request's original JSON bytes when saving, learning or resuming.
@@ -180,6 +194,7 @@ impl ByteCorpusBiasCalibration {
             source,
             input: input.to_vec(),
             spec,
+            fisher: false,
         };
         // Admit the expanded recipe and its worst-case checkpoint before a GPU
         // is requested. Placeholder gains are original values, not a fitted claim.
@@ -187,9 +202,21 @@ impl ByteCorpusBiasCalibration {
         Ok(this)
     }
 
-    fn materialize(&self, fitted: &BTreeMap<u64, Vec<Vec<f32>>>) -> Result<String> {
+    /// Extend the unchanged v3 source to nine v5 arms, matching both flat and
+    /// categorical Fisher-Rao to the original Poincare training-window RMS.
+    pub fn with_fisher_rao_control(mut self) -> Result<Self> {
+        self.fisher = true;
+        self.materialize(&BTreeMap::new())?;
+        Ok(self)
+    }
+
+    fn materialize(&self, fitted: &BTreeMap<(u64, usize), Vec<Vec<f32>>>) -> Result<String> {
         let mut value: Value = serde_json::from_slice(&self.input)?;
-        value["schema"] = json!("spiraltorch.byte_corpus.request.v4");
+        value["schema"] = json!(if self.fisher {
+            "spiraltorch.byte_corpus.request.v5"
+        } else {
+            "spiraltorch.byte_corpus.request.v4"
+        });
         value["bias_calibration"] = json!(self.spec);
         let cases = value["cases"]
             .as_array_mut()
@@ -198,22 +225,32 @@ impl ByteCorpusBiasCalibration {
             c["bias_initialization"] = json!(BiasInitialization::Original);
         }
         let mut extras = Vec::new();
-        for c in cases
-            .iter()
-            .filter(|c| c["pair_metric"] == "euclidean_chord_squared.v1")
+        for (metric_index, metric) in
+            METRICS
+                .iter()
+                .enumerate()
+                .take(if self.fisher { 2 } else { 1 })
         {
-            let mut extra = c.clone();
-            extra["name"] = json!(format!(
-                "{}_rms_matched",
-                c["name"].as_str().ok_or("case name")?
-            ));
-            extra["bias_initialization"] = json!(BiasInitialization::MatchedPoincareRms);
-            if let Some(gains) = fitted.get(&c["seed"].as_u64().ok_or("seed")?) {
-                for (block, values) in gains.iter().enumerate() {
-                    extra["parameters"][6 + block]["values"] = json!(values);
+            for c in cases
+                .iter()
+                .filter(|c| c["pair_metric"] == "euclidean_chord_squared.v1")
+            {
+                let mut extra = c.clone();
+                extra["name"] = json!(format!(
+                    "{}{}_rms_matched",
+                    c["name"].as_str().ok_or("case name")?,
+                    if metric_index == 0 { "" } else { "_fisher_rao" }
+                ));
+                extra["pair_metric"] = json!(metric);
+                extra["bias_initialization"] = json!(BiasInitialization::MatchedPoincareRms);
+                if let Some(gains) = fitted.get(&(c["seed"].as_u64().ok_or("seed")?, metric_index))
+                {
+                    for (block, values) in gains.iter().enumerate() {
+                        extra["parameters"][6 + block]["values"] = json!(values);
+                    }
                 }
+                extras.push(extra);
             }
-            extras.push(extra);
         }
         cases.extend(extras);
         let text = value.to_string();
@@ -252,24 +289,28 @@ impl ByteCorpusBiasCalibration {
                 &r.config,
                 case_for(r, seed, ByteDecoderPairMetric::PoincareSquared, false)?,
             )?;
-            let candidate = plan(
-                &r.config,
-                case_for(r, seed, ByteDecoderPairMetric::EuclideanChordSquared, false)?,
-            )?;
             let target = measure(r, &reference, &runtime, &self.spec.train_batch_indices).await?;
-            let before = measure(r, &candidate, &runtime, &self.spec.train_batch_indices).await?;
-            let fits = target
-                .iter()
-                .zip(&before)
-                .zip(candidate.causal_geometry().ok_or("geometry")?.raw_gains())
-                .map(|((a, b), g)| CausalBiasScaleMatch::new(a, b, g, TOLERANCE))
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            let raw: Vec<_> = fits.iter().map(|f| f.raw_gains().to_vec()).collect();
-            let fitted = candidate.clone().with_initial_geometry_raw_gains(&raw)?;
-            let actual = measure(r, &fitted, &runtime, &self.spec.train_batch_indices).await?;
-            let errors = checked_errors(&target, &actual)?;
-            reports.push(
-                json!({"seed":seed, "valid_pairs_per_head":target[0].valid_pairs_per_head(),
+            for (metric_index, metric) in
+                METRICS
+                    .iter()
+                    .enumerate()
+                    .take(if self.fisher { 2 } else { 1 })
+            {
+                let candidate = candidate_plan(r, seed, *metric)?;
+                let before =
+                    measure(r, &candidate, &runtime, &self.spec.train_batch_indices).await?;
+                let fits = target
+                    .iter()
+                    .zip(&before)
+                    .zip(candidate.causal_geometry().ok_or("geometry")?.raw_gains())
+                    .map(|((a, b), g)| CausalBiasScaleMatch::new(a, b, g, TOLERANCE))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let raw: Vec<_> = fits.iter().map(|f| f.raw_gains().to_vec()).collect();
+                let fitted = candidate.clone().with_initial_geometry_raw_gains(&raw)?;
+                let actual = measure(r, &fitted, &runtime, &self.spec.train_batch_indices).await?;
+                let errors = checked_errors(&target, &actual)?;
+                reports.push(
+                    json!({"seed":seed, "valid_pairs_per_head":target[0].valid_pairs_per_head(),
                 "reference_rms":target.iter().map(CausalBiasMoments::rms).collect::<Vec<_>>(),
                 "candidate_rms":before.iter().map(CausalBiasMoments::rms).collect::<Vec<_>>(),
                 "fitted_rms":actual.iter().map(CausalBiasMoments::rms).collect::<Vec<_>>(),
@@ -277,8 +318,12 @@ impl ByteCorpusBiasCalibration {
                 "before_checkpoint_json":candidate.initial_checkpoint().to_json()?,
                 "fitted_checkpoint_json":fitted.initial_checkpoint().to_json()?,
                 "no_updates_consumed":true}),
-            );
-            gains.insert(seed, raw);
+                );
+                if self.fisher {
+                    reports.last_mut().unwrap()["pair_metric"] = json!(metric);
+                }
+                gains.insert((seed, metric_index), raw);
+            }
         }
         let request_json = self.materialize(&gains)?;
         let prepared = ByteCorpusStudy::from_json(request_json.as_bytes())?;
@@ -286,7 +331,11 @@ impl ByteCorpusBiasCalibration {
             let case = case_for(
                 &prepared.request,
                 record["seed"].as_u64().unwrap(),
-                ByteDecoderPairMetric::EuclideanChordSquared,
+                if self.fisher {
+                    serde_json::from_value(record["pair_metric"].clone())?
+                } else {
+                    ByteDecoderPairMetric::EuclideanChordSquared
+                },
                 true,
             )?;
             if plan(&prepared.request.config, case)?
@@ -300,7 +349,7 @@ impl ByteCorpusBiasCalibration {
         Ok(ByteCorpusPreparedBiasStudy {
             request_json,
             report: json!({
-            "schema":"spiraltorch.byte_corpus.bias_preparation.v1", "bias_calibration":self.spec,
+            "schema":if self.fisher { "spiraltorch.byte_corpus.bias_preparation.v2" } else { "spiraltorch.byte_corpus.bias_preparation.v1" }, "bias_calibration":self.spec,
             "request_sha256":prepared.request_sha256, "adapter":format!("{:?}",runtime.adapter_info()),
             "cases":reports, "scope":"One-time initialization; all later learners consume the same frozen request; not quality, speed or matched dynamics"}),
         })

@@ -19,7 +19,9 @@ RESULT = "spiraltorch.byte_corpus.result.v1"
 REQUEST_V2 = "spiraltorch.byte_corpus.request.v2"
 REQUEST_V3 = "spiraltorch.byte_corpus.request.v3"
 REQUEST_V4 = "spiraltorch.byte_corpus.request.v4"
+REQUEST_V5 = "spiraltorch.byte_corpus.request.v5"
 POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
+FISHER = "categorical_fisher_rao_squared.v1"
 ORIGINAL, MATCHED = "original", "matched_poincare_rms"
 ATOL, RTOL, DELTA_RTOL = 3e-6, 5e-5, .002
 
@@ -76,7 +78,8 @@ def trainable_scalars(case):
 
 
 def request_version(request):
-    calibrated = request["schema"] == REQUEST_V4
+    fisher = request["schema"] == REQUEST_V5
+    calibrated = request["schema"] in (REQUEST_V4, REQUEST_V5)
     if calibrated:
         spec = request.get("bias_calibration")
         if (not isinstance(spec, dict) or set(spec) != {"source_request_sha256", "train_batch_indices", "relative_tolerance"}
@@ -90,24 +93,26 @@ def request_version(request):
                 or len(set(indices)) != len(indices)):
             raise ValueError("invalid training-only calibration selection")
         if any(c.get("bias_initialization") not in (ORIGINAL, MATCHED) for c in request["cases"]):
-            raise ValueError("v4 requires explicit initialization treatments")
+            raise ValueError("v4/v5 require explicit initialization treatments")
     elif "bias_calibration" in request or any("bias_initialization" in c for c in request["cases"]):
-        raise ValueError("calibration metadata belongs to v4 only")
-    if request["schema"] not in (REQUEST_V3, REQUEST_V4) and any("pair_metric" in c for c in request["cases"]):
+        raise ValueError("calibration metadata belongs to v4/v5 only")
+    if request["schema"] not in (REQUEST_V3, REQUEST_V4, REQUEST_V5) and any("pair_metric" in c for c in request["cases"]):
         raise ValueError("v1/v2 have no explicit pair metric")
     if request["schema"] == REQUEST:
         if any("geometry_update" in c for c in request["cases"]):
             raise ValueError("v1 has no explicit geometry update policy")
         return 1
-    if request["schema"] not in (REQUEST_V2, REQUEST_V3, REQUEST_V4):
+    if request["schema"] not in (REQUEST_V2, REQUEST_V3, REQUEST_V4, REQUEST_V5):
         raise ValueError("wrong request schema")
-    version = 4 if calibrated else 3 if request["schema"] == REQUEST_V3 else 2
+    version = 5 if fisher else 4 if calibrated else 3 if request["schema"] == REQUEST_V3 else 2
     modes = {(False, "train", None), (True, "train", POINCARE), (True, "frozen", POINCARE),
              (True, "train", FLAT), (True, "frozen", FLAT)} if version >= 3 else {
                  (False, "train", None), (True, "train", None), (True, "frozen", None)}
     modes = {(*mode, ORIGINAL if calibrated else None) for mode in modes}
     if calibrated:
         modes.update({(True, "train", FLAT, MATCHED), (True, "frozen", FLAT, MATCHED)})
+    if fisher:
+        modes.update({(True, "train", FISHER, MATCHED), (True, "frozen", FISHER, MATCHED)})
     def key(parameters):
         for p in parameters:
             if (not p["shape"] or any(type(d) is not int or d <= 0 for d in p["shape"])
@@ -115,7 +120,7 @@ def request_version(request):
                     or any(type(v) not in (int, float) or not math.isfinite(v) for v in p["values"])):
                 raise ValueError("invalid parameter shape or value")
         return [(p["name"], p["shape"], [struct.pack("<f", x) for x in p["values"]]) for p in parameters]
-    if not 2 <= len(request["cases"]) <= (21 if calibrated else 16) or any(type(c["seed"]) is not int or not 0 <= c["seed"] <= (1 << 53) - 1 for c in request["cases"]):
+    if not 2 <= len(request["cases"]) <= (27 if fisher else 21 if calibrated else 16) or any(type(c["seed"]) is not int or not 0 <= c["seed"] <= (1 << 53) - 1 for c in request["cases"]):
         raise ValueError("invalid control study case count or seed")
     for seed in {c["seed"] for c in request["cases"]}:
         group = [c for c in request["cases"] if c["seed"] == seed]
@@ -130,8 +135,9 @@ def request_version(request):
                      for c in group if c["geometry"]]
         if any(g != geometric[0] for g in geometric[1:]):
             raise ValueError("metric/update arms have different initial geometry bits")
-        for treatment in (False, True):
-            initialized = [key(c["parameters"]) for c in group if c["geometry"] and matched(c) == treatment]
+        for treatment, metric in ((False, None), (True, FLAT), (True, FISHER)):
+            initialized = [key(c["parameters"]) for c in group if c["geometry"] and matched(c) == treatment
+                           and (not treatment or c.get("pair_metric") == metric)]
             if any(g != initialized[0] for g in initialized[1:]):
                 raise ValueError("one initialization treatment must share all geometry bits")
     if not request["cases"]:
@@ -337,8 +343,9 @@ def reference(args):
 
     train = [batch(request["train_documents"], s) for s in request["train_batches"]]
     calibration = None
-    if version == 4:
-        calibration = load_reference("byte_corpus_calibration").verify_initial_rms(request, wave, metric)
+    if version >= 4:
+        fisher_metric = load_reference("fisher_rao_reference").metric if version == 5 else None
+        calibration = load_reference("byte_corpus_calibration").verify_initial_rms(request, wave, metric, fisher_metric)
     valid = [batch(request["validation_documents"], s) for s in request["validation_batches"]]
     reports = []
     for case in request["cases"]:
@@ -362,6 +369,8 @@ def reference(args):
                     if case.get("pair_metric") == FLAT:
                         square = (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
                         pair = (-functional.softplus(p[6 + i])[None, :, None, None] * (4 * square[:, None])).tril()
+                    elif case.get("pair_metric") == FISHER:
+                        pair = fisher_metric(coordinates, p[6 + i])
                     else:
                         pair = metric(coordinates, p[6 + i], config["curvature"])
                 x = block_forward(x, p[offset:offset + count], config["heads"], None, pair, topos)
@@ -397,11 +406,11 @@ def reference(args):
             reports[-1].update(geometry_update=case["geometry_update"], trainable_parameter_scalars=trainable_scalars(case))
         if version >= 3:
             reports[-1]["pair_metric"] = case.get("pair_metric")
-        if version == 4:
+        if version >= 4:
             reports[-1]["bias_initialization"] = case["bias_initialization"]
     report = dict(schema=f"spiraltorch.byte_corpus.result.v{version}", engine="independent_pytorch", torch_version=torch.__version__,
                   dtype="float32", device="cpu", threads=1, request_sha256=digest(raw), cases=reports)
-    if version == 4:
+    if version >= 4:
         report.update(bias_calibration=request["bias_calibration"], calibration_verification=calibration)
     write_new(args.output, report)
 
@@ -428,7 +437,7 @@ def heldout_bpb(point):
 def compare(request_raw, reference_report, actual):
     request = decode_json(request_raw)
     version = request_version(request)
-    if version == 4:
+    if version >= 4:
         load_reference("byte_corpus_calibration").verify_qualification(request, reference_report.get("calibration_verification"))
     if (reference_report.get("engine") != "independent_pytorch"
             or actual.get("engine") != "spiraltorch" or not actual.get("adapter")):
@@ -442,7 +451,7 @@ def compare(request_raw, reference_report, actual):
             raise ValueError("result source mismatch")
         if [c["name"] for c in report["cases"]] != names:
             raise ValueError("case identity/order mismatch")
-        if version == 4 and json.dumps(report.get("bias_calibration"), sort_keys=True, allow_nan=False) != json.dumps(request["bias_calibration"], sort_keys=True, allow_nan=False):
+        if version >= 4 and json.dumps(report.get("bias_calibration"), sort_keys=True, allow_nan=False) != json.dumps(request["bias_calibration"], sort_keys=True, allow_nan=False):
             raise ValueError("calibration recipe identity mismatch")
     n = len(request["train_batches"])
     checkpoints = [0] + [i for i in range(1, n + 1) if i % request["checkpoint_every"] == 0 or i == n]
@@ -458,7 +467,7 @@ def compare(request_raw, reference_report, actual):
                 raise ValueError("case update policy or trainable count mismatch")
             if version >= 3 and ("pair_metric" not in row or row["pair_metric"] != spec.get("pair_metric")):
                 raise ValueError("case metric identity mismatch")
-            if version == 4 and row.get("bias_initialization") != spec["bias_initialization"]:
+            if version >= 4 and row.get("bias_initialization") != spec["bias_initialization"]:
                 raise ValueError("case initialization identity mismatch")
             if row["parameter_tensors"] != len(spec["parameters"]) or row["parameter_scalars"] != sum(len(p["values"]) for p in spec["parameters"]):
                 raise ValueError("parameter count mismatch")
@@ -509,12 +518,12 @@ def compare(request_raw, reference_report, actual):
             summaries[-1]["pair_metric"] = spec.get("pair_metric")
             summaries[-1]["reference_final_heldout_bpb"] = heldout_bpb(expected["validation"][-1])
             summaries[-1]["final_heldout_bpb_abs_error"] = abs(summaries[-1]["final_heldout_bpb"] - summaries[-1]["reference_final_heldout_bpb"])
-        if version == 4:
+        if version >= 4:
             summaries[-1]["bias_initialization"] = spec["bias_initialization"]
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
-        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7}[version] or {c["geometry"] for c in paired} != {False, True}:
+        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7, 5: 9}[version] or {c["geometry"] for c in paired} != {False, True}:
             raise ValueError("incomplete paired seed")
         plain = next(c for c in paired if not c["geometry"])
         geometry = next(c for c in paired if c["geometry"] and not frozen(c) and c.get("pair_metric", POINCARE) == POINCARE)
@@ -537,9 +546,9 @@ def compare(request_raw, reference_report, actual):
                 flat_minus_poincare_bpb=flat[r] - geometry[r], flat_frozen_minus_poincare_frozen_bpb=flat_frozen[r] - fixed[r],
                 flat_learned_minus_frozen_bpb=flat[r] - flat_frozen[r],
                 metric_by_training_interaction_bpb=(flat[r] - flat_frozen[r]) - (geometry[r] - fixed[r]))
-            if version == 4:
-                calibrated = next(c for c in paired if matched(c) and not frozen(c))
-                calibrated_frozen = next(c for c in paired if matched(c) and frozen(c))
+            if version >= 4:
+                calibrated = next(c for c in paired if c.get("pair_metric") == FLAT and matched(c) and not frozen(c))
+                calibrated_frozen = next(c for c in paired if c.get("pair_metric") == FLAT and matched(c) and frozen(c))
                 def contrasts(key):
                     training = calibrated[key] - calibrated_frozen[key]
                     return dict(calibrated_flat_minus_flat_bpb=calibrated[key] - flat[key],
@@ -551,6 +560,20 @@ def compare(request_raw, reference_report, actual):
                         calibrated_metric_by_training_interaction_bpb=training - (geometry[key] - fixed[key]))
                 pairs[-1].update(contrasts("final_heldout_bpb"))
                 reference_contrasts.update(contrasts(r))
+                if version == 5:
+                    fisher = next(c for c in paired if c.get("pair_metric") == FISHER and not frozen(c))
+                    fisher_frozen = next(c for c in paired if c.get("pair_metric") == FISHER and frozen(c))
+                    def fisher_contrasts(key):
+                        training = fisher[key] - fisher_frozen[key]
+                        return dict(fisher_minus_poincare_bpb=fisher[key] - geometry[key],
+                            fisher_frozen_minus_poincare_frozen_bpb=fisher_frozen[key] - fixed[key],
+                            fisher_minus_calibrated_flat_bpb=fisher[key] - calibrated[key],
+                            fisher_frozen_minus_calibrated_flat_frozen_bpb=fisher_frozen[key] - calibrated_frozen[key],
+                            fisher_learned_minus_frozen_bpb=training,
+                            fisher_poincare_training_interaction_bpb=training - (geometry[key] - fixed[key]),
+                            fisher_flat_training_interaction_bpb=training - (calibrated[key] - calibrated_frozen[key]))
+                    pairs[-1].update(fisher_contrasts("final_heldout_bpb"))
+                    reference_contrasts.update(fisher_contrasts(r))
             pairs[-1]["reference_contrasts"] = reference_contrasts
             pairs[-1]["absolute_torch_discrepancy"] = {k: abs(pairs[-1][k] - value) for k, value in reference_contrasts.items()}
             pairs[-1]["same_sign_as_torch"] = {k: ((pairs[-1][k] > 0) - (pairs[-1][k] < 0)) == ((v > 0) - (v < 0))
@@ -564,9 +587,11 @@ def compare(request_raw, reference_report, actual):
         for key in ("flat_minus_poincare_bpb", "flat_frozen_minus_poincare_frozen_bpb", "metric_by_training_interaction_bpb"):
             result["mean_" + key] = statistics.mean(p[key] for p in pairs)
         result["scope"] = "Poincare/flat geometric arms match parameters and SGD budget, not compute or initial functions; ordinary is a lower-parameter context arm; no general quality/speed claim"
-    if version == 4:
+    if version >= 4:
         result["bias_calibration"] = request["bias_calibration"]
         result["scope"] = "One frozen initial-weight request across engines; flat RMS calibration uses declared training windows only, not matched patterns or dynamics; seven arms/seed, no general quality or speed claim"
+    if version == 5:
+        result["scope"] = "Nine arms/seed: v4 plus RMS-matched Fisher-Rao trained/frozen; same declared training windows and frozen request across engines, not matched patterns/dynamics/compute or general quality/speed."
     return result
 
 

@@ -24,10 +24,129 @@ fn prepared() -> Value {
         ByteCorpusBiasCalibration::from_json(source().to_string().as_bytes(), &[0, 1]).unwrap();
     serde_json::from_str(
         &prep
-            .materialize(&BTreeMap::from([(7, vec![vec![0.25]])]))
+            .materialize(&BTreeMap::from([((7, 0), vec![vec![0.25]])]))
             .unwrap(),
     )
     .unwrap()
+}
+
+fn fisher_prepared() -> Value {
+    let preparation =
+        ByteCorpusBiasCalibration::from_json(source().to_string().as_bytes(), &[0, 1])
+            .unwrap()
+            .with_fisher_rao_control()
+            .unwrap();
+    serde_json::from_str(
+        &preparation
+            .materialize(&BTreeMap::from([
+                ((7, 0), vec![vec![0.25]]),
+                ((7, 1), vec![vec![4.5]]),
+            ]))
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn calibration_candidates_change_only_metric_without_reattaching_geometry() {
+    let study = ByteCorpusStudy::from_json(source().to_string().as_bytes()).unwrap();
+    let r = &study.request;
+    let original = plan(
+        &r.config,
+        case_for(r, 7, ByteDecoderPairMetric::EuclideanChordSquared, false).unwrap(),
+    )
+    .unwrap();
+    let checkpoint = original.initial_checkpoint().to_json().unwrap();
+    for metric in METRICS {
+        let candidate = candidate_plan(r, 7, metric).unwrap();
+        let mut expected: Value = serde_json::from_str(&checkpoint).unwrap();
+        expected["model"]["geometry"]["pair_metric"] = json!(metric);
+        let actual: Value =
+            serde_json::from_str(&candidate.initial_checkpoint().to_json().unwrap()).unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn fisher_nine_arms_keep_v4_initials_and_distinct_matched_pairs() {
+    let mut value = fisher_prepared();
+    assert_eq!(value["schema"], "spiraltorch.byte_corpus.request.v5");
+    assert_eq!(
+        &value["cases"].as_array().unwrap()[..7],
+        prepared()["cases"].as_array().unwrap()
+    );
+    for _ in 0..9 {
+        assert!(valid(&value));
+        value["cases"].as_array_mut().unwrap().rotate_left(1);
+    }
+    for slot in [0, 2, 3, 4, 5, 6] {
+        let mut altered = fisher_prepared();
+        altered["cases"][8]["parameters"][slot]["values"][0] = json!(0.75);
+        assert!(!valid(&altered));
+    }
+    for field in ["pair_metric", "geometry_update", "bias_initialization"] {
+        let mut altered = fisher_prepared();
+        altered["cases"][7].as_object_mut().unwrap().remove(field);
+        assert!(!valid(&altered));
+        altered["cases"][7][field] = Value::Null;
+        assert!(!valid(&altered));
+    }
+    for schema in [
+        "spiraltorch.byte_corpus.request.v3",
+        "spiraltorch.byte_corpus.request.v4",
+    ] {
+        let mut altered = fisher_prepared();
+        altered["schema"] = json!(schema);
+        assert!(!valid(&altered));
+    }
+    let mut altered = prepared();
+    altered["schema"] = json!("spiraltorch.byte_corpus.request.v5");
+    assert!(!valid(&altered));
+}
+
+#[test]
+fn fisher_three_groups_are_bounded_and_checkpoint_keeps_frozen_metric_bits() {
+    let mut request = fisher_prepared();
+    let group = request["cases"].as_array().unwrap().clone();
+    for seed in [8, 9, 10] {
+        for case in &group {
+            let mut copy = case.clone();
+            copy["name"] = json!(format!("{}-{seed}", case["name"].as_str().unwrap()));
+            copy["seed"] = json!(seed);
+            request["cases"].as_array_mut().unwrap().push(copy);
+        }
+        assert_eq!(valid(&request), seed != 10);
+    }
+    let study = ByteCorpusStudy::from_json(fisher_prepared().to_string().as_bytes()).unwrap();
+    assert_eq!(
+        study.request.report_schema(true),
+        "spiraltorch.byte_corpus.result.v5"
+    );
+    assert_eq!(
+        study.request.report_schema(false),
+        "spiraltorch.byte_corpus.partial.v5"
+    );
+    for cursor in 0..=2 {
+        let checkpoint = saved(&study, cursor);
+        assert_eq!(checkpoint.schema, "spiraltorch.byte_corpus.checkpoint.v5");
+        study.validate_segment(Some(&checkpoint), cursor).unwrap();
+        for index in [7, 8] {
+            for field in [
+                "/model/geometry/raw_gains/0/0",
+                "/model/geometry/raw_phase/0",
+            ] {
+                let mut changed = checkpoint.clone();
+                let mut model: Value =
+                    serde_json::from_str(&changed.cases[index].model_json).unwrap();
+                *model.pointer_mut(field).unwrap() = json!(0.15);
+                changed.cases[index].model_json = model.to_string();
+                assert_eq!(
+                    study.checked_models(&changed).is_ok(),
+                    cursor > 0 && index == 7
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -112,7 +231,7 @@ fn materialization_preserves_source_bits_and_binds_exact_source_bytes() {
     let bytes = source.to_string();
     let prep = ByteCorpusBiasCalibration::from_json(bytes.as_bytes(), &[1, 0]).unwrap();
     let text = prep
-        .materialize(&BTreeMap::from([(7, vec![vec![-0.0]])]))
+        .materialize(&BTreeMap::from([((7, 0), vec![vec![-0.0]])]))
         .unwrap();
     let value: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
@@ -188,7 +307,7 @@ fn materialization_preserves_distinct_gains_for_every_block_and_head() {
         ByteCorpusBiasCalibration::from_json(value.to_string().as_bytes(), &[0, 1]).unwrap();
     let gains = vec![vec![0.21, 0.32], vec![-0.43, 0.54]];
     let text = preparation
-        .materialize(&BTreeMap::from([(7, gains.clone())]))
+        .materialize(&BTreeMap::from([((7, 0), gains.clone())]))
         .unwrap();
     let study = ByteCorpusStudy::from_json(text.as_bytes()).unwrap();
     for index in [5, 6] {
@@ -201,6 +320,31 @@ fn materialization_preserves_distinct_gains_for_every_block_and_head() {
         let plan = plan(&study.request.config, &study.request.cases[index]).unwrap();
         assert_eq!(plan.block_count(), 2);
         assert_eq!(plan.causal_geometry().unwrap().raw_gains(), &gains);
+    }
+    let fisher_gains = vec![vec![4.21, 3.32], vec![2.43, 1.54]];
+    let text = preparation
+        .with_fisher_rao_control()
+        .unwrap()
+        .materialize(&BTreeMap::from([
+            ((7, 0), gains),
+            ((7, 1), fisher_gains.clone()),
+        ]))
+        .unwrap();
+    let study = ByteCorpusStudy::from_json(text.as_bytes()).unwrap();
+    for index in [7, 8] {
+        for (block, values) in fisher_gains.iter().enumerate() {
+            assert!(policy::same_bits(
+                &study.request.cases[index].parameters[6 + block].values,
+                values
+            ));
+        }
+        let plan = plan(&study.request.config, &study.request.cases[index]).unwrap();
+        assert_eq!(plan.block_count(), 2);
+        assert_eq!(plan.causal_geometry().unwrap().raw_gains(), &fisher_gains);
+        assert_eq!(
+            plan.causal_geometry().unwrap().pair_metric(),
+            ByteDecoderPairMetric::CategoricalFisherRaoSquared
+        );
     }
 }
 

@@ -1,0 +1,396 @@
+{
+  "schema": "spiraltorch.byte_corpus.resume_verification.v5",
+  "passed": true,
+  "request_sha256": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+  "exact_resumed_report_equal": true,
+  "exact_training_and_evaluation_prefixes": true,
+  "saved_parameter_bits_match_paused_report": true,
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602379143238068,
+      "pair_metric": null,
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560256704688072,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5603175163269043,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_flat",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5601888820528984,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_flat_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602336898446083,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.554492086172104,
+      "pair_metric": null,
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552362337708473,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5522845312952995,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_flat",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5527593716979027,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_flat_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5527208968997,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5545293986797333,
+      "pair_metric": null,
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553141862154007,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553172066807747,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_flat",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553373597562313,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_flat_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553395591676235,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_flat_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560162164270878,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed11_flat_frozen_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602197498083115,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552588701248169,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_frozen_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5525394827127457,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531555637717247,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_frozen_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531786754727364,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed11_flat_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5611146613955498,
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed11_flat_frozen_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5611691996455193,
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5537461563944817,
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_frozen_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5537018328905106,
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5530662685632706,
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "geometry_update": "train",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_frozen_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5530809238553047,
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "geometry_update": "frozen",
+      "bias_initialization": "matched_poincare_rms"
+    }
+  ],
+  "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence",
+  "input_sha256": {
+    "request": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+    "baseline": "1556b99e2b82c7a0c1254f9ecea1226d697424a33e4ba4d7a3b4a75d79dd5de6",
+    "partial": "3f390265e81aef04dd9d0cdcabd7e9fb2b65341bafc4ba7bd367861ad962b14d",
+    "resumed": "1556b99e2b82c7a0c1254f9ecea1226d697424a33e4ba4d7a3b4a75d79dd5de6",
+    "checkpoint": "a74c7144f5d4112170f8fd8a6c57f5e4526523a4f72762113f764fce14c957b9"
+  }
+}

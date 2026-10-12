@@ -48,8 +48,11 @@ def verify(source_raw, packet):
     request_raw = packet["request_json"].encode()
     request = study.decode_json(request_raw)
     report = study.decode_json(packet["report_json"])
-    require(study.request_version(request) == 4, "prepared request must be v4")
-    require(report["schema"] == "spiraltorch.byte_corpus.bias_preparation.v1" and bool(report.get("adapter")), "preparation report")
+    version = study.request_version(request)
+    require(version in (4, 5), "prepared request must be v4/v5")
+    metrics = [study.FLAT, study.FISHER] if version == 5 else [study.FLAT]
+    require(report["schema"] == f"spiraltorch.byte_corpus.bias_preparation.v{2 if version == 5 else 1}"
+            and bool(report.get("adapter")), "preparation report")
     spec = request["bias_calibration"]
     require(exact(report["bias_calibration"], spec) and spec["source_request_sha256"] == study.digest(source_raw)
             and report["request_sha256"] == study.digest(request_raw), "source/prepared byte identity")
@@ -64,16 +67,29 @@ def verify(source_raw, packet):
         require(original.pop("bias_initialization") == study.ORIGINAL, "source initialization relabeled")
         require(exact(original, expected), "source arm changed during preparation")
     seeds = sorted({c["seed"] for c in source["cases"]})
-    require([r["seed"] for r in report["cases"]] == seeds, "calibration seed coverage/order")
-    expected_extras = [c for c in source["cases"] if c.get("pair_metric") == study.FLAT]
+    expected_keys = [(s, m) for s in seeds for m in metrics]
+    require([(r["seed"], r.get("pair_metric", study.FLAT)) for r in report["cases"]] == expected_keys
+            and all(type(r["seed"]) is int and ("pair_metric" in r if version == 5 else "pair_metric" not in r)
+                    for r in report["cases"]), "calibration seed/metric coverage/order")
+    expected_extras = []
+    for metric in metrics:
+        for case in source["cases"]:
+            if case.get("pair_metric") != study.FLAT:
+                continue
+            candidate = copy.deepcopy(case)
+            candidate["pair_metric"] = metric
+            if metric == study.FISHER:
+                candidate["name"] += "_fisher_rao"
+            expected_extras.append(candidate)
     require(len(request["cases"][n:]) == len(expected_extras), "calibrated arm coverage")
-    summaries = []
+    summaries, targets = [], {}
     for record in report["cases"]:
         seed = record["seed"]
-        initial = next(c for c in expected_extras if c["seed"] == seed and not study.frozen(c))
-        fitted = next(c for c in request["cases"] if c["seed"] == seed and study.matched(c) and not study.frozen(c))
+        metric = record.get("pair_metric", study.FLAT)
+        initial = next(c for c in expected_extras if c["seed"] == seed and c["pair_metric"] == metric and not study.frozen(c))
+        fitted = next(c for c in request["cases"] if c["seed"] == seed and c.get("pair_metric") == metric and study.matched(c) and not study.frozen(c))
         for field, case in [("before_checkpoint_json", initial), ("fitted_checkpoint_json", fitted)]:
-            stored = stored_parameters(study.decode_json(record[field]), 0, study.FLAT)
+            stored = stored_parameters(study.decode_json(record[field]), 0, metric)
             require(same_parameters(stored, case["parameters"]), "prepared checkpoint is not the actual request initialization")
         gains = [p["values"] for p in fitted["parameters"] if p["name"].startswith("geometry.raw_gain.")]
         require(len(gains) == len(record["raw_gains"]) and all(bits(a) == bits(b) for a, b in zip(gains, record["raw_gains"])), "fitted gain binding")
@@ -87,6 +103,8 @@ def verify(source_raw, packet):
             require(len(value) == len(cfg["blocks"]) and all(len(row) == cfg["heads"] for row in value), "block/head coverage")
             require(all(type(x) in (float, int) and math.isfinite(x) and (x >= 0 if field == "realized_relative_errors" else x > 0)
                         for row in value for x in row), "nonfinite or zero calibration statistic")
+        require(record["reference_rms"] == targets.setdefault(seed, record["reference_rms"]),
+                "metrics must share one Poincare RMS target per seed")
         for a, b, stated in zip(record["reference_rms"], record["fitted_rms"], record["realized_relative_errors"]):
             for target, actual, reported_error in zip(a, b, stated):
                 error = abs(actual / target - 1)
@@ -95,6 +113,8 @@ def verify(source_raw, packet):
         summaries.append(dict(seed=seed, valid_pairs_per_head=count, max_relative_rms_error=max(errors),
                               reference_rms=record["reference_rms"], candidate_rms=record["candidate_rms"],
                               fitted_rms=record["fitted_rms"]))
+        if version == 5:
+            summaries[-1]["pair_metric"] = metric
     for actual, original in zip(request["cases"][n:], expected_extras):
         expected = copy.deepcopy(original)
         expected["name"] += "_rms_matched"
@@ -103,7 +123,7 @@ def verify(source_raw, packet):
             if before["name"].startswith("geometry.raw_gain."):
                 before["values"] = after["values"]
         require(exact(expected, actual), "calibration changed more than the permitted gain values")
-    return dict(schema="spiraltorch.byte_corpus.preparation_verification.v1", passed=True,
+    return dict(schema=f"spiraltorch.byte_corpus.preparation_verification.v{2 if version == 5 else 1}", passed=True,
                 source_request_sha256=study.digest(source_raw), request_sha256=study.digest(request_raw),
                 source_arms_unchanged=n, gain_only_transformation=True, initial_checkpoint_bits_bound=True,
                 bias_calibration=spec, cases=summaries,
