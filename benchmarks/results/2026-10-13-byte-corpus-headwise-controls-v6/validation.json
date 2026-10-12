@@ -1,0 +1,442 @@
+{
+  "schema": "spiraltorch.byte_corpus.headwise_validation.v1",
+  "passed": true,
+  "source_commit": "df31c3684a79fa617c5651cc05533798521f5e65",
+  "source_v5_request_sha256": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+  "request_sha256": "262460760d71ed94ae31fb1f5d9b6886c66c5eb2185172fb7c6b0094685f32ca",
+  "completed": {
+    "native_cases": 63,
+    "browser_cases": 63,
+    "torch_cases": 63,
+    "updates_per_case": 128,
+    "inherited_v5_cases_exact_per_engine": 27,
+    "first_update_pairs_per_gpu_runtime": 30,
+    "resumed_cases_per_gpu_runtime": 63,
+    "pause": 37,
+    "final": 128,
+    "noop_cases_per_gpu_runtime": 63,
+    "native_browser_prepared_bytes_identical": true
+  },
+  "tests": {
+    "rust_study": 36,
+    "native_cli": 5,
+    "python_study_with_torch": 51,
+    "python_artifacts": 64
+  },
+  "independent_review": {
+    "method": "read-only local subagent",
+    "remaining_p1_p2": 0,
+    "resolved": [
+      "expanded checkpoint budget before GPU",
+      "request-derived checkpoint topology",
+      "heterogeneous scalar/dimension types",
+      "duplicate preparation measurements"
+    ],
+    "stdlib_tests": 9,
+    "negative_mutation_probes": 72,
+    "rust_review": "static; parent ran Rust and actual GPU checks"
+  },
+  "independent_native_evidence_review": {
+    "method": "separate read-only local subagent",
+    "remaining_p1_p2": 0,
+    "resolved_p3": "Distinguished heterogeneous-only from all-contrast maximum discrepancy",
+    "training_losses": 8064,
+    "heldout_batch_losses": 6048,
+    "final_parameter_scalars": 711048,
+    "trained_geometry_family_gates": 150,
+    "head_gain_gates": 36,
+    "contrast_signs": 225,
+    "note": "Native evidence independently reverified in memory; browser full-run evidence checked separately by parent."
+  },
+  "toolchain": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "cargo": "1.97.0 (c980f4866 2026-06-30)",
+    "wasm_bindgen": "0.2.129",
+    "torch": "2.12.1"
+  },
+  "provenance": {
+    "uninterrupted_native_binary": "native-binary",
+    "native_segments_and_reviewed_preparation_binary": "native-binary-reviewed",
+    "note": "Review fixes change preparation/preflight only, not training math or frozen input. Complete resumed/no-op reports are byte-identical to the uninterrupted run."
+  },
+  "scope": "Fixed small repository corpus, recipe and three seeds. Gates establish numerical/routing/resume behavior, not general language quality, timing, significance or a preferred geometry.",
+  "source_files": [
+    {
+      "path": "crates/st-nn/src/resident.rs",
+      "bytes": 23634,
+      "sha256": "ab983085df4ec9314cbb44985ff0428e40db8d91d69d2c6b4ebf7fbf2540a59e"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study.rs",
+      "bytes": 46826,
+      "sha256": "5edf5ded3589c716b971c8da5c4738a342a2e9f6104bac8bf1f28153fbfc7dfc"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study/policy.rs",
+      "bytes": 15272,
+      "sha256": "a0fdeba3722153486769f985a618213c152e4ba18768c9833a27db2c147ce2c2"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study/calibration.rs",
+      "bytes": 15277,
+      "sha256": "c70eaa115290fea89d82875f397a7674ecca10f0ab2b9348190dd55b071f3d42"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study/headwise.rs",
+      "bytes": 10272,
+      "sha256": "f819565b441d915f34195a7f2e970abb2798bb453a1e1da5f06031c5d350b02a"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study/headwise/tests.rs",
+      "bytes": 7271,
+      "sha256": "535f5f3320f12608d85b53973498b0f149c3b840f1a835cfa84e2366fc3092ea"
+    },
+    {
+      "path": "crates/st-nn/examples/resident_byte_learning.rs",
+      "bytes": 13631,
+      "sha256": "3f83eb512da97447af7bf3930b1311e659f260e9613d4234f198d727005eda7e"
+    },
+    {
+      "path": "crates/st-nn/examples/resident_byte_learning_browser.rs",
+      "bytes": 4684,
+      "sha256": "b71430e22a2438141baaae17a0ed41e03984f222efd2ce21ce8498b9ed40dfcf"
+    },
+    {
+      "path": "crates/st-nn/tests/byte_learning_prepare_browser.html",
+      "bytes": 3559,
+      "sha256": "db2e087bdf80b7f4b3fa7f9be178988b2dae3768a574aff604b945d59412e990"
+    },
+    {
+      "path": "crates/st-nn/tests/byte_learning_browser.html",
+      "bytes": 4947,
+      "sha256": "6b87113d4f50ff3f5cdc51d70e80b5e729c275465622ad7356ba1a6119384e86"
+    },
+    {
+      "path": "crates/st-nn/tests/byte_learning_resume_browser.html",
+      "bytes": 5960,
+      "sha256": "4e4f31fc13a789db6fdbfe81c4c51f286b84997f6cf7519c8cd20ad1326f6e09"
+    },
+    {
+      "path": "tools/byte_corpus_study.py",
+      "bytes": 40008,
+      "sha256": "b5dbd2fffa66968a29bf6d5f04725e98c59f380786afd529d5bf68749e9241ef"
+    },
+    {
+      "path": "tools/byte_corpus_headwise.py",
+      "bytes": 6975,
+      "sha256": "e1aaa1867f16368256782c1434c15d27e374843fd57039875bd2eb4c32f7e297"
+    },
+    {
+      "path": "tools/byte_corpus_calibration.py",
+      "bytes": 8542,
+      "sha256": "31030186436844941483d39ef1d2fd9e25c1eb7806e26f8b9e3ec8b1375bb58f"
+    },
+    {
+      "path": "tools/test_byte_corpus_headwise.py",
+      "bytes": 14032,
+      "sha256": "67f770a827de0d889701a473339ce64cdd648d26de526d75c93325bc176bc3f4"
+    },
+    {
+      "path": "tools/verify_byte_corpus_headwise_preparation.py",
+      "bytes": 8163,
+      "sha256": "13ed86fa754107e8a73a825eef068d31fc4368ecbc90aec65b83372c4adaf99a"
+    },
+    {
+      "path": "tools/verify_byte_corpus_resume.py",
+      "bytes": 12860,
+      "sha256": "4a11fdc76ba6d368c6667d99382358b04957598b61ce96d805eefe3cb102ae50"
+    },
+    {
+      "path": "tools/verify_byte_corpus_calibrated_controls.py",
+      "bytes": 10824,
+      "sha256": "bbff7e1b7c4ccf495d5661121df895320b97f1e5e281497e8ada64c4d09e15f8"
+    },
+    {
+      "path": "docs/byte_corpus_headwise_controls.md",
+      "bytes": 4926,
+      "sha256": "2e332249c74dd05cba41c5d94fb783eea8cf233542855198c1a9ed7e56717e9d"
+    },
+    {
+      "path": "docs/headwise_geometry_attention.md",
+      "bytes": 6060,
+      "sha256": "35a178a45bfa9a82acb9c7542d50922aa9a3ce83ba6c2f8ce209ac091b72aa97"
+    },
+    {
+      "path": "benchmarks/results/2026-10-13-byte-corpus-headwise-controls-v6/pre-registered.md",
+      "bytes": 2553,
+      "sha256": "f5bd1fbd92655dd96ab97be8caf8d3e797d6e75b87c18bd8d165f70bf4c0f1ea"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 119721,
+      "sha256": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_decoder/geometry.rs",
+      "bytes": 10018,
+      "sha256": "80aa19f0d50ca311af198ea2ad47242f6c6f591ff15784d90ac13c8c33335d77"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_decoder/training/geometry.rs",
+      "bytes": 9307,
+      "sha256": "5d390deb9071897fc05516bc445aeab742ca1918ecc8b0a9c3e37525ee7aabc5"
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_decoder/checkpoint.rs",
+      "bytes": 15753,
+      "sha256": "ed4dabc8c3f31f219943e6fa6ebbffcfda612a6d261cca1633e75907203d989a"
+    },
+    {
+      "path": "tools/generate_resident_byte_decoder_torch_fixture.py",
+      "bytes": 7173,
+      "sha256": "47b5af2f4bfbf5ce6bf367d9d32f762db86d6b5ac2117c8e5a264376dcd78430"
+    },
+    {
+      "path": "tools/generate_causal_zspace_wave_torch_fixture.py",
+      "bytes": 4952,
+      "sha256": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa"
+    },
+    {
+      "path": "tools/generate_poincare_bias_torch_fixture.py",
+      "bytes": 3182,
+      "sha256": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18"
+    },
+    {
+      "path": "tools/fisher_rao_reference.py",
+      "bytes": 941,
+      "sha256": "842faae185b0289365d621ed1e292ac0e6d5e25d83d0666846c2f4a80b4026e4"
+    }
+  ],
+  "local_raw_files": [
+    {
+      "path": "input/request.json",
+      "bytes": 14824699,
+      "sha256": "262460760d71ed94ae31fb1f5d9b6886c66c5eb2185172fb7c6b0094685f32ca"
+    },
+    {
+      "path": "torch.json",
+      "bytes": 15021340,
+      "sha256": "cf2232bc9002ca7cfb39096c6b24dbc3ce5b3ad19aa50032bc34d8719bef89f7"
+    },
+    {
+      "path": "torch.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "native.json",
+      "bytes": 15013489,
+      "sha256": "3cd78c946885b3808d21425ee758e783f6b45468be4f04bf7022081b323e508c"
+    },
+    {
+      "path": "native.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "native-binary",
+      "bytes": 7222864,
+      "sha256": "ac1f1beb97d2d7e818c9e0fbede24c433a7826dc58131a790f3f2cec02b6ac69"
+    },
+    {
+      "path": "native-binary-reviewed",
+      "bytes": 7223024,
+      "sha256": "71a179edcfabeb31986ec9ba92dbf7ce5b11a281b9fecf9fd2263283befa5c4f"
+    },
+    {
+      "path": "resident_byte_learning_browser.js",
+      "bytes": 49883,
+      "sha256": "daa846d736feea6599fdb6fa8f628203ee2bc65524a208fff02c1d1630e32dbd"
+    },
+    {
+      "path": "resident_byte_learning_browser_bg.wasm",
+      "bytes": 2397086,
+      "sha256": "4b27961e923f405d491579e5def13dbdd45a25f84342af19272fc48fc01c287f"
+    },
+    {
+      "path": "native-prepared-packet.json",
+      "bytes": 17216020,
+      "sha256": "94681135b2d18abe821194cfaf5147a2f92e333bae45e167fb5bb57973761623"
+    },
+    {
+      "path": "native-prepared-packet-reviewed.json",
+      "bytes": 17216020,
+      "sha256": "94681135b2d18abe821194cfaf5147a2f92e333bae45e167fb5bb57973761623"
+    },
+    {
+      "path": "browser-prepared-packet.json",
+      "bytes": 17216027,
+      "sha256": "3552550808e88832f0a2d21abb83571caf371152301d30d2505496ff00ff6315"
+    },
+    {
+      "path": "native-preparation-final.json",
+      "bytes": 6255,
+      "sha256": "58988e9f0a973e344b0128ca5d3a4bdc79ebfc6794f0892988a0c3ad3ea25d69"
+    },
+    {
+      "path": "browser-preparation.json",
+      "bytes": 6271,
+      "sha256": "396764128deaf7da62a1cc361bd26014ec8d4fbcca6d81eff0b939894b096e8c"
+    },
+    {
+      "path": "native-comparison-reviewed.json",
+      "bytes": 122325,
+      "sha256": "f248fab9fe3a79a6c38834bdb59443d29401f76250eb8e6fd34b6ccd7709c3fa"
+    },
+    {
+      "path": "browser-comparison.json",
+      "bytes": 122048,
+      "sha256": "5ff367855fc3e9edbdaaad8e81306e3470f98b741a4dc2d7436eabf282845016"
+    },
+    {
+      "path": "rust-study-tests-reviewed.log",
+      "bytes": 118652,
+      "sha256": "fe52dff0dc65adc41a9b5d5bc86467d5d94487d613be842898355b88f2449771"
+    },
+    {
+      "path": "cli-tests.log",
+      "bytes": 115201,
+      "sha256": "fa85d155ce597ea81434495507a6e03ff11a4caabeecb1b0f5cfbbb74554f508"
+    },
+    {
+      "path": "python-study-tests-reviewed.log",
+      "bytes": 150,
+      "sha256": "63e6ddcac2fcb193609f3ca651af7e245f62bd88a29bd805c5c7fb9bb3282b47"
+    },
+    {
+      "path": "python-artifact-tests.log",
+      "bytes": 164,
+      "sha256": "0e075075a99395bcb6d01ea131801c4ac85e2e355215697d66e6b8e34b95a408"
+    },
+    {
+      "path": "html-syntax-reviewed.log",
+      "bytes": 359,
+      "sha256": "43dc07440a4f3381a2cae66bbe45fbb2b483746aab043c64de3e3791dbdfe1d6"
+    },
+    {
+      "path": "native-build-reviewed.log",
+      "bytes": 114548,
+      "sha256": "f64c4bcb01acd3c9183df423b8783c41ed1fed72720d4429404e963782535a8a"
+    },
+    {
+      "path": "wasm-build-reviewed.log",
+      "bytes": 111362,
+      "sha256": "b0b6ef32ef4771d0a0252f6a6424f2a3a658c9d0cc8c85395cf5b97bb785dfe4"
+    },
+    {
+      "path": "native-first-step.json",
+      "bytes": 14657306,
+      "sha256": "541c144e4d8830fbce02beb7cf23484c08deb7609194fb0102689ecf20b858b8"
+    },
+    {
+      "path": "native-partial-37.json",
+      "bytes": 14706300,
+      "sha256": "3c0c89696cd2d91cab57a2bfbf296ae8cf0c0c0065caf97e9d5d5eeff4cc01bd"
+    },
+    {
+      "path": "native-resumed.json",
+      "bytes": 15013489,
+      "sha256": "3cd78c946885b3808d21425ee758e783f6b45468be4f04bf7022081b323e508c"
+    },
+    {
+      "path": "native-noop.json",
+      "bytes": 15013489,
+      "sha256": "3cd78c946885b3808d21425ee758e783f6b45468be4f04bf7022081b323e508c"
+    },
+    {
+      "path": "native-checkpoint-1.json",
+      "bytes": 8567111,
+      "sha256": "efb0430c97db94aac04a3561c6dcb925be30547651d05fdc679ab70646a72165"
+    },
+    {
+      "path": "native-checkpoint-37.json",
+      "bytes": 8599527,
+      "sha256": "cbf75e369955e3bd3a2059aec3584971b077bb598677b0195af5ac6bba7d74de"
+    },
+    {
+      "path": "native-checkpoint-128.json",
+      "bytes": 8809391,
+      "sha256": "8dbd62fd7e47b795d4f278eca6cd7714a21e528abf6c5baed6d97bb4a44f8cef"
+    },
+    {
+      "path": "native-noop-checkpoint.json",
+      "bytes": 8809391,
+      "sha256": "8dbd62fd7e47b795d4f278eca6cd7714a21e528abf6c5baed6d97bb4a44f8cef"
+    },
+    {
+      "path": "native-controls.json",
+      "bytes": 12909,
+      "sha256": "d92c9c192ddf19a1876cd2500e6c48084e4640888fbfccc62d34bc36633eaf0f"
+    },
+    {
+      "path": "native-resume-verification.json",
+      "bytes": 25860,
+      "sha256": "854153dc14aaf391c222c74e80466ac377c293cffe280300a81dfae3354a4f36"
+    },
+    {
+      "path": "native-noop-verification.json",
+      "bytes": 25923,
+      "sha256": "3f7719c2ca7e737dcdbfe423f580fd1b8e8d76ffad421bb44a4244abcdeaa694"
+    },
+    {
+      "path": "browser-first-step.json",
+      "bytes": 14657242,
+      "sha256": "71c1c17ba5dc0bfe7fc784005178f1d975825d171f84bbc0622fcc313065955e"
+    },
+    {
+      "path": "browser-partial-37.json",
+      "bytes": 14706369,
+      "sha256": "2618296298ca1a4dbbc7e31d9ce0c4096042bccf866797f8f6f79ab64886b671"
+    },
+    {
+      "path": "browser-resumed.json",
+      "bytes": 15013622,
+      "sha256": "cfe2b484b6c29e2f02bf12390ba1426ec3acabddf32f0d92830d349009fcfebd"
+    },
+    {
+      "path": "browser-noop.json",
+      "bytes": 15013622,
+      "sha256": "cfe2b484b6c29e2f02bf12390ba1426ec3acabddf32f0d92830d349009fcfebd"
+    },
+    {
+      "path": "browser-checkpoint-1.json",
+      "bytes": 8567549,
+      "sha256": "7eb96ffb599aa065d5e973b7f59ecacc0e4311a6419895f3c79a4a3c1d266660"
+    },
+    {
+      "path": "browser-checkpoint-37.json",
+      "bytes": 8599441,
+      "sha256": "2b776175fff010d861c9a0ef75e5fe27cf26bd0e9b147630b6a4522dee358d7b"
+    },
+    {
+      "path": "browser-checkpoint-128.json",
+      "bytes": 8809424,
+      "sha256": "5e1d54041798fd9da32d1a50c5b6b35ee613bc5c59df4f554b9f3970b161f32f"
+    },
+    {
+      "path": "browser-noop-checkpoint.json",
+      "bytes": 8809424,
+      "sha256": "5e1d54041798fd9da32d1a50c5b6b35ee613bc5c59df4f554b9f3970b161f32f"
+    },
+    {
+      "path": "browser-controls.json",
+      "bytes": 12909,
+      "sha256": "cb792e3488e727e513cc0e9048d5320313ef408699a0290c458cfc75683c43b4"
+    },
+    {
+      "path": "browser-resume-verification.json",
+      "bytes": 25862,
+      "sha256": "1b92686b753785affde279c48238d18222f95d246d8ccbe30e333654985ec29e"
+    },
+    {
+      "path": "browser-noop-verification.json",
+      "bytes": 25925,
+      "sha256": "870c6edaa3be0e1b8c9d244a9f36696f7d1372f12ba7b52318b6e171c6161577"
+    },
+    {
+      "path": "browser.json",
+      "bytes": 15013622,
+      "sha256": "cfe2b484b6c29e2f02bf12390ba1426ec3acabddf32f0d92830d349009fcfebd"
+    }
+  ]
+}
