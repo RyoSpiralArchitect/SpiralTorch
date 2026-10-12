@@ -67,6 +67,22 @@ def frozen_fixture():
 
 
 class Controls(unittest.TestCase):
+    def test_contrasts_use_batch_losses_not_rounded_report_summaries(self):
+        for source in (fixture, frozen_fixture):
+            raw, ref, actual = source()
+            expected = study.compare(raw, ref, actual)
+            for report in (ref, actual):
+                for index, case in enumerate(report["cases"]):
+                    for point in case["validation"]:
+                        # Allowed summary rounding must not become measured effect.
+                        drift = 1e-4 if index % 2 else -1e-4
+                        point["bits_per_byte"] += drift
+                        point["mean_ce"] -= drift
+            self.assertEqual(study.compare(raw, ref, actual), expected)
+            actual["cases"][-1]["validation"][-1]["bits_per_byte"] += .01
+            with self.assertRaisesRegex(ValueError, "validation aggregation"):
+                study.compare(raw, ref, actual)
+
     def test_json_decoder_preserves_signed_zero_and_rejects_ambiguity(self):
         value = study.decode_json('[0, -0, -0.0, -0e0, 12]')
         self.assertEqual(value[0], 0)

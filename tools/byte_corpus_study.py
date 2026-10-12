@@ -338,6 +338,11 @@ def close(actual, expected, label):
     return maximum
 
 
+def heldout_bpb(point):
+    losses = point["batch_losses"]
+    return math.fsum(losses) / len(losses) / math.log(2)
+
+
 def compare(request_raw, reference_report, actual):
     request = decode_json(request_raw)
     version = request_version(request)
@@ -405,8 +410,8 @@ def compare(request_raw, reference_report, actual):
         summaries.append(dict(name=name, seed=spec["seed"], geometry=spec["geometry"],
                               parameter_scalars=got["parameter_scalars"], train_ce_max_error=train_error,
                               heldout_ce_max_error=eval_error, final_parameter_max_error=parameter_error,
-                              initial_heldout_bpb=got["validation"][0]["bits_per_byte"],
-                              final_heldout_bpb=got["validation"][-1]["bits_per_byte"], geometry_deltas=geometry_deltas))
+                              initial_heldout_bpb=heldout_bpb(got["validation"][0]),
+                              final_heldout_bpb=heldout_bpb(got["validation"][-1]), geometry_deltas=geometry_deltas))
         if version == 2:
             summaries[-1].update(geometry_update=spec["geometry_update"], trainable_parameter_scalars=trainable_scalars(spec))
     pairs = []

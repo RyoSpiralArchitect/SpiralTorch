@@ -1,0 +1,107 @@
+{
+  "schema": "spiraltorch.byte_corpus.v2_bpb_fix_independent_review.v1",
+  "reviewed_at_utc": "2026-10-12T13:37:24.421999+00:00",
+  "base_commit": "1a95eacb9ecab341ddc354f8f15c11dd1eb16e98",
+  "source_files": {
+    "tools/byte_corpus_study.py": {
+      "sha256": "161fcfbd8c79989c742477e5f5fe59a6cea6db3c25abfa85c92f1699b82a10fe",
+      "size": 24779
+    },
+    "tools/test_byte_corpus_study.py": {
+      "sha256": "dd67dc021c338210f447fbb04f435e5a5183bc6b1fa782611e8bec47ee9048ae",
+      "size": 16925
+    },
+    "tools/verify_byte_corpus_resume.py": {
+      "sha256": "6b370aa56764ac1d4848fda59339d927aa70a54765b7affe8753fea6352f1b0a",
+      "size": 10838
+    },
+    "tools/test_verify_byte_corpus_resume.py": {
+      "sha256": "b69ead95092f93283b7aba1651c59d36ea2c82f6ff10589766f32c2b0cbfd75d",
+      "size": 12045
+    },
+    "tools/generate_resident_byte_decoder_torch_fixture.py": {
+      "sha256": "47b5af2f4bfbf5ce6bf367d9d32f762db86d6b5ac2117c8e5a264376dcd78430",
+      "size": 7173
+    },
+    "tools/generate_causal_zspace_wave_torch_fixture.py": {
+      "sha256": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa",
+      "size": 4952
+    },
+    "tools/generate_poincare_bias_torch_fixture.py": {
+      "sha256": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18",
+      "size": 3182
+    }
+  },
+  "changed_files": [
+    "tools/byte_corpus_study.py",
+    "tools/test_byte_corpus_study.py"
+  ],
+  "findings": [],
+  "prior_p2_status": "verified_fixed",
+  "stdlib_tests": {
+    "run": 32,
+    "passed": 28,
+    "skipped": 4,
+    "failures": 0,
+    "errors": 0
+  },
+  "new_regression_test_fails_against_original_comparator": true,
+  "v2_offline_comparisons": [
+    {
+      "name": "native",
+      "cases": 9,
+      "numerical_checks_passed": true,
+      "unchanged_from_retained_and_published": true
+    },
+    {
+      "name": "native-resumed",
+      "cases": 9,
+      "numerical_checks_passed": true,
+      "unchanged_from_retained_and_published": true
+    },
+    {
+      "name": "browser",
+      "cases": 9,
+      "numerical_checks_passed": true,
+      "unchanged_from_retained_and_published": true
+    },
+    {
+      "name": "browser-resumed",
+      "cases": 9,
+      "numerical_checks_passed": true,
+      "unchanged_from_retained_and_published": true
+    }
+  ],
+  "within_runtime_resume_cases_passed": {
+    "native": 9,
+    "browser": 9
+  },
+  "old_counterexample_reproduced_and_repaired": {
+    "runs": 4,
+    "seeds_per_run": 3,
+    "comparison_invariant": true
+  },
+  "additional_boundary_probes": {
+    "within_tolerance_invariant": 80,
+    "outside_tolerance_rejected": 80
+  },
+  "v1_retained_comparisons": [
+    {
+      "runtime": "native",
+      "cases": 6,
+      "comparison_unchanged": true
+    },
+    {
+      "runtime": "browser",
+      "cases": 6,
+      "comparison_unchanged": true
+    }
+  ],
+  "original_manifest_hashes_checked": {
+    "source": 13,
+    "public_result": 9,
+    "local_artifact": 46,
+    "all_match": true
+  },
+  "scope": "Read-only independent offline re-review. No Rust build, GPU rerun, network or new Torch execution. Original artifacts preserved; summaries unchanged."
+}
