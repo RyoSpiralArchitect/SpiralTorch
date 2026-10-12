@@ -84,8 +84,9 @@ impl ResidentByteDecoderForward {
     pub fn geometry_pair_bias(&self, block: usize) -> Option<&ResidentTensor> {
         self.geometry.as_ref()?.get_bias(block)
     }
-    /// Resident [head,component] softmax masses from this exact forward's router.
+    /// Resident softmax masses from this exact forward's router.
     /// Fixed-routing and ordinary models return None; reading is explicit.
+    /// Shared weights are [H,K]; contextual weights are [B,H,Q,K].
     pub fn geometry_mixture_weights(&self, block: usize) -> Option<&ResidentTensor> {
         self.geometry.as_ref()?.mixture_weights(block)
     }

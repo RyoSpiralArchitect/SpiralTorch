@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contextual geometry byte learner</title>
+<style>body{font:16px Georgia,serif;background:#f6f1e8;color:#202c28;margin:32px;max-width:1100px}h1{font-weight:400}pre{font:13px monospace;white-space:pre-wrap}button,a{font:inherit;padding:12px}table{border-collapse:collapse;width:100%}td,th{padding:12px;border-bottom:1px solid #bfc7bb;text-align:left}</style>
+<h1>Contextual geometry byte learner</h1>
+<p>Rust-owned query routing, full-model learning and checkpoint resume. No quality or speed claim.</p>
+<button id="run">Run four fixed cases</button>
+<a id="download" hidden>Download local raw result</a>
+<pre id="status">Ready. Runs native-equivalent Rust checks on browser WebGPU.</pre>
+<table><thead><tr><th>Case</th><th>Logit error</th><th>Router update relative error</th><th>Resume</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+const run = document.querySelector('#run'), status = document.querySelector('#status');
+run.onclick = async () => {
+  run.disabled = true;
+  try {
+    status.textContent = 'Loading fixture and Rust WASM; then executing the fixed qualification...';
+    const {default:init, run_resident_byte_query_mixture} = await import('/target/resident-byte-query-web/resident_byte_decoder_browser.js');
+    const response = await fetch('/target/resident-byte-query-web/reference.json');
+    if (!response.ok) throw Error('Missing local fixture');
+    const fixture = await response.text();
+    const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(fixture)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+    await init();
+    const report = JSON.parse(await run_resident_byte_query_mixture(fixture));
+    if (report.schema !== 'spiraltorch.resident_byte_geometry_query_mixture.validation.v1' || report.checks.length !== 4) throw Error('Incomplete qualification');
+    report.fixture_sha256 = sha;
+    for (const c of report.checks) {
+      const tr = document.createElement('tr');
+      for (const value of [c.name,c.output_max_abs_error,c.query_controls?.router_update_relative_l2 ?? c.query_controls_error,c.resume_trajectory.exact_parameters ? 'exact' : 'FAILED']) {
+        const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
+      }
+      document.querySelector('#rows').append(tr);
+    }
+    const link = document.querySelector('#download');
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(report)+'\n'],{type:'application/json'}));
+    link.download = 'resident-byte-query-mixture.json'; link.hidden = false;
+    status.textContent = (report.passed ? 'PASS' : 'FAIL')+': four full-model cases, 16 updates each, exact same-runtime resume checked. Fixture SHA-256: '+sha;
+  } catch(error) { status.textContent = String(error); }
+};
+</script>
+</html>

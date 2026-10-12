@@ -9,6 +9,8 @@ pub const BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA: &str =
     "spiraltorch.nn.byte_decoder_checkpoint.v3";
 pub const BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA: &str =
     "spiraltorch.nn.byte_decoder_checkpoint.v4";
+pub const BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA: &str =
+    "spiraltorch.nn.byte_decoder_checkpoint.v5";
 
 /// A complete fixed-window byte model and its attempted SGD revision.
 /// Plain SGD has no momentum slots. Data cursors, learning-rate schedules,
@@ -101,6 +103,18 @@ struct MixtureRecord {
     metrics: Vec<ByteDecoderPairMetric>,
     scales: Vec<Vec<f32>>,
     raw_logits: Vec<Vec<f32>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "explicit_query_projections"
+    )]
+    query_projections: Option<Vec<GraphRecord>>,
+}
+
+fn explicit_query_projections<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Vec<GraphRecord>>, D::Error> {
+    Vec::<GraphRecord>::deserialize(d).map(Some)
 }
 
 fn explicit_mixture<'de, D: serde::Deserializer<'de>>(
@@ -147,6 +161,14 @@ fn graph_record(plan: &InferencePlan) -> Result<GraphRecord, InferenceError> {
 
 impl ModelRecord {
     fn checkpoint_schema(&self) -> &'static str {
+        if self
+            .geometry
+            .as_ref()
+            .and_then(|g| g.mixture.as_ref())
+            .is_some_and(|m| m.query_projections.is_some())
+        {
+            return BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA;
+        }
         if self.geometry.as_ref().is_some_and(|g| g.mixture.is_some()) {
             return BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA;
         }
@@ -188,11 +210,26 @@ impl ModelRecord {
                             .head_pair_metrics()
                             .filter(|_| g.pair_metric().is_none())
                             .map(<[_]>::to_vec),
-                        mixture: g.mixture().map(|m| MixtureRecord {
-                            metrics: m.metrics().to_vec(),
-                            scales: m.scales().to_vec(),
-                            raw_logits: m.raw_logits().to_vec(),
-                        }),
+                        mixture: g
+                            .mixture()
+                            .map(|m| {
+                                Ok::<_, InferenceError>(MixtureRecord {
+                                    metrics: m.metrics().to_vec(),
+                                    scales: m.scales().to_vec(),
+                                    raw_logits: m.raw_logits().to_vec(),
+                                    query_projections: if m.query_projections().is_empty() {
+                                        None
+                                    } else {
+                                        Some(
+                                            m.query_projections()
+                                                .iter()
+                                                .map(graph_record)
+                                                .collect::<Result<Vec<_>, _>>()?,
+                                        )
+                                    },
+                                })
+                            })
+                            .transpose()?,
                     })
                 })
                 .transpose()?,
@@ -222,6 +259,11 @@ impl ModelRecord {
         // ranks before a tiny JSON can amplify a huge rank across many stages.
         let graphs = std::iter::once(&self.head)
             .chain(self.geometry.iter().map(|g| &g.projection))
+            .chain(self.geometry.iter().flat_map(|g| {
+                g.mixture
+                    .iter()
+                    .flat_map(|m| m.query_projections.iter().flatten())
+            }))
             .chain(
                 self.blocks
                     .iter()
@@ -271,11 +313,21 @@ impl ModelRecord {
                             "mixture conflicts with fixed metric routing",
                         ));
                     }
-                    return plan.with_causal_geometry(geometry.with_mixture(
+                    let geometry = geometry.with_mixture(
                         &mixture.metrics,
                         &mixture.raw_logits,
                         &mixture.scales,
-                    )?);
+                    )?;
+                    let geometry = if let Some(projections) = mixture.query_projections {
+                        let projections = projections
+                            .into_iter()
+                            .map(GraphRecord::into_plan)
+                            .collect::<Result<Vec<_>, _>>()?;
+                        geometry.with_query_projections(&projections)?
+                    } else {
+                        geometry
+                    };
+                    return plan.with_causal_geometry(geometry);
                 }
                 let geometry = match g.head_pair_metrics {
                     Some(metrics) => {
@@ -311,7 +363,14 @@ impl ModelRecord {
                     .values_mut()
                     .chain([&mut g.raw_decay, &mut g.raw_phase])
                     .chain(g.raw_gains.iter_mut())
-                    .chain(g.mixture.iter_mut().flat_map(|m| m.raw_logits.iter_mut()))
+                    .chain(g.mixture.iter_mut().flat_map(|m| {
+                        m.raw_logits.iter_mut().chain(
+                            m.query_projections
+                                .iter_mut()
+                                .flatten()
+                                .flat_map(GraphRecord::values_mut),
+                        )
+                    }))
             }))
             .chain(self.blocks.iter_mut().flat_map(|b| {
                 b.pre

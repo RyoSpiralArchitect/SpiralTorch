@@ -38,7 +38,14 @@ pub(super) async fn resume_trajectory(
             let expected_geometry = &case["config"]["causal_geometry"];
             let (schema, field, absent) = if expected_geometry.get("mixture").is_some() {
                 (
-                    st_nn::resident::BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
+                    if expected_geometry["mixture"]
+                        .get("query_projection")
+                        .is_some()
+                    {
+                        st_nn::resident::BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA
+                    } else {
+                        st_nn::resident::BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA
+                    },
                     "mixture",
                     "pair_metric",
                 )
@@ -87,9 +94,7 @@ pub(super) async fn resume_trajectory(
         let loss =
             forward.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
         let gradient = model.backward(&forward, loss.prediction_gradient())?;
-        let weights = (0..p.block_count())
-            .filter_map(|b| forward.geometry_mixture_weights(b).cloned())
-            .collect::<Vec<_>>();
+        let weights = mixture_snapshots(&p, &forward)?;
         let update = model.sgd(&gradient, 0.125)?;
         let receipt = update.snapshot()?;
         #[cfg(not(target_arch = "wasm32"))]

@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn contextual_checkpoint_preserves_router_graphs_and_refuses_schema_downgrades() {
+    let p = super::super::tests::plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = super::super::tests::query_geometry_for(&p);
+    let p = p.with_causal_geometry(g).unwrap();
+    let text = p.initial_checkpoint().to_json().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        value["schema"],
+        BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA
+    );
+    let restored = ByteDecoderCheckpoint::from_json(&text).unwrap();
+    assert_eq!(restored.to_json().unwrap(), text);
+    assert_eq!(restored.plan().parameter_layout(), p.parameter_layout());
+    for variant in 0..5 {
+        let mut bad = value.clone();
+        let mixture = &mut bad["model"]["geometry"]["mixture"];
+        match variant {
+            0 => bad["schema"] = json!(BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA),
+            1 => mixture["query_projections"] = serde_json::Value::Null,
+            2 => mixture["query_projections"] = json!([]),
+            3 => {
+                mixture["query_projections"].as_array_mut().unwrap().pop();
+            }
+            _ => {
+                mixture.as_object_mut().unwrap().remove("query_projections");
+            }
+        }
+        assert!(
+            ByteDecoderCheckpoint::from_json(&bad.to_string()).is_err(),
+            "variant {variant}"
+        );
+    }
+}
+
+#[test]
 fn mixture_checkpoint_is_versioned_and_binds_fixed_scales_and_router_values() {
     use ByteDecoderPairMetric::*;
     let p = super::super::tests::plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();

@@ -32,7 +32,8 @@ pub use byte_decoder::{
     ByteDecoderCheckpoint, ByteDecoderGeometryMixture, ByteDecoderGeometryParameterLayout,
     ByteDecoderGeometryPlan, ByteDecoderPairMetric, ByteDecoderParameterLayout, ByteDecoderPlan,
     ByteLmBatch, BYTE_DECODER_CHECKPOINT_SCHEMA, BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA,
-    BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
+    BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{

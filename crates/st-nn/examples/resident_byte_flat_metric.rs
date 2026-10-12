@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
     let mut args = std::env::args_os().skip(1);
     let path = args.next().ok_or(
-        "usage: resident_byte_flat_metric <local-torch-fixture.json> [--calibrate|--fisher-rao|--headwise|--mixture]",
+        "usage: resident_byte_flat_metric <local-torch-fixture.json> [--calibrate|--fisher-rao|--headwise|--mixture|--query-mixture]",
     )?;
     let mode = match args.next() {
         None => 0,
@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(flag) if flag == "--fisher-rao" => 2,
         Some(flag) if flag == "--headwise" => 3,
         Some(flag) if flag == "--mixture" => 4,
+        Some(flag) if flag == "--query-mixture" => 5,
         _ => return Err("unknown mode".into()),
     };
     if args.next().is_some() {
@@ -45,9 +46,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         2 => pollster::block_on(support::run_fisher_rao(runtime, &input))?,
         3 => pollster::block_on(support::run_headwise(runtime, &input))?,
         4 => pollster::block_on(support::run_mixture(runtime, &input))?,
+        5 => pollster::block_on(support::run_query_mixture(runtime, &input))?,
         _ => pollster::block_on(support::run_flat_metric(runtime, &input))?,
     };
     println!("{report}");
+    if report["passed"] == false {
+        return Err("qualification failed; raw measurements were retained in the report".into());
+    }
     Ok(())
 }
 

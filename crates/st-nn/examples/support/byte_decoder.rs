@@ -33,6 +33,8 @@ mod headwise_controls;
 mod mixture_controls;
 #[path = "byte_decoder/parameter_rate_controls.rs"]
 mod parameter_rate_controls;
+#[path = "byte_decoder/query_controls.rs"]
+mod query_controls;
 
 pub async fn run_parameter_rates(runtime: WgpuRuntime) -> Result<Value> {
     parameter_rate_controls::run(runtime).await
@@ -125,11 +127,32 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
                 .map(|p| data(&p["values"]))
                 .collect::<Vec<_>>();
             offset += count;
-            geometry.with_mixture(
+            let geometry = geometry.with_mixture(
                 &serde_json::from_value::<Vec<ByteDecoderPairMetric>>(mixture["metrics"].clone())?,
                 &logits,
                 &serde_json::from_value::<Vec<Vec<f32>>>(mixture["scales"].clone())?,
-            )?
+            )?;
+            if let Some(query) = mixture.get("query_projection") {
+                if query != "linear.v1" {
+                    return Err("unknown query projection".into());
+                }
+                let queries = (0..count)
+                    .map(|block| {
+                        let p = &parameters[offset + 2 * block..offset + 2 * block + 2];
+                        Ok(InferencePlan::from_operations(
+                            geometry.projection().output_layout().clone(),
+                            vec![InferenceOp::Linear {
+                                weight: tensor(&p[0])?,
+                                bias: tensor(&p[1])?,
+                            }],
+                        )?)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                offset += 2 * count;
+                geometry.with_query_projections(&queries)?
+            } else {
+                geometry
+            }
         } else {
             match c["causal_geometry"].get("head_pair_metrics") {
                 Some(grid) => {
@@ -316,6 +339,29 @@ fn same_bits(a: &[f32], b: &[f32]) -> bool {
         && a.iter()
             .map(|v| v.to_bits())
             .eq(b.iter().map(|v| v.to_bits()))
+}
+
+fn require_mixture_count(expected: usize, actual: usize) -> Result<()> {
+    if actual != expected {
+        return Err("missing or unexpected block mixture snapshot".into());
+    }
+    Ok(())
+}
+
+fn mixture_snapshots(
+    plan: &ByteDecoderPlan,
+    forward: &st_nn::resident::ResidentByteDecoderForward,
+) -> Result<Vec<ResidentTensor>> {
+    let expected = if plan.causal_geometry().and_then(|g| g.mixture()).is_some() {
+        plan.block_count()
+    } else {
+        0
+    };
+    let values = (0..plan.block_count())
+        .filter_map(|block| forward.geometry_mixture_weights(block).cloned())
+        .collect::<Vec<_>>();
+    require_mixture_count(expected, values.len())?;
+    Ok(values)
 }
 
 async fn causal_checks(runtime: &WgpuRuntime, case: &Value) -> Result<Value> {
@@ -643,6 +689,49 @@ pub async fn run_mixture(runtime: WgpuRuntime, fixture_json: &str) -> Result<Val
     Ok(report)
 }
 
+pub async fn run_query_mixture(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    let fixture: Value = serde_json::from_str(fixture_json)?;
+    let cases = fixture["cases"]
+        .as_array()
+        .ok_or("missing contextual cases")?;
+    if fixture["schema"] != "spiraltorch.resident_byte_geometry_query_mixture.torch_fixture.v1"
+        || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
+        || cases.len() != 4
+        || cases.iter().enumerate().any(|(i, c)| {
+            c["config"]["heads"] != 2
+                || c["query_controls"]["zero_init"] != (i < 2)
+                || c["config"]["causal_geometry"]["mixture"]["query_projection"] != "linear.v1"
+                || c["config"]["causal_geometry"]["mixture"]["metrics"]
+                    != json!([
+                        "poincare_squared.v1",
+                        "euclidean_chord_squared.v1",
+                        "categorical_fisher_rao_squared.v1"
+                    ])
+        })
+    {
+        return Err("incomplete contextual mixture reference".into());
+    }
+    let guard = query_controls::guard(&runtime, &cases[3]).await?;
+    let mut report = run_cases(runtime, cases, &[26, 43, 26, 43], true, false).await?;
+    let mut passed = true;
+    for (case, check) in cases
+        .iter()
+        .zip(report["checks"].as_array_mut().ok_or("missing checks")?)
+    {
+        match query_controls::check(case, check) {
+            Ok(controls) => check["query_controls"] = controls,
+            Err(error) => {
+                passed = false;
+                check["query_controls_error"] = json!(error.to_string());
+            }
+        }
+    }
+    report["passed"] = json!(passed);
+    report["schema"] = json!("spiraltorch.resident_byte_geometry_query_mixture.validation.v1");
+    report["query_guard"] = guard;
+    Ok(report)
+}
+
 async fn run_metric(
     runtime: WgpuRuntime,
     fixture_json: &str,
@@ -727,14 +816,23 @@ async fn run_cases(
         let resident = model.prepare_batch(&host)?;
         let geometry = biases(model.tensor_device(), case, 4)?;
         let forward = model.forward_with_external_biases(&resident, &borrowed(&geometry))?;
-        let mixture_weights = (0..p.block_count())
-            .filter_map(|b| forward.geometry_mixture_weights(b).cloned())
-            .collect::<Vec<_>>();
+        let mixture_weights = mixture_snapshots(&p, &forward)?;
         let initial_mixture_weights = if mixture_weights.is_empty() {
             None
         } else {
             Some(read_many(model.tensor_device(), &mixture_weights).await?)
         };
+        if let Some(actual) = &initial_mixture_weights {
+            let expected = case["mixture_weights"]
+                .as_array()
+                .ok_or("missing mixture oracle")?;
+            if actual.len() != expected.len() {
+                return Err("truncated mixture weights".into());
+            }
+            for (a, e) in actual.iter().zip(expected) {
+                close(a, &data(e), "initial mixture weights")?;
+            }
+        }
         let output_values = read(forward.prediction()).await?;
         let output_error = close(
             &output_values,
@@ -844,9 +942,7 @@ async fn run_cases(
             let loss =
                 forward.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
             let gradient = model.backward(&forward, loss.prediction_gradient())?;
-            let mixture_weights = (0..p.block_count())
-                .filter_map(|b| forward.geometry_mixture_weights(b).cloned())
-                .collect::<Vec<_>>();
+            let mixture_weights = mixture_snapshots(&p, &forward)?;
             let update = model.sgd(&gradient, learning["rate"].as_f64().unwrap() as f32)?;
             let geometry_gradients = p
                 .parameter_layout()
@@ -917,8 +1013,17 @@ async fn run_cases(
                 row["embedding_output_gradient"] = json!(read(&embedded).await?);
             }
             if !mixture_weights.is_empty() {
-                trace.last_mut().unwrap()["mixture_weights"] =
-                    json!(read_many(model.tensor_device(), &mixture_weights).await?);
+                let actual = read_many(model.tensor_device(), &mixture_weights).await?;
+                let expected = learning["trace"][step]["mixture_weights"]
+                    .as_array()
+                    .ok_or("missing mixture weights")?;
+                if actual.len() != expected.len() {
+                    return Err("truncated mixture trajectory".into());
+                }
+                for (a, e) in actual.iter().zip(expected) {
+                    close(a, &data(e), "learned mixture weights")?;
+                }
+                trace.last_mut().unwrap()["mixture_weights"] = json!(actual);
             }
         }
         let checkpoint = checkpoint_controls::run(&runtime, case).await?;

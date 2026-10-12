@@ -31,9 +31,10 @@ explicit instead of assuming that different queries must prefer the same
 geometry. A causal contextual projection can produce the new logits; its own
 pullback must receive `gradient.logits()` and join the model's parameter owner.
 
-The byte decoder still uses its existing shared router. This addition does
-**not** yet implement or qualify a trainable contextual LM router. Nor does it
-mask future keys or make arbitrary supplied logits causal. The logit producer
+The primitive itself does **not** implement a trainable contextual LM router.
+The optional [byte-decoder connection](contextual_geometry_mixture.md) now adds
+that separate learning path; shared routing remains the default. Nor does this
+primitive mask future keys or make arbitrary supplied logits causal. The logit producer
 and attention mask must enforce those boundaries. No manifold Q/K/V projection,
 quality improvement or throughput advantage is claimed.
 

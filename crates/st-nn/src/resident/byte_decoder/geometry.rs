@@ -24,6 +24,7 @@ pub struct ByteDecoderGeometryParameterLayout {
     raw_phase: usize,
     raw_gains: Range<usize>,
     mixture_logits: Option<Range<usize>>,
+    query_projections: Vec<Range<usize>>,
 }
 
 impl ByteDecoderGeometryParameterLayout {
@@ -42,12 +43,17 @@ impl ByteDecoderGeometryParameterLayout {
     pub fn all(&self) -> Range<usize> {
         self.projection.start
             ..self
-                .mixture_logits
-                .as_ref()
+                .query_projections
+                .last()
+                .or(self.mixture_logits.as_ref())
                 .map_or(self.raw_gains.end, |r| r.end)
     }
     pub fn mixture_logits(&self) -> Option<Range<usize>> {
         self.mixture_logits.clone()
+    }
+    /// Per-block contextual projection slots, empty for shared routing.
+    pub fn query_projections(&self) -> &[Range<usize>] {
+        &self.query_projections
     }
 }
 
@@ -58,6 +64,7 @@ pub struct ByteDecoderGeometryMixture {
     metrics: Vec<ByteDecoderPairMetric>,
     scales: Vec<Vec<f32>>,
     raw_logits: Vec<Vec<f32>>,
+    query_projections: Vec<InferencePlan>,
 }
 impl ByteDecoderGeometryMixture {
     pub fn metrics(&self) -> &[ByteDecoderPairMetric] {
@@ -68,6 +75,11 @@ impl ByteDecoderGeometryMixture {
     }
     pub fn raw_logits(&self) -> &[Vec<f32>] {
         &self.raw_logits
+    }
+    /// Tokenwise graphs from causal wave coordinates to head/component logits.
+    /// Their outputs are added to the shared logit table. Empty means shared-only.
+    pub fn query_projections(&self) -> &[InferencePlan] {
+        &self.query_projections
     }
 }
 
@@ -212,7 +224,49 @@ impl ByteDecoderGeometryPlan {
             metrics: metrics.to_vec(),
             raw_logits: raw_logits.to_vec(),
             scales: scales.to_vec(),
+            query_projections: Vec::new(),
         });
+        Ok(self)
+    }
+    /// Learn position-dependent mixtures from the causal wave coordinates.
+    /// Each graph must preserve batch/time and emit flattened [heads,components]
+    /// logits. Zero output recovers the shared mixture's initial function.
+    pub fn with_query_projections(
+        mut self,
+        projections: &[InferencePlan],
+    ) -> Result<Self, InferenceError> {
+        let mixture = self.mixture.as_mut().ok_or(InferenceError::ByteDecoder(
+            "query projections require a geometry mixture",
+        ))?;
+        if projections.len() != self.raw_gains.len() {
+            return Err(InferenceError::ByteDecoder(
+                "one query projection is required per block",
+            ));
+        }
+        let [batch, steps, _] = self.wave.shape();
+        for (projection, gains) in projections.iter().zip(&self.raw_gains) {
+            let cols = gains
+                .len()
+                .checked_mul(mixture.metrics.len())
+                .ok_or(InferenceError::PortableAddressSpace)?;
+            if projection.input_layout() != self.projection.output_layout()
+                || projection.output_layout().shape() != [batch, steps, cols]
+                || projection.graph_definition()?.parameters().is_empty()
+            {
+                return Err(InferenceError::ByteDecoder(
+                    "query projection must be trainable and tokenwise on causal coordinates",
+                ));
+            }
+            st_kernel_contracts::mixture::QuerywiseMixtureSpec::new([
+                batch,
+                gains.len(),
+                steps,
+                steps,
+                mixture.metrics.len(),
+            ])
+            .map_err(|_| InferenceError::PortableAddressSpace)?;
+        }
+        mixture.query_projections = projections.to_vec();
         Ok(self)
     }
     /// Select a metric without changing initial values or trainable scalar count.
@@ -296,6 +350,9 @@ impl ByteDecoderGeometryPlan {
                     values: logits.clone(),
                 });
             }
+            for projection in &mixture.query_projections {
+                values.extend(projection.graph_definition()?.parameters().iter().cloned());
+            }
         }
         Ok(values)
     }
@@ -351,9 +408,20 @@ impl ByteDecoderPlan {
         let gain_end = gain
             .checked_add(geometry.raw_gains.len())
             .ok_or(InferenceError::PortableAddressSpace)?;
-        let end = gain_end
+        let logits_end = gain_end
             .checked_add(geometry.mixture.as_ref().map_or(0, |m| m.raw_logits.len()))
             .ok_or(InferenceError::PortableAddressSpace)?;
+        let mut end = logits_end;
+        let mut query_projections = Vec::new();
+        if let Some(mixture) = &geometry.mixture {
+            for projection in &mixture.query_projections {
+                let next = end
+                    .checked_add(projection.graph_definition()?.parameters().len())
+                    .ok_or(InferenceError::PortableAddressSpace)?;
+                query_projections.push(end..next);
+                end = next;
+            }
+        }
         let shift = end - 2;
         for range in self
             .parameters
@@ -375,7 +443,8 @@ impl ByteDecoderPlan {
             raw_decay: decay,
             raw_phase: phase,
             raw_gains: gain..gain_end,
-            mixture_logits: geometry.mixture.is_some().then_some(gain_end..end),
+            mixture_logits: geometry.mixture.is_some().then_some(gain_end..logits_end),
+            query_projections,
         });
         self.geometry = Some(geometry);
         Ok(self)
