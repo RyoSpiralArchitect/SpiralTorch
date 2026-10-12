@@ -1,0 +1,15 @@
+{
+  "schema": "spiraltorch.local_validation.page_loss.v1",
+  "status": "no_completed_result_recovered",
+  "start_server_local_time": "2026-10-13T03:02:39+09:00",
+  "request_sha256": "7733e760748e14944744a91a6c55a16ad21982a53af0375a4a2ac95d00e9a010",
+  "owned_tab_id": "19",
+  "observations": [
+    "The page had displayed Running 51 cases, 128 updates per case with the canonical request hash.",
+    "A later AX observation timed out waiting for the webview to attach.",
+    "The documented selected-browser tab inventory then did not contain tab 19. No reload was issued and no completed report was recovered."
+  ],
+  "cause": "unknown; no browser crash or user action is inferred",
+  "qualification": false,
+  "replacement_policy": "Retain this failed observation. Re-run the unchanged canonical request in a new page only after the missing-tab observation, not merely because a job is slow."
+}

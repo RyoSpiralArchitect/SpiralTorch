@@ -1,0 +1,551 @@
+{
+  "schema": "spiraltorch.byte_corpus.mixture_preparation_verification.v1",
+  "passed": true,
+  "source_request_sha256": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+  "request_sha256": "f27181edd49a940dadbaf9af84e567d56112ad029285aa5540beddee32512d38",
+  "inherited_cases": 27,
+  "all_initial_parameter_bits_checked": true,
+  "gain_only_fitting": true,
+  "no_updates_consumed": true,
+  "cases": [
+    {
+      "name": "mixture-11-0-train",
+      "seed": 11,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            1.1288928985595703,
+            1,
+            1.1288928985595703
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.3733812248253091,
+          0.26912570724741075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.37308212168357413,
+          0.2689101202940944
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.3733812167819055,
+          0.2691257138841593
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          2.1542067685231814e-8,
+          2.4660403497023253e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-11-1-train",
+      "seed": 11,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            19.713470458984375,
+            1,
+            19.713470458984375
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.3733812248253091,
+          0.26912570724741075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.3690119464754531,
+          0.2659764204762618
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.3733811961087899,
+          0.2691256976574518
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          7.690938186311058e-8,
+          3.563375283732739e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-11-2-train",
+      "seed": 11,
+      "mixture": {
+        "metrics": [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1.1288928985595703,
+            19.713470458984375,
+            1.1288928985595703,
+            19.713470458984375
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.3733812248253091,
+          0.26912570724741075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.36935741993012056,
+          0.26622543050928565
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.37338121065006025,
+          0.2691257156026373
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          3.7964546506508157e-8,
+          3.104581369761661e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-11-3-train",
+      "seed": 11,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            1.1288928985595703,
+            19.713470458984375,
+            1,
+            1.1288928985595703,
+            19.713470458984375
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.3733812248253091,
+          0.26912570724741075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.36951912039065843,
+          0.26634197954448907
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.37338121745908415,
+          0.26912569978163636
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          1.9728428890530836e-8,
+          2.7740844510404372e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-23-0-train",
+      "seed": 23,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            1.122228741645813,
+            1,
+            1.122228741645813
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4150359652911379,
+          0.31015863951122075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.41480553370508727,
+          0.30998643730039016
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.4150359895917429,
+          0.3101586169939854
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          5.8550600590123736e-8,
+          7.259909118317864e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-23-1-train",
+      "seed": 23,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            23.15789794921875,
+            1,
+            23.15789794921875
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4150359652911379,
+          0.31015863951122075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.40394262446629103,
+          0.3018685261199196
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.41503596876076715,
+          0.31015863568740293
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          8.35982794100687e-9,
+          1.2328587151166914e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-23-2-train",
+      "seed": 23,
+      "mixture": {
+        "metrics": [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1.122228741645813,
+            23.15789794921875,
+            1.122228741645813,
+            23.15789794921875
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4150359652911379,
+          0.31015863951122075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.40428094252123004,
+          0.3021213544716682
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.415036006001292,
+          0.3101586180768609
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          9.808825618407013e-8,
+          6.910773109325419e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-23-3-train",
+      "seed": 23,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            1.122228741645813,
+            23.15789794921875,
+            1,
+            1.122228741645813,
+            23.15789794921875
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4150359652911379,
+          0.31015863951122075
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.40523531649086686,
+          0.3028345620346045
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.41503595741360755,
+          0.3101586302056203
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          1.8980355953601702e-8,
+          3.000271242559194e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-37-0-train",
+      "seed": 37,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            1.1406545639038086,
+            1,
+            1.1406545639038086
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4027270845705288,
+          0.3861364045491892
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.4024247197612783,
+          0.38584649666164283
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.4027271204844814,
+          0.386136441447045
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          8.917689919840655e-8,
+          9.555653224246896e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-37-1-train",
+      "seed": 37,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            20.907682418823242,
+            1,
+            20.907682418823242
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4027270845705288,
+          0.3861364045491892
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.3959131327821291,
+          0.3796031598268519
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.402727066775077,
+          0.38613642458570596
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          4.418737264977324e-8,
+          5.188973783987194e-8
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-37-2-train",
+      "seed": 37,
+      "mixture": {
+        "metrics": [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1.1406545639038086,
+            20.907682418823242,
+            1.1406545639038086,
+            20.907682418823242
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4027270845705288,
+          0.3861364045491892
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.3964916077607895,
+          0.38015780427225276
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.402727050009216,
+          0.3861364663116418
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          8.581819832542692e-8,
+          1.599498309357017e-7
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    },
+    {
+      "name": "mixture-37-3-train",
+      "seed": 37,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "router_update": "train",
+        "scales": [
+          [
+            1,
+            1.1406545639038086,
+            20.907682418823242,
+            1,
+            1.1406545639038086,
+            20.907682418823242
+          ]
+        ]
+      },
+      "reference_rms": [
+        [
+          0.4027270845705288,
+          0.3861364045491892
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.3967964220590415,
+          0.3804500608505402
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.40272709929301925,
+          0.38613645187636775
+        ]
+      ],
+      "realized_relative_errors": [
+        [
+          3.655699121196676e-8,
+          1.225659584935812e-7
+        ]
+      ],
+      "valid_pairs_per_head": 4224
+    }
+  ],
+  "scope": "Artifact binding and reported RMS/gain arithmetic; not independent runtime attestation or quality evidence",
+  "packet_sha256": "2d202990724a73cc742f01d293b24c1847b83fb59f8139111c98ffc3972e9df9"
+}
