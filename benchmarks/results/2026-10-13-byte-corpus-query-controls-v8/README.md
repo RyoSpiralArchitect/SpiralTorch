@@ -4,22 +4,27 @@ This increment puts position-conditioned geometric mixtures into actual
 document-held-out byte-LM learning. It extends the shared-router v7 screen
 without changing the source data, order, seeds, units, gains or original arms.
 
-**Status at this checkpoint:** native Metal and independent CPU-f32 Torch
-have completed all 75 cases and 9,600 updates each. Native passes the unchanged
-corpus numerical gates. Browser WebGPU learning is still running and is **not
-qualified** yet. Live pause/resume checks for v8 have not been executed.
-This is an explicitly incomplete cross-runtime screen, not a completed study.
+**Learning comparison complete:** native Metal, browser WebGPU and independent
+CPU-f32 Torch each completed all 75 cases and 9,600 updates. Both resident
+engines pass the unchanged corpus numerical gates. Live pause/resume checks
+for v8 remain pending; this does not claim the entire protocol is complete.
+The earlier `checkpoint-validation.json` intentionally retains the historical
+partial status from before the browser finished.
 
-The [native qualification](native-qualified.json) records maximum CE error
-`1.431e-6` and parameter error `8.345e-7`. All twelve learned query-weight
-tensors move: smallest reference delta L2 `4.912e-5`, largest relative
-delta error `3.022e-6`, below the unchanged `0.002` gate. Every frozen
-query bias/weight preserves its initial bits. All 51 inherited native v7
-case reports match exactly, including signed-zero-sensitive float values.
+The [native](native-comparison.json) and [browser](browser-comparison.json)
+qualifications both record maximum CE error `1.431e-6` and parameter error
+`8.345e-7`. All twelve learned query-weight tensors move: smallest reference
+delta L2 `4.912e-5`, largest relative delta error `3.022e-6` native and
+`3.623e-6` browser, below the unchanged `0.002` gate. Every frozen query
+bias/weight preserves its initial bits. All 51 inherited v7 case reports
+[match exactly in each of the three engines](inheritance.json), including
+signed-zero-sensitive float values.
 
 **No quality advantage is established.** Maximum absolute contextual-versus-
-shared final BPB difference is `6.450e-8` native and `8.600e-8` Torch;
-signs disagree across engines. In the [post-screen native-weight reconstruction](native-activity.json),
+shared final BPB difference is `6.450e-8` native, `8.600e-8` browser and
+`8.600e-8` Torch; signs disagree across engines. All twelve contrasts per
+engine are retained in [contrasts.json](contrasts.json). In the
+[post-screen weight reconstructions](activity.json),
 all learned routers vary by position, but their maximum probability departure
 from their own shared router remains about `9.05e-5`. Nonzero parameter
 updates and tiny score differences must not be presented as useful learning gains.
