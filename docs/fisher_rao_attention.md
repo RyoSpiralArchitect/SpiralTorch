@@ -117,7 +117,9 @@ The separate [nine-arm corpus protocol](byte_corpus_calibration.md#fisher-rao-co
 adds strength-matched Fisher trained/frozen controls without changing v1-v4.
 Its [native/browser corpus record](../benchmarks/results/2026-10-12-byte-corpus-fisher-controls-v5/README.md)
 keeps the fixed-input comparisons and adverse seed outcomes separate from this
-initial synthetic correctness qualification. Geometry mixtures remain untested.
+initial synthetic correctness qualification. Fixed
+[headwise routing](headwise_geometry_attention.md) is a separate extension;
+learned geometry mixtures remain untested.
 
 The [initial native/browser qualification](../benchmarks/results/2026-10-10-fisher-rao-attention-v1/README.md)
 retains scalar traces, independent comparisons and the failed-then-repaired

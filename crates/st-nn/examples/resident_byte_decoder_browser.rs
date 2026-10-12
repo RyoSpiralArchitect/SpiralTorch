@@ -64,6 +64,22 @@ pub async fn run_resident_byte_fisher_rao(
 
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 #[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_headwise(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.headwise.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let report = support::run_headwise(runtime, fixture_json)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(report.to_string())
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
 pub async fn run_resident_byte_bias_scale(
     fixture_json: &str,
 ) -> Result<String, wasm_bindgen::JsValue> {

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 pub const BYTE_DECODER_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v1";
 pub const BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v2";
+pub const BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA: &str =
+    "spiraltorch.nn.byte_decoder_checkpoint.v3";
 
 /// A complete fixed-window byte model and its attempted SGD revision.
 /// Plain SGD has no momentum slots. Data cursors, learning-rate schedules,
@@ -77,12 +79,24 @@ struct GeometryRecord {
         deserialize_with = "explicit_metric"
     )]
     pair_metric: Option<ByteDecoderPairMetric>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "explicit_head_metrics"
+    )]
+    head_pair_metrics: Option<Vec<Vec<ByteDecoderPairMetric>>>,
 }
 
 fn explicit_metric<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<ByteDecoderPairMetric>, D::Error> {
     ByteDecoderPairMetric::deserialize(d).map(Some)
+}
+
+fn explicit_head_metrics<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Vec<Vec<ByteDecoderPairMetric>>>, D::Error> {
+    Vec::<Vec<ByteDecoderPairMetric>>::deserialize(d).map(Some)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -114,6 +128,13 @@ impl ModelRecord {
         if self
             .geometry
             .as_ref()
+            .is_some_and(|g| g.head_pair_metrics.is_some())
+        {
+            return BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA;
+        }
+        if self
+            .geometry
+            .as_ref()
             .is_some_and(|g| g.pair_metric.is_some())
         {
             BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA
@@ -135,8 +156,13 @@ impl ModelRecord {
                         raw_decay: g.raw_decay().to_vec(),
                         raw_phase: g.raw_phase().to_vec(),
                         raw_gains: g.raw_gains().to_vec(),
-                        pair_metric: (g.pair_metric() != ByteDecoderPairMetric::PoincareSquared)
-                            .then_some(g.pair_metric()),
+                        pair_metric: g
+                            .pair_metric()
+                            .filter(|&m| m != ByteDecoderPairMetric::PoincareSquared),
+                        head_pair_metrics: g
+                            .pair_metric()
+                            .is_none()
+                            .then(|| g.head_pair_metrics().to_vec()),
                     })
                 })
                 .transpose()?,
@@ -201,19 +227,36 @@ impl ModelRecord {
         )?;
         match self.geometry {
             None => Ok(plan),
-            Some(g) => plan.with_causal_geometry(
-                ByteDecoderGeometryPlan::new(
+            Some(g) => {
+                let geometry = ByteDecoderGeometryPlan::new(
                     &g.projection.into_plan()?,
                     &g.raw_decay,
                     &g.raw_phase,
                     &g.raw_gains,
                     g.curvature,
-                )?
-                .with_pair_metric(
-                    g.pair_metric
-                        .unwrap_or(ByteDecoderPairMetric::PoincareSquared),
-                ),
-            ),
+                )?;
+                let geometry = match g.head_pair_metrics {
+                    Some(metrics) => {
+                        if g.pair_metric.is_some() {
+                            return Err(InferenceError::ByteDecoder(
+                                "conflicting geometry metric routes",
+                            ));
+                        }
+                        let routed = geometry.with_head_pair_metrics(&metrics)?;
+                        if routed.pair_metric().is_some() {
+                            return Err(InferenceError::ByteDecoder(
+                                "uniform routing requires the canonical metric schema",
+                            ));
+                        }
+                        routed
+                    }
+                    None => geometry.with_pair_metric(
+                        g.pair_metric
+                            .unwrap_or(ByteDecoderPairMetric::PoincareSquared),
+                    ),
+                };
+                plan.with_causal_geometry(geometry)
+            }
         }
     }
 

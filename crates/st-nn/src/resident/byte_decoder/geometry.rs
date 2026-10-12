@@ -53,7 +53,7 @@ pub struct ByteDecoderGeometryPlan {
     raw_decay: Vec<f32>,
     raw_phase: Vec<f32>,
     raw_gains: Vec<Vec<f32>>,
-    metric: ByteDecoderPairMetric,
+    head_metrics: Vec<Vec<ByteDecoderPairMetric>>,
 }
 
 impl ByteDecoderGeometryPlan {
@@ -100,21 +100,56 @@ impl ByteDecoderGeometryPlan {
             raw_decay: raw_decay.to_vec(),
             raw_phase: raw_phase.to_vec(),
             raw_gains: raw_gains.to_vec(),
-            metric: ByteDecoderPairMetric::PoincareSquared,
+            head_metrics: raw_gains
+                .iter()
+                .map(|g| vec![ByteDecoderPairMetric::PoincareSquared; g.len()])
+                .collect(),
         })
     }
 
     pub fn projection(&self) -> &InferencePlan {
         &self.projection
     }
-    pub fn pair_metric(&self) -> ByteDecoderPairMetric {
-        self.metric
+    /// The common metric, or `None` when blocks/heads use different metrics.
+    pub fn pair_metric(&self) -> Option<ByteDecoderPairMetric> {
+        let first = self.head_metrics[0][0];
+        self.head_metrics
+            .iter()
+            .flatten()
+            .all(|&m| m == first)
+            .then_some(first)
+    }
+    /// Complete block-major/head-major routing. This is frozen topology, not a
+    /// learned selector; coordinates remain shared across the consuming heads.
+    pub fn head_pair_metrics(&self) -> &[Vec<ByteDecoderPairMetric>] {
+        &self.head_metrics
     }
     /// Select a metric without changing initial values or trainable scalar count.
     /// The flat metric retains the nonlinear bounded chart, not a linear encoder.
     pub fn with_pair_metric(mut self, metric: ByteDecoderPairMetric) -> Self {
-        self.metric = metric;
+        for head in self.head_metrics.iter_mut().flatten() {
+            *head = metric;
+        }
         self
+    }
+    /// Assign one metric to every block/head without adding parameters or
+    /// detaching any coordinate pullback. Shapes must match the raw gain grid.
+    pub fn with_head_pair_metrics(
+        mut self,
+        metrics: &[Vec<ByteDecoderPairMetric>],
+    ) -> Result<Self, InferenceError> {
+        if metrics.len() != self.raw_gains.len()
+            || metrics
+                .iter()
+                .zip(&self.raw_gains)
+                .any(|(m, g)| m.len() != g.len())
+        {
+            return Err(InferenceError::ByteDecoder(
+                "geometry metric routing must cover every block/head",
+            ));
+        }
+        self.head_metrics = metrics.to_vec();
+        Ok(self)
     }
     pub fn curvature(&self) -> f32 {
         self.wave.curvature()

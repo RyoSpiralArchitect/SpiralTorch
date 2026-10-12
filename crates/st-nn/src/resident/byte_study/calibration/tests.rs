@@ -343,7 +343,7 @@ fn materialization_preserves_distinct_gains_for_every_block_and_head() {
         assert_eq!(plan.causal_geometry().unwrap().raw_gains(), &fisher_gains);
         assert_eq!(
             plan.causal_geometry().unwrap().pair_metric(),
-            ByteDecoderPairMetric::CategoricalFisherRaoSquared
+            Some(ByteDecoderPairMetric::CategoricalFisherRaoSquared)
         );
     }
 }

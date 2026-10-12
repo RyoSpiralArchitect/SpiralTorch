@@ -8,12 +8,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
     let mut args = std::env::args_os().skip(1);
     let path = args.next().ok_or(
-        "usage: resident_byte_flat_metric <local-torch-fixture.json> [--calibrate|--fisher-rao]",
+        "usage: resident_byte_flat_metric <local-torch-fixture.json> [--calibrate|--fisher-rao|--headwise]",
     )?;
     let mode = match args.next() {
         None => 0,
         Some(flag) if flag == "--calibrate" => 1,
         Some(flag) if flag == "--fisher-rao" => 2,
+        Some(flag) if flag == "--headwise" => 3,
         _ => return Err("unknown mode".into()),
     };
     if args.next().is_some() {
@@ -41,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let report = match mode {
         1 => pollster::block_on(support::run_bias_scale(runtime, &input))?,
         2 => pollster::block_on(support::run_fisher_rao(runtime, &input))?,
+        3 => pollster::block_on(support::run_headwise(runtime, &input))?,
         _ => pollster::block_on(support::run_flat_metric(runtime, &input))?,
     };
     println!("{report}");

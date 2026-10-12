@@ -13,6 +13,11 @@ spec.loader.exec_module(rates)
 require, bits, compare, relative = rates.require, rates.bits, rates.compare_values, rates.relative_gradient
 METRIC = "euclidean_chord_squared.v1"
 METRICS = {"flat": METRIC, "fisher_rao": "categorical_fisher_rao_squared.v1"}
+HEADWISE = [
+    [["poincare_squared.v1", "poincare_squared.v1", "categorical_fisher_rao_squared.v1", "poincare_squared.v1"]],
+    [["categorical_fisher_rao_squared.v1", "euclidean_chord_squared.v1"],
+     ["euclidean_chord_squared.v1", "poincare_squared.v1"]],
+]
 
 
 def unique_object(pairs):
@@ -77,6 +82,9 @@ def expected_checkpoint(case, parameters, revision, metric=METRIC):
                 "raw_phase": parameter("geometry.raw_phase", [cols // 2])["values"],
                 "raw_gains": [parameter(f"geometry.raw_gain.{i}", [c["heads"]])["values"]
                               for i in range(len(c["blocks"]))], "pair_metric": metric}
+    if metric is None:
+        del geometry["pair_metric"]
+        geometry["head_pair_metrics"] = c["causal_geometry"]["head_pair_metrics"]
     blocks = []
     for i, block in enumerate(c["blocks"]):
         prefix = f"block.{i}."
@@ -104,7 +112,7 @@ def expected_checkpoint(case, parameters, revision, metric=METRIC):
                   parameter("head.weight", [width, 256], "weight"),
                   parameter("head.output_bias", [256], "bias")], [norm(), linear(2, 3)], 3)
     require(used == names, "checkpoint owner order")
-    return {"schema": "spiraltorch.nn.byte_decoder_checkpoint.v2", "update_rule": "stateless_sgd.v1",
+    return {"schema": "spiraltorch.nn.byte_decoder_checkpoint.v3" if metric is None else "spiraltorch.nn.byte_decoder_checkpoint.v2", "update_rule": "stateless_sgd.v1",
             "window_state": "reset_positions_and_geometry.v1", "attempted_revision": str(revision),
             "model": {"token": token, "position": position, "geometry": geometry, "blocks": blocks, "head": head}}
 
@@ -166,8 +174,8 @@ def fisher_wide_reference():
 
 
 def verify(reference, report, *, kind="flat"):
-    require(kind in METRICS, "unsupported metric comparison")
-    metric = METRICS[kind]
+    require(kind in METRICS or kind == "headwise", "unsupported metric comparison")
+    metric = METRICS.get(kind)
     require(reference["schema"] == f"spiraltorch.resident_byte_geometry_{kind}.torch_fixture.v1", "reference schema")
     require(reference["device"] == "cpu" and reference["dtype"] == "float32"
             and type(reference["threads"]) is int and reference["threads"] == 1, "reference execution")
@@ -178,7 +186,13 @@ def verify(reference, report, *, kind="flat"):
     summaries = []
     for index, (case, check) in enumerate(zip(reference["cases"], report["checks"])):
         c = case["config"]
-        require(c["causal_geometry"]["pair_metric"] == check["metric"] == metric, "metric identity")
+        if kind == "headwise":
+            require("pair_metric" not in c["causal_geometry"] and "metric" not in check
+                    and c["causal_geometry"].get("head_pair_metrics") == check.get("head_pair_metrics") == HEADWISE[index]
+                    and type(c["heads"]) is int and c["heads"] == (4, 2)[index], "headwise routing identity")
+        else:
+            require("head_pair_metrics" not in c["causal_geometry"] and "head_pair_metrics" not in check
+                    and c["causal_geometry"]["pair_metric"] == check["metric"] == metric, "metric identity")
         descriptors = case["parameters"]
         count = (23, 37)[index]
         require(len(descriptors) == count and type(check["parameter_count"]) is int
@@ -194,6 +208,8 @@ def verify(reference, report, *, kind="flat"):
         errors = {"logit_max_abs_error": 0., "loss_max_abs_error": 0., "parameter_max_abs_error": 0.,
                   "initial_vjp_max_abs_error": 0., "geometry_relative_l2": 0.,
                   "embedding_gradient_max_abs_error": 0., "bias_gradient_max_abs_error": 0.}
+        if kind == "headwise":
+            errors["head_gain_relative_l2"] = 0.
         errors["logit_max_abs_error"] = vector(check["output"], case["output"], c["batch"] * c["steps"] * 256)
         require(len(check["parameter_gradients"]) == len(case["parameter_gradients"]) == count, "initial VJP coverage")
         minimum_norm = math.inf
@@ -203,6 +219,10 @@ def verify(reference, report, *, kind="flat"):
                 error, norm = relative(a, e)
                 errors["geometry_relative_l2"] = max(errors["geometry_relative_l2"], error)
                 minimum_norm = min(minimum_norm, norm)
+            if kind == "headwise" and names[i].startswith("geometry.raw_gain."):
+                for actual, expected in zip(a, e):
+                    error, _ = relative([actual], [expected])
+                    errors["head_gain_relative_l2"] = max(errors["head_gain_relative_l2"], error)
         embedding_len = c["batch"] * c["steps"] * c["width"]
         errors["embedding_gradient_max_abs_error"] = vector(check["embedding_output_gradient"],
                                                             case["embedding_output_gradient"], embedding_len)
@@ -240,6 +260,17 @@ def verify(reference, report, *, kind="flat"):
                 minimum_norm = min(minimum_norm, norm)
             errors["embedding_gradient_max_abs_error"] = max(errors["embedding_gradient_max_abs_error"],
                 vector(actual["embedding_output_gradient"], expected["embedding_output_gradient"], embedding_len))
+        if kind == "headwise":
+            # Do not let larger Poincare heads hide a disconnected Fisher head.
+            # Apply the same relative gate to each head's full SGD VJP history.
+            for i in geometry:
+                if not names[i].startswith("geometry.raw_gain."):
+                    continue
+                for head in range(lengths[i]):
+                    a = [t["geometry_gradients"][i - 2][head] for t in actual_learning["trace"]]
+                    e = [t["geometry_gradients"][i - 2][head] for t in learning["trace"]]
+                    error, _ = relative(a, e)
+                    errors["head_gain_relative_l2"] = max(errors["head_gain_relative_l2"], error)
         resume = check["resume_trajectory"]
         for name, value in (("split_revision", 7), ("final_revision", 16), ("verified_steps", 16)):
             require(type(resume[name]) is int and resume[name] == value, "resume cursor")
@@ -256,8 +287,21 @@ def verify(reference, report, *, kind="flat"):
         summaries.append({"name": case["name"], "metric": metric, "parameter_tensors": count,
                           "parameter_scalars": sum(lengths), "steps": 16, "resume_exact_steps": 16,
                           "minimum_reference_geometry_gradient_l2": minimum_norm, **errors})
+        if kind == "headwise":
+            del summaries[-1]["metric"]
+            summaries[-1]["head_pair_metrics"] = HEADWISE[index]
     result = {"schema": f"spiraltorch.resident_byte_geometry_{kind}.comparison.v1", "passed": True,
             "cases": summaries, "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation"}
+    if kind == "headwise":
+        guard = report.get("head_group_guard")
+        require(type(guard) is dict and guard.get("schema") == "spiraltorch.byte_headwise_group_guard.v1"
+                and type(guard.get("fault_head")) is int and guard["fault_head"] == 3
+                and type(guard.get("parameter_tensors")) is int and guard["parameter_tensors"] == 23
+                and all(guard.get(k) is True for k in ("finite_control", "all_gradients_guarded", "atomic_rejection")),
+                "missing head group guard")
+        bits(guard["baseline_max_abs_bias"])
+        require(guard["baseline_max_abs_bias"] > 2., "insensitive overflow control")
+        result["head_group_guard"] = guard
     if kind == "fisher_rao":
         boundary = report.get("wide_pullback_control")
         require(type(boundary) is dict and boundary.get("schema")
@@ -272,11 +316,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("reference", "report", "output"):
         parser.add_argument(name, type=Path)
-    parser.add_argument("--fisher-rao", action="store_true", help="require the explicit Fisher-Rao schemas and metric")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--fisher-rao", action="store_true", help="require the explicit Fisher-Rao schemas and metric")
+    mode.add_argument("--headwise", action="store_true", help="require the fixed headwise routing and v3 checkpoints")
     args = parser.parse_args()
     reference, report = args.reference.read_bytes(), args.report.read_bytes()
     result = verify(json.loads(reference, object_pairs_hook=unique_object), json.loads(report, object_pairs_hook=unique_object),
-                    kind="fisher_rao" if args.fisher_rao else "flat")
+                    kind="headwise" if args.headwise else "fisher_rao" if args.fisher_rao else "flat")
     result["input_sha256"] = {"reference": hashlib.sha256(reference).hexdigest(), "report": hashlib.sha256(report).hexdigest()}
     with args.output.open("x", encoding="utf-8") as output:
         json.dump(result, output, indent=2, allow_nan=False)

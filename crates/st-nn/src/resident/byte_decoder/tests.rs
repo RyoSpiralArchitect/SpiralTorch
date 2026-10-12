@@ -118,6 +118,54 @@ pub(super) fn geometry_for(plan: &ByteDecoderPlan) -> ByteDecoderGeometryPlan {
 }
 
 #[test]
+fn headwise_geometry_is_frozen_shape_checked_and_can_be_reset_to_uniform() {
+    use ByteDecoderPairMetric::*;
+    let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = geometry_for(&p);
+    let mut routing = vec![
+        vec![PoincareSquared, CategoricalFisherRaoSquared],
+        vec![EuclideanChordSquared, PoincareSquared],
+    ];
+    let routed = g.clone().with_head_pair_metrics(&routing).unwrap();
+    assert_eq!(routed.pair_metric(), None);
+    assert_eq!(routed.head_pair_metrics(), routing);
+    routing[0][0] = EuclideanChordSquared;
+    assert_eq!(routed.head_pair_metrics()[0][0], PoincareSquared);
+    assert_eq!(routed.raw_gains(), g.raw_gains());
+    assert_eq!(routed.raw_decay(), g.raw_decay());
+    assert_eq!(routed.raw_phase(), g.raw_phase());
+    for bad in [
+        vec![],
+        vec![vec![PoincareSquared; 2]],
+        vec![vec![]; 2],
+        vec![vec![PoincareSquared], vec![PoincareSquared; 2]],
+        vec![vec![PoincareSquared; 2], vec![PoincareSquared; 3]],
+    ] {
+        assert!(g.clone().with_head_pair_metrics(&bad).is_err());
+    }
+    for metric in [
+        PoincareSquared,
+        EuclideanChordSquared,
+        CategoricalFisherRaoSquared,
+    ] {
+        let uniform = routed.clone().with_pair_metric(metric);
+        assert_eq!(uniform.pair_metric(), Some(metric));
+        assert_eq!(uniform.head_pair_metrics(), vec![vec![metric; 2]; 2]);
+        let by_grid = g
+            .clone()
+            .with_head_pair_metrics(&vec![vec![metric; 2]; 2])
+            .unwrap();
+        let a = p.clone().with_causal_geometry(uniform).unwrap();
+        let b = p.clone().with_causal_geometry(by_grid).unwrap();
+        assert_eq!(a.parameter_layout(), b.parameter_layout());
+        assert_eq!(
+            a.initial_checkpoint().to_json().unwrap(),
+            b.initial_checkpoint().to_json().unwrap()
+        );
+    }
+}
+
+#[test]
 fn causal_geometry_parameters_are_frozen_and_share_explicit_model_slots() {
     let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
     let g = geometry_for(&p);

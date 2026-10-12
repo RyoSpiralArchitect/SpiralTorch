@@ -27,6 +27,8 @@ mod checkpoint_controls;
 mod fisher_controls;
 #[path = "byte_decoder/geometry_controls.rs"]
 mod geometry_controls;
+#[path = "byte_decoder/headwise_controls.rs"]
+mod headwise_controls;
 #[path = "byte_decoder/parameter_rate_controls.rs"]
 mod parameter_rate_controls;
 
@@ -99,19 +101,27 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
             }
             _ => return Err("unknown geometry pair metric".into()),
         };
-        Some(
-            ByteDecoderGeometryPlan::new(
-                &projection,
-                &data(&parameters[4]["values"]),
-                &data(&parameters[5]["values"]),
-                &parameters[6..offset]
-                    .iter()
-                    .map(|p| data(&p["values"]))
-                    .collect::<Vec<_>>(),
-                c["causal_geometry"]["curvature"].as_f64().unwrap() as f32,
-            )?
-            .with_pair_metric(metric),
-        )
+        let geometry = ByteDecoderGeometryPlan::new(
+            &projection,
+            &data(&parameters[4]["values"]),
+            &data(&parameters[5]["values"]),
+            &parameters[6..offset]
+                .iter()
+                .map(|p| data(&p["values"]))
+                .collect::<Vec<_>>(),
+            c["causal_geometry"]["curvature"].as_f64().unwrap() as f32,
+        )?;
+        Some(match c["causal_geometry"].get("head_pair_metrics") {
+            Some(grid) => {
+                if c["causal_geometry"].get("pair_metric").is_some() {
+                    return Err("conflicting geometry routes".into());
+                }
+                geometry.with_head_pair_metrics(&serde_json::from_value::<
+                    Vec<Vec<ByteDecoderPairMetric>>,
+                >(grid.clone())?)?
+            }
+            None => geometry.with_pair_metric(metric),
+        })
     } else {
         None
     };
@@ -545,6 +555,42 @@ pub async fn run_fisher_rao(runtime: WgpuRuntime, fixture_json: &str) -> Result<
     Ok(result)
 }
 
+pub async fn run_headwise(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    use ByteDecoderPairMetric::*;
+    let fixture: Value = serde_json::from_str(fixture_json)?;
+    let routes = json!([
+        [[
+            PoincareSquared,
+            PoincareSquared,
+            CategoricalFisherRaoSquared,
+            PoincareSquared
+        ]],
+        [
+            [CategoricalFisherRaoSquared, EuclideanChordSquared],
+            [EuclideanChordSquared, PoincareSquared]
+        ]
+    ]);
+    let cases = fixture["cases"]
+        .as_array()
+        .ok_or("missing headwise cases")?;
+    if fixture["schema"] != "spiraltorch.resident_byte_geometry_headwise.torch_fixture.v1"
+        || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
+        || cases.len() != 2
+        || cases.iter().enumerate().any(|(i, c)| {
+            c["config"]["causal_geometry"]["head_pair_metrics"] != routes[i]
+                || c["config"]["causal_geometry"].get("pair_metric").is_some()
+                || c["config"]["heads"] != [4, 2][i]
+        })
+    {
+        return Err("incomplete or mislabeled headwise reference".into());
+    }
+    let guard = headwise_controls::run(&runtime, &cases[0]).await?;
+    let mut report = run_cases(runtime, cases, &[23, 37], true, false).await?;
+    report["head_group_guard"] = guard;
+    report["schema"] = json!("spiraltorch.resident_byte_geometry_headwise.validation.v1");
+    Ok(report)
+}
+
 async fn run_metric(
     runtime: WgpuRuntime,
     fixture_json: &str,
@@ -816,7 +862,11 @@ async fn run_cases(
         }
         if raw {
             let check = checks.last_mut().unwrap();
-            check["metric"] = case["config"]["causal_geometry"]["pair_metric"].clone();
+            if let Some(grid) = case["config"]["causal_geometry"].get("head_pair_metrics") {
+                check["head_pair_metrics"] = grid.clone();
+            } else {
+                check["metric"] = case["config"]["causal_geometry"]["pair_metric"].clone();
+            }
             check["parameter_names"] =
                 json!(parameters.iter().map(|p| &p["name"]).collect::<Vec<_>>());
             check["parameter_shapes"] =

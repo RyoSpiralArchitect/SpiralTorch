@@ -35,9 +35,23 @@ pub(super) async fn resume_trajectory(
         if step == 7 {
             saved = checkpoint(&model).await?.to_json()?;
             let record: Value = serde_json::from_str(&saved)?;
-            if record["schema"] != st_nn::resident::BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA
-                || record["model"]["geometry"]["pair_metric"]
-                    != case["config"]["causal_geometry"]["pair_metric"]
+            let expected_geometry = &case["config"]["causal_geometry"];
+            let (schema, field, absent) = if expected_geometry.get("head_pair_metrics").is_some() {
+                (
+                    st_nn::resident::BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA,
+                    "head_pair_metrics",
+                    "pair_metric",
+                )
+            } else {
+                (
+                    st_nn::resident::BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA,
+                    "pair_metric",
+                    "head_pair_metrics",
+                )
+            };
+            if record["schema"] != schema
+                || record["model"]["geometry"][field] != expected_geometry[field]
+                || record["model"]["geometry"].get(absent).is_some()
                 || record["attempted_revision"] != "7"
             {
                 return Err("flat checkpoint lost metric identity or clock".into());

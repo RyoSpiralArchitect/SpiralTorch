@@ -22,7 +22,10 @@ fn initial_gain_replacement_preserves_every_other_checkpoint_field() {
         let raw = vec![vec![-0., 0.75], vec![2.5, -0.25]];
         let changed = plan.clone().with_initial_geometry_raw_gains(&raw).unwrap();
         assert_eq!(changed.parameter_layout(), plan.parameter_layout());
-        assert_eq!(changed.causal_geometry().unwrap().pair_metric(), metric);
+        assert_eq!(
+            changed.causal_geometry().unwrap().pair_metric(),
+            Some(metric)
+        );
         let payload = changed.initial_checkpoint().to_json().unwrap();
         let restored = ByteDecoderCheckpoint::from_json(&payload).unwrap();
         assert_eq!(restored.to_json().unwrap(), payload);
@@ -76,7 +79,7 @@ fn flat_metric_checkpoint_is_explicit_and_keeps_the_same_parameter_owner() {
     assert_eq!(restored.to_json().unwrap(), payload);
     assert_eq!(
         restored.plan.geometry.unwrap().pair_metric(),
-        ByteDecoderPairMetric::EuclideanChordSquared
+        Some(ByteDecoderPairMetric::EuclideanChordSquared)
     );
     for variant in 0..5 {
         let mut bad = value.clone();
@@ -119,7 +122,7 @@ fn fisher_metric_checkpoint_remains_explicit_and_rejects_legacy_schema() {
     assert_eq!(restored.to_json().unwrap(), payload);
     assert_eq!(
         restored.plan.geometry.unwrap().pair_metric(),
-        ByteDecoderPairMetric::CategoricalFisherRaoSquared
+        Some(ByteDecoderPairMetric::CategoricalFisherRaoSquared)
     );
     let mut bad: serde_json::Value = serde_json::from_str(&payload).unwrap();
     assert_eq!(bad["schema"], BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA);
@@ -129,6 +132,121 @@ fn fisher_metric_checkpoint_remains_explicit_and_rejects_legacy_schema() {
     );
     bad["schema"] = json!(BYTE_DECODER_CHECKPOINT_SCHEMA);
     assert!(ByteDecoderCheckpoint::from_json(&bad.to_string()).is_err());
+}
+
+#[test]
+fn headwise_checkpoint_binds_every_metric_and_retains_canonical_legacy_encodings() {
+    use ByteDecoderPairMetric::*;
+    let mut original = checkpoint();
+    let routing = vec![
+        vec![PoincareSquared, CategoricalFisherRaoSquared],
+        vec![EuclideanChordSquared, PoincareSquared],
+    ];
+    original.plan.geometry = original
+        .plan
+        .geometry
+        .take()
+        .map(|g| g.with_head_pair_metrics(&routing).unwrap());
+    let payload = original.to_json().unwrap();
+    let restored = ByteDecoderCheckpoint::from_json(&payload).unwrap();
+    assert_eq!(restored.to_json().unwrap(), payload);
+    assert_eq!(
+        restored.plan.parameter_layout(),
+        original.plan.parameter_layout()
+    );
+    assert_eq!(
+        restored.plan.geometry.as_ref().unwrap().head_pair_metrics(),
+        routing
+    );
+    let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(value["schema"], BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA);
+    assert!(value["model"]["geometry"].get("pair_metric").is_none());
+    assert_eq!(
+        value["model"]["geometry"]["head_pair_metrics"],
+        json!(routing)
+    );
+    for variant in 0..11 {
+        let mut bad = value.clone();
+        match variant {
+            0 => bad["schema"] = json!(BYTE_DECODER_CHECKPOINT_SCHEMA),
+            1 => bad["schema"] = json!(BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA),
+            2 => bad["model"]["geometry"]["head_pair_metrics"] = serde_json::Value::Null,
+            3 => bad["model"]["geometry"]["head_pair_metrics"] = json!([]),
+            4 => bad["model"]["geometry"]["head_pair_metrics"] = json!([["poincare_squared.v1"]]),
+            5 => bad["model"]["geometry"]["head_pair_metrics"][1][0] = json!("unknown"),
+            6 => bad["model"]["geometry"]["pair_metric"] = json!("euclidean_chord_squared.v1"),
+            7 => {
+                bad["model"]["geometry"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("head_pair_metrics");
+            }
+            8 => {
+                bad["model"]["geometry"]["head_pair_metrics"] =
+                    json!(vec![vec![PoincareSquared; 2]; 2])
+            }
+            9 => {
+                bad["model"]["geometry"]["head_pair_metrics"] =
+                    json!(vec![vec![EuclideanChordSquared; 2]; 2])
+            }
+            _ => {
+                bad["model"]["geometry"]["head_pair_metrics"] =
+                    json!(vec![vec![CategoricalFisherRaoSquared; 2]; 2])
+            }
+        }
+        assert!(
+            ByteDecoderCheckpoint::from_json(&bad.to_string()).is_err(),
+            "mutation {variant}"
+        );
+    }
+    let duplicate = payload.replacen(
+        "\"head_pair_metrics\":",
+        "\"head_pair_metrics\":[],\"head_pair_metrics\":",
+        1,
+    );
+    assert!(ByteDecoderCheckpoint::from_json(&duplicate).is_err());
+    let changed = original
+        .plan
+        .with_initial_geometry_raw_gains(&[vec![0.1, -0.2], vec![0.3, -0.4]])
+        .unwrap();
+    assert_eq!(
+        changed.causal_geometry().unwrap().head_pair_metrics(),
+        routing
+    );
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn changing_any_head_changes_topology_without_changing_parameter_values() {
+    use ByteDecoderPairMetric::*;
+    let mut original = checkpoint();
+    let routing = vec![
+        vec![PoincareSquared, CategoricalFisherRaoSquared],
+        vec![EuclideanChordSquared, PoincareSquared],
+    ];
+    original.plan.geometry = original
+        .plan
+        .geometry
+        .take()
+        .map(|g| g.with_head_pair_metrics(&routing).unwrap());
+    let before = original.topology_json().unwrap();
+    for block in 0..2 {
+        for head in 0..2 {
+            let mut changed = original.clone();
+            let mut grid = routing.clone();
+            grid[block][head] = match grid[block][head] {
+                PoincareSquared => EuclideanChordSquared,
+                _ => PoincareSquared,
+            };
+            changed.plan.geometry = changed
+                .plan
+                .geometry
+                .take()
+                .map(|g| g.with_head_pair_metrics(&grid).unwrap());
+            assert!(original.geometry_parameters_match(&changed).unwrap());
+            assert_ne!(before, changed.topology_json().unwrap());
+        }
+    }
 }
 
 #[test]
