@@ -1,5 +1,8 @@
 # Byte-Corpus Learned-Mixture Controls
 
+For position-conditioned mixtures with one shared intercept, see the
+[v8 contextual study](byte_corpus_query_controls.md); v7 below remains unchanged.
+
 Study v7 connects the [resident learned-mixture model](learned_geometry_mixture.md)
 to document-held-out byte-language learning. Rust owns preparation, resident
 forward/backward, atomic SGD and checkpoint restoration. Python provides an

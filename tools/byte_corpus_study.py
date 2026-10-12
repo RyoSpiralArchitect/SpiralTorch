@@ -22,6 +22,7 @@ REQUEST_V4 = "spiraltorch.byte_corpus.request.v4"
 REQUEST_V5 = "spiraltorch.byte_corpus.request.v5"
 REQUEST_V6 = "spiraltorch.byte_corpus.request.v6"
 REQUEST_V7 = "spiraltorch.byte_corpus.request.v7"
+REQUEST_V8 = "spiraltorch.byte_corpus.request.v8"
 POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
 FISHER = "categorical_fisher_rao_squared.v1"
 ORIGINAL, MATCHED = "original", "matched_poincare_rms"
@@ -80,11 +81,19 @@ def trainable_scalars(case):
 
 
 def parameter_frozen(case, name):
+    query = case.get("mixture", {}).get("query_projection")
     return ((frozen(case) and name.startswith("geometry."))
-            or (case.get("mixture",{}).get("router_update") == "frozen" and name.startswith("geometry.mixture_logits.")))
+            or (case.get("mixture",{}).get("router_update") == "frozen" and name.startswith("geometry.mixture_logits."))
+            or (query is not None and name.startswith("geometry.query_projection.")
+                and (name.endswith(".bias") or query["weight_update"] == "frozen")))
 
 
 def request_version(request):
+    if request["schema"] == REQUEST_V8:
+        load_reference("byte_corpus_query").validate_request(request)
+        return 8
+    if "query_controls" in request:
+        raise ValueError("contextual metadata belongs to v8 only")
     if request["schema"] == REQUEST_V7:
         load_reference("byte_corpus_mixture").validate_request(request)
         return 7
@@ -350,7 +359,7 @@ def reference(args):
     version = request_version(request)
     config = request["config"]
     headwise_pair = load_reference("byte_corpus_headwise").pair_bias if version == 6 else None
-    mixture_pair = load_reference("byte_corpus_mixture").pair_bias if version == 7 else None
+    mixture_pair = load_reference("byte_corpus_mixture").pair_bias if version in (7, 8) else None
     b, t, w = config["batch"], config["steps"], config["width"]
 
     def batch(documents, selected):
@@ -382,6 +391,8 @@ def reference(args):
                 offset = 6 + len(config["blocks"])
                 if "mixture" in case:
                     offset += len(config["blocks"])
+                    if "query_projection" in case["mixture"]:
+                        offset += 2 * len(config["blocks"])
             x = embedded
             for i, topos in enumerate(config["blocks"]):
                 count = 13 if topos else 12
@@ -389,7 +400,9 @@ def reference(args):
                 if case["geometry"]:
                     if "mixture" in case:
                         pair = mixture_pair(coordinates,p[6+i],p[6+len(config["blocks"])+i],
-                            case["mixture"],i,config["curvature"],metric,fisher_metric)
+                            case["mixture"],i,config["curvature"],metric,fisher_metric,
+                            p[6+2*len(config["blocks"])+2*i:8+2*len(config["blocks"])+2*i]
+                            if "query_projection" in case["mixture"] else None)
                     elif "head_pair_metrics" in case:
                         pair = headwise_pair(
                             coordinates, p[6 + i], case["head_pair_metrics"][i], config["curvature"], metric, fisher_metric)
@@ -571,7 +584,7 @@ def compare(request_raw, reference_report, actual):
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
-        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7, 5: 9, 6: 21, 7:17}[version] or {c["geometry"] for c in paired} != {False, True}:
+        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7, 5: 9, 6: 21, 7:17, 8:25}[version] or {c["geometry"] for c in paired} != {False, True}:
             raise ValueError("incomplete paired seed")
         plain = next(c for c in paired if not c["geometry"])
         geometry = next(c for c in paired if c["geometry"] and not frozen(c) and "head_pair_metrics" not in c and "mixture" not in c and c.get("pair_metric", POINCARE) == POINCARE)
@@ -648,6 +661,12 @@ def compare(request_raw, reference_report, actual):
         result["mixture_controls"] = request["mixture_controls"]
         result["mixture_contrasts"] = load_reference("byte_corpus_mixture").contrasts(summaries)
         result["scope"] = "17 arms/seed: unchanged v5 plus four metric subsets with learned/fixed routers. Both coordinate encoders learn, initial train-only RMS is matched. No general quality/speed claim or equal compute across different metric subsets."
+    if version == 8:
+        result["query_controls"] = request["query_controls"]
+        result["query_contrasts"] = load_reference("byte_corpus_query").contrasts(summaries)
+        result["mixture_contrasts"] = load_reference("byte_corpus_mixture").contrasts(
+            [c for c in summaries if "query_projection" not in c.get("mixture", {})])
+        result["scope"] = "25 arms/seed: unchanged v7 plus contextual train/frozen projections. Bias stays zero; shared intercept and coordinates learn. Same data/update count, not equal parameter count or compute; no general quality/speed claim."
     return result
 
 

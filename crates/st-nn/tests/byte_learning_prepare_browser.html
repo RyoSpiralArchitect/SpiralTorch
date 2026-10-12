@@ -14,7 +14,12 @@ try {
   const headwise = params.get("headwise") === "1";
   const fisher = params.get("fisher") === "1";
   const mixtures = params.get("mixtures") === "1";
-  if ([headwise,fisher,mixtures].filter(Boolean).length > 1) throw Error("Choose one preparation mode");
+  const queryMixtures = params.get("query") === "1";
+  if ([headwise,fisher,mixtures,queryMixtures].filter(Boolean).length > 1) throw Error("Choose one preparation mode");
+  if (queryMixtures) {
+    document.querySelector("#summary").textContent = "Extending frozen v7 with zero-start contextual projections.";
+    document.querySelector("#recipe").textContent = "No fitting or GPU required. Preserve every source arm, gain and data selection; query projection bias remains frozen zero.";
+  }
   if (headwise) {
     document.querySelector("#summary").textContent = "Checking fixed head assignments from frozen v5; no fitting.";
     document.querySelector("#recipe").textContent = "Inherits each head's calibrated gain from the frozen v5 request. Checks RMS on its declared training batches; no fitting or learning updates.";
@@ -23,7 +28,7 @@ try {
     document.querySelector("#summary").textContent = "Preparing all metric subsets from frozen v5.";
     document.querySelector("#recipe").textContent = "Freeze component units from v5; fit only shared initial gains on its declared training windows. Pair learned/fixed routers, without held-out fitting or updates.";
   }
-  const response = await fetch(`/target/resident-byte-learning-web/source-v${headwise || mixtures ? 5 : 3}.json`, {cache:"no-store"});
+  const response = await fetch(`/target/resident-byte-learning-web/source-v${queryMixtures ? 7 : headwise || mixtures ? 5 : 3}.json`, {cache:"no-store"});
   if (!response.ok) throw Error("Frozen source is missing");
   const input = await response.text();
   const digest = async text => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), x => x.toString(16).padStart(2,"0")).join("");
@@ -31,14 +36,15 @@ try {
   const wasm = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
   await wasm.default();
   const prepare = fisher ? wasm.prepare_resident_byte_learning_fisher : wasm.prepare_resident_byte_learning;
-  const packetJson = mixtures ? await wasm.prepare_resident_byte_learning_mixtures(input)
+  const packetJson = queryMixtures ? wasm.prepare_resident_byte_learning_query_mixtures(input)
+    : mixtures ? await wasm.prepare_resident_byte_learning_mixtures(input)
     : headwise ? await wasm.prepare_resident_byte_learning_headwise(input)
     : await prepare(input, new Uint32Array([0,1,2,3]));
   const packet = JSON.parse(packetJson);
   if (packet.schema !== "spiraltorch.byte_corpus.prepared.v1" || typeof packet.request_json !== "string" || typeof packet.report_json !== "string") throw Error("Invalid preparation packet");
   const report = JSON.parse(packet.report_json);
-  const schema = mixtures ? "spiraltorch.byte_corpus.mixture_preparation.v1" : headwise ? "spiraltorch.byte_corpus.headwise_preparation.v1" : `spiraltorch.byte_corpus.bias_preparation.v${fisher ? 2 : 1}`;
-  if (report.schema !== schema || (headwise || mixtures ? report.source_request_sha256 : report.bias_calibration.source_request_sha256) !== sourceHash
+  const schema = queryMixtures ? "spiraltorch.byte_corpus.query_preparation.v1" : mixtures ? "spiraltorch.byte_corpus.mixture_preparation.v1" : headwise ? "spiraltorch.byte_corpus.headwise_preparation.v1" : `spiraltorch.byte_corpus.bias_preparation.v${fisher ? 2 : 1}`;
+  if (report.schema !== schema || (headwise || mixtures || queryMixtures ? report.source_request_sha256 : report.bias_calibration.source_request_sha256) !== sourceHash
       || report.request_sha256 !== await digest(packet.request_json)) throw Error("Preparation identity differs");
   const link = document.querySelector("#download");
   link.href = URL.createObjectURL(new Blob([packetJson], {type:"application/json"}));
@@ -46,7 +52,8 @@ try {
   link.hidden = false;
   target.dataset.status = "completed";
   target.textContent = JSON.stringify({source_sha256:sourceHash, request_sha256:report.request_sha256,
-    [headwise ? "verified_headwise_routes" : "fitted_metric_groups"]:report.cases.length}, null, 2);
+    [queryMixtures ? "prepared_cases" : headwise ? "verified_headwise_routes" : "fitted_metric_groups"]:
+      queryMixtures ? JSON.parse(packet.request_json).cases.length : report.cases.length}, null, 2);
   document.querySelector("#summary").textContent = "Prepared. Preserve the opaque request bytes. Verify provenance separately and select ONE request for every engine; do not substitute per-engine fitted weights in a comparison.";
 } catch (error) {
   target.dataset.status = "error";

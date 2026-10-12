@@ -1,5 +1,20 @@
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 #[wasm_bindgen::prelude::wasm_bindgen]
+pub fn prepare_resident_byte_learning_query_mixtures(
+    input: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    let prepared = st_nn::resident::ByteCorpusQueryMixtureControls::from_json(input.as_bytes())
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?
+        .prepare();
+    Ok(
+        serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+        "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        .to_string(),
+    )
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
 pub async fn prepare_resident_byte_learning_mixtures(
     input: &str,
 ) -> Result<String, wasm_bindgen::JsValue> {

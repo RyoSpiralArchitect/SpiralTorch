@@ -1,7 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use st_nn::resident::{
     ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusMixtureControls,
-    ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES,
+    ByteCorpusQueryMixtureControls, ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -40,6 +40,7 @@ struct Args {
     fisher: bool,
     headwise: bool,
     mixtures: bool,
+    query_mixtures: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -50,9 +51,16 @@ impl Args {
         let mut args = args.into_iter();
         let mut result = Self {
             request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json]")?.into(),
-            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false, mixtures: false,
+            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false, mixtures: false, query_mixtures: false,
         };
         while let Some(flag) = args.next() {
+            if flag == "--prepare-query-mixtures" {
+                if result.query_mixtures {
+                    return Err("duplicate contextual preparation flag".into());
+                }
+                result.query_mixtures = true;
+                continue;
+            }
             if flag == "--prepare-mixtures" {
                 if result.mixtures {
                     return Err("duplicate mixture preparation flag".into());
@@ -92,12 +100,16 @@ impl Args {
         }
         if usize::from(result.headwise)
             + usize::from(result.mixtures)
+            + usize::from(result.query_mixtures)
             + usize::from(result.calibrate.is_some())
             > 1
         {
             return Err("choose one preparation mode".into());
         }
-        if (result.calibrate.is_some() || result.headwise || result.mixtures)
+        if (result.calibrate.is_some()
+            || result.headwise
+            || result.mixtures
+            || result.query_mixtures)
             && (result.stop.is_some() || result.resume.is_some() || result.output.is_some())
         {
             return Err(
@@ -141,6 +153,15 @@ fn save_checkpoint(path: &std::path::Path, json: &str) -> Result<(), Box<dyn std
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(std::env::args_os().skip(1))?;
     let input = read_request(&args.request)?;
+    if args.query_mixtures {
+        let prepared = ByteCorpusQueryMixtureControls::from_json(&input)?.prepare();
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
     if args.mixtures {
         let preparation = ByteCorpusMixtureControls::from_json(&input)?;
         let (runtime, _) =

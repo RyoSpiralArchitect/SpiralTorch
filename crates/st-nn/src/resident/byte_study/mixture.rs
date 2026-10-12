@@ -14,6 +14,12 @@ pub(super) struct MixtureSpec {
     pub(super) metrics: Vec<ByteDecoderPairMetric>,
     pub(super) scales: Vec<Vec<f32>>,
     pub(super) router_update: GeometryUpdate,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "query::explicit_projection"
+    )]
+    pub(super) query_projection: Option<query::QueryProjectionSpec>,
 }
 
 #[derive(Deserialize)]
@@ -37,7 +43,7 @@ pub(super) fn validate_spec(r: &Request) -> Result<()> {
     if r.mixture_controls() != r.mixture_controls.is_some()
         || (!r.mixture_controls() && r.cases.iter().any(|c| c.mixture.is_some()))
     {
-        return Err("mixture controls belong to v7 only".into());
+        return Err("mixture controls belong to v7/v8 only".into());
     }
     if let Some(spec) = &r.mixture_controls {
         if r.config.heads != 2
@@ -111,9 +117,11 @@ pub(super) fn validate_modes(cases: &[&Case]) -> Result<()> {
                 .iter()
                 .copied()
                 .filter(|c| {
-                    c.mixture
-                        .as_ref()
-                        .is_some_and(|m| m.metrics == metrics && m.router_update == update)
+                    c.mixture.as_ref().is_some_and(|m| {
+                        m.query_projection.is_none()
+                            && m.metrics == metrics
+                            && m.router_update == update
+                    })
                 })
                 .collect();
             if found.len() != 1 {
@@ -253,7 +261,8 @@ impl ByteCorpusMixtureControls {
                     c["mixture"] = json!(MixtureSpec {
                         metrics: metrics.to_vec(),
                         scales: vec![units.clone()],
-                        router_update: update
+                        router_update: update,
+                        query_projection: None
                     });
                     let parameters = c["parameters"].as_array_mut().ok_or("missing parameters")?;
                     let gain_index = parameters
@@ -355,4 +364,4 @@ impl ByteCorpusMixtureControls {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

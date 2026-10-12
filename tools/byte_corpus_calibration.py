@@ -13,7 +13,7 @@ def headwise_module():
 
 def candidate_metrics(request):
     return (["euclidean_chord_squared.v1", "categorical_fisher_rao_squared.v1"]
-            if request["schema"] in ("spiraltorch.byte_corpus.request.v5", "spiraltorch.byte_corpus.request.v6", "spiraltorch.byte_corpus.request.v7")
+            if request["schema"] in ("spiraltorch.byte_corpus.request.v5", "spiraltorch.byte_corpus.request.v6", "spiraltorch.byte_corpus.request.v7", "spiraltorch.byte_corpus.request.v8")
             else ["euclidean_chord_squared.v1"])
 
 
@@ -26,7 +26,7 @@ def verify_qualification(request, record):
     seeds = sorted({c["seed"] for c in request["cases"]})
     metrics = candidate_metrics(request)
     headwise = request["schema"] == "spiraltorch.byte_corpus.request.v6"
-    mixture = request["schema"] == "spiraltorch.byte_corpus.request.v7"
+    mixture = request["schema"] in ("spiraltorch.byte_corpus.request.v7", "spiraltorch.byte_corpus.request.v8")
     expected = []
     for seed in seeds:
         expected.extend((seed, metric, None) for metric in metrics)
@@ -76,7 +76,7 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
     spec = request["bias_calibration"]
     headwise = headwise_module() if request["schema"] == "spiraltorch.byte_corpus.request.v6" else None
     mixture = None
-    if request["schema"] == "spiraltorch.byte_corpus.request.v7":
+    if request["schema"] in ("spiraltorch.byte_corpus.request.v7", "spiraltorch.byte_corpus.request.v8"):
         spec_module = importlib.util.spec_from_file_location("byte_corpus_mixture", Path(__file__).with_name("byte_corpus_mixture.py"))
         mixture = importlib.util.module_from_spec(spec_module)
         spec_module.loader.exec_module(mixture)
@@ -97,7 +97,9 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
                 for block in range(len(config["blocks"])):
                     if "mixture" in case:
                         scores = mixture.pair_bias(coordinates,p[6+block],p[6+len(config["blocks"])+block],
-                            case["mixture"],block,config["curvature"],metric,fisher_metric)
+                            case["mixture"],block,config["curvature"],metric,fisher_metric,
+                            p[6+2*len(config["blocks"])+2*block:8+2*len(config["blocks"])+2*block]
+                            if "query_projection" in case["mixture"] else None)
                     elif "head_pair_metrics" in case:
                         scores = headwise.pair_bias(coordinates, p[6+block], case["head_pair_metrics"][block],
                                                    config["curvature"], metric, fisher_metric)

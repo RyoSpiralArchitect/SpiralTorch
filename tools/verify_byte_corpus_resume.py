@@ -49,7 +49,8 @@ def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None, 
     require(pair_metric in (None, STUDY.POINCARE, STUDY.FLAT, STUDY.FISHER), "saved metric identity")
     require(head_pair_metrics is None or pair_metric is None, "conflicting saved metric selectors")
     require(mixture is None or (head_pair_metrics is None and pair_metric is None), "conflicting saved mixture selector")
-    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{4 if mixture is not None else 3 if head_pair_metrics is not None else 2 if metric_aware else 1}", "model schema")
+    query = mixture is not None and "query_projection" in mixture
+    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{5 if query else 4 if mixture is not None else 3 if head_pair_metrics is not None else 2 if metric_aware else 1}", "model schema")
     require(record["update_rule"] == "stateless_sgd.v1", "model update rule")
     require(record["window_state"] == "reset_positions_and_geometry.v1", "model window state")
     require(record["attempted_revision"] == str(cursor), "model clock")
@@ -70,7 +71,7 @@ def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None, 
         if mixture is not None:
             fields.add("mixture")
             saved = geometry.get("mixture")
-            require(type(saved) is dict and set(saved)=={"metrics","scales","raw_logits"}
+            require(type(saved) is dict and set(saved)==({"metrics","scales","raw_logits"} | ({"query_projections"} if query else set()))
                     and exact(saved["metrics"],mixture["metrics"])
                     and type(saved["scales"]) is list and len(saved["scales"])==len(mixture["scales"])
                     and all(list(map(f32,a))==list(map(f32,b)) for a,b in zip(saved["scales"],mixture["scales"])), "saved mixture topology differs")
@@ -90,6 +91,11 @@ def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None, 
             for gains,values in zip(geometry["raw_gains"],geometry["mixture"]["raw_logits"]):
                 require(type(values) is list and len(values)==len(gains)*len(mixture["metrics"]), "saved router shape")
                 parameters.append({"shape":[len(gains),len(mixture["metrics"])],"values":values})
+            if query:
+                projections = geometry["mixture"]["query_projections"]
+                require(type(projections) is list and len(projections) == len(geometry["raw_gains"]), "saved query block count")
+                for projection in projections:
+                    graph(projection)
     for block in model["blocks"]:
         require(set(block) == {"pre", "heads", "qkv", "output", "feed_forward"}, "block envelope")
         for name in ("pre", "qkv", "output", "feed_forward"):

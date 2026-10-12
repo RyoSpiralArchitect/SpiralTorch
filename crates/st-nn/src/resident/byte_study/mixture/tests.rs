@@ -2,7 +2,7 @@ use super::super::headwise::tests::source as fixture;
 use super::super::tests::{saved, valid};
 use super::*;
 
-fn prepared() -> Value {
+pub(in crate::resident::byte_study) fn prepared() -> Value {
     serde_json::from_str(
         &ByteCorpusMixtureControls::from_json(fixture().to_string().as_bytes())
             .unwrap()

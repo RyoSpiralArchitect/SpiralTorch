@@ -97,7 +97,7 @@ def validate_request(request):
                     == [struct.pack("<f",v) for v in pair[1]["mixture"]["scales"][0]], "router twins must share every initial bit")
 
 
-def pair_bias(coordinates, gains, logits, mixture, block, curvature, poincare, fisher):
+def pair_bias(coordinates, gains, logits, mixture, block, curvature, poincare, fisher, projection=None):
     import torch
     import torch.nn.functional as functional
     parts = []
@@ -113,7 +113,16 @@ def pair_bias(coordinates, gains, logits, mixture, block, curvature, poincare, f
             raise ValueError("unknown component metric")
         parts.append(scores)
     scales = torch.tensor(mixture["scales"][block],device="cpu",dtype=torch.float32).reshape(logits.shape)
-    return (torch.stack(parts,dim=-1) * scales[None,:,None,None,:] * logits.softmax(-1)[None,:,None,None,:]).sum(-1)
+    if projection is not None:
+        require("query_projection" in mixture and len(projection) == 2, "query projection coverage")
+        h, k = logits.shape
+        query = coordinates @ projection[0] + projection[1]
+        query = (query + logits.reshape(h*k)).reshape(*coordinates.shape[:2], h, k)
+        weights = query.permute(0, 2, 1, 3).softmax(-1)[:, :, :, None, :]
+    else:
+        require("query_projection" not in mixture, "missing query projection")
+        weights = logits.softmax(-1)[None,:,None,None,:]
+    return (torch.stack(parts,dim=-1) * scales[None,:,None,None,:] * weights).sum(-1)
 
 
 def router_deltas(initial, actual, expected, shape):
