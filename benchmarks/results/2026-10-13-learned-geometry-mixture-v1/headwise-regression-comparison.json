@@ -1,0 +1,70 @@
+{
+  "schema": "spiraltorch.resident_byte_geometry_headwise.comparison.v1",
+  "passed": true,
+  "cases": [
+    {
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "parameter_tensors": 23,
+      "parameter_scalars": 2518,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 0.00000873582763543429,
+      "logit_max_abs_error": 8.940696716308594e-8,
+      "loss_max_abs_error": 4.76837158203125e-7,
+      "parameter_max_abs_error": 8.940696716308594e-8,
+      "initial_vjp_max_abs_error": 1.1920928955078125e-7,
+      "geometry_relative_l2": 0.000040283519889015105,
+      "embedding_gradient_max_abs_error": 1.9185245037078857e-7,
+      "bias_gradient_max_abs_error": 0,
+      "head_gain_relative_l2": 0.000013175299841091832,
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ]
+    },
+    {
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "parameter_tensors": 37,
+      "parameter_scalars": 2678,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 0.000012809464721876313,
+      "logit_max_abs_error": 7.450580596923828e-8,
+      "loss_max_abs_error": 0.000001430511474609375,
+      "parameter_max_abs_error": 4.470348358154297e-7,
+      "initial_vjp_max_abs_error": 3.5762786865234375e-7,
+      "geometry_relative_l2": 0.00008183032930135803,
+      "embedding_gradient_max_abs_error": 0.0000030919909477233887,
+      "bias_gradient_max_abs_error": 3.958120942115784e-9,
+      "head_gain_relative_l2": 0.00010753248091456021,
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "euclidean_chord_squared.v1"
+        ],
+        [
+          "euclidean_chord_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ]
+    }
+  ],
+  "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation",
+  "head_group_guard": {
+    "all_gradients_guarded": true,
+    "atomic_rejection": true,
+    "baseline_max_abs_bias": 48.9681510925293,
+    "fault_head": 3,
+    "finite_control": true,
+    "parameter_tensors": 23,
+    "schema": "spiraltorch.byte_headwise_group_guard.v1"
+  },
+  "input_sha256": {
+    "reference": "35e16d9885c9a3b32b23bdb66ecf4926550e367b9b8992c6645d15f381d10741",
+    "report": "8496948c0a16a29634f79bed2123b1ebbfb3d2ddc10b2f96373ae0089109e4be"
+  }
+}

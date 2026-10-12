@@ -1,0 +1,150 @@
+{
+  "schema": "spiraltorch.resident_byte_geometry_mixture.comparison.v1",
+  "passed": true,
+  "cases": [
+    {
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "parameter_tensors": 24,
+      "parameter_scalars": 2522,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 0.000003288088228793638,
+      "logit_max_abs_error": 5.960464477539063e-8,
+      "loss_max_abs_error": 4.76837158203125e-7,
+      "parameter_max_abs_error": 1.1920928955078125e-7,
+      "initial_vjp_max_abs_error": 1.4901161193847656e-7,
+      "geometry_relative_l2": 0.000015470385385844496,
+      "embedding_gradient_max_abs_error": 1.210719347000122e-7,
+      "bias_gradient_max_abs_error": 0,
+      "head_gain_relative_l2": 0.0000026644870697006712,
+      "router_relative_l2": 0.000012534875561614797,
+      "mixture_weight_max_abs_error": 5.960464477539063e-8,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "scales": [
+          [
+            1,
+            0.8,
+            24,
+            1,
+            1.2,
+            48
+          ]
+        ]
+      },
+      "max_abs_mixture_mass_change_by_block_head": [
+        [
+          6.258487701416016e-7,
+          0.0000033080577850341797
+        ]
+      ],
+      "first_pre_update_loss": 5.551129341125488,
+      "last_pre_update_loss": 3.942518711090088
+    },
+    {
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "parameter_tensors": 39,
+      "parameter_scalars": 2690,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 0.000003524243039978743,
+      "logit_max_abs_error": 7.450580596923828e-8,
+      "loss_max_abs_error": 4.76837158203125e-7,
+      "parameter_max_abs_error": 4.76837158203125e-7,
+      "initial_vjp_max_abs_error": 2.384185791015625e-7,
+      "geometry_relative_l2": 0.000054848008487646825,
+      "embedding_gradient_max_abs_error": 0.0000021010637283325195,
+      "bias_gradient_max_abs_error": 5.587935447692871e-9,
+      "head_gain_relative_l2": 0.00002547523497027594,
+      "router_relative_l2": 0.00006052369033272034,
+      "mixture_weight_max_abs_error": 5.960464477539063e-8,
+      "mixture": {
+        "metrics": [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ],
+        "scales": [
+          [
+            1,
+            0.8,
+            24,
+            1,
+            1.2,
+            48
+          ],
+          [
+            0.7,
+            1.5,
+            36,
+            1.3,
+            0.6,
+            40
+          ]
+        ]
+      },
+      "max_abs_mixture_mass_change_by_block_head": [
+        [
+          3.2782554626464844e-7,
+          0.00000712275505065918
+        ],
+        [
+          0.000002562999725341797,
+          0.00000864267349243164
+        ]
+      ],
+      "first_pre_update_loss": 5.523712635040283,
+      "last_pre_update_loss": 3.9157803058624268
+    }
+  ],
+  "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation",
+  "mixture_guard": {
+    "all_gradients_guarded": true,
+    "atomic_rejection": true,
+    "baseline_max_abs_bias": 48.9681510925293,
+    "fault_component": 0,
+    "fault_head": 1,
+    "finite_control": true,
+    "parameter_tensors": 24,
+    "schema": "spiraltorch.byte_mixture_guard.v1",
+    "zero_mass_control": true
+  },
+  "wide_pullback_control": {
+    "checks": [
+      {
+        "name": "finite_final",
+        "output_relative_l2": 0,
+        "components_relative_l2": 0,
+        "logits_relative_l2": 0
+      },
+      {
+        "name": "position_centering",
+        "output_relative_l2": 0,
+        "components_relative_l2": 0,
+        "logits_relative_l2": 0
+      },
+      {
+        "name": "batch_centering",
+        "output_relative_l2": 0,
+        "components_relative_l2": 0,
+        "logits_relative_l2": 0
+      },
+      {
+        "name": "identical_components",
+        "output_relative_l2": 0,
+        "components_relative_l2": 4.1273656937842085e-8,
+        "logits_max_abs_error": 0
+      }
+    ],
+    "nonfinite_final_rejected": true
+  },
+  "input_sha256": {
+    "reference": "2457c21b0bce822feef589f38afb84a0ab1b81b37d36f9b737586bd6b24c6331",
+    "report": "b1e196375336df84a56aacb812bef90d0aa5d86eb637a3c624b2469dc80c6cdc"
+  },
+  "publication": "Scalar results only; full parameter/VJP/mass histories and checkpoints retained locally"
+}

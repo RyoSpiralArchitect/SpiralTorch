@@ -1,0 +1,234 @@
+{
+  "schema": "spiraltorch.learned_geometry_mixture_evidence.v1",
+  "source_revision": "610da9e92f979ff3bb89a88ce2ed700145e2ae73",
+  "base_revision": "fb6210a87923f77a9ef980003e4b09fe3ef0ed9f",
+  "reference": {
+    "torch": "2.12.1",
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 1
+  },
+  "execution": {
+    "native": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "browser": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }"
+  },
+  "tests": [
+    {
+      "log": "contract-tests-reviewed2.log",
+      "passed": 6,
+      "scope": "CPU contracts and boundary derivatives"
+    },
+    {
+      "log": "backend-tests-reviewed.log",
+      "passed": 6,
+      "scope": "4 actual GPU tests plus shader and limit checks; runtime opt-in enabled"
+    },
+    {
+      "log": "model-tests-reviewed.log",
+      "passed": 24,
+      "scope": "plan/checkpoint and model atomicity tests; runtime opt-in enabled"
+    },
+    {
+      "log": "verifier-tests-reviewed.log",
+      "passed": 71,
+      "scope": "fabricated acceptance/rejection boundaries, not GPU proof"
+    }
+  ],
+  "review": {
+    "mode": "read-only local independent subagent",
+    "findings_fixed": 2,
+    "remaining_concrete_p1_p2": 0,
+    "scope": "source review and bounded stdlib mutations, not CI/human review"
+  },
+  "protocol": "pre-registered.md",
+  "post_protocol_regressions": "review-regressions.md",
+  "raw_retention": "Complete observations, weights, fixtures, checkpoints, binaries and logs retained locally; no raw archive is published",
+  "raw_files": [
+    {
+      "name": "reference.json",
+      "bytes": 2296778,
+      "sha256": "2457c21b0bce822feef589f38afb84a0ab1b81b37d36f9b737586bd6b24c6331"
+    },
+    {
+      "name": "native-reviewed.json",
+      "bytes": 3845336,
+      "sha256": "3929aa3b1a288b7125e3f93373136ca61d495d85754ad682e4e7b819c8fe3aea"
+    },
+    {
+      "name": "browser-reviewed.json",
+      "bytes": 3845067,
+      "sha256": "b1e196375336df84a56aacb812bef90d0aa5d86eb637a3c624b2469dc80c6cdc"
+    },
+    {
+      "name": "native-comparison-reviewed.json",
+      "bytes": 5317,
+      "sha256": "22069241f722c91342fe72658e9105c13b3cfc5794cc67a3686ef8d36310d45f"
+    },
+    {
+      "name": "browser-comparison-reviewed.json",
+      "bytes": 5319,
+      "sha256": "f45f7fd9f666c471eb92c4321bb204db18d2a2882765fa82bcd646daeb69d65e"
+    },
+    {
+      "name": "native-reviewed.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "native-verifier-reviewed.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "browser-verifier-reviewed.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "headwise-regression.json",
+      "bytes": 3806605,
+      "sha256": "8496948c0a16a29634f79bed2123b1ebbfb3d2ddc10b2f96373ae0089109e4be"
+    },
+    {
+      "name": "headwise-regression.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "headwise-regression-comparison.json",
+      "bytes": 2533,
+      "sha256": "b78d14bb36218baed68842f3c41c9bc140ad564a8906417b2acca638914372ad"
+    },
+    {
+      "name": "headwise-verifier.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "contract-tests-reviewed2.log",
+      "bytes": 973,
+      "sha256": "f0708ce2cb0bf1efce7253c1318960baefd3aa1706a4bee2d22ecf1ab32a61e1"
+    },
+    {
+      "name": "backend-tests-reviewed.log",
+      "bytes": 115170,
+      "sha256": "f01fd25815d7f900ba8a0feec9b508b7ae407ae79c6b3be1c1ce6ef52f915b1f"
+    },
+    {
+      "name": "model-tests-reviewed.log",
+      "bytes": 118206,
+      "sha256": "54ddd9f95d8245261fd8dc45080d3f9ff2842d21b8c6f840cb04e9ca17db7c8c"
+    },
+    {
+      "name": "verifier-tests-reviewed.log",
+      "bytes": 171,
+      "sha256": "50e1d63f395f5cfc740345683be17dba8ffa975ab110a85f56fac8e20e7b784f"
+    },
+    {
+      "name": "native-build-reviewed.log",
+      "bytes": 115350,
+      "sha256": "bfa9ac0bd78de70b1f173094f00bd1fd1edcc7a0f3c708c693f707a2c56aeda9"
+    },
+    {
+      "name": "wasm-build-reviewed.log",
+      "bytes": 111954,
+      "sha256": "42b3402bf4c7a451ecc458d210f9e537068474e0e7f5dd516d29e1e4ed212fa8"
+    },
+    {
+      "name": "rustfmt-reviewed2.log",
+      "bytes": 27000,
+      "sha256": "c3c0f055c502a5f5bed390bc8a8b5e28ee3e727d0dd989a1eb37701e0a472b06"
+    },
+    {
+      "name": "native-binary-reviewed",
+      "bytes": 7222544,
+      "sha256": "089668b91b42503a26174cb2ba872fbff5228f3c1c01a28b6668b2733158426b"
+    },
+    {
+      "name": "web/resident_byte_decoder_browser.js",
+      "bytes": 49411,
+      "sha256": "b9f4dc670198309a92e22ed90eb8ddbb5d4cb26135a7981f7c5fd70c612d36bc"
+    },
+    {
+      "name": "web/resident_byte_decoder_browser_bg.wasm",
+      "bytes": 11387759,
+      "sha256": "678caa0996647419a233a0b6c0852cf4d806a5abe4584658f71897567dcb2533"
+    },
+    {
+      "name": "serve_validation.py",
+      "bytes": 1688,
+      "sha256": "aeda3b3c763820746dc1caf5fdde565e49a771350fb3e1a0f1cd1e68e12b5a7e"
+    },
+    {
+      "name": "local-review.md",
+      "bytes": 908,
+      "sha256": "7c240b057ed181f8b27eda1a9b25c81db4eaf259c5a69ede21771d0df19a4a78"
+    },
+    {
+      "name": "publish-evidence.cjs",
+      "bytes": 7332,
+      "sha256": "ca15fa7c265b0e6e94bc2eed854fd8c309fac0137528904048294bb203e3a4e7"
+    },
+    {
+      "name": "backend-tests-attempt1.log",
+      "bytes": 117143,
+      "sha256": "0a04287ad2066ce1bde4314c9a63d33275c1b760326d00bb8db7bcc85af49afa"
+    },
+    {
+      "name": "backend-tests-attempt2.log",
+      "bytes": 114801,
+      "sha256": "41b83b5f54b76703691a959ec43b3dc14880da7992dd5d9bed2d2325c3224ed8"
+    },
+    {
+      "name": "contract-tests-reviewed.log",
+      "bytes": 897,
+      "sha256": "c310ddbca24257d34f6421435a4b3c6800f359a40dd32384ec5db09b3e58152b"
+    },
+    {
+      "name": "native-attempt1.json",
+      "bytes": 3838150,
+      "sha256": "bfac7be4dd3f02476b6449407ced2a9ea08a46103996a03329327e3a44ab8f25"
+    },
+    {
+      "name": "native-attempt2.json",
+      "bytes": 3844541,
+      "sha256": "e13c845ebb6b58fbaa8a5d4d425852e3bc62d904d3463b99db00183b3e4730c9"
+    },
+    {
+      "name": "native-comparison-attempt2.json",
+      "bytes": 4556,
+      "sha256": "db5f0ecf3418776c494d82b66f9e147bffdfe3e07f6ec04f4f78318145a58d1f"
+    },
+    {
+      "name": "native-binary-before-wide-fix",
+      "bytes": 7221600,
+      "sha256": "8f7bdb9bea823a3373fca8680e19c01ad756fd29275372e2272593d8616a0e9d"
+    }
+  ],
+  "preserved_attempts": [
+    {
+      "name": "backend-tests-attempt1.log",
+      "status": "failed",
+      "cause": "missing COPY_DST on the inherited guard buffer, repaired before full-model measurements"
+    },
+    {
+      "name": "native-comparison-attempt2.json",
+      "status": "superseded_pre_review_qualification",
+      "scope": "original synthetic fixture passed; did not cover the later numerical review regressions"
+    },
+    {
+      "name": "contract-tests-reviewed.log",
+      "status": "superseded_partial_repair",
+      "scope": "wide final narrowing fixed; per-position centering regression added afterward"
+    }
+  ],
+  "claims": {
+    "numerical_parity": true,
+    "same_runtime_exact_resume": true,
+    "learned_router_connected": true,
+    "corpus_uplift": false,
+    "performance_uplift": false,
+    "cross_runtime_bitwise_identity": false,
+    "formal_ci": false
+  }
+}
