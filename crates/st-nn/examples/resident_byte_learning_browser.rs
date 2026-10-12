@@ -1,5 +1,25 @@
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 #[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn prepare_resident_byte_learning_mixtures(
+    input: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_nn::resident::ByteCorpusMixtureControls;
+    use wasm_bindgen::JsValue;
+    let error = |e: Box<dyn std::error::Error>| JsValue::from_str(&e.to_string());
+    let preparation = ByteCorpusMixtureControls::from_json(input.as_bytes()).map_err(error)?;
+    let runtime = st_backend_wgpu::runtime::WgpuRuntime::request_headless("byte.corpus.mixture")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let prepared = preparation.prepare(runtime).await.map_err(error)?;
+    Ok(
+        serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+        "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        .to_string(),
+    )
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
 pub async fn prepare_resident_byte_learning_headwise(
     input: &str,
 ) -> Result<String, wasm_bindgen::JsValue> {

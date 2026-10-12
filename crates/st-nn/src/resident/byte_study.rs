@@ -27,9 +27,11 @@ pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
 mod calibration;
 mod headwise;
+mod mixture;
 mod policy;
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
 pub use headwise::ByteCorpusHeadwiseControls;
+pub use mixture::ByteCorpusMixtureControls;
 use policy::{BiasInitialization, GeometryUpdate};
 
 /// A fixed request: documents, initial models, SGD rate and all selected windows.
@@ -38,6 +40,8 @@ use policy::{BiasInitialization, GeometryUpdate};
 /// v4 adds a prepared, gain-only RMS-matched flat learned/frozen pair.
 /// v5 retains those seven arms and adds a matched Fisher-Rao learned/frozen pair.
 /// v6 retains v5 and adds every ordered heterogeneous two-head assignment.
+/// v7 separately extends v5 with all two/three-metric mixtures, pairing learned
+/// routers with fixed routers while both coordinate encoders continue learning.
 /// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
@@ -147,6 +151,8 @@ struct Case {
     pair_metric: Option<ByteDecoderPairMetric>,
     #[serde(default, deserialize_with = "headwise::explicit_metrics")]
     head_pair_metrics: Option<Vec<Vec<ByteDecoderPairMetric>>>,
+    #[serde(default, deserialize_with = "mixture::explicit_mixture")]
+    mixture: Option<mixture::MixtureSpec>,
     #[serde(default, deserialize_with = "policy::explicit_initialization")]
     bias_initialization: Option<BiasInitialization>,
     parameters: Vec<Parameter>,
@@ -168,6 +174,8 @@ struct Request {
     bias_calibration: Option<calibration::CalibrationSpec>,
     #[serde(default, deserialize_with = "headwise::explicit_spec")]
     headwise_controls: Option<headwise::HeadwiseSpec>,
+    #[serde(default, deserialize_with = "mixture::explicit_spec")]
+    mixture_controls: Option<mixture::MixtureControlsSpec>,
 }
 
 fn parse(input: &[u8]) -> Result<Request> {
@@ -185,6 +193,7 @@ fn parse(input: &[u8]) -> Result<Request> {
             | "spiraltorch.byte_corpus.request.v4"
             | "spiraltorch.byte_corpus.request.v5"
             | "spiraltorch.byte_corpus.request.v6"
+            | "spiraltorch.byte_corpus.request.v7"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
@@ -201,7 +210,9 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(1..=1024).contains(&r.train_batches.len())
         || !(1..=128).contains(&r.validation_batches.len())
         || !(1..=64).contains(&r.checkpoint_every)
-        || !(2..=if r.headwise_controls() {
+        || !(2..=if r.mixture_controls() {
+            51
+        } else if r.headwise_controls() {
             63
         } else if r.fisher_controls() {
             27
@@ -217,6 +228,7 @@ fn parse(input: &[u8]) -> Result<Request> {
     }
     calibration::validate_spec(&r)?;
     headwise::validate_spec(&r)?;
+    mixture::validate_spec(&r)?;
     if r.train_documents.is_empty()
         || r.validation_documents.is_empty()
         || r.train_documents
@@ -333,7 +345,17 @@ fn plan(c: &Config, case: &Case) -> Result<ByteDecoderPlan> {
             .collect::<Result<Vec<_>>>()?;
         let geometry =
             ByteDecoderGeometryPlan::new(&projection, &decay, &phase, &gains, c.curvature)?;
-        Some(if let Some(metrics) = &case.head_pair_metrics {
+        Some(if let Some(mix) = &case.mixture {
+            let routers = (0..c.blocks.len())
+                .map(|i| {
+                    p.values(
+                        &format!("geometry.mixture_logits.{i}"),
+                        &[c.heads, mix.metrics.len()],
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            geometry.with_mixture(&mix.metrics, &routers, &mix.scales)?
+        } else if let Some(metrics) = &case.head_pair_metrics {
             geometry.with_head_pair_metrics(metrics)?
         } else {
             geometry.with_pair_metric(
@@ -564,6 +586,7 @@ impl ByteCorpusStudy {
                     || model.topology_json()? != initial.topology_json()?
                     || (cursor == 0 && model.to_json()? != initial.to_json()?)
                     || (case.frozen() && !model.geometry_parameters_match(&initial)?)
+                    || (case.router_frozen() && !mixture::routers_match(&model, &initial))
                 {
                     return Err(
                         "checkpoint model revision, topology or initial/frozen values differ"
@@ -647,14 +670,18 @@ impl ByteCorpusStudy {
                 Some(models) => models[index].restore_wgpu(runtime.clone())?,
                 None => plan(&r.config, case)?.compile_training_wgpu(runtime.clone())?,
             };
-            let rates = if case.frozen() {
+            let rates = if case.frozen() || case.router_frozen() {
                 let mut rates = vec![r.rate; model.parameter_layout().len()];
-                rates[model
+                let geometry = model
                     .parameter_layout()
                     .geometry()
-                    .ok_or("missing frozen geometry")?
-                    .all()]
-                .fill(0.);
+                    .ok_or("missing frozen geometry")?;
+                let slots = if case.frozen() {
+                    geometry.all()
+                } else {
+                    geometry.mixture_logits().ok_or("missing frozen router")?
+                };
+                rates[slots].fill(0.);
                 Some(rates)
             } else {
                 None
@@ -718,16 +745,15 @@ impl ByteCorpusStudy {
                 }
             }
             let final_values = read_many(&model, model.parameter_snapshot().values()).await?;
-            if case.frozen()
-                && case
-                    .parameters
-                    .iter()
-                    .zip(&final_values)
-                    .any(|(p, values)| {
-                        p.name.starts_with("geometry.") && !policy::same_bits(&p.values, values)
-                    })
+            if case
+                .parameters
+                .iter()
+                .zip(&final_values)
+                .any(|(p, values)| {
+                    case.parameter_frozen(&p.name) && !policy::same_bits(&p.values, values)
+                })
             {
-                return Err("frozen geometry changed during the study".into());
+                return Err("frozen geometry/router changed during the study".into());
             }
             let mut report = json!({"name":case.name,"seed":case.seed,"geometry":case.geometry,
                 "parameter_tensors":case.parameters.len(),
@@ -739,11 +765,13 @@ impl ByteCorpusStudy {
                 report["trainable_parameter_scalars"] = json!(case
                     .parameters
                     .iter()
-                    .filter(|p| !case.frozen() || !p.name.starts_with("geometry."))
+                    .filter(|p| !case.parameter_frozen(&p.name))
                     .map(|p| p.values.len())
                     .sum::<usize>());
             }
-            if let Some(metrics) = &case.head_pair_metrics {
+            if let Some(mix) = &case.mixture {
+                report["mixture"] = json!(mix);
+            } else if let Some(metrics) = &case.head_pair_metrics {
                 report["head_pair_metrics"] = json!(metrics);
             } else if r.metric_controls() {
                 report["pair_metric"] = json!(case.pair_metric);

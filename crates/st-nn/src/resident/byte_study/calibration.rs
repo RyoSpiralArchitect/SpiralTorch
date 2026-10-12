@@ -159,11 +159,11 @@ pub(super) async fn verify_initial(r: &Request, runtime: &WgpuRuntime) -> Result
             let actual = measure(r, &fitted, runtime, &spec.train_batch_indices).await?;
             checked_errors(&target, &actual)?;
         }
-        for case in r
-            .cases
-            .iter()
-            .filter(|c| c.seed == seed && c.head_pair_metrics.is_some() && !c.frozen())
-        {
+        for case in r.cases.iter().filter(|c| {
+            c.seed == seed
+                && !c.frozen()
+                && (c.head_pair_metrics.is_some() || (c.mixture.is_some() && !c.router_frozen()))
+        }) {
             let actual = measure(
                 r,
                 &plan(&r.config, case)?,

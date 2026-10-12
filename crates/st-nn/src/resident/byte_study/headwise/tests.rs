@@ -1,7 +1,7 @@
 use super::super::tests::{fixture, saved, valid};
 use super::*;
 
-fn source() -> Value {
+pub(in crate::resident::byte_study) fn source() -> Value {
     let mut value = fixture();
     value["schema"] = json!("spiraltorch.byte_corpus.request.v5");
     value["config"]["heads"] = json!(2);

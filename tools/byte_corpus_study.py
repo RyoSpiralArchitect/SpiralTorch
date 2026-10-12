@@ -21,6 +21,7 @@ REQUEST_V3 = "spiraltorch.byte_corpus.request.v3"
 REQUEST_V4 = "spiraltorch.byte_corpus.request.v4"
 REQUEST_V5 = "spiraltorch.byte_corpus.request.v5"
 REQUEST_V6 = "spiraltorch.byte_corpus.request.v6"
+REQUEST_V7 = "spiraltorch.byte_corpus.request.v7"
 POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
 FISHER = "categorical_fisher_rao_squared.v1"
 ORIGINAL, MATCHED = "original", "matched_poincare_rms"
@@ -75,10 +76,20 @@ def matched(case):
 
 def trainable_scalars(case):
     return sum(len(p["values"]) for p in case["parameters"]
-               if not frozen(case) or not p["name"].startswith("geometry."))
+               if not parameter_frozen(case,p["name"]))
+
+
+def parameter_frozen(case, name):
+    return ((frozen(case) and name.startswith("geometry."))
+            or (case.get("mixture",{}).get("router_update") == "frozen" and name.startswith("geometry.mixture_logits.")))
 
 
 def request_version(request):
+    if request["schema"] == REQUEST_V7:
+        load_reference("byte_corpus_mixture").validate_request(request)
+        return 7
+    if "mixture_controls" in request or any("mixture" in c for c in request["cases"]):
+        raise ValueError("mixture metadata belongs to v7 only")
     if request["schema"] == REQUEST_V6:
         load_reference("byte_corpus_headwise").validate_request(request)
         return 6
@@ -339,6 +350,7 @@ def reference(args):
     version = request_version(request)
     config = request["config"]
     headwise_pair = load_reference("byte_corpus_headwise").pair_bias if version == 6 else None
+    mixture_pair = load_reference("byte_corpus_mixture").pair_bias if version == 7 else None
     b, t, w = config["batch"], config["steps"], config["width"]
 
     def batch(documents, selected):
@@ -368,12 +380,17 @@ def reference(args):
                 coordinates, _ = wave(drive, p[4], p[5],
                                       torch.zeros((b, config["geometry_cols"]), device="cpu"), config["curvature"])
                 offset = 6 + len(config["blocks"])
+                if "mixture" in case:
+                    offset += len(config["blocks"])
             x = embedded
             for i, topos in enumerate(config["blocks"]):
                 count = 13 if topos else 12
                 pair = None
                 if case["geometry"]:
-                    if "head_pair_metrics" in case:
+                    if "mixture" in case:
+                        pair = mixture_pair(coordinates,p[6+i],p[6+len(config["blocks"])+i],
+                            case["mixture"],i,config["curvature"],metric,fisher_metric)
+                    elif "head_pair_metrics" in case:
                         pair = headwise_pair(
                             coordinates, p[6 + i], case["head_pair_metrics"][i], config["curvature"], metric, fisher_metric)
                     elif case.get("pair_metric") == FLAT:
@@ -403,7 +420,7 @@ def reference(args):
             gradients = torch.autograd.grad(loss, p)
             with torch.no_grad():
                 for descriptor, value, gradient in zip(case["parameters"], p, gradients):
-                    if not (frozen(case) and descriptor["name"].startswith("geometry.")):
+                    if not parameter_frozen(case,descriptor["name"]):
                         value -= request["rate"] * gradient
             training.append(dict(revision=step, ce=loss.item()))
             if step % request["checkpoint_every"] == 0 or step == len(train):
@@ -414,7 +431,9 @@ def reference(args):
                             final_parameters=[v.detach().reshape(-1).tolist() for v in p]))
         if version >= 2:
             reports[-1].update(geometry_update=case["geometry_update"], trainable_parameter_scalars=trainable_scalars(case))
-        if "head_pair_metrics" in case:
+        if "mixture" in case:
+            reports[-1]["mixture"] = case["mixture"]
+        elif "head_pair_metrics" in case:
             reports[-1]["head_pair_metrics"] = case["head_pair_metrics"]
         elif version >= 3:
             reports[-1]["pair_metric"] = case.get("pair_metric")
@@ -477,7 +496,12 @@ def compare(request_raw, reference_report, actual):
                                 or type(row.get("trainable_parameter_scalars")) is not int
                                 or row["trainable_parameter_scalars"] != trainable_scalars(spec)):
                 raise ValueError("case update policy or trainable count mismatch")
-            if "head_pair_metrics" in spec:
+            if "mixture" in spec:
+                if row.get("mixture") != spec["mixture"] or "pair_metric" in row or "head_pair_metrics" in row:
+                    raise ValueError("case mixture identity mismatch")
+            elif "mixture" in row:
+                raise ValueError("foreign mixture report")
+            elif "head_pair_metrics" in spec:
                 if row.get("head_pair_metrics") != spec["head_pair_metrics"] or "pair_metric" in row:
                     raise ValueError("case headwise metric identity mismatch")
             elif version >= 3 and ("head_pair_metrics" in row or "pair_metric" not in row or row["pair_metric"] != spec.get("pair_metric")):
@@ -509,7 +533,7 @@ def compare(request_raw, reference_report, actual):
             if desc["name"].startswith("geometry."):
                 # Rust uploads float32 values; decimal conversion is not learning.
                 initial = [f32(x) for x in desc["values"]]
-                if frozen(spec):
+                if parameter_frozen(spec,desc["name"]):
                     original = [struct.pack("<f", x) for x in initial]
                     if any([struct.pack("<f", x) for x in values] != original for values in (a, e)):
                         raise ValueError("frozen geometry parameter bits changed: " + desc["name"])
@@ -524,6 +548,8 @@ def compare(request_raw, reference_report, actual):
                                             reference_delta_l2=expected_norm, relative_l2_error=error / expected_norm))
                 if "head_pair_metrics" in spec and desc["name"].startswith("geometry.raw_gain."):
                     geometry_deltas[-1]["per_head"] = load_reference("byte_corpus_headwise").gain_deltas(initial, a, e)
+                if "mixture" in spec and desc["name"].startswith("geometry.mixture_logits."):
+                    geometry_deltas[-1]["per_component"] = load_reference("byte_corpus_mixture").router_deltas(initial,a,e,desc["shape"])
         summaries.append(dict(name=name, seed=spec["seed"], geometry=spec["geometry"],
                               parameter_scalars=got["parameter_scalars"], train_ce_max_error=train_error,
                               heldout_ce_max_error=eval_error, final_parameter_max_error=parameter_error,
@@ -532,7 +558,9 @@ def compare(request_raw, reference_report, actual):
         if version >= 2:
             summaries[-1].update(geometry_update=spec["geometry_update"], trainable_parameter_scalars=trainable_scalars(spec))
         if version >= 3:
-            if "head_pair_metrics" in spec:
+            if "mixture" in spec:
+                summaries[-1]["mixture"] = spec["mixture"]
+            elif "head_pair_metrics" in spec:
                 summaries[-1]["head_pair_metrics"] = spec["head_pair_metrics"]
             else:
                 summaries[-1]["pair_metric"] = spec.get("pair_metric")
@@ -543,10 +571,10 @@ def compare(request_raw, reference_report, actual):
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
-        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7, 5: 9, 6: 21}[version] or {c["geometry"] for c in paired} != {False, True}:
+        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7, 5: 9, 6: 21, 7:17}[version] or {c["geometry"] for c in paired} != {False, True}:
             raise ValueError("incomplete paired seed")
         plain = next(c for c in paired if not c["geometry"])
-        geometry = next(c for c in paired if c["geometry"] and not frozen(c) and "head_pair_metrics" not in c and c.get("pair_metric", POINCARE) == POINCARE)
+        geometry = next(c for c in paired if c["geometry"] and not frozen(c) and "head_pair_metrics" not in c and "mixture" not in c and c.get("pair_metric", POINCARE) == POINCARE)
         pairs.append(dict(seed=seed, geometry_minus_ordinary_bpb=geometry["final_heldout_bpb"] - plain["final_heldout_bpb"]))
         if version >= 2:
             fixed = next(c for c in paired if frozen(c) and "head_pair_metrics" not in c and c.get("pair_metric", POINCARE) == POINCARE)
@@ -616,6 +644,10 @@ def compare(request_raw, reference_report, actual):
         result["headwise_controls"] = request["headwise_controls"]
         result["headwise_contrasts"] = load_reference("byte_corpus_headwise").contrasts(summaries)
         result["scope"] = "21 arms/seed: all nine v5 arms plus six ordered heterogeneous two-head routes trained/frozen. Inherited per-head gains, no refitting. Same data/update budget, not matched patterns/dynamics/compute or a general quality/speed claim."
+    if version == 7:
+        result["mixture_controls"] = request["mixture_controls"]
+        result["mixture_contrasts"] = load_reference("byte_corpus_mixture").contrasts(summaries)
+        result["scope"] = "17 arms/seed: unchanged v5 plus four metric subsets with learned/fixed routers. Both coordinate encoders learn, initial train-only RMS is matched. No general quality/speed claim or equal compute across different metric subsets."
     return result
 
 

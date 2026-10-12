@@ -239,4 +239,4 @@ impl ByteCorpusHeadwiseControls {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

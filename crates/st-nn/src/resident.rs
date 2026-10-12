@@ -36,9 +36,9 @@ pub use byte_decoder::{
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{
-    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusPreparedBiasStudy,
-    ByteCorpusStudy, ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment,
-    BYTE_CORPUS_STUDY_MAX_BYTES,
+    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusMixtureControls,
+    ByteCorpusPreparedBiasStudy, ByteCorpusStudy, ByteCorpusStudyCheckpoint, ByteCorpusStudyResult,
+    ByteCorpusStudySegment, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]

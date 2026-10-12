@@ -1,7 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use st_nn::resident::{
-    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusStudy,
-    BYTE_CORPUS_STUDY_MAX_BYTES,
+    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusMixtureControls,
+    ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -39,6 +39,7 @@ struct Args {
     calibrate: Option<Vec<usize>>,
     fisher: bool,
     headwise: bool,
+    mixtures: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -49,9 +50,16 @@ impl Args {
         let mut args = args.into_iter();
         let mut result = Self {
             request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json]")?.into(),
-            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false,
+            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false, mixtures: false,
         };
         while let Some(flag) = args.next() {
+            if flag == "--prepare-mixtures" {
+                if result.mixtures {
+                    return Err("duplicate mixture preparation flag".into());
+                }
+                result.mixtures = true;
+                continue;
+            }
             if flag == "--prepare-headwise" {
                 if result.headwise {
                     return Err("duplicate headwise preparation flag".into());
@@ -82,10 +90,14 @@ impl Args {
                 _ => return Err("unknown or duplicate flag".into()),
             }
         }
-        if result.headwise && result.calibrate.is_some() {
-            return Err("headwise preparation inherits a v5 calibration; no refitting".into());
+        if usize::from(result.headwise)
+            + usize::from(result.mixtures)
+            + usize::from(result.calibrate.is_some())
+            > 1
+        {
+            return Err("choose one preparation mode".into());
         }
-        if (result.calibrate.is_some() || result.headwise)
+        if (result.calibrate.is_some() || result.headwise || result.mixtures)
             && (result.stop.is_some() || result.resume.is_some() || result.output.is_some())
         {
             return Err(
@@ -129,6 +141,18 @@ fn save_checkpoint(path: &std::path::Path, json: &str) -> Result<(), Box<dyn std
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(std::env::args_os().skip(1))?;
     let input = read_request(&args.request)?;
+    if args.mixtures {
+        let preparation = ByteCorpusMixtureControls::from_json(&input)?;
+        let (runtime, _) =
+            st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.mixture")?;
+        let prepared = pollster::block_on(preparation.prepare(runtime))?;
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
     if args.headwise {
         let preparation = ByteCorpusHeadwiseControls::from_json(&input)?;
         let (runtime, _) =
@@ -234,6 +258,17 @@ mod tests {
             vec!["request", "--calibrate-flat", "0", "--prepare-headwise"],
             vec!["request", "--prepare-headwise", "--stop-after", "1"],
             vec!["request", "--prepare-headwise", "--resume", "old.json"],
+            vec!["request", "--prepare-mixtures", "--prepare-mixtures"],
+            vec!["request", "--prepare-mixtures", "--prepare-headwise"],
+            vec!["request", "--prepare-mixtures", "--calibrate-fisher", "0"],
+            vec!["request", "--prepare-mixtures", "--stop-after", "1"],
+            vec!["request", "--prepare-mixtures", "--resume", "old.json"],
+            vec![
+                "request",
+                "--prepare-mixtures",
+                "--checkpoint-out",
+                "new.json",
+            ],
             vec![
                 "request",
                 "--prepare-headwise",

@@ -48,6 +48,15 @@ impl Case {
     pub(super) fn frozen(&self) -> bool {
         self.geometry_update == Some(GeometryUpdate::Frozen)
     }
+    pub(super) fn router_frozen(&self) -> bool {
+        self.mixture
+            .as_ref()
+            .is_some_and(|m| m.router_update == GeometryUpdate::Frozen)
+    }
+    pub(super) fn parameter_frozen(&self, name: &str) -> bool {
+        (self.frozen() && name.starts_with("geometry."))
+            || (self.router_frozen() && name.starts_with("geometry.mixture_logits."))
+    }
 }
 
 impl Request {
@@ -62,6 +71,7 @@ impl Request {
                 | "spiraltorch.byte_corpus.request.v4"
                 | "spiraltorch.byte_corpus.request.v5"
                 | "spiraltorch.byte_corpus.request.v6"
+                | "spiraltorch.byte_corpus.request.v7"
         )
     }
 
@@ -71,13 +81,16 @@ impl Request {
             "spiraltorch.byte_corpus.request.v4"
                 | "spiraltorch.byte_corpus.request.v5"
                 | "spiraltorch.byte_corpus.request.v6"
+                | "spiraltorch.byte_corpus.request.v7"
         )
     }
 
     pub(super) fn fisher_controls(&self) -> bool {
         matches!(
             self.schema.as_str(),
-            "spiraltorch.byte_corpus.request.v5" | "spiraltorch.byte_corpus.request.v6"
+            "spiraltorch.byte_corpus.request.v5"
+                | "spiraltorch.byte_corpus.request.v6"
+                | "spiraltorch.byte_corpus.request.v7"
         )
     }
 
@@ -85,8 +98,14 @@ impl Request {
         self.schema == "spiraltorch.byte_corpus.request.v6"
     }
 
+    pub(super) fn mixture_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v7"
+    }
+
     pub(super) fn arms_per_seed(&self) -> usize {
-        if self.headwise_controls() {
+        if self.mixture_controls() {
+            17
+        } else if self.headwise_controls() {
             21
         } else if self.fisher_controls() {
             9
@@ -102,7 +121,9 @@ impl Request {
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.headwise_controls() {
+        if self.mixture_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v7"
+        } else if self.headwise_controls() {
             "spiraltorch.byte_corpus.checkpoint.v6"
         } else if self.fisher_controls() {
             "spiraltorch.byte_corpus.checkpoint.v5"
@@ -118,6 +139,13 @@ impl Request {
     }
 
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.mixture_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v7"
+            } else {
+                "spiraltorch.byte_corpus.partial.v7"
+            };
+        }
         if self.headwise_controls() {
             return if complete {
                 "spiraltorch.byte_corpus.result.v6"
@@ -238,6 +266,7 @@ impl Request {
                 .iter()
                 .filter(|c| {
                     c.head_pair_metrics.is_none()
+                        && c.mixture.is_none()
                         && c.geometry == geometry
                         && c.geometry_update == Some(update)
                         && c.pair_metric == metric
@@ -252,7 +281,13 @@ impl Request {
         if self.headwise_controls() {
             headwise::validate_modes(cases)?;
         }
-        let geometric = cases.iter().filter(|c| c.geometry).collect::<Vec<_>>();
+        if self.mixture_controls() {
+            mixture::validate_modes(cases)?;
+        }
+        let geometric = cases
+            .iter()
+            .filter(|c| c.geometry && c.mixture.is_none())
+            .collect::<Vec<_>>();
         let equal = |a: &Case, b: &Case, skip_gains: bool| {
             let (a, b) = (&a.parameters, &b.parameters);
             a.len() == b.len()

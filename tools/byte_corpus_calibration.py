@@ -13,7 +13,7 @@ def headwise_module():
 
 def candidate_metrics(request):
     return (["euclidean_chord_squared.v1", "categorical_fisher_rao_squared.v1"]
-            if request["schema"] in ("spiraltorch.byte_corpus.request.v5", "spiraltorch.byte_corpus.request.v6")
+            if request["schema"] in ("spiraltorch.byte_corpus.request.v5", "spiraltorch.byte_corpus.request.v6", "spiraltorch.byte_corpus.request.v7")
             else ["euclidean_chord_squared.v1"])
 
 
@@ -26,17 +26,21 @@ def verify_qualification(request, record):
     seeds = sorted({c["seed"] for c in request["cases"]})
     metrics = candidate_metrics(request)
     headwise = request["schema"] == "spiraltorch.byte_corpus.request.v6"
+    mixture = request["schema"] == "spiraltorch.byte_corpus.request.v7"
     expected = []
     for seed in seeds:
         expected.extend((seed, metric, None) for metric in metrics)
         if headwise:
             expected.extend((seed, None, c) for c in request["cases"]
                             if c["seed"] == seed and "head_pair_metrics" in c and c["geometry_update"] == "train")
+        if mixture:
+            expected.extend((seed,None,c) for c in request["cases"]
+                            if c["seed"]==seed and "mixture" in c and c["mixture"]["router_update"]=="train")
     if (type(cases) is not list or len(cases) != len(expected)
             or any(type(c.get("seed")) is not int or c["seed"] != seed
-                   or ((c.get("head_pair_metrics") != route["head_pair_metrics"] or c.get("name") != route["name"] or "pair_metric" in c)
+                   or ((c.get("mixture" if mixture else "head_pair_metrics") != route["mixture" if mixture else "head_pair_metrics"] or c.get("name") != route["name"] or "pair_metric" in c)
                        if route is not None else
-                       ("head_pair_metrics" in c or (c.get("pair_metric") != metric if len(metrics) == 2 else "pair_metric" in c)))
+                       ("mixture" in c or "head_pair_metrics" in c or (c.get("pair_metric") != metric if len(metrics) == 2 else "pair_metric" in c)))
                    for c, (seed, metric, route) in zip(cases, expected))):
         raise ValueError("independent calibration seed coverage")
     cfg = request["config"]
@@ -71,6 +75,11 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
     batch, t = config["batch"], config["steps"]
     spec = request["bias_calibration"]
     headwise = headwise_module() if request["schema"] == "spiraltorch.byte_corpus.request.v6" else None
+    mixture = None
+    if request["schema"] == "spiraltorch.byte_corpus.request.v7":
+        spec_module = importlib.util.spec_from_file_location("byte_corpus_mixture", Path(__file__).with_name("byte_corpus_mixture.py"))
+        mixture = importlib.util.module_from_spec(spec_module)
+        spec_module.loader.exec_module(mixture)
 
     def moments(case):
         p = [torch.tensor(v["values"], device="cpu", dtype=torch.float32).reshape(v["shape"])
@@ -86,7 +95,10 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
                 coordinates, _ = wave(embedded @ p[2] + p[3], p[4], p[5],
                     torch.zeros((batch, config["geometry_cols"]), device="cpu"), config["curvature"])
                 for block in range(len(config["blocks"])):
-                    if "head_pair_metrics" in case:
+                    if "mixture" in case:
+                        scores = mixture.pair_bias(coordinates,p[6+block],p[6+len(config["blocks"])+block],
+                            case["mixture"],block,config["curvature"],metric,fisher_metric)
+                    elif "head_pair_metrics" in case:
                         scores = headwise.pair_bias(coordinates, p[6+block], case["head_pair_metrics"][block],
                                                    config["curvature"], metric, fisher_metric)
                     elif case["pair_metric"] == "euclidean_chord_squared.v1":
@@ -115,6 +127,8 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
                          and c.get("pair_metric") == selected_metric) for selected_metric in metrics]
         if headwise:
             selected.extend(c for c in group if "head_pair_metrics" in c)
+        if mixture:
+            selected.extend(c for c in group if "mixture" in c and c["mixture"]["router_update"]=="train")
         for fitted in selected:
             observed, other_count = moments(fitted)
             if count != other_count:
@@ -132,7 +146,9 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
                 errors.append(row)
             reports.append(dict(seed=seed, reference_rms=reference, fitted_rms=observed,
                                 valid_pairs_per_head=count, realized_relative_errors=errors))
-            if "head_pair_metrics" in fitted:
+            if "mixture" in fitted:
+                reports[-1].update(name=fitted["name"],mixture=fitted["mixture"])
+            elif "head_pair_metrics" in fitted:
                 reports[-1].update(name=fitted["name"], head_pair_metrics=fitted["head_pair_metrics"])
             elif len(metrics) == 2:
                 reports[-1]["pair_metric"] = fitted["pair_metric"]

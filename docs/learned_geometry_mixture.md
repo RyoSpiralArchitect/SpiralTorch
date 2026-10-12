@@ -103,7 +103,8 @@ and open `crates/st-nn/tests/byte_mixture_browser.html` on loopback. Download th
 observations and use the same comparator. Production learning is Rust/WGPU;
 Python is the independent oracle and JavaScript transports fixture/report bytes.
 
-Corpus studies v1-v6 remain unchanged experiments. Learned-mixture corpus arms,
-frozen-router controls and matched strength calibration need a new study.
+Corpus studies v1-v6 remain unchanged experiments. The separate
+[v7 corpus study](byte_corpus_mixture_controls.md) adds all four metric subsets,
+learned/fixed-router controls and training-only matched-strength calibration.
 Synthetic loss reduction is not a language-quality, preferred-geometry,
 tokenizer-free advantage or improvement-over-fixed-routing result.
