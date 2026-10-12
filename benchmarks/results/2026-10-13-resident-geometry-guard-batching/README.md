@@ -39,9 +39,16 @@ files. Parent-executed tests are not an independent execution replication.
 Abandoning an unsubmitted encoder is not directly covered by the new test.
 
 The [predeclared correctness protocol](pre-registered.md) remains fixed.
-Before timing or adoption, separately freeze a repeated native/browser
-performance protocol. Fewer submissions alone are not evidence of speedup.
-The byte-corpus v8 study uses its original preserved binaries, not this candidate.
+The separate [performance protocol](performance-protocol.md) is now frozen,
+but **timing has not run**. It requires three warmup-plus-ABBA blocks per
+runtime, at least 5% geometric-mean improvement and no slower block.
+Even a passing screen still requires unchanged full v8 corpus results before
+adoption. Fewer submissions alone are not evidence of speedup. The v8 study
+above uses its original preserved binaries, not this candidate.
+
+The [timing-harness review](timing-review.md) records three initial P2 findings,
+their repairs and the reviewed seven CPU-only tests. Real-browser durability,
+crash recovery and verified-byte blob-module execution remain unverified.
 
 Reproduce the four-case check with the existing
 [contextual geometry recipe](../../../docs/contextual_geometry_mixture.md)
@@ -49,3 +56,22 @@ and the same frozen fixture, then compare complete raw bytes with the baseline.
 Run scoped Rust tests with `SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1` and
 `--test-threads=1`. Raw tensors, checkpoints, binaries and logs stay local;
 published hashes identify retained bytes, not execution attestation.
+
+For the future artifact-pair measurement, use fresh local output paths:
+
+```sh
+python3 -I -S -B bench_native.py performance-protocol.json \
+  "$BASELINE_BIN" "$CANDIDATE_BIN" "$FIXTURE" "$RAW/performance/native"
+```
+
+On loopback, serve `bench_browser.html`, `/performance-protocol.json`,
+`/reference.json`, and the pinned JS/WASM pair under each of `/A/` and `/B/`.
+Run fresh pages with `?block=1`, `?block=2`, then `?block=3`, one at a time;
+download each private packet as `browser-block-N.json` under `$RAW/performance`.
+Reopening an existing block recovers its saved record without rerunning it.
+Then publish scalar results only:
+
+```sh
+python3 -I -S -B summarize_performance.py performance-protocol.json \
+  "$RAW/performance" "$NEW_SCALAR_RESULT"
+```
