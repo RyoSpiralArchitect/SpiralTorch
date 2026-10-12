@@ -213,8 +213,8 @@ impl ResidentTensor {
         let context = device.runtime().context();
         logits.require_context(context)?;
         preflight(spec, &context.device().limits())?;
-        let joined = device.guard_together(&[self, logits])?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
+        let joined = device.guard_together_into(&[self, logits], &mut encoder)?;
         let input = joined[0].contiguous_into(&mut encoder)?;
         let logits = joined[1].contiguous_into(&mut encoder)?;
         let flags = guard(device, &joined[0], &mut encoder)?;
@@ -255,8 +255,9 @@ impl ResidentTensor {
             spec,
             spec.output_len(),
         )?;
+        let family =
+            device.guard_together_into(&[&output, &weights, &input, &logits], &mut encoder)?;
         context.queue().submit(Some(encoder.finish()));
-        let family = device.guard_together(&[&output, &weights, &input, &logits])?;
         Ok(ResidentHeadwiseMixture {
             spec,
             input: family[2].clone(),
@@ -284,8 +285,8 @@ impl ResidentHeadwiseMixture {
         let context = device.runtime().context();
         seed.require_context(context)?;
         preflight(self.spec, &context.device().limits())?;
-        let joined = device.guard_together(&[&self.output, seed])?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
+        let joined = device.guard_together_into(&[&self.output, seed], &mut encoder)?;
         let seed = joined[1].contiguous_into(&mut encoder)?;
         let flags = guard(device, &joined[0], &mut encoder)?;
         let components = device
@@ -326,8 +327,8 @@ impl ResidentHeadwiseMixture {
             self.spec,
             heads,
         )?;
+        let family = device.guard_together_into(&[&components, &logits, &seed], &mut encoder)?;
         context.queue().submit(Some(encoder.finish()));
-        let family = device.guard_together(&[&components, &logits, &seed])?;
         Ok(ResidentHeadwiseMixtureVjp {
             components: family[0].clone(),
             logits: family[1].clone(),
