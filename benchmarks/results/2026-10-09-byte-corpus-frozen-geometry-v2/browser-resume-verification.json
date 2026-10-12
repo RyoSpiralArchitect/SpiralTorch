@@ -1,0 +1,117 @@
+{
+  "schema": "spiraltorch.byte_corpus.resume_verification.v2",
+  "passed": true,
+  "request_sha256": "0782ac7a078005b6b4b20c4c7e56c9629363a995228d2d0cd654541623e456ee",
+  "exact_resumed_report_equal": true,
+  "exact_training_and_evaluation_prefixes": true,
+  "saved_parameter_bits_match_paused_report": true,
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602379143238068
+    },
+    {
+      "name": "seed11_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560256704688072
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5603175163269043
+    },
+    {
+      "name": "seed23_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.554492086172104
+    },
+    {
+      "name": "seed23_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552362337708473
+    },
+    {
+      "name": "seed23_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5522845312952995
+    },
+    {
+      "name": "seed37_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5545293986797333
+    },
+    {
+      "name": "seed37_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553141862154007
+    },
+    {
+      "name": "seed37_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553172066807747
+    }
+  ],
+  "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence",
+  "input_sha256": {
+    "request": "0782ac7a078005b6b4b20c4c7e56c9629363a995228d2d0cd654541623e456ee",
+    "baseline": "32e84bf6c2bd326aed070f9a9ddba734c584e82e39bcfe3e9ab308084ce0186a",
+    "partial": "b15be906bd62a24dee879cd1f24cfb34eb236b6c22a81b46c839177535c3feff",
+    "resumed": "32e84bf6c2bd326aed070f9a9ddba734c584e82e39bcfe3e9ab308084ce0186a",
+    "checkpoint": "62d636de87290f403d2fa79feb8cbe9b2fcd4d614d81994ecfc88fd3181dddb6"
+  }
+}

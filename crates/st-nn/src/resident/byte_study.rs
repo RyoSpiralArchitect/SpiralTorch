@@ -1,4 +1,4 @@
-//! Bounded, paired corpus studies with request-bound, all-case resume.
+//! Bounded paired/three-arm corpus studies with request-bound, all-case resume.
 //! Native and browser clients share model math, data order and acceptance gates.
 use crate::{
     resident::{
@@ -25,9 +25,12 @@ type Result<T> = ByteCorpusStudyResult<T>;
 /// Input and checkpoint JSON are bounded before deserialization.
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
+mod policy;
+use policy::GeometryUpdate;
 
 /// A fixed request: documents, initial models, SGD rate and all selected windows.
-/// This is the bounded paired-study protocol, not an arbitrary training scheduler.
+/// v1 pairs ordinary/learned geometry; v2 adds identical-initialization frozen
+/// geometry. This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
     request_sha256: String,
@@ -130,6 +133,8 @@ struct Case {
     name: String,
     seed: u64,
     geometry: bool,
+    #[serde(default, deserialize_with = "policy::explicit_update")]
+    geometry_update: Option<GeometryUpdate>,
     parameters: Vec<Parameter>,
 }
 
@@ -154,8 +159,10 @@ fn parse(input: &[u8]) -> Result<Request> {
     let r: Request = serde_json::from_slice(input)?;
     let c = &r.config;
     // Bounds belong to this interactive study runner, not the public model API.
-    if r.schema != "spiraltorch.byte_corpus.request.v1"
-        || !(1..=8).contains(&c.batch)
+    if !matches!(
+        r.schema.as_str(),
+        "spiraltorch.byte_corpus.request.v1" | "spiraltorch.byte_corpus.request.v2"
+    ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
         || !(2..=256).contains(&c.hidden)
@@ -172,7 +179,7 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(1..=128).contains(&r.validation_batches.len())
         || !(1..=64).contains(&r.checkpoint_every)
         || !(2..=16).contains(&r.cases.len())
-        || r.cases.len() % 2 != 0
+        || r.cases.len() % if r.controls() { 3 } else { 2 } != 0
     {
         return Err("invalid study configuration".into());
     }
@@ -210,9 +217,7 @@ fn parse(input: &[u8]) -> Result<Request> {
     }
     for seed in seeds {
         let pair: Vec<_> = r.cases.iter().filter(|c| c.seed == seed).collect();
-        if pair.len() != 2 || pair[0].geometry == pair[1].geometry {
-            return Err("each seed needs one ordinary and one geometry case".into());
-        }
+        r.validate_modes(&pair)?;
         let core = |case: &Case| {
             case.parameters
                 .iter()
@@ -226,7 +231,7 @@ fn parse(input: &[u8]) -> Result<Request> {
                 })
                 .collect::<Vec<_>>()
         };
-        if core(pair[0]) != core(pair[1]) {
+        if pair[1..].iter().any(|case| core(pair[0]) != core(case)) {
             return Err("paired ordinary initial parameters differ".into());
         }
     }
@@ -441,7 +446,7 @@ impl ByteCorpusStudy {
     /// training even when the original request used compact literals like 1e-4.
     pub fn checkpoint_size_bound(&self) -> Result<usize> {
         let mut bound = serde_json::to_vec(&ByteCorpusStudyCheckpoint {
-            schema: CHECKPOINT_SCHEMA.to_owned(),
+            schema: self.request.checkpoint_schema().to_owned(),
             request_sha256: self.request_sha256.clone(),
             completed_updates: self.total_updates() as u32,
             cases: self
@@ -483,7 +488,7 @@ impl ByteCorpusStudy {
         checkpoint: &ByteCorpusStudyCheckpoint,
     ) -> Result<Vec<ByteDecoderCheckpoint>> {
         let cursor = checkpoint.completed_updates();
-        if checkpoint.schema != CHECKPOINT_SCHEMA
+        if checkpoint.schema != self.request.checkpoint_schema()
             || checkpoint.request_sha256 != self.request_sha256
             || cursor > self.total_updates()
             || checkpoint.cases.len() != self.request.cases.len()
@@ -521,9 +526,11 @@ impl ByteCorpusStudy {
                 if model.attempted_revision() != cursor as u64
                     || model.topology_json()? != initial.topology_json()?
                     || (cursor == 0 && model.to_json()? != initial.to_json()?)
+                    || (case.frozen() && !model.geometry_parameters_match(&initial)?)
                 {
                     return Err(
-                        "checkpoint model revision, topology or initial values differ".into(),
+                        "checkpoint model revision, topology or initial/frozen values differ"
+                            .into(),
                     );
                 }
                 Ok(model)
@@ -600,6 +607,18 @@ impl ByteCorpusStudy {
                 Some(models) => models[index].restore_wgpu(runtime.clone())?,
                 None => plan(&r.config, case)?.compile_training_wgpu(runtime.clone())?,
             };
+            let rates = if case.frozen() {
+                let mut rates = vec![r.rate; model.parameter_layout().len()];
+                rates[model
+                    .parameter_layout()
+                    .geometry()
+                    .ok_or("missing frozen geometry")?
+                    .all()]
+                .fill(0.);
+                Some(rates)
+            } else {
+                None
+            };
             let (mut training, mut evaluations) = if let Some(checkpoint) = resume {
                 let saved = &checkpoint.cases[index];
                 (saved.training.clone(), saved.validation.clone())
@@ -631,7 +650,10 @@ impl ByteCorpusStudy {
                 let loss =
                     tape.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
                 let gradients = model.backward(&tape, loss.prediction_gradient())?;
-                let update = model.sgd(&gradients, r.rate)?;
+                let update = match &rates {
+                    Some(rates) => model.sgd_with_rates(&gradients, rates)?,
+                    None => model.sgd(&gradients, r.rate)?,
+                };
                 pending.push((update, loss.value().clone()));
                 if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
                     // Bounded bursts; all receipts are drained even at a pause
@@ -656,11 +678,32 @@ impl ByteCorpusStudy {
                 }
             }
             let final_values = read_many(&model, model.parameter_snapshot().values()).await?;
-            reports.push(json!({"name":case.name,"seed":case.seed,"geometry":case.geometry,
+            if case.frozen()
+                && case
+                    .parameters
+                    .iter()
+                    .zip(&final_values)
+                    .any(|(p, values)| {
+                        p.name.starts_with("geometry.") && !policy::same_bits(&p.values, values)
+                    })
+            {
+                return Err("frozen geometry changed during the study".into());
+            }
+            let mut report = json!({"name":case.name,"seed":case.seed,"geometry":case.geometry,
                 "parameter_tensors":case.parameters.len(),
                 "parameter_scalars":case.parameters.iter().map(|p| p.values.len()).sum::<usize>(),
                 "training":training,"validation":evaluations.iter().map(|e| e.report(r)).collect::<Vec<_>>(),
-                "final_parameters":final_values}));
+                "final_parameters":final_values});
+            if r.controls() {
+                report["geometry_update"] = json!(case.geometry_update);
+                report["trainable_parameter_scalars"] = json!(case
+                    .parameters
+                    .iter()
+                    .filter(|p| !case.frozen() || !p.name.starts_with("geometry."))
+                    .map(|p| p.values.len())
+                    .sum::<usize>());
+            }
+            reports.push(report);
             if capture {
                 let readback = model.checkpoint_snapshot()?;
                 #[cfg(not(target_arch = "wasm32"))]
@@ -675,16 +718,12 @@ impl ByteCorpusStudy {
                 });
             }
         }
-        let schema = if stop_after == self.total_updates() {
-            "spiraltorch.byte_corpus.result.v1"
-        } else {
-            "spiraltorch.byte_corpus.partial.v1"
-        };
+        let schema = r.report_schema(stop_after == self.total_updates());
         let report = json!({"schema":schema,"engine":"spiraltorch","request_sha256":self.request_sha256,
             "adapter":format!("{:?}",runtime.adapter_info()),"cases":reports,
             "scope":"Document-held-out byte corpus pilot; no language-quality superiority or speed claim"});
         let checkpoint = capture.then(|| ByteCorpusStudyCheckpoint {
-            schema: CHECKPOINT_SCHEMA.to_owned(),
+            schema: r.checkpoint_schema().to_owned(),
             request_sha256: self.request_sha256.clone(),
             completed_updates: stop_after as u32,
             cases: saved_cases,
@@ -697,7 +736,7 @@ impl ByteCorpusStudy {
 mod tests {
     use super::*;
 
-    fn fixture() -> Value {
+    pub(super) fn fixture() -> Value {
         let mut p = Vec::new();
         let mut add = |name: &str, shape: &[usize]| {
             p.push(json!({"name":name,"shape":shape,"values":vec![0.1;shape.iter().product()]}));
@@ -739,14 +778,14 @@ mod tests {
                 {"name":"geometry","seed":7,"geometry":true,"parameters":geometry}]})
     }
 
-    fn valid(value: &Value) -> bool {
+    pub(super) fn valid(value: &Value) -> bool {
         ByteCorpusStudy::from_json(&serde_json::to_vec(value).unwrap()).is_ok()
     }
 
     // Synthetic records exercise structural validation, not proof of training.
-    fn saved(study: &ByteCorpusStudy, cursor: usize) -> ByteCorpusStudyCheckpoint {
+    pub(super) fn saved(study: &ByteCorpusStudy, cursor: usize) -> ByteCorpusStudyCheckpoint {
         ByteCorpusStudyCheckpoint {
-            schema: CHECKPOINT_SCHEMA.into(),
+            schema: study.request.checkpoint_schema().into(),
             request_sha256: study.request_sha256.clone(),
             completed_updates: cursor as u32,
             cases: study
