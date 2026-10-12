@@ -13,7 +13,7 @@ const METRICS: [ByteDecoderPairMetric; 2] = [
 #[serde(deny_unknown_fields)]
 pub(super) struct CalibrationSpec {
     source_request_sha256: String,
-    train_batch_indices: Vec<usize>,
+    pub(super) train_batch_indices: Vec<usize>,
     relative_tolerance: f64,
 }
 
@@ -75,7 +75,7 @@ fn candidate_plan(
     plan(&r.config, &case)
 }
 
-async fn measure(
+pub(super) async fn measure(
     r: &Request,
     plan: &ByteDecoderPlan,
     runtime: &WgpuRuntime,
@@ -121,7 +121,7 @@ async fn measure(
     Ok(moments)
 }
 
-fn checked_errors(
+pub(super) fn checked_errors(
     reference: &[CausalBiasMoments],
     candidate: &[CausalBiasMoments],
 ) -> Result<Vec<Vec<f64>>> {
@@ -157,6 +157,20 @@ pub(super) async fn verify_initial(r: &Request, runtime: &WgpuRuntime) -> Result
         for metric in &METRICS[..if r.fisher_controls() { 2 } else { 1 }] {
             let fitted = plan(&r.config, case_for(r, seed, *metric, true)?)?;
             let actual = measure(r, &fitted, runtime, &spec.train_batch_indices).await?;
+            checked_errors(&target, &actual)?;
+        }
+        for case in r
+            .cases
+            .iter()
+            .filter(|c| c.seed == seed && c.head_pair_metrics.is_some() && !c.frozen())
+        {
+            let actual = measure(
+                r,
+                &plan(&r.config, case)?,
+                runtime,
+                &spec.train_batch_indices,
+            )
+            .await?;
             checked_errors(&target, &actual)?;
         }
     }

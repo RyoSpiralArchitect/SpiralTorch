@@ -110,3 +110,8 @@ These are synthetic correctness checks, not a corpus-quality or speed result.
 Raw weights/checkpoints remain local; scalar evidence and hashes are published
 separately. Learned mixtures and large-scale geometry selection are subsequent
 work, not outcomes of this qualification.
+
+For fixed, calibrated combinations in the actual corpus learner, see
+[the v6 headwise controls](byte_corpus_headwise_controls.md). The study retains
+all nine homogeneous controls before adding six ordered heterogeneous routes
+with trained/frozen twins.

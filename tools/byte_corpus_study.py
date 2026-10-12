@@ -20,6 +20,7 @@ REQUEST_V2 = "spiraltorch.byte_corpus.request.v2"
 REQUEST_V3 = "spiraltorch.byte_corpus.request.v3"
 REQUEST_V4 = "spiraltorch.byte_corpus.request.v4"
 REQUEST_V5 = "spiraltorch.byte_corpus.request.v5"
+REQUEST_V6 = "spiraltorch.byte_corpus.request.v6"
 POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
 FISHER = "categorical_fisher_rao_squared.v1"
 ORIGINAL, MATCHED = "original", "matched_poincare_rms"
@@ -78,6 +79,11 @@ def trainable_scalars(case):
 
 
 def request_version(request):
+    if request["schema"] == REQUEST_V6:
+        load_reference("byte_corpus_headwise").validate_request(request)
+        return 6
+    if "headwise_controls" in request or any("head_pair_metrics" in c for c in request["cases"]):
+        raise ValueError("headwise metadata belongs to v6 only")
     fisher = request["schema"] == REQUEST_V5
     calibrated = request["schema"] in (REQUEST_V4, REQUEST_V5)
     if calibrated:
@@ -332,6 +338,7 @@ def reference(args):
     request = decode_json(raw)
     version = request_version(request)
     config = request["config"]
+    headwise_pair = load_reference("byte_corpus_headwise").pair_bias if version == 6 else None
     b, t, w = config["batch"], config["steps"], config["width"]
 
     def batch(documents, selected):
@@ -344,7 +351,7 @@ def reference(args):
     train = [batch(request["train_documents"], s) for s in request["train_batches"]]
     calibration = None
     if version >= 4:
-        fisher_metric = load_reference("fisher_rao_reference").metric if version == 5 else None
+        fisher_metric = load_reference("fisher_rao_reference").metric if version >= 5 else None
         calibration = load_reference("byte_corpus_calibration").verify_initial_rms(request, wave, metric, fisher_metric)
     valid = [batch(request["validation_documents"], s) for s in request["validation_batches"]]
     reports = []
@@ -366,7 +373,10 @@ def reference(args):
                 count = 13 if topos else 12
                 pair = None
                 if case["geometry"]:
-                    if case.get("pair_metric") == FLAT:
+                    if "head_pair_metrics" in case:
+                        pair = headwise_pair(
+                            coordinates, p[6 + i], case["head_pair_metrics"][i], config["curvature"], metric, fisher_metric)
+                    elif case.get("pair_metric") == FLAT:
                         square = (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
                         pair = (-functional.softplus(p[6 + i])[None, :, None, None] * (4 * square[:, None])).tril()
                     elif case.get("pair_metric") == FISHER:
@@ -404,7 +414,9 @@ def reference(args):
                             final_parameters=[v.detach().reshape(-1).tolist() for v in p]))
         if version >= 2:
             reports[-1].update(geometry_update=case["geometry_update"], trainable_parameter_scalars=trainable_scalars(case))
-        if version >= 3:
+        if "head_pair_metrics" in case:
+            reports[-1]["head_pair_metrics"] = case["head_pair_metrics"]
+        elif version >= 3:
             reports[-1]["pair_metric"] = case.get("pair_metric")
         if version >= 4:
             reports[-1]["bias_initialization"] = case["bias_initialization"]
@@ -465,7 +477,10 @@ def compare(request_raw, reference_report, actual):
                                 or type(row.get("trainable_parameter_scalars")) is not int
                                 or row["trainable_parameter_scalars"] != trainable_scalars(spec)):
                 raise ValueError("case update policy or trainable count mismatch")
-            if version >= 3 and ("pair_metric" not in row or row["pair_metric"] != spec.get("pair_metric")):
+            if "head_pair_metrics" in spec:
+                if row.get("head_pair_metrics") != spec["head_pair_metrics"] or "pair_metric" in row:
+                    raise ValueError("case headwise metric identity mismatch")
+            elif version >= 3 and ("head_pair_metrics" in row or "pair_metric" not in row or row["pair_metric"] != spec.get("pair_metric")):
                 raise ValueError("case metric identity mismatch")
             if version >= 4 and row.get("bias_initialization") != spec["bias_initialization"]:
                 raise ValueError("case initialization identity mismatch")
@@ -507,6 +522,8 @@ def compare(request_raw, reference_report, actual):
                     raise ValueError("unqualified geometry learning delta: " + desc["name"])
                 geometry_deltas.append(dict(name=desc["name"], actual_delta_l2=actual_norm,
                                             reference_delta_l2=expected_norm, relative_l2_error=error / expected_norm))
+                if "head_pair_metrics" in spec and desc["name"].startswith("geometry.raw_gain."):
+                    geometry_deltas[-1]["per_head"] = load_reference("byte_corpus_headwise").gain_deltas(initial, a, e)
         summaries.append(dict(name=name, seed=spec["seed"], geometry=spec["geometry"],
                               parameter_scalars=got["parameter_scalars"], train_ce_max_error=train_error,
                               heldout_ce_max_error=eval_error, final_parameter_max_error=parameter_error,
@@ -515,7 +532,10 @@ def compare(request_raw, reference_report, actual):
         if version >= 2:
             summaries[-1].update(geometry_update=spec["geometry_update"], trainable_parameter_scalars=trainable_scalars(spec))
         if version >= 3:
-            summaries[-1]["pair_metric"] = spec.get("pair_metric")
+            if "head_pair_metrics" in spec:
+                summaries[-1]["head_pair_metrics"] = spec["head_pair_metrics"]
+            else:
+                summaries[-1]["pair_metric"] = spec.get("pair_metric")
             summaries[-1]["reference_final_heldout_bpb"] = heldout_bpb(expected["validation"][-1])
             summaries[-1]["final_heldout_bpb_abs_error"] = abs(summaries[-1]["final_heldout_bpb"] - summaries[-1]["reference_final_heldout_bpb"])
         if version >= 4:
@@ -523,13 +543,13 @@ def compare(request_raw, reference_report, actual):
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
-        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7, 5: 9}[version] or {c["geometry"] for c in paired} != {False, True}:
+        if len(paired) != {1: 2, 2: 3, 3: 5, 4: 7, 5: 9, 6: 21}[version] or {c["geometry"] for c in paired} != {False, True}:
             raise ValueError("incomplete paired seed")
         plain = next(c for c in paired if not c["geometry"])
-        geometry = next(c for c in paired if c["geometry"] and not frozen(c) and c.get("pair_metric", POINCARE) == POINCARE)
+        geometry = next(c for c in paired if c["geometry"] and not frozen(c) and "head_pair_metrics" not in c and c.get("pair_metric", POINCARE) == POINCARE)
         pairs.append(dict(seed=seed, geometry_minus_ordinary_bpb=geometry["final_heldout_bpb"] - plain["final_heldout_bpb"]))
         if version >= 2:
-            fixed = next(c for c in paired if frozen(c) and c.get("pair_metric", POINCARE) == POINCARE)
+            fixed = next(c for c in paired if frozen(c) and "head_pair_metrics" not in c and c.get("pair_metric", POINCARE) == POINCARE)
             pairs[-1].update(frozen_geometry_minus_ordinary_bpb=fixed["final_heldout_bpb"] - plain["final_heldout_bpb"],
                              learned_geometry_minus_frozen_bpb=geometry["final_heldout_bpb"] - fixed["final_heldout_bpb"])
         if version >= 3:
@@ -560,7 +580,7 @@ def compare(request_raw, reference_report, actual):
                         calibrated_metric_by_training_interaction_bpb=training - (geometry[key] - fixed[key]))
                 pairs[-1].update(contrasts("final_heldout_bpb"))
                 reference_contrasts.update(contrasts(r))
-                if version == 5:
+                if version >= 5:
                     fisher = next(c for c in paired if c.get("pair_metric") == FISHER and not frozen(c))
                     fisher_frozen = next(c for c in paired if c.get("pair_metric") == FISHER and frozen(c))
                     def fisher_contrasts(key):
@@ -592,6 +612,10 @@ def compare(request_raw, reference_report, actual):
         result["scope"] = "One frozen initial-weight request across engines; flat RMS calibration uses declared training windows only, not matched patterns or dynamics; seven arms/seed, no general quality or speed claim"
     if version == 5:
         result["scope"] = "Nine arms/seed: v4 plus RMS-matched Fisher-Rao trained/frozen; same declared training windows and frozen request across engines, not matched patterns/dynamics/compute or general quality/speed."
+    if version == 6:
+        result["headwise_controls"] = request["headwise_controls"]
+        result["headwise_contrasts"] = load_reference("byte_corpus_headwise").contrasts(summaries)
+        result["scope"] = "21 arms/seed: all nine v5 arms plus six ordered heterogeneous two-head routes trained/frozen. Inherited per-head gains, no refitting. Same data/update budget, not matched patterns/dynamics/compute or a general quality/speed claim."
     return result
 
 

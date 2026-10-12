@@ -1,5 +1,8 @@
 #[cfg(not(target_arch = "wasm32"))]
-use st_nn::resident::{ByteCorpusBiasCalibration, ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES};
+use st_nn::resident::{
+    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusStudy,
+    BYTE_CORPUS_STUDY_MAX_BYTES,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_request(path: &std::path::Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -35,6 +38,7 @@ struct Args {
     stop: Option<usize>,
     calibrate: Option<Vec<usize>>,
     fisher: bool,
+    headwise: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -45,9 +49,16 @@ impl Args {
         let mut args = args.into_iter();
         let mut result = Self {
             request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json]")?.into(),
-            resume: None, output: None, stop: None, calibrate: None, fisher: false,
+            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false,
         };
         while let Some(flag) = args.next() {
+            if flag == "--prepare-headwise" {
+                if result.headwise {
+                    return Err("duplicate headwise preparation flag".into());
+                }
+                result.headwise = true;
+                continue;
+            }
             let value = args.next().ok_or("missing flag value")?;
             match flag.to_str() {
                 Some("--resume") if result.resume.is_none() => result.resume = Some(value.into()),
@@ -71,7 +82,10 @@ impl Args {
                 _ => return Err("unknown or duplicate flag".into()),
             }
         }
-        if result.calibrate.is_some()
+        if result.headwise && result.calibrate.is_some() {
+            return Err("headwise preparation inherits a v5 calibration; no refitting".into());
+        }
+        if (result.calibrate.is_some() || result.headwise)
             && (result.stop.is_some() || result.resume.is_some() || result.output.is_some())
         {
             return Err(
@@ -115,6 +129,18 @@ fn save_checkpoint(path: &std::path::Path, json: &str) -> Result<(), Box<dyn std
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(std::env::args_os().skip(1))?;
     let input = read_request(&args.request)?;
+    if args.headwise {
+        let preparation = ByteCorpusHeadwiseControls::from_json(&input)?;
+        let (runtime, _) =
+            st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.headwise")?;
+        let prepared = pollster::block_on(preparation.prepare(runtime))?;
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
     if let Some(indices) = args.calibrate {
         let mut preparation = ByteCorpusBiasCalibration::from_json(&input, &indices)?;
         if args.fisher {
@@ -203,6 +229,17 @@ mod tests {
                 "1",
             ],
             vec!["request", "--calibrate-fisher", "0", "--resume", "old.json"],
+            vec!["request", "--prepare-headwise", "--prepare-headwise"],
+            vec!["request", "--prepare-headwise", "--calibrate-fisher", "0"],
+            vec!["request", "--calibrate-flat", "0", "--prepare-headwise"],
+            vec!["request", "--prepare-headwise", "--stop-after", "1"],
+            vec!["request", "--prepare-headwise", "--resume", "old.json"],
+            vec![
+                "request",
+                "--prepare-headwise",
+                "--checkpoint-out",
+                "new.json",
+            ],
         ] {
             assert!(super::Args::parse(args.into_iter().map(std::ffi::OsString::from)).is_err());
         }
@@ -224,6 +261,15 @@ mod tests {
         .unwrap();
         assert!(fisher.fisher);
         assert_eq!(fisher.calibrate, Some(vec![0, 1]));
+        assert!(
+            super::Args::parse(
+                ["request", "--prepare-headwise"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+            )
+            .unwrap()
+            .headwise
+        );
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("new.json");
         let args = [

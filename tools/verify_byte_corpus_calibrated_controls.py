@@ -39,7 +39,9 @@ def validate_report(report, request, request_hash, cursor):
         require(resume.exact(report.get("bias_calibration"), request["bias_calibration"]), "request-derived calibration")
     revisions = [0] + [r for r in range(1, cursor + 1) if r % request["checkpoint_every"] == 0 or r == total]
     for row, spec in zip(report["cases"], request["cases"]):
-        for key in ("name", "seed", "geometry", "geometry_update", "pair_metric"):
+        metric_field = "head_pair_metrics" if "head_pair_metrics" in spec else "pair_metric"
+        require(("pair_metric" if metric_field == "head_pair_metrics" else "head_pair_metrics") not in row, "exclusive case metric")
+        for key in ("name", "seed", "geometry", "geometry_update", metric_field):
             require(key in row and resume.exact(row[key], spec.get(key)), "request-derived case metadata")
         if version >= 4:
             require(row.get("bias_initialization") == spec["bias_initialization"], "request-derived initialization")
@@ -68,7 +70,13 @@ def validate_report(report, request, request_hash, cursor):
 def verify(request_raw, source_raw, full, retained, first):
     request, source = map(study.decode_json, (request_raw, source_raw))
     version, source_version = study.request_version(request), study.request_version(source)
-    require((version, source_version) in ((4, 3), (5, 4)), "control schema")
+    require((version, source_version) in ((4, 3), (5, 4), (6, 5)), "control schema")
+    if version == 6:
+        require(request["headwise_controls"]["source_request_sha256"] == study.digest(source_raw), "headwise source binding")
+        for key in source:
+            if key not in ("schema", "cases"):
+                require(resume.exact(source[key], request.get(key)), "headwise source recipe")
+        require(resume.exact(source["cases"], request["cases"][:len(source["cases"])]), "headwise source initial cases")
     if version == 4:
         require(request["bias_calibration"]["source_request_sha256"] == study.digest(source_raw), "source binding")
     else:
@@ -95,7 +103,8 @@ def verify(request_raw, source_raw, full, retained, first):
         require(resume.exact(copy, old), "inherited full case report changed")
         old_names.append(old["name"])
     for spec, result, prefix in zip(request["cases"], full["cases"], first["cases"]):
-        require(all(resume.exact(prefix[k], result[k]) for k in ("name", "seed", "geometry", "geometry_update", "pair_metric", "bias_initialization", "parameter_tensors", "parameter_scalars", "trainable_parameter_scalars")), "first-step case metadata")
+        metric_field = "head_pair_metrics" if "head_pair_metrics" in spec else "pair_metric"
+        require(all(resume.exact(prefix[k], result[k]) for k in ("name", "seed", "geometry", "geometry_update", metric_field, "bias_initialization", "parameter_tensors", "parameter_scalars", "trainable_parameter_scalars")), "first-step case metadata")
         require(resume.exact(prefix["training"], result["training"][:1])
                 and [p["revision"] for p in prefix["training"]] == [1]
                 and resume.exact(prefix["validation"], [p for p in result["validation"] if p["revision"] <= 1]), "first-step prefix or evaluation schedule")
@@ -106,11 +115,14 @@ def verify(request_raw, source_raw, full, retained, first):
     pairs = []
     for seed in sorted({c["seed"] for c in request["cases"]}):
         modes = [(study.POINCARE, study.ORIGINAL), (study.FLAT, study.ORIGINAL), (study.FLAT, study.MATCHED)]
-        if version == 5:
+        if version >= 5:
             modes.append((study.FISHER, study.MATCHED))
+        if version == 6:
+            modes.extend(([list(route)], study.MATCHED) for route in load("byte_corpus_headwise").ROUTES)
         for metric, initialization in modes:
+            field = "head_pair_metrics" if isinstance(metric, list) else "pair_metric"
             indices = [i for i, c in enumerate(request["cases"]) if c["seed"] == seed
-                       and c.get("pair_metric") == metric and c["bias_initialization"] == initialization]
+                       and c.get(field) == metric and c["bias_initialization"] == initialization]
             trained = next(i for i in indices if not study.frozen(request["cases"][i]))
             fixed = next(i for i in indices if study.frozen(request["cases"][i]))
             a, b = first["cases"][trained], first["cases"][fixed]
@@ -127,10 +139,11 @@ def verify(request_raw, source_raw, full, retained, first):
                     if desc["name"] in ("token_embedding", "position_embedding"):
                         require(bits(learned) != original, "embedding did not learn")
             require(bool(moving), "trained geometry did not change")
-            pairs.append(dict(seed=seed, pair_metric=metric, bias_initialization=initialization,
+            pairs.append(dict(seed=seed, bias_initialization=initialization,
                               first_backbone_update_bits_identical=True, both_embeddings_moved=True,
                               frozen_initial_bits_preserved=True, moving_geometry_families=moving))
-    return dict(schema=f"spiraltorch.byte_corpus.calibrated_controls.v{2 if version == 5 else 1}", passed=True,
+            pairs[-1][field] = metric
+    return dict(schema=f"spiraltorch.byte_corpus.calibrated_controls.v{version-3}", passed=True,
                 request_sha256=study.digest(request_raw), source_request_sha256=study.digest(source_raw),
                 inherited_full_reports_exact=old_names, pairs=pairs,
                 scope="Same-runtime inheritance and separately executed first-update controls, not quality or speed evidence")

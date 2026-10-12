@@ -1,10 +1,19 @@
 """Independent measurement only. Fitted weights are prepared by Rust, not here."""
 import math
+import importlib.util
+from pathlib import Path
+
+
+def headwise_module():
+    spec = importlib.util.spec_from_file_location("byte_corpus_headwise", Path(__file__).with_name("byte_corpus_headwise.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def candidate_metrics(request):
     return (["euclidean_chord_squared.v1", "categorical_fisher_rao_squared.v1"]
-            if request["schema"] == "spiraltorch.byte_corpus.request.v5"
+            if request["schema"] in ("spiraltorch.byte_corpus.request.v5", "spiraltorch.byte_corpus.request.v6")
             else ["euclidean_chord_squared.v1"])
 
 
@@ -16,11 +25,19 @@ def verify_qualification(request, record):
     cases = record["cases"]
     seeds = sorted({c["seed"] for c in request["cases"]})
     metrics = candidate_metrics(request)
-    expected = [(seed, metric) for seed in seeds for metric in metrics]
+    headwise = request["schema"] == "spiraltorch.byte_corpus.request.v6"
+    expected = []
+    for seed in seeds:
+        expected.extend((seed, metric, None) for metric in metrics)
+        if headwise:
+            expected.extend((seed, None, c) for c in request["cases"]
+                            if c["seed"] == seed and "head_pair_metrics" in c and c["geometry_update"] == "train")
     if (type(cases) is not list or len(cases) != len(expected)
             or any(type(c.get("seed")) is not int or c["seed"] != seed
-                   or (c.get("pair_metric") != metric if len(metrics) == 2 else "pair_metric" in c)
-                   for c, (seed, metric) in zip(cases, expected))):
+                   or ((c.get("head_pair_metrics") != route["head_pair_metrics"] or c.get("name") != route["name"] or "pair_metric" in c)
+                       if route is not None else
+                       ("head_pair_metrics" in c or (c.get("pair_metric") != metric if len(metrics) == 2 else "pair_metric" in c)))
+                   for c, (seed, metric, route) in zip(cases, expected))):
         raise ValueError("independent calibration seed coverage")
     cfg = request["config"]
     spec = request["bias_calibration"]
@@ -53,6 +70,7 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
     config = request["config"]
     batch, t = config["batch"], config["steps"]
     spec = request["bias_calibration"]
+    headwise = headwise_module() if request["schema"] == "spiraltorch.byte_corpus.request.v6" else None
 
     def moments(case):
         p = [torch.tensor(v["values"], device="cpu", dtype=torch.float32).reshape(v["shape"])
@@ -68,7 +86,10 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
                 coordinates, _ = wave(embedded @ p[2] + p[3], p[4], p[5],
                     torch.zeros((batch, config["geometry_cols"]), device="cpu"), config["curvature"])
                 for block in range(len(config["blocks"])):
-                    if case["pair_metric"] == "euclidean_chord_squared.v1":
+                    if "head_pair_metrics" in case:
+                        scores = headwise.pair_bias(coordinates, p[6+block], case["head_pair_metrics"][block],
+                                                   config["curvature"], metric, fisher_metric)
+                    elif case["pair_metric"] == "euclidean_chord_squared.v1":
                         distance = (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
                         scores = (-functional.softplus(p[6+block])[None, :, None, None] * (4 * distance[:, None])).tril()
                     elif case["pair_metric"] == "categorical_fisher_rao_squared.v1":
@@ -90,9 +111,11 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
         target = next(c for c in group if c.get("pair_metric") == "poincare_squared.v1")
         reference, count = moments(target)
         metrics = candidate_metrics(request)
-        for selected_metric in metrics:
-            fitted = next(c for c in group if c["bias_initialization"] == "matched_poincare_rms"
-                          and c.get("pair_metric") == selected_metric)
+        selected = [next(c for c in group if c["bias_initialization"] == "matched_poincare_rms"
+                         and c.get("pair_metric") == selected_metric) for selected_metric in metrics]
+        if headwise:
+            selected.extend(c for c in group if "head_pair_metrics" in c)
+        for fitted in selected:
             observed, other_count = moments(fitted)
             if count != other_count:
                 raise ValueError("calibration measurement coverage differs")
@@ -109,8 +132,10 @@ def verify_initial_rms(request, wave, metric, fisher_metric=None):
                 errors.append(row)
             reports.append(dict(seed=seed, reference_rms=reference, fitted_rms=observed,
                                 valid_pairs_per_head=count, realized_relative_errors=errors))
-            if len(metrics) == 2:
-                reports[-1]["pair_metric"] = selected_metric
+            if "head_pair_metrics" in fitted:
+                reports[-1].update(name=fitted["name"], head_pair_metrics=fitted["head_pair_metrics"])
+            elif len(metrics) == 2:
+                reports[-1]["pair_metric"] = fitted["pair_metric"]
     result = dict(passed=True, no_fitting=True, no_updates_consumed=True, cases=reports)
     verify_qualification(request, result)
     return result

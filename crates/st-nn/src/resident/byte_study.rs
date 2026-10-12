@@ -26,8 +26,10 @@ type Result<T> = ByteCorpusStudyResult<T>;
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
 mod calibration;
+mod headwise;
 mod policy;
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
+pub use headwise::ByteCorpusHeadwiseControls;
 use policy::{BiasInitialization, GeometryUpdate};
 
 /// A fixed request: documents, initial models, SGD rate and all selected windows.
@@ -35,6 +37,7 @@ use policy::{BiasInitialization, GeometryUpdate};
 /// geometry; v3 crosses learned/frozen with Poincare/flat pair distance.
 /// v4 adds a prepared, gain-only RMS-matched flat learned/frozen pair.
 /// v5 retains those seven arms and adds a matched Fisher-Rao learned/frozen pair.
+/// v6 retains v5 and adds every ordered heterogeneous two-head assignment.
 /// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
@@ -142,6 +145,8 @@ struct Case {
     geometry_update: Option<GeometryUpdate>,
     #[serde(default, deserialize_with = "policy::explicit_metric")]
     pair_metric: Option<ByteDecoderPairMetric>,
+    #[serde(default, deserialize_with = "headwise::explicit_metrics")]
+    head_pair_metrics: Option<Vec<Vec<ByteDecoderPairMetric>>>,
     #[serde(default, deserialize_with = "policy::explicit_initialization")]
     bias_initialization: Option<BiasInitialization>,
     parameters: Vec<Parameter>,
@@ -161,6 +166,8 @@ struct Request {
     cases: Vec<Case>,
     #[serde(default, deserialize_with = "calibration::explicit_spec")]
     bias_calibration: Option<calibration::CalibrationSpec>,
+    #[serde(default, deserialize_with = "headwise::explicit_spec")]
+    headwise_controls: Option<headwise::HeadwiseSpec>,
 }
 
 fn parse(input: &[u8]) -> Result<Request> {
@@ -177,6 +184,7 @@ fn parse(input: &[u8]) -> Result<Request> {
             | "spiraltorch.byte_corpus.request.v3"
             | "spiraltorch.byte_corpus.request.v4"
             | "spiraltorch.byte_corpus.request.v5"
+            | "spiraltorch.byte_corpus.request.v6"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
@@ -193,7 +201,9 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(1..=1024).contains(&r.train_batches.len())
         || !(1..=128).contains(&r.validation_batches.len())
         || !(1..=64).contains(&r.checkpoint_every)
-        || !(2..=if r.fisher_controls() {
+        || !(2..=if r.headwise_controls() {
+            63
+        } else if r.fisher_controls() {
             27
         } else if r.calibration_controls() {
             21
@@ -206,6 +216,7 @@ fn parse(input: &[u8]) -> Result<Request> {
         return Err("invalid study configuration".into());
     }
     calibration::validate_spec(&r)?;
+    headwise::validate_spec(&r)?;
     if r.train_documents.is_empty()
         || r.validation_documents.is_empty()
         || r.train_documents
@@ -320,13 +331,16 @@ fn plan(c: &Config, case: &Case) -> Result<ByteDecoderPlan> {
         let gains = (0..c.blocks.len())
             .map(|i| p.values(&format!("geometry.raw_gain.{i}"), &[c.heads]))
             .collect::<Result<Vec<_>>>()?;
-        Some(
-            ByteDecoderGeometryPlan::new(&projection, &decay, &phase, &gains, c.curvature)?
-                .with_pair_metric(
-                    case.pair_metric
-                        .unwrap_or(ByteDecoderPairMetric::PoincareSquared),
-                ),
-        )
+        let geometry =
+            ByteDecoderGeometryPlan::new(&projection, &decay, &phase, &gains, c.curvature)?;
+        Some(if let Some(metrics) = &case.head_pair_metrics {
+            geometry.with_head_pair_metrics(metrics)?
+        } else {
+            geometry.with_pair_metric(
+                case.pair_metric
+                    .unwrap_or(ByteDecoderPairMetric::PoincareSquared),
+            )
+        })
     } else {
         None
     };
@@ -729,7 +743,9 @@ impl ByteCorpusStudy {
                     .map(|p| p.values.len())
                     .sum::<usize>());
             }
-            if r.metric_controls() {
+            if let Some(metrics) = &case.head_pair_metrics {
+                report["head_pair_metrics"] = json!(metrics);
+            } else if r.metric_controls() {
                 report["pair_metric"] = json!(case.pair_metric);
             }
             if r.calibration_controls() {

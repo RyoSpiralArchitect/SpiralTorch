@@ -3,34 +3,44 @@
 <link rel="icon" href="data:,">
 <title>Byte corpus training-only bias preparation</title>
 <h1>Byte corpus training-only bias preparation</h1>
-<p>Fits on preselected training batches 0, 1, 2, 3. This is initialization, not learning.</p>
+<p id="recipe">Fits on preselected training batches 0, 1, 2, 3. This is initialization, not learning.</p>
 <p id="summary">Loading the frozen v3 source request...</p>
 <a id="download" hidden>Download opaque preparation packet</a>
 <pre id="result" data-status="running">No held-out evaluation or training update.</pre>
 <script type="module">
 const target = document.querySelector("#result");
 try {
-  const response = await fetch("/target/resident-byte-learning-web/source-v3.json", {cache:"no-store"});
+  const params = new URLSearchParams(location.search);
+  const headwise = params.get("headwise") === "1";
+  const fisher = params.get("fisher") === "1";
+  if (headwise && fisher) throw Error("Headwise preparation inherits v5; do not refit");
+  if (headwise) {
+    document.querySelector("#summary").textContent = "Checking fixed head assignments from frozen v5; no fitting.";
+    document.querySelector("#recipe").textContent = "Inherits each head's calibrated gain from the frozen v5 request. Checks RMS on its declared training batches; no fitting or learning updates.";
+  }
+  const response = await fetch(`/target/resident-byte-learning-web/source-v${headwise ? 5 : 3}.json`, {cache:"no-store"});
   if (!response.ok) throw Error("Frozen source is missing");
   const input = await response.text();
   const digest = async text => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), x => x.toString(16).padStart(2,"0")).join("");
   const sourceHash = await digest(input);
-  const fisher = new URLSearchParams(location.search).get("fisher") === "1";
   const wasm = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
   await wasm.default();
   const prepare = fisher ? wasm.prepare_resident_byte_learning_fisher : wasm.prepare_resident_byte_learning;
-  const packetJson = await prepare(input, new Uint32Array([0,1,2,3]));
+  const packetJson = headwise ? await wasm.prepare_resident_byte_learning_headwise(input)
+    : await prepare(input, new Uint32Array([0,1,2,3]));
   const packet = JSON.parse(packetJson);
   if (packet.schema !== "spiraltorch.byte_corpus.prepared.v1" || typeof packet.request_json !== "string" || typeof packet.report_json !== "string") throw Error("Invalid preparation packet");
   const report = JSON.parse(packet.report_json);
-  if (report.schema !== `spiraltorch.byte_corpus.bias_preparation.v${fisher ? 2 : 1}` || report.bias_calibration.source_request_sha256 !== sourceHash
+  const schema = headwise ? "spiraltorch.byte_corpus.headwise_preparation.v1" : `spiraltorch.byte_corpus.bias_preparation.v${fisher ? 2 : 1}`;
+  if (report.schema !== schema || (headwise ? report.source_request_sha256 : report.bias_calibration.source_request_sha256) !== sourceHash
       || report.request_sha256 !== await digest(packet.request_json)) throw Error("Preparation identity differs");
   const link = document.querySelector("#download");
   link.href = URL.createObjectURL(new Blob([packetJson], {type:"application/json"}));
   link.download = "resident-byte-corpus-prepared.json";
   link.hidden = false;
   target.dataset.status = "completed";
-  target.textContent = JSON.stringify({source_sha256:sourceHash, request_sha256:report.request_sha256, fitted_metric_groups:report.cases.length}, null, 2);
+  target.textContent = JSON.stringify({source_sha256:sourceHash, request_sha256:report.request_sha256,
+    [headwise ? "verified_headwise_routes" : "fitted_metric_groups"]:report.cases.length}, null, 2);
   document.querySelector("#summary").textContent = "Prepared. Preserve the opaque request bytes. Verify provenance separately and select ONE request for every engine; do not substitute per-engine fitted weights in a comparison.";
 } catch (error) {
   target.dataset.status = "error";

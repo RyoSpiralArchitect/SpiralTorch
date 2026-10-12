@@ -61,22 +61,34 @@ impl Request {
             "spiraltorch.byte_corpus.request.v3"
                 | "spiraltorch.byte_corpus.request.v4"
                 | "spiraltorch.byte_corpus.request.v5"
+                | "spiraltorch.byte_corpus.request.v6"
         )
     }
 
     pub(super) fn calibration_controls(&self) -> bool {
         matches!(
             self.schema.as_str(),
-            "spiraltorch.byte_corpus.request.v4" | "spiraltorch.byte_corpus.request.v5"
+            "spiraltorch.byte_corpus.request.v4"
+                | "spiraltorch.byte_corpus.request.v5"
+                | "spiraltorch.byte_corpus.request.v6"
         )
     }
 
     pub(super) fn fisher_controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v5"
+        matches!(
+            self.schema.as_str(),
+            "spiraltorch.byte_corpus.request.v5" | "spiraltorch.byte_corpus.request.v6"
+        )
+    }
+
+    pub(super) fn headwise_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v6"
     }
 
     pub(super) fn arms_per_seed(&self) -> usize {
-        if self.fisher_controls() {
+        if self.headwise_controls() {
+            21
+        } else if self.fisher_controls() {
             9
         } else if self.calibration_controls() {
             7
@@ -90,7 +102,9 @@ impl Request {
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.fisher_controls() {
+        if self.headwise_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v6"
+        } else if self.fisher_controls() {
             "spiraltorch.byte_corpus.checkpoint.v5"
         } else if self.calibration_controls() {
             "spiraltorch.byte_corpus.checkpoint.v4"
@@ -104,6 +118,13 @@ impl Request {
     }
 
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.headwise_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v6"
+            } else {
+                "spiraltorch.byte_corpus.partial.v6"
+            };
+        }
         if self.fisher_controls() {
             return if complete {
                 "spiraltorch.byte_corpus.result.v5"
@@ -216,7 +237,8 @@ impl Request {
             if cases
                 .iter()
                 .filter(|c| {
-                    c.geometry == geometry
+                    c.head_pair_metrics.is_none()
+                        && c.geometry == geometry
                         && c.geometry_update == Some(update)
                         && c.pair_metric == metric
                         && c.bias_initialization == initialization
@@ -226,6 +248,9 @@ impl Request {
             {
                 return Err("missing or repeated geometry metric/update arm for seed".into());
             }
+        }
+        if self.headwise_controls() {
+            headwise::validate_modes(cases)?;
         }
         let geometric = cases.iter().filter(|c| c.geometry).collect::<Vec<_>>();
         let equal = |a: &Case, b: &Case, skip_gains: bool| {

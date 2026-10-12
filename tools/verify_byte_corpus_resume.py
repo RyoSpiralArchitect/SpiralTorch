@@ -37,7 +37,7 @@ def exact(left, right):
     return left == right
 
 
-def stored_parameters(record, cursor, pair_metric=None):
+def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None):
     """Extract tensors in Rust's documented owner order; no model mathematics.
 
     Full topology/operation validation remains ByteCorpusStudy's Rust preflight.
@@ -47,7 +47,8 @@ def stored_parameters(record, cursor, pair_metric=None):
             "incomplete model envelope")
     metric_aware = pair_metric in (STUDY.FLAT, STUDY.FISHER)
     require(pair_metric in (None, STUDY.POINCARE, STUDY.FLAT, STUDY.FISHER), "saved metric identity")
-    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{2 if metric_aware else 1}", "model schema")
+    require(head_pair_metrics is None or pair_metric is None, "conflicting saved metric selectors")
+    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{3 if head_pair_metrics is not None else 2 if metric_aware else 1}", "model schema")
     require(record["update_rule"] == "stateless_sgd.v1", "model update rule")
     require(record["window_state"] == "reset_positions_and_geometry.v1", "model window state")
     require(record["attempted_revision"] == str(cursor), "model clock")
@@ -62,10 +63,13 @@ def stored_parameters(record, cursor, pair_metric=None):
         parameters.extend(value["parameters"])
 
     geometry = model["geometry"]
-    require(not metric_aware or geometry is not None, "metric-aware model requires geometry")
+    require(not (metric_aware or head_pair_metrics is not None) or geometry is not None, "metric-aware model requires geometry")
     if geometry is not None:
         fields = {"projection", "curvature", "raw_decay", "raw_phase", "raw_gains"}
-        if metric_aware:
+        if head_pair_metrics is not None:
+            fields.add("head_pair_metrics")
+            require(exact(geometry.get("head_pair_metrics"), head_pair_metrics), "saved headwise metric differs")
+        elif metric_aware:
             fields.add("pair_metric")
             require(geometry.get("pair_metric") == pair_metric, "saved metric differs")
         require(set(geometry) == fields,
@@ -112,7 +116,10 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 trainable = sum(len(p["values"]) for p in case["parameters"]
                                 if case["geometry_update"] != "frozen" or not p["name"].startswith("geometry."))
                 require(exact(report.get("trainable_parameter_scalars"), trainable), "trainable count differs")
-            if version >= 3:
+            if "head_pair_metrics" in case:
+                require(exact(report.get("head_pair_metrics"), case["head_pair_metrics"]) and "pair_metric" not in report, "report headwise metric differs")
+            elif version >= 3:
+                require("head_pair_metrics" not in report, "unexpected report headwise metric")
                 require("pair_metric" in report and exact(report["pair_metric"], case.get("pair_metric")), "report metric differs")
             if version >= 4:
                 require(report.get("bias_initialization") == case["bias_initialization"], "initialization differs")
@@ -147,7 +154,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 "evaluation prefix differs or extra pause evaluation")
         require(saved["name"] == case["name"], "saved case identity")
         model = STUDY.decode_json(saved["model_json"])
-        stored = stored_parameters(model, cursor, case.get("pair_metric"))
+        stored = stored_parameters(model, cursor, case.get("pair_metric"), case.get("head_pair_metrics"))
         require((model["model"]["geometry"] is not None) is case["geometry"], "saved geometry mode")
         require(len(stored) == len(case["parameters"]), "saved tensor count")
         for parameter, expected, readback in zip(stored, case["parameters"], prefix["final_parameters"]):
@@ -167,7 +174,9 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                           "pause": cursor, "evaluation_revisions": evaluations,
                           "final_mean_ce": full["validation"][-1]["mean_ce"]})
         if version >= 3:
-            summaries[-1].update(pair_metric=case.get("pair_metric"), geometry_update=case["geometry_update"])
+            summaries[-1]["geometry_update"] = case["geometry_update"]
+            field = "head_pair_metrics" if "head_pair_metrics" in case else "pair_metric"
+            summaries[-1][field] = case.get(field)
         if version >= 4:
             summaries[-1]["bias_initialization"] = case["bias_initialization"]
     return {"schema": f"spiraltorch.byte_corpus.resume_verification.v{version}", "passed": True,
