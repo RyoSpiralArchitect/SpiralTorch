@@ -6,10 +6,19 @@ without changing the source data, order, seeds, units, gains or original arms.
 
 **Learning comparison complete:** native Metal, browser WebGPU and independent
 CPU-f32 Torch each completed all 75 cases and 9,600 updates. Both resident
-engines pass the unchanged corpus numerical gates. Live pause/resume checks
-for v8 remain pending; this does not claim the entire protocol is complete.
+engines pass the unchanged corpus numerical gates. Native pause-37/fresh-process
+resume and completed-state no-op checks also pass. Browser pause/resume is still
+in progress; this does not claim the entire protocol is complete.
 The earlier `checkpoint-validation.json` intentionally retains the historical
 partial status from before the browser finished.
+
+The native [resume](native-resume-verification.json) and
+[no-op](native-noop-verification.json) checks cover all 75 cases. Resumed
+reports exactly equal uninterrupted learning, including every training and
+evaluation point and final parameter. Saved tensor bits match the paused
+readback, frozen parameters remain unchanged, and no-op checkpoint bytes equal
+the input checkpoint. These runs use the preserved v8 baseline executable,
+not the separate guard-batching optimization candidate.
 
 The [native](native-comparison.json) and [browser](browser-comparison.json)
 qualifications both record maximum CE error `1.431e-6` and parameter error

@@ -55,6 +55,31 @@ Contextual cases add `mixture.query_projection` with `weight_update` and
 `bias: "frozen_zero"`. Model checkpoints use v5; the enclosing corpus
 checkpoint uses v8 and verifies every frozen query parameter before resume.
 
+## Checkpoint And Resume
+
+Keep the request and executable fixed, and use fresh output paths. For a
+pause between scheduled held-out evaluations:
+
+```sh
+"$BIN" "$RAW/input/request.json" --stop-after 37 \
+  --checkpoint-out "$RAW/checkpoint-37.json" > "$RAW/partial-37.json"
+"$BIN" "$RAW/input/request.json" --resume "$RAW/checkpoint-37.json" \
+  --checkpoint-out "$RAW/checkpoint-128.json" > "$RAW/resumed.json"
+python3 -I -S -B tools/verify_byte_corpus_resume.py \
+  "$RAW/input/request.json" "$RAW/native.json" "$RAW/partial-37.json" \
+  "$RAW/resumed.json" "$RAW/checkpoint-37.json" "$RAW/resume-check.json"
+```
+
+The verifier consumes the checkpoint at the **pause**, not the final checkpoint:
+it binds saved tensor bits and histories to the paused report, then requires
+the full resumed report to match uninterrupted learning exactly. A completed
+checkpoint can be reloaded separately to test a no-op, without consuming updates.
+Browser pause uses `byte_learning_resume_browser.html?stop=37`; resume requires
+a fresh page with `?resume=1` and the opaque downloaded checkpoint served as
+`target/resident-byte-learning-web/checkpoint.json`. Native and browser each
+compare against their own uninterrupted result; cross-runtime bitwise equality
+is not required. Keep checkpoints and full parameter reports local.
+
 ## Interpretation
 
 Compare contextual training against both frozen-W and shared-only arms.
