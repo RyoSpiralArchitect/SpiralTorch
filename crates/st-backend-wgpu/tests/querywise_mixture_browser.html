@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Query-local geometry mixtures</title>
+<h1>Query-local geometry mixtures</h1>
+<p id="summary">Running the Rust/WebGPU query-local mixture checks...</p>
+<a id="download" hidden>Download verification result</a>
+<pre id="result" data-status="running"></pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const response = await fetch("/target/querywise-mixture-web/fixture.json", {cache:"no-store"});
+  if (!response.ok) throw Error("Fixture download failed");
+  const input = await response.text();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  const fixtureSha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,"0")).join("");
+  const {default:init, run_querywise_mixture} = await import("/target/querywise-mixture-web/querywise_mixture_browser.js");
+  await init();
+  const report = JSON.parse(await run_querywise_mixture(input));
+  if (report.schema !== "spiraltorch.querywise_mixture.validation.v2" || report.passed !== true
+      || report.checks.length !== JSON.parse(input).cases.length) throw Error("Incomplete verification result");
+  report.fixture_sha256 = fixtureSha256;
+  result.dataset.status = "passed";
+  result.textContent = JSON.stringify(report,null,2);
+  document.querySelector("#summary").textContent = `Passed ${report.checks.length} cases: forward, query-local VJP, SGD and failure guards. Primitive qualification, not an input-conditioned LM or quality/speed claim.`;
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([result.textContent],{type:"application/json"}));
+  link.download = "querywise-mixture-browser.json";
+  link.hidden = false;
+} catch (error) {
+  result.dataset.status = "error";
+  result.textContent = String(error.stack || error);
+  document.querySelector("#summary").textContent = "Verification failed.";
+}
+</script>

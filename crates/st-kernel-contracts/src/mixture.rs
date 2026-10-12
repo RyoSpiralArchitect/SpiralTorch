@@ -3,6 +3,9 @@
 //! conditioned on a future token. Gradients are sums, never implicit means.
 use thiserror::Error;
 
+mod querywise;
+pub use querywise::{QuerywiseMixtureForward, QuerywiseMixtureSpec, QuerywiseMixtureVjp};
+
 pub const MAX_COMPONENTS: usize = 8;
 
 #[derive(Debug, Error, PartialEq)]

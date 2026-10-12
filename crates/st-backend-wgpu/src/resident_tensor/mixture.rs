@@ -2,6 +2,9 @@
 use super::*;
 use st_kernel_contracts::mixture::{HeadwiseMixtureSpec, MixtureError};
 
+mod querywise;
+pub use querywise::{ResidentQuerywiseMixture, ResidentQuerywiseMixtureVjp};
+
 #[derive(Clone, Debug)]
 pub struct ResidentHeadwiseMixture {
     spec: HeadwiseMixtureSpec,

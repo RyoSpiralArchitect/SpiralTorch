@@ -1,5 +1,106 @@
 use super::*;
 use st_kernel_contracts::mixture::HeadwiseMixtureForward;
+use st_kernel_contracts::mixture::{QuerywiseMixtureForward, QuerywiseMixtureSpec};
+
+#[test]
+fn querywise_strides_and_local_pullbacks_preserve_all_axes() {
+    let Some(d) = device() else { return };
+    for shape in [[1, 1, 1, 1, 2], [2, 3, 4, 5, 3], [2, 2, 3, 7, 8]] {
+        let s = QuerywiseMixtureSpec::new(shape).unwrap();
+        let [b, h, q, keys, k] = shape;
+        let x: Vec<_> = (0..s.len()).map(|i| (i as f32 * 0.3).sin()).collect();
+        let logits: Vec<_> = (0..s.router_len())
+            .map(|i| (i as f32 * 0.7).cos())
+            .collect();
+        let seed: Vec<_> = (0..s.output_len())
+            .map(|i| (i as f32 * 0.4).cos())
+            .collect();
+        let strided = |shape: &[usize], values: &[f32]| {
+            let shape = [shape, &[2]].concat();
+            d.upload(
+                &shape,
+                &values.iter().flat_map(|&v| [99., v]).collect::<Vec<_>>(),
+            )
+            .unwrap()
+            .select(shape.len() - 1, 1)
+            .unwrap()
+        };
+        let oracle = QuerywiseMixtureForward::new(s, &x, &logits).unwrap();
+        let f = strided(&shape, &x)
+            .querywise_mixture(&strided(&[b, h, q, k], &logits))
+            .unwrap();
+        assert_eq!(f.output().layout().shape(), [b, h, q, keys]);
+        assert_eq!(f.weights().layout().shape(), [b, h, q, k]);
+        close(&read(f.output()), oracle.output());
+        close(&read(f.weights()), oracle.weights());
+        let expected = oracle.backward(&seed).unwrap();
+        let seed = strided(&[b, h, q, keys], &seed);
+        let g = f.backward(&seed).unwrap();
+        assert_eq!(g.components().layout().shape(), shape);
+        assert_eq!(g.logits().layout().shape(), [b, h, q, k]);
+        close(&read(g.components()), &expected.input);
+        close(&read(g.logits()), &expected.logits);
+        assert_eq!(read(g.logits()), read(f.backward(&seed).unwrap().logits()));
+    }
+}
+
+#[test]
+fn querywise_wrong_shapes_and_guarded_zero_mass_components_reject() {
+    let Some(d) = device() else { return };
+    let x = d.upload(&[2, 1, 2, 1, 2], &[1.; 8]).unwrap();
+    let logits = d
+        .upload(&[2, 1, 2, 2], &[f32::MAX, -f32::MAX].repeat(4))
+        .unwrap();
+    assert!(x
+        .querywise_mixture(&d.upload(&[1, 2], &[0., 0.]).unwrap())
+        .is_err());
+    assert!(x
+        .reshape(&[2, 1, 2, 2])
+        .unwrap()
+        .querywise_mixture(&logits)
+        .is_err());
+    let f = x.querywise_mixture(&logits).unwrap();
+    let seed = d.upload(&[2, 1, 2, 1], &[1.; 4]).unwrap();
+    assert!(f.backward(&seed.reshape(&[2, 2, 1]).unwrap()).is_err());
+    assert_eq!(read(f.output()), [1.; 4]);
+    let huge = d.upload(&[1], &[f32::MAX]).unwrap();
+    let bad = huge.add(&huge).unwrap();
+    for operand in 0..3 {
+        let failed = |v: &ResidentTensor| d.guard_together(&[v, &bad]).unwrap()[0].clone();
+        let forward = if operand == 0 { failed(&x) } else { x.clone() }
+            .querywise_mixture(&if operand == 1 {
+                failed(&logits)
+            } else {
+                logits.clone()
+            })
+            .unwrap();
+        let g = forward
+            .backward(&if operand == 2 {
+                failed(&seed)
+            } else {
+                seed.clone()
+            })
+            .unwrap();
+        for value in [g.components(), g.logits()] {
+            assert!(matches!(
+                value.snapshot().unwrap().read(),
+                Err(TensorError::NonFinite)
+            ));
+        }
+        if operand != 2 {
+            assert!(matches!(
+                forward.output().snapshot().unwrap().read(),
+                Err(TensorError::NonFinite)
+            ));
+            assert!(matches!(
+                forward.weights().snapshot().unwrap().read(),
+                Err(TensorError::NonFinite)
+            ));
+        }
+    }
+    assert_eq!(read(f.output()), [1.; 4]);
+    assert_eq!(read(f.backward(&seed).unwrap().logits()), [0.; 8]);
+}
 
 #[test]
 fn mixture_shaders_validate_without_a_device() {

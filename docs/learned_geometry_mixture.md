@@ -106,5 +106,7 @@ Python is the independent oracle and JavaScript transports fixture/report bytes.
 Corpus studies v1-v6 remain unchanged experiments. The separate
 [v7 corpus study](byte_corpus_mixture_controls.md) adds all four metric subsets,
 learned/fixed-router controls and training-only matched-strength calibration.
+The [query-local primitive](querywise_geometry_mixture.md) adds resident
+per-query routing and pullbacks without changing this model's shared router.
 Synthetic loss reduction is not a language-quality, preferred-geometry,
 tokenizer-free advantage or improvement-over-fixed-routing result.
