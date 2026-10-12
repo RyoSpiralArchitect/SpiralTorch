@@ -18,6 +18,8 @@ HEADWISE = [
     [["categorical_fisher_rao_squared.v1", "euclidean_chord_squared.v1"],
      ["euclidean_chord_squared.v1", "poincare_squared.v1"]],
 ]
+MIXTURE_METRICS = ["poincare_squared.v1", "euclidean_chord_squared.v1", "categorical_fisher_rao_squared.v1"]
+MIXTURE_SCALES = [[1., .8, 24., 1., 1.2, 48.], [.7, 1.5, 36., 1.3, .6, 40.]]
 
 
 def unique_object(pairs):
@@ -82,7 +84,13 @@ def expected_checkpoint(case, parameters, revision, metric=METRIC):
                 "raw_phase": parameter("geometry.raw_phase", [cols // 2])["values"],
                 "raw_gains": [parameter(f"geometry.raw_gain.{i}", [c["heads"]])["values"]
                               for i in range(len(c["blocks"]))], "pair_metric": metric}
-    if metric is None:
+    mixture = c["causal_geometry"].get("mixture")
+    if mixture is not None:
+        del geometry["pair_metric"]
+        geometry["mixture"] = {**mixture, "raw_logits": [
+            parameter(f"geometry.mixture_logits.{i}", [c["heads"], len(mixture["metrics"])])["values"]
+            for i in range(len(c["blocks"]))]}
+    elif metric is None:
         del geometry["pair_metric"]
         geometry["head_pair_metrics"] = c["causal_geometry"]["head_pair_metrics"]
     blocks = []
@@ -112,7 +120,8 @@ def expected_checkpoint(case, parameters, revision, metric=METRIC):
                   parameter("head.weight", [width, 256], "weight"),
                   parameter("head.output_bias", [256], "bias")], [norm(), linear(2, 3)], 3)
     require(used == names, "checkpoint owner order")
-    return {"schema": "spiraltorch.nn.byte_decoder_checkpoint.v3" if metric is None else "spiraltorch.nn.byte_decoder_checkpoint.v2", "update_rule": "stateless_sgd.v1",
+    return {"schema": ("spiraltorch.nn.byte_decoder_checkpoint.v4" if mixture is not None else
+                       "spiraltorch.nn.byte_decoder_checkpoint.v3" if metric is None else "spiraltorch.nn.byte_decoder_checkpoint.v2"), "update_rule": "stateless_sgd.v1",
             "window_state": "reset_positions_and_geometry.v1", "attempted_revision": str(revision),
             "model": {"token": token, "position": position, "geometry": geometry, "blocks": blocks, "head": head}}
 
@@ -173,8 +182,57 @@ def fisher_wide_reference():
     return {"coordinates": [a, b, b, a], "raw_gain": [-.5 * seed * distance]}
 
 
+def mixture_weights(actual, expected, blocks):
+    require(type(actual) is list and type(expected) is list and len(actual) == len(expected) == blocks,
+            "mixture mass block coverage")
+    maximum = 0.
+    for a, e in zip(actual, expected):
+        maximum = max(maximum, vector(a, e, 6))
+        for head in range(2):
+            for row in (a[head * 3:(head + 1) * 3], e[head * 3:(head + 1) * 3]):
+                require(all(0. <= v <= 1. for v in row) and abs(math.fsum(row) - 1.) <= 1e-6,
+                        "mixture masses must be normalized")
+    return maximum
+
+
+def mixture_wide_reference():
+    """Analytic float64 boundaries added after the independent numerical review."""
+    maximum = rates.struct.unpack("!f", bytes.fromhex("7f7fffff"))[0]
+    mass = [math.exp(v - .7) for v in (-.3, .2, .7)]
+    total = math.fsum(mass)
+    return [
+        {"name": "finite_final", "output": [1.5], "logits": [-maximum / 4., maximum / 4.],
+         "components": [maximum / 2.] * 2},
+        *[{"name": name, "output": [maximum, 1.5], "logits": [-.25, .25], "components": [.5] * 4}
+          for name in ("position_centering", "batch_centering")],
+        {"name": "identical_components", "output": [maximum] * 2, "logits": [0.] * 3,
+         "components": [maximum * w / total for w in mass] * 2},
+    ]
+
+
+def mixture_wide_control(boundary):
+    require(type(boundary) is dict and boundary.get("schema") == "spiraltorch.mixture_wide_pullback.v1"
+            and boundary.get("nonfinite_final_rejected") is True, "missing mixture wide pullback control")
+    checks = boundary.get("checks")
+    require(type(checks) is list and len(checks) == 4, "mixture wide control coverage")
+    result = []
+    for actual, expected in zip(checks, mixture_wide_reference()):
+        require(actual.get("name") == expected["name"], "mixture wide control identity")
+        errors = {}
+        for field in ("output", "components", "logits"):
+            values = expected[field]
+            vector(actual[field], values, len(values))
+            if any(values):
+                errors[field + "_relative_l2"] = relative(actual[field], values)[0]
+            else:
+                exact(actual[field], values)
+                errors[field + "_max_abs_error"] = 0.
+        result.append({"name": expected["name"], **errors})
+    return {"checks": result, "nonfinite_final_rejected": True}
+
+
 def verify(reference, report, *, kind="flat"):
-    require(kind in METRICS or kind == "headwise", "unsupported metric comparison")
+    require(kind in METRICS or kind in ("headwise", "mixture"), "unsupported metric comparison")
     metric = METRICS.get(kind)
     require(reference["schema"] == f"spiraltorch.resident_byte_geometry_{kind}.torch_fixture.v1", "reference schema")
     require(reference["device"] == "cpu" and reference["dtype"] == "float32"
@@ -186,7 +244,14 @@ def verify(reference, report, *, kind="flat"):
     summaries = []
     for index, (case, check) in enumerate(zip(reference["cases"], report["checks"])):
         c = case["config"]
-        if kind == "headwise":
+        if kind == "mixture":
+            require("pair_metric" not in c["causal_geometry"] and "head_pair_metrics" not in c["causal_geometry"]
+                    and "metric" not in check and "head_pair_metrics" not in check
+                    and type(c["heads"]) is int and c["heads"] == 2, "mixture routing identity")
+            expected_mixture = {"metrics": MIXTURE_METRICS, "scales": MIXTURE_SCALES[:index + 1]}
+            exact_record(c["causal_geometry"].get("mixture"), expected_mixture)
+            exact_record(check.get("mixture"), expected_mixture)
+        elif kind == "headwise":
             require("pair_metric" not in c["causal_geometry"] and "metric" not in check
                     and c["causal_geometry"].get("head_pair_metrics") == check.get("head_pair_metrics") == HEADWISE[index]
                     and type(c["heads"]) is int and c["heads"] == (4, 2)[index], "headwise routing identity")
@@ -194,7 +259,9 @@ def verify(reference, report, *, kind="flat"):
             require("head_pair_metrics" not in c["causal_geometry"] and "head_pair_metrics" not in check
                     and c["causal_geometry"]["pair_metric"] == check["metric"] == metric, "metric identity")
         descriptors = case["parameters"]
-        count = (23, 37)[index]
+        if kind != "mixture":
+            require("mixture" not in c["causal_geometry"] and "mixture" not in check, "foreign mixture mode")
+        count = ((24, 39) if kind == "mixture" else (23, 37))[index]
         require(len(descriptors) == count and type(check["parameter_count"]) is int
                 and check["parameter_count"] == count, "parameter count")
         names, shapes = [d["name"] for d in descriptors], [d["shape"] for d in descriptors]
@@ -203,13 +270,17 @@ def verify(reference, report, *, kind="flat"):
         for shape in shapes:
             require(shape and all(type(v) is int and v > 0 for v in shape), "parameter shape")
         lengths = [math.prod(s) for s in shapes]
-        geometry = list(range(2, 7 + index))
+        geometry_end = 8 + 2 * index if kind == "mixture" else 7 + index
+        geometry = list(range(2, geometry_end))
         require([i for i, n in enumerate(names) if n.startswith("geometry.")] == geometry, "geometry coverage")
         errors = {"logit_max_abs_error": 0., "loss_max_abs_error": 0., "parameter_max_abs_error": 0.,
                   "initial_vjp_max_abs_error": 0., "geometry_relative_l2": 0.,
                   "embedding_gradient_max_abs_error": 0., "bias_gradient_max_abs_error": 0.}
-        if kind == "headwise":
+        if kind in ("headwise", "mixture"):
             errors["head_gain_relative_l2"] = 0.
+        if kind == "mixture":
+            errors["router_relative_l2"] = 0.
+            errors["mixture_weight_max_abs_error"] = mixture_weights(check["mixture_weights"], case["mixture_weights"], index + 1)
         errors["logit_max_abs_error"] = vector(check["output"], case["output"], c["batch"] * c["steps"] * 256)
         require(len(check["parameter_gradients"]) == len(case["parameter_gradients"]) == count, "initial VJP coverage")
         minimum_norm = math.inf
@@ -219,10 +290,15 @@ def verify(reference, report, *, kind="flat"):
                 error, norm = relative(a, e)
                 errors["geometry_relative_l2"] = max(errors["geometry_relative_l2"], error)
                 minimum_norm = min(minimum_norm, norm)
-            if kind == "headwise" and names[i].startswith("geometry.raw_gain."):
+            if kind in ("headwise", "mixture") and names[i].startswith("geometry.raw_gain."):
                 for actual, expected in zip(a, e):
                     error, _ = relative([actual], [expected])
                     errors["head_gain_relative_l2"] = max(errors["head_gain_relative_l2"], error)
+            if kind == "mixture" and names[i].startswith("geometry.mixture_logits."):
+                require(shapes[i] == [2, 3], "router shape")
+                for head in range(2):
+                    error, _ = relative(a[head * 3:(head + 1) * 3], e[head * 3:(head + 1) * 3])
+                    errors["router_relative_l2"] = max(errors["router_relative_l2"], error)
         embedding_len = c["batch"] * c["steps"] * c["width"]
         errors["embedding_gradient_max_abs_error"] = vector(check["embedding_output_gradient"],
                                                             case["embedding_output_gradient"], embedding_len)
@@ -231,7 +307,7 @@ def verify(reference, report, *, kind="flat"):
         for a, e, length in zip(check["bias_gradients"], case["bias_gradients"], bias_lengths):
             errors["bias_gradient_max_abs_error"] = max(errors["bias_gradient_max_abs_error"], vector(a, e, length))
         controls = check["metric_controls"]
-        require(controls["geometry_parameter_slots"] == [2, 7 + index]
+        require(controls["geometry_parameter_slots"] == [2, geometry_end]
                 and controls["qk_scores_zero"] is c["causal_geometry"]["metric_only_scores"], "metric control identity")
         for name, threshold in (("off_output_separation", 1e-6), ("detached_embedding_gradient_separation", 1e-8)):
             bits(controls[name])
@@ -260,7 +336,16 @@ def verify(reference, report, *, kind="flat"):
                 minimum_norm = min(minimum_norm, norm)
             errors["embedding_gradient_max_abs_error"] = max(errors["embedding_gradient_max_abs_error"],
                 vector(actual["embedding_output_gradient"], expected["embedding_output_gradient"], embedding_len))
-        if kind == "headwise":
+            if kind == "mixture":
+                errors["mixture_weight_max_abs_error"] = max(errors["mixture_weight_max_abs_error"],
+                    mixture_weights(actual["mixture_weights"], expected["mixture_weights"], index + 1))
+                for i in geometry:
+                    if names[i].startswith("geometry.mixture_logits."):
+                        for head in range(2):
+                            a = actual["geometry_gradients"][i - 2][head * 3:(head + 1) * 3]
+                            e = expected["geometry_gradients"][i - 2][head * 3:(head + 1) * 3]
+                            errors["router_relative_l2"] = max(errors["router_relative_l2"], relative(a, e)[0])
+        if kind in ("headwise", "mixture"):
             # Do not let larger Poincare heads hide a disconnected Fisher head.
             # Apply the same relative gate to each head's full SGD VJP history.
             for i in geometry:
@@ -271,11 +356,21 @@ def verify(reference, report, *, kind="flat"):
                     e = [t["geometry_gradients"][i - 2][head] for t in learning["trace"]]
                     error, _ = relative(a, e)
                     errors["head_gain_relative_l2"] = max(errors["head_gain_relative_l2"], error)
+        if kind == "mixture":
+            for i in geometry:
+                if not names[i].startswith("geometry.mixture_logits."):
+                    continue
+                for coordinate in range(lengths[i]):
+                    a = [t["geometry_gradients"][i - 2][coordinate] for t in actual_learning["trace"]]
+                    e = [t["geometry_gradients"][i - 2][coordinate] for t in learning["trace"]]
+                    errors["router_relative_l2"] = max(errors["router_relative_l2"], relative(a, e)[0])
         resume = check["resume_trajectory"]
         for name, value in (("split_revision", 7), ("final_revision", 16), ("verified_steps", 16)):
             require(type(resume[name]) is int and resume[name] == value, "resume cursor")
         require(all(resume[name] is True for name in ("exact_losses", "exact_parameters", "exact_geometry_gradients",
                                                      "exact_embedding_gradients", "fresh_owner")), "resume controls")
+        if kind == "mixture":
+            require(resume.get("exact_mixture_weights") is True, "resume mixture masses")
         for name, revision in (("checkpoint_json", 7), ("final_checkpoint_json", 16)):
             checkpoint = json.loads(resume[name], object_pairs_hook=unique_object)
             exact_record(checkpoint, expected_checkpoint(case, actual_learning["trace"][revision - 1]["parameters"], revision, metric))
@@ -284,12 +379,19 @@ def verify(reference, report, *, kind="flat"):
             require(type(a["revision"]) is int and a["revision"] == e["revision"], "resume revision")
             for field in ("loss", "parameters", "geometry_gradients", "embedding_output_gradient"):
                 exact(a[field], e[field])
+            if kind == "mixture":
+                exact(a["mixture_weights"], e["mixture_weights"])
         summaries.append({"name": case["name"], "metric": metric, "parameter_tensors": count,
                           "parameter_scalars": sum(lengths), "steps": 16, "resume_exact_steps": 16,
                           "minimum_reference_geometry_gradient_l2": minimum_norm, **errors})
         if kind == "headwise":
             del summaries[-1]["metric"]
             summaries[-1]["head_pair_metrics"] = HEADWISE[index]
+        if kind == "mixture":
+            del summaries[-1]["metric"]
+            summaries[-1]["mixture"] = expected_mixture
+            summaries[-1]["initial_mixture_weights"] = check["mixture_weights"]
+            summaries[-1]["last_pre_update_mixture_weights"] = actual_learning["trace"][-1]["mixture_weights"]
     result = {"schema": f"spiraltorch.resident_byte_geometry_{kind}.comparison.v1", "passed": True,
             "cases": summaries, "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation"}
     if kind == "headwise":
@@ -309,6 +411,18 @@ def verify(reference, report, *, kind="flat"):
         result["wide_pullback_control"] = {
             key + "_relative_l2": relative(boundary[key], expected)[0]
             for key, expected in fisher_wide_reference().items()}
+    if kind == "mixture":
+        guard = report.get("mixture_guard")
+        require(type(guard) is dict and guard.get("schema") == "spiraltorch.byte_mixture_guard.v1"
+                and type(guard.get("fault_head")) is int and guard["fault_head"] == 1
+                and type(guard.get("fault_component")) is int and guard["fault_component"] == 0
+                and type(guard.get("parameter_tensors")) is int and guard["parameter_tensors"] == 24
+                and all(guard.get(k) is True for k in ("finite_control", "zero_mass_control", "all_gradients_guarded", "atomic_rejection")),
+                "missing mixture guard")
+        bits(guard["baseline_max_abs_bias"])
+        require(guard["baseline_max_abs_bias"] > 2., "insensitive mixture guard")
+        result["mixture_guard"] = guard
+        result["wide_pullback_control"] = mixture_wide_control(report.get("wide_pullback_control"))
     return result
 
 
@@ -319,10 +433,11 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--fisher-rao", action="store_true", help="require the explicit Fisher-Rao schemas and metric")
     mode.add_argument("--headwise", action="store_true", help="require the fixed headwise routing and v3 checkpoints")
+    mode.add_argument("--mixture", action="store_true", help="require learned mixtures and v4 checkpoints")
     args = parser.parse_args()
     reference, report = args.reference.read_bytes(), args.report.read_bytes()
     result = verify(json.loads(reference, object_pairs_hook=unique_object), json.loads(report, object_pairs_hook=unique_object),
-                    kind="headwise" if args.headwise else "fisher_rao" if args.fisher_rao else "flat")
+                    kind="mixture" if args.mixture else "headwise" if args.headwise else "fisher_rao" if args.fisher_rao else "flat")
     result["input_sha256"] = {"reference": hashlib.sha256(reference).hexdigest(), "report": hashlib.sha256(report).hexdigest()}
     with args.output.open("x", encoding="utf-8") as output:
         json.dump(result, output, indent=2, allow_nan=False)

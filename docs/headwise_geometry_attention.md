@@ -45,8 +45,8 @@ curvature of [Fisher-Rao](fisher_rao_attention.md).
 
 `with_head_pair_metrics` freezes an exact block-major/head-major grid. Missing,
 extra or empty heads/blocks fail before GPU allocation. `with_pair_metric`
-resets every entry to the same metric. `head_pair_metrics()` always returns
-the complete grid.
+resets every entry to the same metric. `head_pair_metrics()` returns
+`Some(grid)` for fixed routing and `None` for a learned mixture.
 
 Rust API migration: `pair_metric()` now returns `Option<ByteDecoderPairMetric>`.
 It is `Some(metric)` only when the whole model is uniform, otherwise `None`.
@@ -108,8 +108,9 @@ Download its raw observations and use the same independent comparator.
 
 These are synthetic correctness checks, not a corpus-quality or speed result.
 Raw weights/checkpoints remain local; scalar evidence and hashes are published
-separately. Learned mixtures and large-scale geometry selection are subsequent
-work, not outcomes of this qualification.
+separately. [Learned mixtures](learned_geometry_mixture.md) have a separate
+model contract and qualification, not an outcome of this fixed-routing study.
+Large-scale geometry selection remains separate work.
 
 For fixed, calibrated combinations in the actual corpus learner, see
 [the v6 headwise controls](byte_corpus_headwise_controls.md). The study retains

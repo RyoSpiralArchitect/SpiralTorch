@@ -36,7 +36,13 @@ pub(super) async fn resume_trajectory(
             saved = checkpoint(&model).await?.to_json()?;
             let record: Value = serde_json::from_str(&saved)?;
             let expected_geometry = &case["config"]["causal_geometry"];
-            let (schema, field, absent) = if expected_geometry.get("head_pair_metrics").is_some() {
+            let (schema, field, absent) = if expected_geometry.get("mixture").is_some() {
+                (
+                    st_nn::resident::BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
+                    "mixture",
+                    "pair_metric",
+                )
+            } else if expected_geometry.get("head_pair_metrics").is_some() {
                 (
                     st_nn::resident::BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA,
                     "head_pair_metrics",
@@ -50,7 +56,17 @@ pub(super) async fn resume_trajectory(
                 )
             };
             if record["schema"] != schema
-                || record["model"]["geometry"][field] != expected_geometry[field]
+                || (if field == "mixture" {
+                    record["model"]["geometry"][field]["metrics"]
+                        != expected_geometry[field]["metrics"]
+                        || record["model"]["geometry"][field]["scales"]
+                            != expected_geometry[field]["scales"]
+                        || record["model"]["geometry"]
+                            .get("head_pair_metrics")
+                            .is_some()
+                } else {
+                    record["model"]["geometry"][field] != expected_geometry[field]
+                })
                 || record["model"]["geometry"].get(absent).is_some()
                 || record["attempted_revision"] != "7"
             {
@@ -71,6 +87,9 @@ pub(super) async fn resume_trajectory(
         let loss =
             forward.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
         let gradient = model.backward(&forward, loss.prediction_gradient())?;
+        let weights = (0..p.block_count())
+            .filter_map(|b| forward.geometry_mixture_weights(b).cloned())
+            .collect::<Vec<_>>();
         let update = model.sgd(&gradient, 0.125)?;
         let receipt = update.snapshot()?;
         #[cfg(not(target_arch = "wasm32"))]
@@ -118,14 +137,31 @@ pub(super) async fn resume_trajectory(
             json!({"revision":revision, "loss":loss_values[0], "parameters":parameters,
             "geometry_gradients":geometry, "embedding_output_gradient":embedding_values}),
         );
+        if !weights.is_empty() {
+            let weights = read_many(model.tensor_device(), &weights).await?;
+            let want = expected["mixture_weights"]
+                .as_array()
+                .ok_or("missing mixture masses")?;
+            if weights.len() != want.len()
+                || weights
+                    .iter()
+                    .zip(want)
+                    .any(|(a, b)| !same_bits(a, &data(b)))
+            {
+                return Err("resumed mixture masses differ".into());
+            }
+            observed.last_mut().unwrap()["mixture_weights"] = json!(weights);
+        }
     }
-    Ok(
-        json!({"split_revision":7, "final_revision":16, "verified_steps":16,
+    let mut report = json!({"split_revision":7, "final_revision":16, "verified_steps":16,
         "exact_losses":true, "exact_parameters":true, "exact_geometry_gradients":true,
         "exact_embedding_gradients":true, "fresh_owner":true,
         "checkpoint_json":saved, "final_checkpoint_json":checkpoint(&model).await?.to_json()?,
-        "trace":observed}),
-    )
+        "trace":observed});
+    if p.causal_geometry().and_then(|g| g.mixture()).is_some() {
+        report["exact_mixture_weights"] = json!(true);
+    }
+    Ok(report)
 }
 
 pub(super) async fn checkpoint(model: &ResidentByteDecoder) -> Result<ByteDecoderCheckpoint> {

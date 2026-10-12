@@ -3,6 +3,7 @@ use st_backend_wgpu::resident_tensor::{
     causal_wave::ResidentCausalWaveForward,
     euclidean::{ResidentEuclideanBiasForward, ResidentPairBiasVjp},
     fisher_rao::ResidentFisherRaoBiasForward,
+    mixture::ResidentHeadwiseMixture,
     poincare::ResidentPoincareBiasForward,
 };
 
@@ -62,16 +63,49 @@ fn head_groups(metrics: &[ByteDecoderPairMetric]) -> Vec<(Range<usize>, ByteDeco
 struct BlockMetricTape {
     groups: Vec<MetricTape>,
     scores: ResidentTensor,
+    mixture: Option<(ResidentHeadwiseMixture, Vec<ResidentTensor>)>,
 }
 
 impl BlockMetricTape {
     fn backward(
         &self,
         seed: &ResidentTensor,
-    ) -> Result<(ResidentTensor, ResidentTensor), GpuTensorError> {
+    ) -> Result<(ResidentTensor, ResidentTensor, Option<ResidentTensor>), GpuTensorError> {
+        if let Some((mixture, scales)) = &self.mixture {
+            let shape = seed.layout().shape();
+            let mixed = mixture.backward(&seed.contiguous()?.reshape(&[
+                shape[0],
+                shape[1],
+                shape[2] * shape[3],
+            ])?)?;
+            let mut coordinates: Option<ResidentTensor> = None;
+            let mut gains: Option<ResidentTensor> = None;
+            for (k, (group, scale)) in self.groups.iter().zip(scales).enumerate() {
+                let cotangent = mixed
+                    .components()
+                    .select(3, k)?
+                    .contiguous()?
+                    .reshape(shape)?
+                    .mul(scale)?;
+                let g = group.backward(&cotangent)?;
+                coordinates = Some(match coordinates {
+                    Some(sum) => sum.add(g.coordinates())?,
+                    None => g.coordinates().clone(),
+                });
+                gains = Some(match gains {
+                    Some(sum) => sum.add(g.raw_gain())?,
+                    None => g.raw_gain().clone(),
+                });
+            }
+            return Ok((
+                coordinates.expect("validated mixture components"),
+                gains.expect("validated mixture components"),
+                Some(mixed.logits().clone()),
+            ));
+        }
         if self.groups.len() == 1 {
             let vjp = self.groups[0].backward(seed)?;
-            return Ok((vjp.coordinates().clone(), vjp.raw_gain().clone()));
+            return Ok((vjp.coordinates().clone(), vjp.raw_gain().clone(), None));
         }
         let mut offset = 0;
         let mut coordinates: Option<ResidentTensor> = None;
@@ -89,6 +123,7 @@ impl BlockMetricTape {
         Ok((
             coordinates.expect("a checked block has at least one head"),
             ResidentTensor::concatenate(&gains.iter().collect::<Vec<_>>(), 0)?,
+            None,
         ))
     }
 }
@@ -106,6 +141,9 @@ impl GeometryTape {
     pub(super) fn get_bias(&self, block: usize) -> Option<&ResidentTensor> {
         self.metrics.get(block).map(|m| &m.scores)
     }
+    pub(super) fn mixture_weights(&self, block: usize) -> Option<&ResidentTensor> {
+        Some(self.metrics.get(block)?.mixture.as_ref()?.0.weights())
+    }
 }
 
 pub(super) struct GeometryVjp {
@@ -119,6 +157,12 @@ pub(super) struct GeometryAutograd {
     zero_state: ResidentTensor,
     curvature: f32,
     head_groups: Vec<Vec<(Range<usize>, ByteDecoderPairMetric)>>,
+    mixture: Option<MixtureAutograd>,
+}
+
+struct MixtureAutograd {
+    metrics: Vec<ByteDecoderPairMetric>,
+    scales: Vec<Vec<ResidentTensor>>,
 }
 
 impl GeometryAutograd {
@@ -144,9 +188,34 @@ impl GeometryAutograd {
             curvature: plan.curvature(),
             head_groups: plan
                 .head_pair_metrics()
+                .unwrap_or(&[])
                 .iter()
                 .map(|m| head_groups(m))
                 .collect(),
+            mixture: plan
+                .mixture()
+                .map(|m| {
+                    let count = m.metrics().len();
+                    let scales = m
+                        .scales()
+                        .iter()
+                        .zip(plan.raw_gains())
+                        .map(|(scales, gains)| {
+                            (0..count)
+                                .map(|k| {
+                                    let values: Vec<_> =
+                                        (0..gains.len()).map(|h| scales[h * count + k]).collect();
+                                    device.upload(&[1, gains.len(), 1, 1], &values)
+                                })
+                                .collect::<Result<Vec<_>, _>>()
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok::<_, GpuTensorError>(MixtureAutograd {
+                        metrics: m.metrics().to_vec(),
+                        scales,
+                    })
+                })
+                .transpose()?,
         })
     }
 
@@ -174,8 +243,46 @@ impl GeometryAutograd {
         )?;
         let metrics = values[self.layout.raw_gains()]
             .iter()
-            .zip(&self.head_groups)
-            .map(|(gain, routing)| {
+            .enumerate()
+            .map(|(block, gain)| {
+                if let Some(mixture) = &self.mixture {
+                    let groups = mixture
+                        .metrics
+                        .iter()
+                        .map(|metric| {
+                            MetricTape::forward(wave.features(), gain, *metric, self.curvature)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let shape = groups[0].scores().layout().shape();
+                    let parts = groups
+                        .iter()
+                        .zip(&mixture.scales[block])
+                        .map(|(group, scale)| {
+                            group.scores().mul(scale)?.reshape(&[
+                                shape[0],
+                                shape[1],
+                                shape[2] * shape[3],
+                                1,
+                            ])
+                        })
+                        .collect::<Result<Vec<_>, GpuTensorError>>()?;
+                    let components =
+                        ResidentTensor::concatenate(&parts.iter().collect::<Vec<_>>(), 3)?;
+                    let router = &values[self
+                        .layout
+                        .mixture_logits()
+                        .expect("mixture owns logits")
+                        .start
+                        + block];
+                    let forward = components.headwise_mixture(router)?;
+                    let scores = forward.output().reshape(shape)?;
+                    return Ok(BlockMetricTape {
+                        groups,
+                        scores,
+                        mixture: Some((forward, mixture.scales[block].clone())),
+                    });
+                }
+                let routing = &self.head_groups[block];
                 let groups = routing
                     .iter()
                     .map(|(heads, metric)| {
@@ -195,7 +302,11 @@ impl GeometryAutograd {
                         1,
                     )?
                 };
-                Ok(BlockMetricTape { groups, scores })
+                Ok(BlockMetricTape {
+                    groups,
+                    scores,
+                    mixture: None,
+                })
             })
             .collect::<Result<Vec<_>, GpuTensorError>>()?;
         Ok(GeometryTape {
@@ -215,14 +326,18 @@ impl GeometryAutograd {
         }
         let mut coordinates: Option<ResidentTensor> = None;
         let mut gains = Vec::new();
+        let mut routers = Vec::new();
         for (metric, bias) in tape.metrics.iter().zip(biases) {
             let seed = bias.pair_bias().ok_or(TrainingError::ParameterLayout)?;
-            let (coordinate, gain) = metric.backward(seed)?;
+            let (coordinate, gain, router) = metric.backward(seed)?;
             coordinates = Some(match coordinates {
                 Some(sum) => sum.add(&coordinate)?,
                 None => coordinate,
             });
             gains.push(gain);
+            if let Some(router) = router {
+                routers.push(router);
+            }
         }
         // All consuming blocks contribute before recurrence BPTT. This model
         // resets at the window boundary, so its terminal-state cotangent is zero.
@@ -234,6 +349,7 @@ impl GeometryAutograd {
         let mut parameters = projection.parameter_gradients().to_vec();
         parameters.extend([wave.raw_decay().clone(), wave.raw_phase().clone()]);
         parameters.extend(gains);
+        parameters.extend(routers);
         Ok(GeometryVjp {
             input: projection.input_gradient().clone(),
             parameters,

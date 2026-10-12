@@ -20,6 +20,7 @@ pub mod gradient_clip;
 pub mod graph;
 pub mod indexing;
 pub mod layout;
+pub mod mixture;
 pub mod momentum;
 pub mod normalization;
 mod pair_bias;

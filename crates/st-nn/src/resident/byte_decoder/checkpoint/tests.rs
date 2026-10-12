@@ -1,4 +1,84 @@
 use super::*;
+
+#[test]
+fn mixture_checkpoint_is_versioned_and_binds_fixed_scales_and_router_values() {
+    use ByteDecoderPairMetric::*;
+    let p = super::super::tests::plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = super::super::tests::geometry_for(&p)
+        .with_mixture(
+            &[
+                PoincareSquared,
+                EuclideanChordSquared,
+                CategoricalFisherRaoSquared,
+            ],
+            &vec![vec![-0., 0.2, 0.5, 0.1, -0.3, 0.4]; 2],
+            &vec![vec![1., 0.8, 24., 1., 1.2, 48.]; 2],
+        )
+        .unwrap();
+    let p = p.with_causal_geometry(g).unwrap();
+    let checkpoint = p.initial_checkpoint();
+    let text = checkpoint.to_json().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["schema"], BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA);
+    assert!(value["model"]["geometry"].get("pair_metric").is_none());
+    assert!(value["model"]["geometry"]
+        .get("head_pair_metrics")
+        .is_none());
+    let decoded = ByteDecoderCheckpoint::from_json(&text).unwrap();
+    assert_eq!(decoded.to_json().unwrap(), text);
+    assert_eq!(decoded.plan.parameter_layout(), p.parameter_layout());
+    assert_eq!(
+        decoded
+            .plan
+            .geometry
+            .as_ref()
+            .unwrap()
+            .mixture()
+            .unwrap()
+            .raw_logits()[0][0]
+            .to_bits(),
+        (-0f32).to_bits()
+    );
+    for variant in 0..11 {
+        let mut bad = value.clone();
+        match variant {
+            0 => bad["schema"] = json!(BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA),
+            1 => bad["model"]["geometry"]["pair_metric"] = json!("euclidean_chord_squared.v1"),
+            2 => {
+                bad["model"]["geometry"]["head_pair_metrics"] =
+                    json!(vec![vec!["poincare_squared.v1"; 2]; 2])
+            }
+            3 => bad["model"]["geometry"]["mixture"] = serde_json::Value::Null,
+            4 => bad["model"]["geometry"]["mixture"]["raw_logits"] = json!([[0.1, 0.2, 0.3]]),
+            5 => bad["model"]["geometry"]["mixture"]["scales"][0][0] = json!(-1.),
+            6 => bad["model"]["geometry"]["mixture"]["scales"][0][0] = json!(0.),
+            7 => bad["model"]["geometry"]["mixture"]["metrics"][1] = json!("poincare_squared.v1"),
+            8 => bad["model"]["geometry"]["mixture"]["scales"] = json!([]),
+            9 => bad["model"]["geometry"]["mixture"]["temperature"] = json!(1.),
+            _ => bad["model"]["geometry"]["mixture"]["raw_logits"][0][0] = json!(true),
+        }
+        assert!(
+            ByteDecoderCheckpoint::from_json(&bad.to_string()).is_err(),
+            "variant {variant}"
+        );
+    }
+    #[cfg(feature = "wgpu")]
+    {
+        let mut changed = value.clone();
+        changed["model"]["geometry"]["mixture"]["raw_logits"][0][0] = json!(0.4);
+        let other = ByteDecoderCheckpoint::from_json(&changed.to_string()).unwrap();
+        assert_eq!(
+            checkpoint.topology_json().unwrap(),
+            other.topology_json().unwrap()
+        );
+        changed["model"]["geometry"]["mixture"]["scales"][0][0] = json!(2.);
+        let other = ByteDecoderCheckpoint::from_json(&changed.to_string()).unwrap();
+        assert_ne!(
+            checkpoint.topology_json().unwrap(),
+            other.topology_json().unwrap()
+        );
+    }
+}
 use serde_json::json;
 
 fn checkpoint() -> ByteDecoderCheckpoint {
@@ -155,7 +235,13 @@ fn headwise_checkpoint_binds_every_metric_and_retains_canonical_legacy_encodings
         original.plan.parameter_layout()
     );
     assert_eq!(
-        restored.plan.geometry.as_ref().unwrap().head_pair_metrics(),
+        restored
+            .plan
+            .geometry
+            .as_ref()
+            .unwrap()
+            .head_pair_metrics()
+            .unwrap(),
         routing
     );
     let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
@@ -210,7 +296,11 @@ fn headwise_checkpoint_binds_every_metric_and_retains_canonical_legacy_encodings
         .with_initial_geometry_raw_gains(&[vec![0.1, -0.2], vec![0.3, -0.4]])
         .unwrap();
     assert_eq!(
-        changed.causal_geometry().unwrap().head_pair_metrics(),
+        changed
+            .causal_geometry()
+            .unwrap()
+            .head_pair_metrics()
+            .unwrap(),
         routing
     );
 }

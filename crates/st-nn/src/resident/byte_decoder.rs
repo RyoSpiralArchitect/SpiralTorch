@@ -4,14 +4,15 @@ use std::ops::Range;
 
 mod geometry;
 pub use geometry::{
-    ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan, ByteDecoderPairMetric,
+    ByteDecoderGeometryMixture, ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan,
+    ByteDecoderPairMetric,
 };
 mod checkpoint;
 #[cfg(feature = "wgpu")]
 pub use checkpoint::ByteDecoderCheckpointReadback;
 pub use checkpoint::{
     ByteDecoderCheckpoint, BYTE_DECODER_CHECKPOINT_SCHEMA, BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA,
-    BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
 };
 
 #[cfg(feature = "wgpu")]

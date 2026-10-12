@@ -20,6 +20,7 @@ pub mod euclidean;
 pub mod fisher_rao;
 pub(crate) mod guard_capture;
 pub mod loss;
+pub mod mixture;
 pub mod normalization;
 pub mod poincare;
 pub mod pointwise;
@@ -31,6 +32,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    Mixture(#[from] st_kernel_contracts::mixture::MixtureError),
     #[error(transparent)]
     Poincare(#[from] st_kernel_contracts::poincare::PoincareError),
     #[error(transparent)]
@@ -89,6 +92,7 @@ struct Kernels {
     concatenate: std::sync::OnceLock<concatenate::ConcatenateKernels>,
     embedding: std::sync::OnceLock<embedding::EmbeddingKernels>,
     causal_wave: std::sync::OnceLock<causal_wave::CausalWaveKernels>,
+    mixture: std::sync::OnceLock<mixture::MixtureKernels>,
     poincare: std::sync::OnceLock<poincare::PoincareKernels>,
     fisher_chart: std::sync::OnceLock<poincare::fisher_chart::FisherChartKernels>,
     guard_capture: std::sync::OnceLock<guard_capture::GuardCapture>,
@@ -251,6 +255,7 @@ impl TensorDevice {
             concatenate: std::sync::OnceLock::new(),
             embedding: std::sync::OnceLock::new(),
             causal_wave: std::sync::OnceLock::new(),
+            mixture: std::sync::OnceLock::new(),
             poincare: std::sync::OnceLock::new(),
             fisher_chart: std::sync::OnceLock::new(),
             guard_capture: std::sync::OnceLock::new(),

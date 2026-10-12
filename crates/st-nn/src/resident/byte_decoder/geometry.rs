@@ -23,6 +23,7 @@ pub struct ByteDecoderGeometryParameterLayout {
     raw_decay: usize,
     raw_phase: usize,
     raw_gains: Range<usize>,
+    mixture_logits: Option<Range<usize>>,
 }
 
 impl ByteDecoderGeometryParameterLayout {
@@ -39,7 +40,34 @@ impl ByteDecoderGeometryParameterLayout {
         self.raw_gains.clone()
     }
     pub fn all(&self) -> Range<usize> {
-        self.projection.start..self.raw_gains.end
+        self.projection.start
+            ..self
+                .mixture_logits
+                .as_ref()
+                .map_or(self.raw_gains.end, |r| r.end)
+    }
+    pub fn mixture_logits(&self) -> Option<Range<usize>> {
+        self.mixture_logits.clone()
+    }
+}
+
+/// Ordered components and fixed positive scales, with a trainable [head,component]
+/// logit table for each block. Scales calibrate units; they are not optimizer slots.
+#[derive(Clone, Debug)]
+pub struct ByteDecoderGeometryMixture {
+    metrics: Vec<ByteDecoderPairMetric>,
+    scales: Vec<Vec<f32>>,
+    raw_logits: Vec<Vec<f32>>,
+}
+impl ByteDecoderGeometryMixture {
+    pub fn metrics(&self) -> &[ByteDecoderPairMetric] {
+        &self.metrics
+    }
+    pub fn scales(&self) -> &[Vec<f32>] {
+        &self.scales
+    }
+    pub fn raw_logits(&self) -> &[Vec<f32>] {
+        &self.raw_logits
     }
 }
 
@@ -54,6 +82,7 @@ pub struct ByteDecoderGeometryPlan {
     raw_phase: Vec<f32>,
     raw_gains: Vec<Vec<f32>>,
     head_metrics: Vec<Vec<ByteDecoderPairMetric>>,
+    mixture: Option<ByteDecoderGeometryMixture>,
 }
 
 impl ByteDecoderGeometryPlan {
@@ -95,6 +124,7 @@ impl ByteDecoderGeometryPlan {
             PoincareBiasSpec::new(shape, gain.len(), curvature)?;
         }
         Ok(Self {
+            mixture: None,
             projection: projection.clone(),
             wave,
             raw_decay: raw_decay.to_vec(),
@@ -112,6 +142,9 @@ impl ByteDecoderGeometryPlan {
     }
     /// The common metric, or `None` when blocks/heads use different metrics.
     pub fn pair_metric(&self) -> Option<ByteDecoderPairMetric> {
+        if self.mixture.is_some() {
+            return None;
+        }
         let first = self.head_metrics[0][0];
         self.head_metrics
             .iter()
@@ -121,12 +154,71 @@ impl ByteDecoderGeometryPlan {
     }
     /// Complete block-major/head-major routing. This is frozen topology, not a
     /// learned selector; coordinates remain shared across the consuming heads.
-    pub fn head_pair_metrics(&self) -> &[Vec<ByteDecoderPairMetric>] {
-        &self.head_metrics
+    pub fn head_pair_metrics(&self) -> Option<&[Vec<ByteDecoderPairMetric>]> {
+        self.mixture
+            .is_none()
+            .then_some(self.head_metrics.as_slice())
+    }
+    pub fn mixture(&self) -> Option<&ByteDecoderGeometryMixture> {
+        self.mixture.as_ref()
+    }
+    /// Replace fixed routing with a learned convex mixture of distinct metrics.
+    /// Each block supplies flattened [heads,components] logits and fixed scales.
+    /// The shared gain remains independent of the normalized mixture weights.
+    pub fn with_mixture(
+        mut self,
+        metrics: &[ByteDecoderPairMetric],
+        raw_logits: &[Vec<f32>],
+        scales: &[Vec<f32>],
+    ) -> Result<Self, InferenceError> {
+        if !(2..=3).contains(&metrics.len())
+            || metrics
+                .iter()
+                .enumerate()
+                .any(|(i, m)| metrics[..i].contains(m))
+            || raw_logits.len() != self.raw_gains.len()
+            || scales.len() != self.raw_gains.len()
+        {
+            return Err(InferenceError::ByteDecoder(
+                "mixture requires distinct metrics and a router/scale table per block",
+            ));
+        }
+        for ((logits, scale), gains) in raw_logits.iter().zip(scales).zip(&self.raw_gains) {
+            let [batch, steps, _] = self.wave.shape();
+            let positions = steps
+                .checked_mul(steps)
+                .ok_or(InferenceError::PortableAddressSpace)?;
+            st_kernel_contracts::mixture::HeadwiseMixtureSpec::new([
+                batch,
+                gains.len(),
+                positions,
+                metrics.len(),
+            ])
+            .map_err(|_| InferenceError::PortableAddressSpace)?;
+            let len = gains
+                .len()
+                .checked_mul(metrics.len())
+                .ok_or(InferenceError::PortableAddressSpace)?;
+            u32::try_from(len).map_err(|_| InferenceError::PortableAddressSpace)?;
+            if logits.len() != len
+                || scale.len() != len
+                || logits.iter().any(|v| !v.is_finite())
+                || scale.iter().any(|v| !v.is_finite() || *v <= 0.)
+            {
+                return Err(InferenceError::ByteDecoder("mixture logits/scales must match every head/component and be finite; scales must be positive"));
+            }
+        }
+        self.mixture = Some(ByteDecoderGeometryMixture {
+            metrics: metrics.to_vec(),
+            raw_logits: raw_logits.to_vec(),
+            scales: scales.to_vec(),
+        });
+        Ok(self)
     }
     /// Select a metric without changing initial values or trainable scalar count.
     /// The flat metric retains the nonlinear bounded chart, not a linear encoder.
     pub fn with_pair_metric(mut self, metric: ByteDecoderPairMetric) -> Self {
+        self.mixture = None;
         for head in self.head_metrics.iter_mut().flatten() {
             *head = metric;
         }
@@ -149,6 +241,7 @@ impl ByteDecoderGeometryPlan {
             ));
         }
         self.head_metrics = metrics.to_vec();
+        self.mixture = None;
         Ok(self)
     }
     pub fn curvature(&self) -> f32 {
@@ -194,6 +287,15 @@ impl ByteDecoderGeometryPlan {
                 shape: vec![v.len()],
                 values: v.clone(),
             });
+        }
+        if let Some(mixture) = &self.mixture {
+            for (logits, gains) in mixture.raw_logits.iter().zip(&self.raw_gains) {
+                values.push(GraphParameter {
+                    role: ParameterRole::Gate,
+                    shape: vec![gains.len(), mixture.metrics.len()],
+                    values: logits.clone(),
+                });
+            }
         }
         Ok(values)
     }
@@ -246,8 +348,11 @@ impl ByteDecoderPlan {
         let gain = phase
             .checked_add(1)
             .ok_or(InferenceError::PortableAddressSpace)?;
-        let end = gain
+        let gain_end = gain
             .checked_add(geometry.raw_gains.len())
+            .ok_or(InferenceError::PortableAddressSpace)?;
+        let end = gain_end
+            .checked_add(geometry.mixture.as_ref().map_or(0, |m| m.raw_logits.len()))
             .ok_or(InferenceError::PortableAddressSpace)?;
         let shift = end - 2;
         for range in self
@@ -269,7 +374,8 @@ impl ByteDecoderPlan {
             projection: 2..decay,
             raw_decay: decay,
             raw_phase: phase,
-            raw_gains: gain..end,
+            raw_gains: gain..gain_end,
+            mixture_logits: geometry.mixture.is_some().then_some(gain_end..end),
         });
         self.geometry = Some(geometry);
         Ok(self)

@@ -7,6 +7,8 @@ pub const BYTE_DECODER_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_ch
 pub const BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v2";
 pub const BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA: &str =
     "spiraltorch.nn.byte_decoder_checkpoint.v3";
+pub const BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA: &str =
+    "spiraltorch.nn.byte_decoder_checkpoint.v4";
 
 /// A complete fixed-window byte model and its attempted SGD revision.
 /// Plain SGD has no momentum slots. Data cursors, learning-rate schedules,
@@ -85,6 +87,26 @@ struct GeometryRecord {
         deserialize_with = "explicit_head_metrics"
     )]
     head_pair_metrics: Option<Vec<Vec<ByteDecoderPairMetric>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "explicit_mixture"
+    )]
+    mixture: Option<MixtureRecord>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MixtureRecord {
+    metrics: Vec<ByteDecoderPairMetric>,
+    scales: Vec<Vec<f32>>,
+    raw_logits: Vec<Vec<f32>>,
+}
+
+fn explicit_mixture<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<MixtureRecord>, D::Error> {
+    MixtureRecord::deserialize(d).map(Some)
 }
 
 fn explicit_metric<'de, D: serde::Deserializer<'de>>(
@@ -125,6 +147,9 @@ fn graph_record(plan: &InferencePlan) -> Result<GraphRecord, InferenceError> {
 
 impl ModelRecord {
     fn checkpoint_schema(&self) -> &'static str {
+        if self.geometry.as_ref().is_some_and(|g| g.mixture.is_some()) {
+            return BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA;
+        }
         if self
             .geometry
             .as_ref()
@@ -160,9 +185,14 @@ impl ModelRecord {
                             .pair_metric()
                             .filter(|&m| m != ByteDecoderPairMetric::PoincareSquared),
                         head_pair_metrics: g
-                            .pair_metric()
-                            .is_none()
-                            .then(|| g.head_pair_metrics().to_vec()),
+                            .head_pair_metrics()
+                            .filter(|_| g.pair_metric().is_none())
+                            .map(<[_]>::to_vec),
+                        mixture: g.mixture().map(|m| MixtureRecord {
+                            metrics: m.metrics().to_vec(),
+                            scales: m.scales().to_vec(),
+                            raw_logits: m.raw_logits().to_vec(),
+                        }),
                     })
                 })
                 .transpose()?,
@@ -235,6 +265,18 @@ impl ModelRecord {
                     &g.raw_gains,
                     g.curvature,
                 )?;
+                if let Some(mixture) = g.mixture {
+                    if g.pair_metric.is_some() || g.head_pair_metrics.is_some() {
+                        return Err(InferenceError::ByteDecoder(
+                            "mixture conflicts with fixed metric routing",
+                        ));
+                    }
+                    return plan.with_causal_geometry(geometry.with_mixture(
+                        &mixture.metrics,
+                        &mixture.raw_logits,
+                        &mixture.scales,
+                    )?);
+                }
                 let geometry = match g.head_pair_metrics {
                     Some(metrics) => {
                         if g.pair_metric.is_some() {
@@ -269,6 +311,7 @@ impl ModelRecord {
                     .values_mut()
                     .chain([&mut g.raw_decay, &mut g.raw_phase])
                     .chain(g.raw_gains.iter_mut())
+                    .chain(g.mixture.iter_mut().flat_map(|m| m.raw_logits.iter_mut()))
             }))
             .chain(self.blocks.iter_mut().flat_map(|b| {
                 b.pre
