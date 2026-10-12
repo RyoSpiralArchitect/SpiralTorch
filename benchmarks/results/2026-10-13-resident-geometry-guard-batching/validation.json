@@ -1,0 +1,192 @@
+{
+  "schema": "spiraltorch.geometry_guard_batching.correctness.v1",
+  "source_commit": "0f09558b9aa70b893ebfbfa0b4765634db24d24b",
+  "baseline_source": "edf5e2008e810fca3e498d50bf80e11be714da36",
+  "predeclared_protocol_sha256": "c0eef5e2c38d40a87f1b743ce3bb85867efe6f07a2d8e6e4fbed02ababcd7925",
+  "fixture_sha256": "164062e811489f97779d5b23f17389ff3a7dbd20ac536ae32bf33b5fbf19ee4a",
+  "comparisons": [
+    {
+      "engine": "native",
+      "all_report_bytes_exact": true,
+      "baseline_file": "native-final.json",
+      "baseline_sha256": "3faf4ea13bf690bc06a748589abb2c75959ed9b6a9243961bbb6d77679a55ce0",
+      "candidate_sha256": "3faf4ea13bf690bc06a748589abb2c75959ed9b6a9243961bbb6d77679a55ce0",
+      "original_qualification_passed": true,
+      "cases": 4,
+      "updates_per_case": 16,
+      "retained_failures": []
+    },
+    {
+      "engine": "browser",
+      "all_report_bytes_exact": true,
+      "baseline_file": "browser-reviewed.json",
+      "baseline_sha256": "1820587ac513406d482f012efee6b86984bfbe64510b7ca253e5e01516dabfb3",
+      "candidate_sha256": "1820587ac513406d482f012efee6b86984bfbe64510b7ca253e5e01516dabfb3",
+      "original_qualification_passed": false,
+      "cases": 4,
+      "updates_per_case": 16,
+      "retained_failures": [
+        {
+          "name": "zero_query_causal_geometry_blocks2_metric_onlyFalse",
+          "error": "\"zero_query_causal_geometry_blocks2_metric_onlyFalse\" step 14 geometry.mixture_logits.1: contextual update inert or inaccurate: ref=0.000006812899059201229, rel=0.004374396586346818"
+        }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "scope": "validity",
+      "passed": 4,
+      "log_sha256": "7bd506d5337d82ec97d727fa1e8048e70a2993ad38a7e0c61fd77f5e14c474e9"
+    },
+    {
+      "scope": "poincare",
+      "passed": 11,
+      "log_sha256": "c8c10753c1a60f20ddde85e34cbb70ecc649f4df2b36a62f78623191ee994205"
+    },
+    {
+      "scope": "causal_wave",
+      "passed": 4,
+      "log_sha256": "95379fa5515dfd3198ab6dfc835cd63c545656fbb47b5508041951776d8a0d45"
+    },
+    {
+      "scope": "mixture",
+      "passed": 8,
+      "log_sha256": "acdca0ece1bc75044e29b3d29c7bf99bb64841651c3a1b4283a77308eb44fc6f"
+    },
+    {
+      "scope": "byte-decoder-tests-serial",
+      "passed": 27,
+      "log_sha256": "1cbeb0aec73c8e9cecc2b9955e55dbe8520deb3e7aacf9521272f313f2acd1ba"
+    }
+  ],
+  "gpu_test_gate": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+  "source_files": [
+    {
+      "path": "crates/st-backend-wgpu/src/resident_tensor/validity.rs",
+      "sha256": "6a8fd22773bd0ae6c2a155ea37718d07f93a408c508658cbefd39ee58926746d"
+    },
+    {
+      "path": "crates/st-backend-wgpu/src/resident_tensor/validity/tests.rs",
+      "sha256": "44432859b165191a6cdc791ad8146b0edff40bb0e82312e1fade5582c2b22c81"
+    },
+    {
+      "path": "crates/st-backend-wgpu/src/resident_tensor/poincare.rs",
+      "sha256": "40d051b3511c7ee9cf91ca682dcdc5bcaf542ba93782c60336c943054345b98a"
+    },
+    {
+      "path": "crates/st-backend-wgpu/src/resident_tensor/causal_wave.rs",
+      "sha256": "a47abda053f6f973d900425b24a527fec7ba862ca18a27b6f0e95248d0ca36c7"
+    },
+    {
+      "path": "crates/st-backend-wgpu/src/resident_tensor/mixture.rs",
+      "sha256": "5beb33c46581a2284021720a3b03ce79ebf93eba403d219c57180d9854432eef"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "browser-completed.jpg",
+      "bytes": 84140,
+      "sha256": "f9185f0436ca4dec86adf6032ad690697bddce9fa7aceaff18746055fc779a65"
+    },
+    {
+      "path": "browser.json",
+      "bytes": 8121205,
+      "sha256": "1820587ac513406d482f012efee6b86984bfbe64510b7ca253e5e01516dabfb3"
+    },
+    {
+      "path": "byte-decoder-tests-serial.log",
+      "bytes": 3298,
+      "sha256": "1cbeb0aec73c8e9cecc2b9955e55dbe8520deb3e7aacf9521272f313f2acd1ba"
+    },
+    {
+      "path": "byte-decoder-tests.log",
+      "bytes": 118416,
+      "sha256": "807cd61376ee7d45f28707f80d4591ae67d9c630eb73e8ca5908223aea3e05f5"
+    },
+    {
+      "path": "causal_wave-tests.log",
+      "bytes": 546,
+      "sha256": "95379fa5515dfd3198ab6dfc835cd63c545656fbb47b5508041951776d8a0d45"
+    },
+    {
+      "path": "mixture-tests.log",
+      "bytes": 915,
+      "sha256": "acdca0ece1bc75044e29b3d29c7bf99bb64841651c3a1b4283a77308eb44fc6f"
+    },
+    {
+      "path": "native-build.log",
+      "bytes": 115350,
+      "sha256": "cfcf3e3aa0403fa36df25fe438f18050290270ea8b41aea2dc63d94307c3468d"
+    },
+    {
+      "path": "native.json",
+      "bytes": 8119927,
+      "sha256": "3faf4ea13bf690bc06a748589abb2c75959ed9b6a9243961bbb6d77679a55ce0"
+    },
+    {
+      "path": "native.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "poincare-tests.log",
+      "bytes": 1236,
+      "sha256": "c8c10753c1a60f20ddde85e34cbb70ecc649f4df2b36a62f78623191ee994205"
+    },
+    {
+      "path": "publish.py",
+      "bytes": 2878,
+      "sha256": "42651d7c82fe0c0f27484a7278a63120eba1adfbda52219e1577136debf221ee"
+    },
+    {
+      "path": "resident_byte_query-candidate",
+      "bytes": 7335792,
+      "sha256": "a0cca141af409e5ea30f15e70ad4f1cf4cabd2954bc43b109a47f6ebbac4dd75"
+    },
+    {
+      "path": "serve.py",
+      "bytes": 1394,
+      "sha256": "7f352ac23341f0450c9acff04c195449d0fa5d81917d8ab91fbd2d55be3ac92a"
+    },
+    {
+      "path": "server.log",
+      "bytes": 1311,
+      "sha256": "f98e59f995dc383251731ab74e6982cc3bfdcce0121454beeeb1e87c68f3bde9"
+    },
+    {
+      "path": "validity-tests.log",
+      "bytes": 114897,
+      "sha256": "7bd506d5337d82ec97d727fa1e8048e70a2993ad38a7e0c61fd77f5e14c474e9"
+    },
+    {
+      "path": "wasm-build.log",
+      "bytes": 111793,
+      "sha256": "5970a4c833cb2c371e3a7c9eb077923bd7955ad0a04a0177acac7bb4ea0afe8d"
+    },
+    {
+      "path": "web/resident_byte_decoder_browser.d.ts",
+      "bytes": 4956,
+      "sha256": "ccc81385be789dc43e8180ea22f735202422d86faead5fc8afb35905c1bc97f4"
+    },
+    {
+      "path": "web/resident_byte_decoder_browser.js",
+      "bytes": 49763,
+      "sha256": "11a53debe6ad892771487db9fcff94bcafd4c5bde7f60e31dbac3ab255f2386e"
+    },
+    {
+      "path": "web/resident_byte_decoder_browser_bg.wasm",
+      "bytes": 11519856,
+      "sha256": "b90568f256067faa9e2be800f3a1b6dac13eb7573837eac094bb08b6cc316cd4"
+    },
+    {
+      "path": "web/resident_byte_decoder_browser_bg.wasm.d.ts",
+      "bytes": 3315,
+      "sha256": "b59805921cb0370bdbef2a535e203cb4e770ce2aba058899c016aa26f3363d82"
+    }
+  ],
+  "performance_measured": false,
+  "adopted": false,
+  "independent_review": "Read-only five-file source review; no actionable P1/P2; no independent execution.",
+  "scope": "Same-runtime raw report equality; retains the original browser failure. Hashes are not execution attestation."
+}
