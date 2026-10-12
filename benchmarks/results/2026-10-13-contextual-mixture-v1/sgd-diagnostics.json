@@ -1,0 +1,102 @@
+{
+  "native": {
+    "schema": "spiraltorch.contextual_mixture.sgd_diagnostic.v1",
+    "original_qualification_passed": true,
+    "original_gate_relaxed": false,
+    "note": "Read-only recomputation from retained actual gradients and previous f32 parameters; not a new promotion criterion.",
+    "cases": [
+      {
+        "name": "zero_query_causal_geometry_blocks1_metric_onlyTrue",
+        "checked_scalar_updates": 576,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.000011706566200402038,
+        "max_gradient_relative_l2": 0.000011608630775666147,
+        "failures": []
+      },
+      {
+        "name": "zero_query_causal_geometry_blocks2_metric_onlyFalse",
+        "checked_scalar_updates": 1152,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.00007801642711475167,
+        "max_gradient_relative_l2": 0.0000787262921957789,
+        "failures": []
+      },
+      {
+        "name": "contextual_query_causal_geometry_blocks1_metric_onlyTrue",
+        "checked_scalar_updates": 576,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.00003343934418366452,
+        "max_gradient_relative_l2": 0.000033810567516737065,
+        "failures": []
+      },
+      {
+        "name": "contextual_query_causal_geometry_blocks2_metric_onlyFalse",
+        "checked_scalar_updates": 1152,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.00004224910507564542,
+        "max_gradient_relative_l2": 0.000042657498699316375,
+        "failures": []
+      }
+    ]
+  },
+  "browser": {
+    "schema": "spiraltorch.contextual_mixture.sgd_diagnostic.v1",
+    "original_qualification_passed": false,
+    "original_gate_relaxed": false,
+    "note": "Read-only recomputation from retained actual gradients and previous f32 parameters; not a new promotion criterion.",
+    "cases": [
+      {
+        "name": "zero_query_causal_geometry_blocks1_metric_onlyTrue",
+        "checked_scalar_updates": 576,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.000010332528674700277,
+        "max_gradient_relative_l2": 0.000010391824557737933,
+        "failures": []
+      },
+      {
+        "name": "zero_query_causal_geometry_blocks2_metric_onlyFalse",
+        "checked_scalar_updates": 1152,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.004374396586346819,
+        "max_gradient_relative_l2": 0.0001237118396693394,
+        "failures": [
+          {
+            "step": 14,
+            "parameter": "geometry.mixture_logits.1",
+            "delta_relative_l2": 0.004374396586346819,
+            "gradient_relative_l2": 0.000008795628517911161,
+            "reference_delta_l2": 0.000006812899059201229,
+            "own_sgd_mismatches": 0,
+            "own_sgd_max_ulp": 0,
+            "own_sgd_max_abs": 0,
+            "parameter_max_ulp_vs_reference": 1
+          }
+        ]
+      },
+      {
+        "name": "contextual_query_causal_geometry_blocks1_metric_onlyTrue",
+        "checked_scalar_updates": 576,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.00002283452671291743,
+        "max_gradient_relative_l2": 0.000021758670394146084,
+        "failures": []
+      },
+      {
+        "name": "contextual_query_causal_geometry_blocks2_metric_onlyFalse",
+        "checked_scalar_updates": 1152,
+        "own_sgd_mismatches": 0,
+        "own_sgd_max_ulp": 0,
+        "max_delta_relative_l2": 0.0001477672704296686,
+        "max_gradient_relative_l2": 0.00014821168147151912,
+        "failures": []
+      }
+    ]
+  }
+}
