@@ -80,6 +80,19 @@ a fresh page with `?resume=1` and the opaque downloaded checkpoint served as
 compare against their own uninterrupted result; cross-runtime bitwise equality
 is not required. Keep checkpoints and full parameter reports local.
 
+For the browser completed-state no-op, preserve the pause checkpoint and
+serve the final downloaded checkpoint under that same endpoint instead.
+Open another fresh `?resume=1` page, save both returned artifacts to new paths,
+and compare the report against the original browser result:
+
+```sh
+python3 -I -S -B tools/verify_byte_corpus_resume.py \
+  "$RAW/input/request.json" "$RAW/browser.json" "$RAW/browser-resumed.json" \
+  "$RAW/browser-noop.json" "$RAW/browser-checkpoint-128.json" \
+  "$RAW/browser-noop-verification.json"
+cmp "$RAW/browser-checkpoint-128.json" "$RAW/browser-noop-checkpoint.json"
+```
+
 ## Interpretation
 
 Compare contextual training against both frozen-W and shared-only arms.

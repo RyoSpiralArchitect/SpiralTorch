@@ -4,11 +4,11 @@ This increment puts position-conditioned geometric mixtures into actual
 document-held-out byte-LM learning. It extends the shared-router v7 screen
 without changing the source data, order, seeds, units, gains or original arms.
 
-**Learning comparison complete:** native Metal, browser WebGPU and independent
+**Learning and within-runtime resume comparisons complete:** native Metal, browser WebGPU and independent
 CPU-f32 Torch each completed all 75 cases and 9,600 updates. Both resident
 engines pass the unchanged corpus numerical gates. Native pause-37/fresh-process
-resume and completed-state no-op checks also pass. Browser pause/resume is still
-in progress; this does not claim the entire protocol is complete.
+and browser pause-37/fresh-page resume checks pass, as do their separate
+completed-state no-op checks.
 The earlier `checkpoint-validation.json` intentionally retains the historical
 partial status from before the browser finished.
 
@@ -19,6 +19,15 @@ evaluation point and final parameter. Saved tensor bits match the paused
 readback, frozen parameters remain unchanged, and no-op checkpoint bytes equal
 the input checkpoint. These runs use the preserved v8 baseline executable,
 not the separate guard-batching optimization candidate.
+
+The browser [resume](browser-resume-verification.json) and
+[no-op](browser-noop-verification.json) checks independently cover the same
+75 cases and invariants. The uninterrupted, resumed and no-op raw reports are
+byte-identical; the completed and no-op checkpoint bytes are also identical.
+These are exact comparisons within each runtime, not native/browser bitwise
+equality. [Browser artifact hashes](browser-resume-validation.json) bind the
+preserved original v8 WASM and local reports/checkpoints. Native evidence's
+earlier browser-pending field remains a historical snapshot.
 
 The [native](native-comparison.json) and [browser](browser-comparison.json)
 qualifications both record maximum CE error `1.431e-6` and parameter error
@@ -73,7 +82,7 @@ training-window check on its actual execution device.
 
 See the [predeclared protocol](pre-registered.md), the
 [production recipe](../../../docs/byte_corpus_query_controls.md), and
-[two independent source reviews](independent-review.md).
+[source and evidence reviews](independent-review.md).
 
 Source commit: `386966e747013b7c40c45c83f76746e94793ec02`.
 Local validation: 44 Rust study tests and 91 Python corpus tests passed;

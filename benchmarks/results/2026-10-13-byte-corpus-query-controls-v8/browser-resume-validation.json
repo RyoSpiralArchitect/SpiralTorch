@@ -1,0 +1,96 @@
+{
+  "schema": "spiraltorch.byte_corpus.browser_resume_evidence.v8",
+  "source_commit": "386966e747013b7c40c45c83f76746e94793ec02",
+  "request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+  "uses_guard_batching_candidate": false,
+  "cases": 75,
+  "pause": 37,
+  "updates": 128,
+  "fresh_page_resume_verified": true,
+  "completed_state_noop_verified": true,
+  "resumed_reports_byte_exact": true,
+  "noop_checkpoint_bytes_exact": true,
+  "artifacts": [
+    {
+      "path": "browser.json",
+      "bytes": 17891950,
+      "sha256": "2af73a89a41e711d201e2a7272c4ea84bca13ee8848d4cfbb8e1fc642eccbd8d"
+    },
+    {
+      "path": "browser-partial-37.json",
+      "bytes": 17524334,
+      "sha256": "946e7dfa3840dddc91800f578d4ecfbcd95687957bda886d8c7342ae8b621b95"
+    },
+    {
+      "path": "browser-partial-checkpoint.json",
+      "bytes": 10256390,
+      "sha256": "b6f70806a62795d85eedf11b3cb6fa928ec71081cce7a465e3d7cf41832641e5"
+    },
+    {
+      "path": "browser-resumed.json",
+      "bytes": 17891950,
+      "sha256": "2af73a89a41e711d201e2a7272c4ea84bca13ee8848d4cfbb8e1fc642eccbd8d"
+    },
+    {
+      "path": "browser-checkpoint-128.json",
+      "bytes": 10506323,
+      "sha256": "a81e625c51788f9a3c4b9f4da495ff57a7e8980a05cc63af2cef65219daf9e2c"
+    },
+    {
+      "path": "browser-noop.json",
+      "bytes": 17891950,
+      "sha256": "2af73a89a41e711d201e2a7272c4ea84bca13ee8848d4cfbb8e1fc642eccbd8d"
+    },
+    {
+      "path": "browser-noop-checkpoint.json",
+      "bytes": 10506323,
+      "sha256": "a81e625c51788f9a3c4b9f4da495ff57a7e8980a05cc63af2cef65219daf9e2c"
+    },
+    {
+      "path": "browser-resume-verification.json",
+      "bytes": 44472,
+      "sha256": "aae063d3694db7b068e8f8654b2e2ed3c66340e1803a58d275bc822dfa70b727"
+    },
+    {
+      "path": "browser-noop-verification.json",
+      "bytes": 44547,
+      "sha256": "4dabaedd9e983a2c18b44feb547f0033008f072fbb8c43b4166a1903a8895eaf"
+    },
+    {
+      "path": "web/resident_byte_learning_browser.js",
+      "bytes": 50984,
+      "sha256": "6dabc85e29172fd097b3027e5eba27bebc6dbfafe91941c968eb18bc6fbd6da9"
+    },
+    {
+      "path": "web/resident_byte_learning_browser_bg.wasm",
+      "bytes": 2659954,
+      "sha256": "0aab2c782c163a753576b915e247fbc1115dff2d27f6367ddb22084a25f89a8b"
+    },
+    {
+      "path": "serve_resume.py",
+      "bytes": 1640,
+      "sha256": "4b9485acbfe481faf528265f282eae59d047fcabb95e5bbc9da76415ec7d1495"
+    },
+    {
+      "path": "browser-paused-37.jpg",
+      "bytes": 46511,
+      "sha256": "78ebeed9cefe0b9e6ddbe8392f0d3be88aed26c2463dfb588d47a83517eeedba"
+    },
+    {
+      "path": "browser-resume-completed.jpg",
+      "bytes": 47940,
+      "sha256": "e797116bb91705a32e1e9c14d190a6d0fc9a2c760d0b98cddc0b3dca23ba5a6a"
+    },
+    {
+      "path": "browser-noop-completed.jpg",
+      "bytes": 47402,
+      "sha256": "c2821b3794282b7d789a8f259a2e19c234d2944619509a87730858fd123007a0"
+    },
+    {
+      "path": "publish_browser_resume.py",
+      "bytes": 2757,
+      "sha256": "9087e27774c0d78a266fc5848f7efb87ea971c1964fdb141386c23bf9c19871b"
+    }
+  ],
+  "scope": "Original v8 baseline WASM; browser pause/fresh-page continuation and completed-state no-op. Exact within-runtime checks, not quality, speed or execution attestation. Historical partial records and the contextual v1 browser failure remain unchanged."
+}

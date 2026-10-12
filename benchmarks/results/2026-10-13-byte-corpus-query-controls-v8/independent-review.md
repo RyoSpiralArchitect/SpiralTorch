@@ -28,3 +28,20 @@ the parent's separately recorded execution checks.
 
 Both scopes retain the earlier contextual v1 browser per-step qualification
 as **failed**. This review does not waive or replace that frozen criterion.
+
+## Browser Resume Publication
+
+Reviewer `01a1324c-0cfa-7432-98c8-7d04a290a846` found no P1/P2 issue in the
+six-file browser-resume evidence increment against `51e79a18`:
+the README, checksum manifest, resume/no-op checks, artifact inventory and
+`docs/byte_corpus_query_controls.md`. The reviewer read the verifier and local
+publisher, checked all 16 listed artifact sizes/hashes, the request hash and
+four updated publication hashes, and confirmed 75 distinct cases per check.
+No raw weights/corpus content were present and the historical failure stayed
+explicitly failed. This section records that returned review; it was appended
+afterward and was not itself part of the six-file review.
+
+This was static review with read-only JSON/hash checks. Neither script was
+executed by the reviewer, and fresh-page execution, source-to-WASM provenance,
+model validity and training were not independently attested. No files were
+written, and no builds, GPU work or network access were performed.
