@@ -17,27 +17,6 @@ impl TensorDevice {
         if tensors.len() <= 1 {
             return Ok(tensors.iter().map(|tensor| (*tensor).clone()).collect());
         }
-        let mut encoder = context.device().create_command_encoder(&Default::default());
-        let aliases = self.guard_together_into(tensors, &mut encoder)?;
-        context.queue().submit(Some(encoder.finish()));
-        Ok(aliases)
-    }
-
-    /// Capture validity at this point in the owning device's encoder. The
-    /// caller must submit it before exposing the aliases or using them in a
-    /// separately submitted operation. Keep this deferred API backend-private.
-    pub(super) fn guard_together_into(
-        &self,
-        tensors: &[&ResidentTensor],
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Vec<ResidentTensor>, TensorError> {
-        let context = self.runtime().context();
-        for tensor in tensors {
-            tensor.require_context(context)?;
-        }
-        if tensors.len() <= 1 {
-            return Ok(tensors.iter().map(|tensor| (*tensor).clone()).collect());
-        }
         let gpu = context.device();
         storage_limit(tensors.len(), &gpu.limits())?;
         let inherited = runtime::empty_buffer::<u32>(
@@ -57,6 +36,7 @@ impl TensorDevice {
             .guard_capture
             .get_or_init(|| guard_capture::GuardCapture::new(gpu));
         let binding = capture.bind(gpu, &inherited, &validation);
+        let mut encoder = gpu.create_command_encoder(&Default::default());
         for (i, tensor) in tensors.iter().enumerate() {
             encoder.copy_buffer_to_buffer(tensor.flags(), 0, &inherited, i as u64 * 4, 4);
         }
@@ -64,6 +44,7 @@ impl TensorDevice {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             capture.encode_in_pass(&mut pass, &binding);
         }
+        context.queue().submit(Some(encoder.finish()));
         Ok(tensors
             .iter()
             .map(|tensor| ResidentTensor {

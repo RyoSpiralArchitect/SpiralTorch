@@ -352,8 +352,8 @@ impl ResidentTensor {
         let (cache_len, _) = preflight(spec, &[self, raw_gain])?;
         let device = &self.device;
         let context = device.runtime().context();
+        let joined = device.guard_together(&[self, raw_gain])?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
-        let joined = device.guard_together_into(&[self, raw_gain], &mut encoder)?;
         let coordinates = joined[0].contiguous_into(&mut encoder)?;
         let raw_gain = joined[1].contiguous_into(&mut encoder)?;
         let flag = flags(device, &joined[0], &mut encoder)?;
@@ -394,9 +394,8 @@ impl ResidentTensor {
             p,
             spec.scores_len(),
         )?;
-        let family = device
-            .guard_together_into(&[&scores, &cache, &coordinates, &raw_gain], &mut encoder)?;
         context.queue().submit(Some(encoder.finish()));
+        let family = device.guard_together(&[&scores, &cache, &coordinates, &raw_gain])?;
         Ok(PairForward {
             spec,
             coordinates,
@@ -456,8 +455,8 @@ impl PairForward {
         let (_, len) = preflight(s, &[&self.scores, seed])?;
         let device = &self.scores.device;
         let context = device.runtime().context();
+        let joined = device.guard_together(&[&self.scores, seed])?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
-        let joined = device.guard_together_into(&[&self.scores, seed], &mut encoder)?;
         let seed = joined[1].contiguous_into(&mut encoder)?;
         let flag = flags(device, &joined[0], &mut encoder)?;
         let packed =
@@ -519,8 +518,8 @@ impl PairForward {
                 s.shape()[0] * s.shape()[1],
             )?;
         }
-        let family = device.guard_together_into(&[&packed, &seed], &mut encoder)?;
         context.queue().submit(Some(encoder.finish()));
+        let family = device.guard_together(&[&packed, &seed])?;
         Ok(ResidentPairBiasVjp {
             coordinates: family[0]
                 .narrow(0, 0, s.coordinates_len())?

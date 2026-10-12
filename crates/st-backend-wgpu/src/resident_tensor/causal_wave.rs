@@ -303,9 +303,9 @@ impl ResidentTensor {
         let inputs = [self, raw_decay, raw_phase, initial_state];
         let (len, _) = preflight(spec, &inputs)?;
         let device = &self.device;
+        let joined = device.guard_together(&inputs)?;
         let context = device.runtime().context();
         let mut encoder = context.device().create_command_encoder(&Default::default());
-        let joined = device.guard_together_into(&inputs, &mut encoder)?;
         let packed_inputs = joined
             .iter()
             .map(|t| t.contiguous_into(&mut encoder))
@@ -351,10 +351,10 @@ impl ResidentTensor {
             p,
             shape[0] * shape[1],
         )?;
+        context.queue().submit(Some(encoder.finish()));
         let mut family = vec![&features, &packed];
         family.extend(packed_inputs.iter());
-        let family = device.guard_together_into(&family, &mut encoder)?;
-        context.queue().submit(Some(encoder.finish()));
+        let family = device.guard_together(&family)?;
         let features = family[0].clone();
         let packed = family[1].clone();
         let final_state = packed
@@ -396,11 +396,9 @@ impl ResidentCausalWaveForward {
         )?;
         let device = &self.features.device;
         let context = device.runtime().context();
+        let joined =
+            device.guard_together(&[&self.features, feature_cotangent, terminal_cotangent])?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
-        let joined = device.guard_together_into(
-            &[&self.features, feature_cotangent, terminal_cotangent],
-            &mut encoder,
-        )?;
         let seed = joined[1].contiguous_into(&mut encoder)?;
         let terminal = joined[2].contiguous_into(&mut encoder)?;
         let flags = guard(device, &joined[0], &mut encoder)?;
@@ -457,8 +455,8 @@ impl ResidentCausalWaveForward {
             p,
             spec.pairs(),
         )?;
-        let family = device.guard_together_into(&[&packed, &seed, &terminal], &mut encoder)?;
         context.queue().submit(Some(encoder.finish()));
+        let family = device.guard_together(&[&packed, &seed, &terminal])?;
         let packed = &family[0];
         let parameter_offset = spec.len() + 2 * spec.state_len();
         Ok(ResidentCausalWaveVjp {
