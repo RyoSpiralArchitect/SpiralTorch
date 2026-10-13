@@ -98,6 +98,9 @@ The canonical Rust protocol names are `poincare_squared.v1`,
 chord, not geodesic distance. Builders return new plans without mutating old
 plans or compiled models. Mixture components must be distinct; scales are
 fixed, finite and positive. Router parameters remain trainable.
+Query projections reserve one graph stage and one parameter slot for the shared
+logit table. Oversized augmented graphs are rejected during plan construction
+and checkpoint import, before any device allocation.
 
 The contextual router consumes causal geometry coordinates at the query
 position, **not the transformer's Q tensor**. `backward(...,

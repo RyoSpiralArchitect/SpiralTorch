@@ -77,6 +77,7 @@ class LearningSmokeTests(unittest.TestCase):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("python -I tools/smoke_learning_stack.py", ci)
         self.assertIn("python -I tests/test_release_learning_smoke.py", ci)
+        self.assertIn("python -I -B bindings/st-py/tests/test_nn_byte_decoder.py -v", ci)
 
     def test_homogeneous_substitute_does_not_pass_headwise_smoke(self):
         constructor = st.nn.ByteDecoderGeometryPlan
