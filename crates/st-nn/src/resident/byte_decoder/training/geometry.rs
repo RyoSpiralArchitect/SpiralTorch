@@ -1,3 +1,4 @@
+use super::super::geometry::query_graph;
 use super::*;
 use st_backend_wgpu::resident_tensor::{
     causal_wave::ResidentCausalWaveForward,
@@ -6,11 +7,6 @@ use st_backend_wgpu::resident_tensor::{
     mixture::{ResidentHeadwiseMixture, ResidentQuerywiseMixture},
     poincare::ResidentPoincareBiasForward,
     projective::ResidentProjectiveBiasForward,
-};
-use st_kernel_contracts::{
-    elementwise::ElementwiseOp,
-    graph::{GraphDefinition, GraphError, GraphStage},
-    pointwise::{PointwiseChain, PointwiseStep},
 };
 
 enum MetricTape {
@@ -232,39 +228,6 @@ struct MixtureAutograd {
     metrics: Vec<ByteDecoderPairMetric>,
     scales: Vec<Vec<ResidentTensor>>,
     queries: Vec<ResidentGraphAutograd>,
-}
-
-// Bind the existing shared table as the final broadcast-add parameter. Its
-// reduction is the graph's exact VJP, not a second host-side router heuristic.
-fn query_graph(
-    projection: &InferencePlan,
-    logits: &[f32],
-) -> Result<GraphDefinition, InferenceError> {
-    let graph = projection.graph_definition()?;
-    let mut parameters = graph.parameters().to_vec();
-    let index = parameters.len();
-    parameters.push(GraphParameter {
-        role: ParameterRole::Bias,
-        shape: vec![logits.len()],
-        values: logits.to_vec(),
-    });
-    let mut stages = graph.stages().to_vec();
-    stages.push(GraphStage::Pointwise {
-        chain: PointwiseChain::new(
-            2,
-            vec![PointwiseStep {
-                op: ElementwiseOp::Add,
-                rhs: Some(1),
-            }],
-        )
-        .map_err(GraphError::from)?,
-        parameters: vec![index],
-    });
-    Ok(GraphDefinition::new(
-        graph.input_layout().clone(),
-        stages,
-        parameters,
-    )?)
 }
 
 impl GeometryAutograd {

@@ -1,6 +1,50 @@
 //! A causal metric encoder, owned and updated by the complete byte model.
 use super::*;
-use st_kernel_contracts::{causal_wave::CausalWaveSpec, poincare::PoincareBiasSpec};
+use st_kernel_contracts::{
+    causal_wave::CausalWaveSpec,
+    elementwise::ElementwiseOp,
+    graph::GraphError,
+    poincare::PoincareBiasSpec,
+    pointwise::{PointwiseChain, PointwiseStep},
+};
+
+// Validate the augmented graph at the portable boundary and compile that same
+// graph on the device. The shared logit table owns one extra stage and slot.
+pub(super) fn query_graph(
+    projection: &InferencePlan,
+    logits: &[f32],
+) -> Result<GraphDefinition, InferenceError> {
+    let graph = projection.graph_definition()?;
+    let mut parameters = graph.parameters().to_vec();
+    if parameters.is_empty() {
+        return Err(InferenceError::ByteDecoder(
+            "query projection must be trainable and tokenwise on causal coordinates",
+        ));
+    }
+    let index = parameters.len();
+    parameters.push(GraphParameter {
+        role: ParameterRole::Bias,
+        shape: vec![logits.len()],
+        values: logits.to_vec(),
+    });
+    let mut stages = graph.stages().to_vec();
+    stages.push(GraphStage::Pointwise {
+        chain: PointwiseChain::new(
+            2,
+            vec![PointwiseStep {
+                op: ElementwiseOp::Add,
+                rhs: Some(1),
+            }],
+        )
+        .map_err(GraphError::from)?,
+        parameters: vec![index],
+    });
+    Ok(GraphDefinition::new(
+        graph.input_layout().clone(),
+        stages,
+        parameters,
+    )?)
+}
 
 /// Pair metric only: projection, causal wave, chart and parameter ownership stay
 /// identical. The flat control uses 4*||x-y||^2, the origin-local Poincare scale.
@@ -247,19 +291,23 @@ impl ByteDecoderGeometryPlan {
             ));
         }
         let [batch, steps, _] = self.wave.shape();
-        for (projection, gains) in projections.iter().zip(&self.raw_gains) {
+        for ((projection, gains), logits) in projections
+            .iter()
+            .zip(&self.raw_gains)
+            .zip(&mixture.raw_logits)
+        {
             let cols = gains
                 .len()
                 .checked_mul(mixture.metrics.len())
                 .ok_or(InferenceError::PortableAddressSpace)?;
             if projection.input_layout() != self.projection.output_layout()
                 || projection.output_layout().shape() != [batch, steps, cols]
-                || projection.graph_definition()?.parameters().is_empty()
             {
                 return Err(InferenceError::ByteDecoder(
                     "query projection must be trainable and tokenwise on causal coordinates",
                 ));
             }
+            query_graph(projection, logits)?;
             st_kernel_contracts::mixture::QuerywiseMixtureSpec::new([
                 batch,
                 gains.len(),

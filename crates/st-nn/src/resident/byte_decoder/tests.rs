@@ -1,5 +1,7 @@
 use super::*;
 
+mod query_budget;
+
 pub(super) fn plan(
     mask: AttentionMask,
     block_count: usize,
