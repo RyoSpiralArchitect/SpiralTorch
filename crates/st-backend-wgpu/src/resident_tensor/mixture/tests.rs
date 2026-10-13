@@ -205,10 +205,7 @@ fn mixture_native_forward_and_vjps_support_strided_inputs_and_repeated_backward(
             .narrow(1, 0, k)
             .unwrap();
         let seed_gpu = d
-            .upload(
-                &[b + 1, h, p],
-                &vec![vec![99.; h * p], seed.clone()].concat(),
-            )
+            .upload(&[b + 1, h, p], &[vec![99.; h * p], seed.clone()].concat())
             .unwrap()
             .narrow(0, 1, b)
             .unwrap();
