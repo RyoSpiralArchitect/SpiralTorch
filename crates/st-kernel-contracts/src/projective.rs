@@ -46,7 +46,7 @@ pub fn complex_projective_chord_squared(x: &[f64], y: &[f64]) -> Result<f64, Pro
     if x.len() != y.len() {
         return Err(ProjectiveError::Length);
     }
-    if x.is_empty() || x.len() % 2 != 0 {
+    if x.is_empty() || !x.len().is_multiple_of(2) {
         return Err(ProjectiveError::Shape);
     }
     let normalized = |row: &[f64]| -> Result<Vec<f64>, ProjectiveError> {
@@ -83,7 +83,7 @@ pub struct ProjectiveBiasSpec {
 
 impl ProjectiveBiasSpec {
     pub fn new(shape: [usize; 3], heads: usize) -> Result<Self, ProjectiveError> {
-        if shape.contains(&0) || shape[2] % 2 != 0 || heads == 0 {
+        if shape.contains(&0) || !shape[2].is_multiple_of(2) || heads == 0 {
             return Err(ProjectiveError::Shape);
         }
         let count = |dims: &[usize]| {

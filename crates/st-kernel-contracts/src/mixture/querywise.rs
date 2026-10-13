@@ -129,11 +129,12 @@ mod tests {
             .map(|i| (i as f32 * 0.7).sin())
             .collect();
         let f = QuerywiseMixtureForward::new(s, &x, &logits).unwrap();
-        let selected = (1 * 3 + 2) * 4 + 1;
+        let (batch, head, query) = (1, 2, 1);
+        let selected = (batch * 3 + head) * 4 + query;
         let mut seed = vec![0.; s.output_len()];
         seed[selected * 5..(selected + 1) * 5].copy_from_slice(&[0.1, -0.2, 0.4, 0.3, -0.1]);
         let g = f.backward(&seed).unwrap();
-        for (group, grad) in g.logits.chunks_exact(3).enumerate() {
+        for (group, grad) in g.logits.as_chunks::<3>().0.iter().enumerate() {
             if group != selected {
                 assert_eq!(grad, &[0.; 3]);
             } else {
@@ -141,7 +142,7 @@ mod tests {
                 assert!(grad.iter().sum::<f32>().abs() < 1e-6);
             }
         }
-        for (group, grad) in g.input.chunks_exact(5 * 3).enumerate() {
+        for (group, grad) in g.input.as_chunks::<{ 5 * 3 }>().0.iter().enumerate() {
             if group != selected {
                 assert!(grad.iter().all(|&v| v == 0.));
             }

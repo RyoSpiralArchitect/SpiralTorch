@@ -70,7 +70,7 @@ fn full_logit_and_gain_pullbacks_match_finite_differences() {
             "{i}: {numerical} != {want}"
         );
     }
-    for row in g.coordinates.chunks_exact(4) {
+    for row in g.coordinates.as_chunks::<4>().0 {
         assert!(row.iter().map(|&v| f64::from(v)).sum::<f64>().abs() < 2e-7);
     }
 }
@@ -81,7 +81,12 @@ fn causal_mask_shift_invariance_and_identity_are_not_detaches() {
     let x = [0.25, -0.5, 1., 1., -0.25, 0.5, -0.75, 1.5, 0.25];
     let f = FisherRaoBiasForward::new(s, &x, &[0.1, -0.2]).unwrap();
     let mut shifted = x;
-    for (row, offset) in shifted.chunks_exact_mut(3).zip([8., -4., 16.]) {
+    for (row, offset) in shifted
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip([8., -4., 16.])
+    {
         for v in row {
             *v += offset;
         }

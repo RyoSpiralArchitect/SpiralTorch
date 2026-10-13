@@ -239,7 +239,7 @@ mod tests {
                 );
             }
         }
-        for row in g.logits.chunks_exact(3) {
+        for row in g.logits.as_chunks::<3>().0 {
             assert!(row.iter().sum::<f32>().abs() < 1e-6);
         }
     }

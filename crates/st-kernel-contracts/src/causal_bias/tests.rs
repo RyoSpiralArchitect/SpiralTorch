@@ -29,7 +29,7 @@ fn centered_rms_is_per_head_causal_and_row_shift_invariant() {
     assert_eq!(original.valid_pairs_per_head(), 6);
     assert!((original.rms()[0] - 55f64.sqrt() / 6.).abs() < 1e-14);
     assert_eq!(original.rms()[1], original.rms()[0] * 2.);
-    for (i, row) in values.chunks_exact_mut(3).enumerate() {
+    for (i, row) in values.as_chunks_mut::<3>().0.iter_mut().enumerate() {
         for (k, value) in row.iter_mut().enumerate() {
             *value += (16 * (i + 1)) as f32;
             if k > i % 3 {
