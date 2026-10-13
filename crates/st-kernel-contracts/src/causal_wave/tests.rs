@@ -1,9 +1,159 @@
 use super::*;
 
+#[test]
+fn nested_batch_cancellation_keeps_the_last_parameter_signal() {
+    let f = CausalWaveForward::new(
+        CausalWaveSpec::new([5, 1, 2], -1.).unwrap(),
+        &[0.; 10],
+        &[0.],
+        &[0.],
+        &[1., 0., 1., 0., 1., 0., 1., 0., 1., 0.],
+    )
+    .unwrap();
+    let small = 2f64.powi(-128) as f32;
+    for channel in 0..2 {
+        let mut terminal = [0.; 10];
+        for (b, value) in [2f32.powi(124), 0.25, small, -0.25, -2f32.powi(124)]
+            .into_iter()
+            .enumerate()
+        {
+            terminal[2 * b + channel] = value;
+        }
+        let g = f.backward(&[0.; 10], &terminal).unwrap();
+        let coefficient = if channel == 0 {
+            f64::from(MAX_DECAY * 0.25)
+        } else {
+            f64::from(MAX_DECAY * 0.5) * f64::from(std::f32::consts::PI)
+        };
+        let expected = (coefficient * f64::from(small)) as f32;
+        let actual = if channel == 0 {
+            g.raw_decay[0]
+        } else {
+            g.raw_phase[0]
+        };
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "channel={channel}: {actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn time_partials_survive_later_batch_cancellation() {
+    let large = 2f32.powi(124);
+    let f = CausalWaveForward::new(
+        CausalWaveSpec::new([2, 2, 2], -1.).unwrap(),
+        &[large, 0., 0., 0., large, 0., 0., 0.],
+        &[0.],
+        &[0.],
+        &[1., 0., 0., 0.],
+    )
+    .unwrap();
+    let g = f.backward(&[0.; 8], &[0., 1., 0., -1.]).unwrap();
+    let rho = f64::from(MAX_DECAY * 0.5);
+    let expected = (rho * rho * f64::from(std::f32::consts::PI)) as f32;
+    assert_eq!(
+        g.raw_phase[0].to_bits(),
+        expected.to_bits(),
+        "{} != {expected}",
+        g.raw_phase[0]
+    );
+}
+
+#[test]
+fn batch_cancellation_preserves_small_parameter_gradients() {
+    let permutations = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+    let f = CausalWaveForward::new(
+        CausalWaveSpec::new([3, 1, 2], -1.).unwrap(),
+        &[0.; 6],
+        &[0.],
+        &[0.],
+        &[1., 0., 1., 0., 1., 0.],
+    )
+    .unwrap();
+    for large in [2f32.powi(24), 2f32.powi(48), 2f32.powi(96)] {
+        for order in permutations {
+            for channel in 0..2 {
+                let values = [large, 1., -large];
+                let mut terminal = [0.; 6];
+                for (b, i) in order.iter().enumerate() {
+                    terminal[2 * b + channel] = values[*i];
+                }
+                let g = f.backward(&[0.; 6], &terminal).unwrap();
+                let expected = if channel == 0 {
+                    MAX_DECAY * 0.25
+                } else {
+                    (f64::from(MAX_DECAY * 0.5) * f64::from(std::f32::consts::PI)) as f32
+                };
+                let actual = if channel == 0 {
+                    g.raw_decay[0]
+                } else {
+                    g.raw_phase[0]
+                };
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "large={large}, order={order:?}, channel={channel}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn finite_batch_cancellation_can_recover_overflowed_parameter_partials() {
+    for channel in 0..2 {
+        let x = if channel == 0 { 8. } else { 1. };
+        let f = CausalWaveForward::new(
+            CausalWaveSpec::new([2, 1, 2], -1.).unwrap(),
+            &[0.; 4],
+            &[0.],
+            &[0.],
+            &[x, 0., x, 0.],
+        )
+        .unwrap();
+        let mut terminal = [0.; 4];
+        terminal[channel] = f32::MAX;
+        terminal[2 + channel] = -f32::MAX;
+        let g = f.backward(&[0.; 4], &terminal).unwrap();
+        assert_eq!(g.raw_decay, vec![0.]);
+        assert_eq!(g.raw_phase, vec![0.]);
+        assert!(g
+            .drive
+            .iter()
+            .chain(&g.initial_state)
+            .all(|v| v.is_finite()));
+        terminal[2 + channel] = f32::MAX;
+        assert!(matches!(
+            f.backward(&[0.; 4], &terminal),
+            Err(CausalWaveError::NonFinite)
+        ));
+    }
+}
+
 fn near(a: &[f32], b: &[f32], tolerance: f32) {
     assert_eq!(a.len(), b.len());
     for (&x, &y) in a.iter().zip(b) {
         assert!((x - y).abs() <= tolerance, "{x} != {y}");
+    }
+}
+
+#[test]
+fn sequence_exponent_bound_is_checked_without_allocating() {
+    assert!(CausalWaveSpec::new([1, MAX_STEPS, 2], -1.).is_ok());
+    for steps in [MAX_STEPS + 1, 20_000_000] {
+        assert_eq!(
+            CausalWaveSpec::new([1, steps, 2], -1.),
+            Err(CausalWaveError::SequenceLength)
+        );
     }
 }
 

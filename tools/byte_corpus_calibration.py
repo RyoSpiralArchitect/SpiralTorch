@@ -1,0 +1,159 @@
+"""Independent measurement only. Fitted weights are prepared by Rust, not here."""
+import math
+import importlib.util
+from pathlib import Path
+
+
+def headwise_module():
+    spec = importlib.util.spec_from_file_location("byte_corpus_headwise", Path(__file__).with_name("byte_corpus_headwise.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def candidate_metrics(request):
+    return (["euclidean_chord_squared.v1", "categorical_fisher_rao_squared.v1"]
+            if request["schema"] in ("spiraltorch.byte_corpus.request.v5", "spiraltorch.byte_corpus.request.v6", "spiraltorch.byte_corpus.request.v7", "spiraltorch.byte_corpus.request.v8")
+            else ["euclidean_chord_squared.v1"])
+
+
+def verify_qualification(request, record):
+    """Validate recorded independent measurements without trusting pass flags."""
+    if (not isinstance(record, dict) or set(record) != {"passed", "no_fitting", "no_updates_consumed", "cases"}
+            or any(record.get(flag) is not True for flag in ("passed", "no_fitting", "no_updates_consumed"))):
+        raise ValueError("missing or failed independent calibration qualification")
+    cases = record["cases"]
+    seeds = sorted({c["seed"] for c in request["cases"]})
+    metrics = candidate_metrics(request)
+    headwise = request["schema"] == "spiraltorch.byte_corpus.request.v6"
+    mixture = request["schema"] in ("spiraltorch.byte_corpus.request.v7", "spiraltorch.byte_corpus.request.v8")
+    expected = []
+    for seed in seeds:
+        expected.extend((seed, metric, None) for metric in metrics)
+        if headwise:
+            expected.extend((seed, None, c) for c in request["cases"]
+                            if c["seed"] == seed and "head_pair_metrics" in c and c["geometry_update"] == "train")
+        if mixture:
+            expected.extend((seed,None,c) for c in request["cases"]
+                            if c["seed"]==seed and "mixture" in c and c["mixture"]["router_update"]=="train")
+    if (type(cases) is not list or len(cases) != len(expected)
+            or any(type(c.get("seed")) is not int or c["seed"] != seed
+                   or ((c.get("mixture" if mixture else "head_pair_metrics") != route["mixture" if mixture else "head_pair_metrics"] or c.get("name") != route["name"] or "pair_metric" in c)
+                       if route is not None else
+                       ("mixture" in c or "head_pair_metrics" in c or (c.get("pair_metric") != metric if len(metrics) == 2 else "pair_metric" in c)))
+                   for c, (seed, metric, route) in zip(cases, expected))):
+        raise ValueError("independent calibration seed coverage")
+    cfg = request["config"]
+    spec = request["bias_calibration"]
+    count = len(spec["train_batch_indices"]) * cfg["batch"] * cfg["steps"] * (cfg["steps"] + 1) // 2
+    targets = {}
+    for case in cases:
+        if type(case.get("valid_pairs_per_head")) is not int or case["valid_pairs_per_head"] != count:
+            raise ValueError("independent calibration pair coverage")
+        for field in ("reference_rms", "fitted_rms", "realized_relative_errors"):
+            value = case.get(field)
+            if (type(value) is not list or len(value) != len(cfg["blocks"])
+                    or any(type(row) is not list or len(row) != cfg["heads"] for row in value)
+                    or any(type(x) not in (float, int) or not math.isfinite(x)
+                           or (x < 0 if field == "realized_relative_errors" else x <= 0)
+                           for row in value for x in row)):
+                raise ValueError("independent calibration block/head statistic")
+        if case["reference_rms"] != targets.setdefault(case["seed"], case["reference_rms"]):
+            raise ValueError("metrics must share one Poincare RMS target per seed")
+        for reference, fitted, stated in zip(case["reference_rms"], case["fitted_rms"], case["realized_relative_errors"]):
+            for target, actual, claimed in zip(reference, fitted, stated):
+                error = abs(actual / target - 1)
+                if not math.isfinite(error) or error > spec["relative_tolerance"] or abs(error - claimed) > 1e-14:
+                    raise ValueError("independent calibration RMS gate or arithmetic")
+
+
+def verify_initial_rms(request, wave, metric, fisher_metric=None):
+    import torch
+    import torch.nn.functional as functional
+
+    config = request["config"]
+    batch, t = config["batch"], config["steps"]
+    spec = request["bias_calibration"]
+    headwise = headwise_module() if request["schema"] == "spiraltorch.byte_corpus.request.v6" else None
+    mixture = None
+    if request["schema"] in ("spiraltorch.byte_corpus.request.v7", "spiraltorch.byte_corpus.request.v8"):
+        spec_module = importlib.util.spec_from_file_location("byte_corpus_mixture", Path(__file__).with_name("byte_corpus_mixture.py"))
+        mixture = importlib.util.module_from_spec(spec_module)
+        spec_module.loader.exec_module(mixture)
+
+    def moments(case):
+        p = [torch.tensor(v["values"], device="cpu", dtype=torch.float32).reshape(v["shape"])
+             for v in case["parameters"]]
+        energy = torch.zeros((len(config["blocks"]), config["heads"]), device="cpu", dtype=torch.float64)
+        count = 0
+        with torch.no_grad():
+            for index in spec["train_batch_indices"]:
+                rows = [request["train_documents"][d][s:s+t] for d, s in request["train_batches"][index]]
+                ids = torch.tensor(rows, device="cpu", dtype=torch.long)
+                positions = torch.arange(t, device="cpu").expand(batch, t)
+                embedded = functional.embedding(ids, p[0]) + functional.embedding(positions, p[1])
+                coordinates, _ = wave(embedded @ p[2] + p[3], p[4], p[5],
+                    torch.zeros((batch, config["geometry_cols"]), device="cpu"), config["curvature"])
+                for block in range(len(config["blocks"])):
+                    if "mixture" in case:
+                        scores = mixture.pair_bias(coordinates,p[6+block],p[6+len(config["blocks"])+block],
+                            case["mixture"],block,config["curvature"],metric,fisher_metric,
+                            p[6+2*len(config["blocks"])+2*block:8+2*len(config["blocks"])+2*block]
+                            if "query_projection" in case["mixture"] else None)
+                    elif "head_pair_metrics" in case:
+                        scores = headwise.pair_bias(coordinates, p[6+block], case["head_pair_metrics"][block],
+                                                   config["curvature"], metric, fisher_metric)
+                    elif case["pair_metric"] == "euclidean_chord_squared.v1":
+                        distance = (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
+                        scores = (-functional.softplus(p[6+block])[None, :, None, None] * (4 * distance[:, None])).tril()
+                    elif case["pair_metric"] == "categorical_fisher_rao_squared.v1":
+                        if fisher_metric is None:
+                            raise ValueError("missing independent Fisher-Rao reference")
+                        scores = fisher_metric(coordinates, p[6+block])
+                    else:
+                        scores = metric(coordinates, p[6+block], config["curvature"])
+                    for q in range(t):
+                        row = scores[:, :, q, :q+1].double()
+                        centered = row - row.mean(-1, keepdim=True)
+                        energy[block] += centered.square().sum((0, 2))
+                count += batch * t * (t + 1) // 2
+        return (energy / count).sqrt().tolist(), count
+
+    reports = []
+    for seed in sorted({c["seed"] for c in request["cases"]}):
+        group = [c for c in request["cases"] if c["seed"] == seed and c["geometry_update"] == "train"]
+        target = next(c for c in group if c.get("pair_metric") == "poincare_squared.v1")
+        reference, count = moments(target)
+        metrics = candidate_metrics(request)
+        selected = [next(c for c in group if c["bias_initialization"] == "matched_poincare_rms"
+                         and c.get("pair_metric") == selected_metric) for selected_metric in metrics]
+        if headwise:
+            selected.extend(c for c in group if "head_pair_metrics" in c)
+        if mixture:
+            selected.extend(c for c in group if "mixture" in c and c["mixture"]["router_update"]=="train")
+        for fitted in selected:
+            observed, other_count = moments(fitted)
+            if count != other_count:
+                raise ValueError("calibration measurement coverage differs")
+            errors = []
+            for reference_row, observed_row in zip(reference, observed):
+                row = []
+                for target, actual in zip(reference_row, observed_row):
+                    if not math.isfinite(target) or not math.isfinite(actual) or min(target, actual) <= 0:
+                        raise ValueError("unqualified initial RMS")
+                    error = abs(actual / target - 1)
+                    if error > spec["relative_tolerance"]:
+                        raise ValueError("frozen initial RMS gate failed; do not fit or relax it")
+                    row.append(error)
+                errors.append(row)
+            reports.append(dict(seed=seed, reference_rms=reference, fitted_rms=observed,
+                                valid_pairs_per_head=count, realized_relative_errors=errors))
+            if "mixture" in fitted:
+                reports[-1].update(name=fitted["name"],mixture=fitted["mixture"])
+            elif "head_pair_metrics" in fitted:
+                reports[-1].update(name=fitted["name"], head_pair_metrics=fitted["head_pair_metrics"])
+            elif len(metrics) == 2:
+                reports[-1]["pair_metric"] = fitted["pair_metric"]
+    result = dict(passed=True, no_fitting=True, no_updates_consumed=True, cases=reports)
+    verify_qualification(request, result)
+    return result

@@ -1,0 +1,206 @@
+{
+  "schema": "spiraltorch.complex_projective_validation.v1",
+  "builds_and_commands": [
+    {
+      "stage": "spinor",
+      "exit_code": 0,
+      "started": "2026-10-13T03:16:03.847Z",
+      "finished": "2026-10-13T03:16:38.435Z"
+    },
+    {
+      "stage": "nn-final",
+      "exit_code": 0,
+      "started": "2026-10-13T03:16:38.444Z",
+      "finished": "2026-10-13T03:17:19.541Z"
+    },
+    {
+      "stage": "build-final",
+      "exit_code": 0,
+      "started": "2026-10-13T03:17:19.545Z",
+      "finished": "2026-10-13T03:18:07.075Z"
+    },
+    {
+      "stage": "native-observed",
+      "exit_code": 1,
+      "started": "2026-10-13T03:18:07.085Z",
+      "finished": "2026-10-13T03:18:22.173Z"
+    },
+    {
+      "stage": "wasm-build",
+      "exit_code": 0,
+      "started": "2026-10-13T03:18:22.188Z",
+      "finished": "2026-10-13T03:19:06.231Z"
+    },
+    {
+      "stage": "bindgen",
+      "exit_code": 0,
+      "started": "2026-10-13T03:19:06.240Z",
+      "finished": "2026-10-13T03:19:06.423Z"
+    }
+  ],
+  "local_tests": {
+    "pure_projective": 7,
+    "resident_pair_gpu": 15,
+    "spinor": 1,
+    "byte_decoder": 28,
+    "independent_torch": 3
+  },
+  "earlier_expected_failure": {
+    "test": "cancelling_large_overlap_keeps_homogeneous_anchor_gradient",
+    "exit_code": 101,
+    "subsequently_fixed": true
+  },
+  "fixture_sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358",
+  "legacy_fixture_sha256": "164062e811489f97779d5b23f17389ff3a7dbd20ac536ae32bf33b5fbf19ee4a",
+  "raw_manifest": [
+    {
+      "name": "protocol.json",
+      "bytes": 3217,
+      "sha256": "ae4302602b4000800b3d45503c2f7065d0ecdbd32595eb962dbbb2e8556c4395"
+    },
+    {
+      "name": "evidence-protocol.json",
+      "bytes": 3343,
+      "sha256": "21ff105fe6c53e4539f99e1361a80de5e47784d16bc99e8944b96d260f720a41"
+    },
+    {
+      "name": "reference.json",
+      "bytes": 7466211,
+      "sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358"
+    },
+    {
+      "name": "native.json",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "native.log",
+      "bytes": 148,
+      "sha256": "7359c9b8b8d37683e08c0d43dcebb11a4bdccb3aa71d0ace68eb965501053cdf"
+    },
+    {
+      "name": "native-observed.json",
+      "bytes": 11798095,
+      "sha256": "a12fb784824ba2b676f0b995b148e06fc41a68d3c70d60ae1091e471465b1e22"
+    },
+    {
+      "name": "native-observed.log",
+      "bytes": 76,
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b"
+    },
+    {
+      "name": "browser.json",
+      "bytes": 11790984,
+      "sha256": "2df747fb08a8c640146499d15f43dbc062de7d4e1add152db51569e399e13835"
+    },
+    {
+      "name": "browser-result.png",
+      "bytes": 97036,
+      "sha256": "3c9db06ad04f14a36a752503581c7cbfae59ed705451dcf17f42f06a3d343507"
+    },
+    {
+      "name": "core-tests.log",
+      "bytes": 1098,
+      "sha256": "1ccd1329f1999e5d62126dc2319dae759fc91ecfa4f6a5e0ecdaffffa782436e"
+    },
+    {
+      "name": "gpu-tests.log",
+      "bytes": 116140,
+      "sha256": "f6446cbf4babae5760892a882db1627b499ce96930b8cbd92453fb16fa3eb06c"
+    },
+    {
+      "name": "spinor.log",
+      "bytes": 2340,
+      "sha256": "969a4204d5fc3775c38a796d9b68270cae8f894d5f254e500dcd9ff8ee3c1ffa"
+    },
+    {
+      "name": "nn-final.log",
+      "bytes": 118546,
+      "sha256": "f6e7b2325921476c513dc3d565c2a1fa2b69d9fbe340e0ecca0ec2fd1239b3b5"
+    },
+    {
+      "name": "torch-reference-tests.log",
+      "bytes": 494,
+      "sha256": "93d9c1a0bc7f535a2f53ae6abc3cd1ed6fc015ecc232939c55fbabf604a8dfc1"
+    },
+    {
+      "name": "validation-stages.jsonl",
+      "bytes": 2246,
+      "sha256": "d0480b1ad0748252367a771fdcd4c9e7893b4e8ad3a3a4286a84c040bddd6b4e"
+    },
+    {
+      "name": "anchor-regression-before.log",
+      "bytes": 1271,
+      "sha256": "e369c6f90ab19c16ac4bf69ab33c055fdf7e87a45be8277ada179cccc6925d6b"
+    },
+    {
+      "name": "same-state-diagnostic.json",
+      "bytes": 680,
+      "sha256": "6c6b62d045167073977d11a91848b2e735f4942ad764725393362a15056e93f6"
+    },
+    {
+      "name": "same-state-diagnostic.log",
+      "bytes": 160,
+      "sha256": "bf2a59c642cce211be429dde02f0f711ad646bbcbbb988205d1ae04c6e8a2cb1"
+    },
+    {
+      "name": "diagnose_same_state.py",
+      "bytes": 4964,
+      "sha256": "c7f88b05bf974d9768e611bf1c615a09383a58d7e90e00375330b3cd0a208df5"
+    },
+    {
+      "name": "publish.cjs",
+      "bytes": 8883,
+      "sha256": "f4e3dc7ca685cac3bd8a64ab928568cfaf23eea084334eeeb63e8e3d54b1f3ab"
+    },
+    {
+      "name": "validate.cjs",
+      "bytes": 3077,
+      "sha256": "9db115e660e450a4b6b21fc623c3efe6a38e21f78e8bdc08d9dea3c63a7896e5"
+    },
+    {
+      "name": "resident-byte-qualified",
+      "bytes": 7375024,
+      "sha256": "412934f11dc8ecda6fafd9056a8b8d20b2e024fe25b0aaa47b3e74a3cfb7d6eb"
+    },
+    {
+      "name": "resident-byte-pre-anchor-fix",
+      "bytes": 7374240,
+      "sha256": "b9f8ed0ad4905003b8e861e24ff81c573cd5ff00d26bb9b71f15d566210aeb70"
+    },
+    {
+      "name": "web/resident_byte_decoder_browser.js",
+      "bytes": 50109,
+      "sha256": "5b144353bae9ee03d27bfb87f75329a73ece5c8d403f878fb8e60bc6e0e58dd2"
+    },
+    {
+      "name": "web/resident_byte_decoder_browser_bg.wasm",
+      "bytes": 11600343,
+      "sha256": "2056be5aef6fa740cf32ae924c4f31562b0ae16f9c43bac1a00e6ba9a88b2c3c"
+    }
+  ],
+  "source_hashes": {
+    "crates/st-kernel-contracts/src/projective.rs": "a63139f9525a28fbb57ec530f5a3c7003d239f663b559182881603d552a8a977",
+    "crates/st-kernel-contracts/src/projective/tests.rs": "bb8f3daad1ef8a592d01a6664a71d8ef71346f560e7550cf3964e4247b29a607",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "e22a8e881c1e07511b7cf2396b2fdc89f989b3cb2927b5ab3d3cd4e98ce31e46",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "ad1936df651495c68f3c9420e7ee676eb099144acf31acbefb041426a532facd",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/pair_spec.rs": "86857c1b11500e23f66c6e115be266c05989ab0ae0cf2d88f3da9ae2940604d0",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": "fcf1f0935ea1abfc597aeb188b5521789aeecd6414a438efd7bfd287c5cd09b5",
+    "crates/st-backend-wgpu/src/resident_tensor/projective.rs": "aa64e101ee06dcc8a918b4b8a00c8c68cb96b45b2c56a15f8c0fdbe9942cb7c6",
+    "crates/st-core/src/theory/stv.rs": "b39beaf4e9f06f7c2275a0c8acf6636cd1240086b1916361ac43be71ef8dfcad",
+    "crates/st-kernel-contracts/src/lib.rs": "50f92bfe1f8fc7fe739a5da5daf2f0c17c31cfece83d098e8cf3083f99ed6976",
+    "crates/st-nn/src/resident/byte_decoder/geometry.rs": "47f4b36f2830c2284564cb5d76f5a7117b88ea5c0c93e7471eca381d6b7a399a",
+    "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "0dd0aedd90e754837a8a33146ad8683cf1bd1b6e39af84c20171eb83d7d5cbb0",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs": "11ee438e078d4d7febf4464b910155581235c606d0e1f9261854ae6c8dcfa644",
+    "crates/st-nn/examples/resident_byte_flat_metric.rs": "ba08b2333854e8a8e2eb58f4868f49e19c27a3efeff78b6b136572a2c5934dec",
+    "crates/st-nn/examples/resident_byte_decoder_browser.rs": "0fe73970ab8c60b74403f9e7e2f001fbf5eded0af40ec46984028f20773d0b62",
+    "crates/st-nn/examples/support/byte_decoder.rs": "0b8aa1a823aa3ccf0d658d2aaeed2dfede3387c1e5ae266f627d7047b3aa8773",
+    "crates/st-nn/examples/support/byte_decoder/projective_controls.rs": "3f6021de56540cc184f78083474f7eb6ba0257a5c130a5f4e93af822672ba145",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": "2a1b2749da460304f301b4ec795dee4b227353986f770bf02f8d8d3b266b1301",
+    "tools/projective_reference.py": "20db137e458d52c5d427b9f63f27a50c6847f3367c9713a92f7e858e17999f26",
+    "tools/generate_resident_byte_projective_torch_fixture.py": "4688377ddee6137a0cfb225e7c3a13d553aa028ea2637340b3db00d94b6b193b",
+    "tools/generate_resident_byte_geometry_torch_fixture.py": "ca11ae5742e3347afb3b34610c15b34edc82c839f34566ccfdf733ad3580c81f"
+  },
+  "scope": "Raw tensors/checkpoints/binaries remain local. Scalar projection independently recomputes numerical and exact-resume checks.",
+  "independent_review": "See review.md; no formal PR, CI or merge in this increment."
+}

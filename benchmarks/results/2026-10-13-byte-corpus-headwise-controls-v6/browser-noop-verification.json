@@ -1,0 +1,1080 @@
+{
+  "schema": "spiraltorch.byte_corpus.resume_verification.v6",
+  "passed": true,
+  "request_sha256": "262460760d71ed94ae31fb1f5d9b6886c66c5eb2185172fb7c6b0094685f32ca",
+  "exact_resumed_report_equal": true,
+  "exact_training_and_evaluation_prefixes": true,
+  "saved_parameter_bits_match_paused_report": true,
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602379143238068,
+      "geometry_update": "train",
+      "pair_metric": null,
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_geometry",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560256704688072,
+      "geometry_update": "train",
+      "pair_metric": "poincare_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5603175163269043,
+      "geometry_update": "frozen",
+      "pair_metric": "poincare_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_flat",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5601888820528984,
+      "geometry_update": "train",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_flat_frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602336898446083,
+      "geometry_update": "frozen",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_ordinary",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.554492086172104,
+      "geometry_update": "train",
+      "pair_metric": null,
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_geometry",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552362337708473,
+      "geometry_update": "train",
+      "pair_metric": "poincare_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_geometry_frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5522845312952995,
+      "geometry_update": "frozen",
+      "pair_metric": "poincare_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_flat",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5527593716979027,
+      "geometry_update": "train",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed23_flat_frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5527208968997,
+      "geometry_update": "frozen",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_ordinary",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5545293986797333,
+      "geometry_update": "train",
+      "pair_metric": null,
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_geometry",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553141862154007,
+      "geometry_update": "train",
+      "pair_metric": "poincare_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_geometry_frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553172066807747,
+      "geometry_update": "frozen",
+      "pair_metric": "poincare_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_flat",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553373597562313,
+      "geometry_update": "train",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed37_flat_frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553395591676235,
+      "geometry_update": "frozen",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "original"
+    },
+    {
+      "name": "seed11_flat_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560162164270878,
+      "geometry_update": "train",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed11_flat_frozen_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602197498083115,
+      "geometry_update": "frozen",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552588701248169,
+      "geometry_update": "train",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_frozen_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5525394827127457,
+      "geometry_update": "frozen",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531555637717247,
+      "geometry_update": "train",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_frozen_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531786754727364,
+      "geometry_update": "frozen",
+      "pair_metric": "euclidean_chord_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed11_flat_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5611146613955498,
+      "geometry_update": "train",
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed11_flat_frozen_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5611691996455193,
+      "geometry_update": "frozen",
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5537461563944817,
+      "geometry_update": "train",
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed23_flat_frozen_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5537018328905106,
+      "geometry_update": "frozen",
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5530662685632706,
+      "geometry_update": "train",
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "seed37_flat_frozen_fisher_rao_rms_matched",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5530809238553047,
+      "geometry_update": "frozen",
+      "pair_metric": "categorical_fisher_rao_squared.v1",
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-0-1-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5601528510451317,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-0-1-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560211181640625,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-0-2-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5603779181838036,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-0-2-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5604597106575966,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-1-0-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602671578526497,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-1-0-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560325153172016,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-1-2-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5604036077857018,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-1-2-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5604863092303276,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-2-0-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5608781576156616,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-2-0-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560928553342819,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-2-1-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5607757717370987,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-11-2-1-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560825541615486,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-0-1-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5523735731840134,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-0-1-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552304558455944,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-0-2-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552710920572281,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-0-2-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5526324063539505,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-1-0-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5525710433721542,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-1-0-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5525151789188385,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-1-2-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552929773926735,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-1-2-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552870139479637,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-2-0-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553346760571003,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-2-0-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553324356675148,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-2-1-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553369164466858,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-23-2-1-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5533507168293,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-0-1-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531783625483513,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-0-1-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5532059893012047,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-0-2-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553270846605301,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-0-2-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5532931461930275,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "poincare_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-1-0-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553119979798794,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-1-0-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553145818412304,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-1-2-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5532491579651833,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-1-2-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.553265891969204,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "euclidean_chord_squared.v1",
+          "categorical_fisher_rao_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-2-0-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5529010221362114,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-2-0-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5529326796531677,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "poincare_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-2-1-train",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.55294169485569,
+      "geometry_update": "train",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    },
+    {
+      "name": "headwise-37-2-1-frozen",
+      "updates": 128,
+      "pause": 128,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5529707223176956,
+      "geometry_update": "frozen",
+      "head_pair_metrics": [
+        [
+          "categorical_fisher_rao_squared.v1",
+          "euclidean_chord_squared.v1"
+        ]
+      ],
+      "bias_initialization": "matched_poincare_rms"
+    }
+  ],
+  "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence",
+  "input_sha256": {
+    "request": "262460760d71ed94ae31fb1f5d9b6886c66c5eb2185172fb7c6b0094685f32ca",
+    "baseline": "cfe2b484b6c29e2f02bf12390ba1426ec3acabddf32f0d92830d349009fcfebd",
+    "partial": "cfe2b484b6c29e2f02bf12390ba1426ec3acabddf32f0d92830d349009fcfebd",
+    "resumed": "cfe2b484b6c29e2f02bf12390ba1426ec3acabddf32f0d92830d349009fcfebd",
+    "checkpoint": "5e1d54041798fd9da32d1a50c5b6b35ee613bc5c59df4f554b9f3970b161f32f"
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "schema": "spiraltorch.byte_corpus.resume_verification.v3",
+  "passed": true,
+  "request_sha256": "759ed1282bad72c2351fcc9c78fef0f661087bf57f578f96e741882763204849",
+  "exact_resumed_report_equal": true,
+  "exact_training_and_evaluation_prefixes": true,
+  "saved_parameter_bits_match_paused_report": true,
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602379590272903,
+      "pair_metric": null,
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed11_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560256689786911,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560317523777485,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "frozen"
+    },
+    {
+      "name": "seed11_flat",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560188874602318,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed11_flat_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602336823940277,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen"
+    },
+    {
+      "name": "seed23_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.554492086172104,
+      "pair_metric": null,
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed23_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552362345159054,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed23_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5522845536470413,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "frozen"
+    },
+    {
+      "name": "seed23_flat",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5527593716979027,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed23_flat_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552720971405506,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen"
+    },
+    {
+      "name": "seed37_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5545293986797333,
+      "pair_metric": null,
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed37_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531418845057487,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed37_geometry_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531720742583275,
+      "pair_metric": "poincare_squared.v1",
+      "geometry_update": "frozen"
+    },
+    {
+      "name": "seed37_flat",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5533736124634743,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "train"
+    },
+    {
+      "name": "seed37_flat_frozen",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5533955693244934,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "geometry_update": "frozen"
+    }
+  ],
+  "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence",
+  "input_sha256": {
+    "request": "759ed1282bad72c2351fcc9c78fef0f661087bf57f578f96e741882763204849",
+    "baseline": "76e1aabde9134ca7df8b3aef6adaf53b98fda8b706d83176ff4cc00467b931ea",
+    "partial": "2adbd3aa1b0d31aeb6d43237f945605fc6eae1f60b345b8bddf5410e68fe283b",
+    "resumed": "76e1aabde9134ca7df8b3aef6adaf53b98fda8b706d83176ff4cc00467b931ea",
+    "checkpoint": "a6854404f6536d13f020300b60d865efbb2dcbd688abf952e7cc8851301d143b"
+  }
+}

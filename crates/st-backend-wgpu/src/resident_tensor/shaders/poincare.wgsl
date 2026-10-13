@@ -1,12 +1,14 @@
 ROUNDED_ADD
 WIDE_ARITHMETIC
+FISHER_MATH
 struct Params {
     batch:u32, steps:u32, cols:u32, heads:u32,
     coordinates:u32, pairs:u32, scores:u32, groups_x:u32,
     groups:u32, coordinates_offset:u32, gain_offset:u32, seed_offset:u32,
-    curvature_magnitude:f32, padding0:u32, padding1:u32, padding2:u32,
+    curvature_magnitude:f32, distance_scale:f32, metric_kind:u32, root_gradient_offset:u32,
 };
-@group(0) @binding(0) var<storage,read> coordinates:array<f32>;
+// Ordinary f32 coordinates, or private Wide simplex roots plus logit bits.
+@group(0) @binding(0) var<storage,read> coordinates:array<u32>;
 @group(0) @binding(1) var<storage,read> raw_gain:array<f32>;
 // Four extended values per pair: squared distance, base and two radial factors.
 @group(0) @binding(2) var<storage,read_write> cache:array<Wide>;
@@ -28,7 +30,66 @@ fn invocation(w:vec3<u32>,lane:u32)->u32 {
     return group*256u+lane;
 }
 fn coordinate(row:u32,col:u32)->Wide {
-    return parts(checked(coordinates[p.coordinates_offset+row*p.cols+col]));
+    if (p.metric_kind==2u) {
+        let offset=p.coordinates_offset+5u*(row*p.cols+col);
+        return Wide(bitcast<f32>(coordinates[offset]),bitcast<f32>(coordinates[offset+1u]),
+            bitcast<i32>(coordinates[offset+2u]),bitcast<f32>(coordinates[offset+3u]));
+    }
+    return parts(checked(bitcast<f32>(coordinates[p.coordinates_offset+row*p.cols+col])));
+}
+FISHER_PAIR
+struct ComplexWide { re:Wide, im:Wide };
+fn complex_coordinate(row:u32,col:u32)->ComplexWide {
+    return ComplexWide(coordinate(row,col),coordinate(row,col+1u));
+}
+fn complex_add(a:ComplexWide,b:ComplexWide)->ComplexWide {
+    return ComplexWide(wide_add(a.re,b.re),wide_add(a.im,b.im));
+}
+fn complex_sub(a:ComplexWide,b:ComplexWide)->ComplexWide {
+    return ComplexWide(wide_sub(a.re,b.re),wide_sub(a.im,b.im));
+}
+fn complex_conj(a:ComplexWide)->ComplexWide {
+    return ComplexWide(a.re,wide_neg(a.im));
+}
+fn complex_mul(a:ComplexWide,b:ComplexWide)->ComplexWide {
+    return ComplexWide(wide_sub(wide_mul(a.re,b.re),wide_mul(a.im,b.im)),
+        wide_add(wide_mul(a.re,b.im),wide_mul(a.im,b.re)));
+}
+fn complex_wedge(xi:ComplexWide,yj:ComplexWide,xj:ComplexWide,yi:ComplexWide)->ComplexWide {
+    var re=wide_sum_zero();var im=wide_sum_zero();
+    re=wide_sum_add(re,wide_mul(xi.re,yj.re));re=wide_sum_add(re,wide_neg(wide_mul(xi.im,yj.im)));
+    re=wide_sum_add(re,wide_neg(wide_mul(xj.re,yi.re)));re=wide_sum_add(re,wide_mul(xj.im,yi.im));
+    im=wide_sum_add(im,wide_mul(xi.re,yj.im));im=wide_sum_add(im,wide_mul(xi.im,yj.re));
+    im=wide_sum_add(im,wide_neg(wide_mul(xj.re,yi.im)));im=wide_sum_add(im,wide_neg(wide_mul(xj.im,yi.re)));
+    return ComplexWide(wide_sum_value(re),wide_sum_value(im));
+}
+struct ProjectiveSum { value:Wide, correction:Wide };
+struct ProjectiveComplexSum { re:ProjectiveSum, im:ProjectiveSum };
+fn projective_sum_zero()->ProjectiveComplexSum {
+    let zero=ProjectiveSum(parts(0.0),parts(0.0));
+    return ProjectiveComplexSum(zero,zero);
+}
+fn projective_sum_add(s:ProjectiveSum,x:Wide)->ProjectiveSum {
+    let total=wide_add(s.value,x);
+    var a=s.value;var b=x;
+    if(a.hi<0.0) {a=wide_neg(a);}
+    if(b.hi<0.0) {b=wide_neg(b);}
+    var lost=parts(0.0);
+    if(wide_sub(a,b).hi>=0.0) {lost=wide_add(wide_sub(s.value,total),x);}
+    else {lost=wide_add(wide_sub(x,total),s.value);}
+    return ProjectiveSum(total,wide_add(s.correction,lost));
+}
+fn projective_complex_add(s:ProjectiveComplexSum,x:ComplexWide)->ProjectiveComplexSum {
+    return ProjectiveComplexSum(projective_sum_add(s.re,x.re),projective_sum_add(s.im,x.im));
+}
+fn projective_dot_add(s:ProjectiveComplexSum,x:ComplexWide,y:ComplexWide)->ProjectiveComplexSum {
+    // Preserve primitive products before complex addition loses a low term.
+    let re=projective_sum_add(projective_sum_add(s.re,wide_mul(x.re,y.re)),wide_mul(x.im,y.im));
+    let im=projective_sum_add(projective_sum_add(s.im,wide_mul(x.re,y.im)),wide_neg(wide_mul(x.im,y.re)));
+    return ProjectiveComplexSum(re,im);
+}
+fn projective_sum_value(s:ProjectiveComplexSum)->ComplexWide {
+    return ComplexWide(wide_add(s.re.value,s.re.correction),wide_add(s.im.value,s.im.correction));
 }
 fn margin(norm:Wide)->Wide {
     let a=wide_sub(parts(1.0),wide_mul(parts(p.curvature_magnitude),norm));
@@ -64,12 +125,38 @@ fn prepare_pairs(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_in
     let id=invocation(w,lane);if (id>=p.pairs) { return; }
     let k=id%p.steps;let q=(id/p.steps)%p.steps;let b=id/(p.steps*p.steps);
     if (k>q) { for(var j=0u;j<4u;j++) { cache[4u*id+j]=parts(0.0); }return; }
+    if (p.metric_kind==2u) {fisher_prepare(b*p.steps+q,b*p.steps+k,id);return;}
     var nx=parts(0.0);var ny=parts(0.0);var square=parts(0.0);
     for(var i=0u;i<p.cols;i++) {
         let x=coordinate(b*p.steps+q,i);let y=coordinate(b*p.steps+k,i);
         let delta=wide_sub(x,y);
         nx=wide_add(nx,wide_mul(x,x));ny=wide_add(ny,wide_mul(y,y));
         square=wide_add(square,wide_mul(delta,delta));
+    }
+    if (p.metric_kind==3u) {
+        // ||(1,z) wedge (1,w)||^2 / ((1+|z|^2)*(1+|w|^2)).
+        // Avoid 1-overlap cancellation and keep quartic intermediates Wide.
+        for(var i=0u;i<p.cols;i+=2u) {
+            let xi=complex_coordinate(b*p.steps+q,i);let yi=complex_coordinate(b*p.steps+k,i);
+            for(var j=i+2u;j<p.cols;j+=2u) {
+                let wedge=complex_wedge(xi,complex_coordinate(b*p.steps+k,j),
+                    complex_coordinate(b*p.steps+q,j),yi);
+                square=wide_add(square,wide_add(wide_mul(wedge.re,wedge.re),wide_mul(wedge.im,wedge.im)));
+            }
+        }
+        let a=wide_add(parts(1.0),nx);let d=wide_add(parts(1.0),ny);
+        let inverse=wide_div(parts(1.0),wide_mul(a,d));
+        cache[4u*id]=wide_mul(square,inverse);cache[4u*id+1u]=inverse;
+        cache[4u*id+2u]=wide_div(parts(1.0),a);cache[4u*id+3u]=wide_div(parts(1.0),d);
+        return;
+    }
+    if (p.metric_kind==1u) {
+        let scale=parts(p.distance_scale);
+        cache[4u*id]=wide_mul(scale,square);
+        cache[4u*id+1u]=wide_mul(parts(2.0),scale);
+        cache[4u*id+2u]=parts(0.0);
+        cache[4u*id+3u]=parts(0.0);
+        return;
     }
     let a=margin(nx);let d=margin(ny);let ad=wide_mul(a,d);
     let c=parts(p.curvature_magnitude);
@@ -126,19 +213,89 @@ fn pair_scale(pair:u32)->Wide {
     return Wide(bitcast<f32>(output[offset]),bitcast<f32>(output[offset+1u]),
         bitcast<i32>(output[offset+2u]),bitcast<f32>(output[offset+3u]));
 }
+fn projective_derivative(row:u32,other:u32,i:u32,offset:u32,radial:u32)->Wide {
+    let c=i-(i%2u);let xi=complex_coordinate(row,c);let yi=complex_coordinate(other,c);
+    var dot=projective_sum_zero();var terms=projective_sum_zero();
+    for(var j=0u;j<p.cols;j+=2u) {
+        let xj=complex_coordinate(row,j);let yj=complex_coordinate(other,j);
+        dot=projective_dot_add(dot,xj,yj);
+        if(j!=c) {
+            terms=projective_complex_add(terms,complex_mul(complex_conj(xj),complex_wedge(xi,yj,xj,yi)));
+        }
+    }
+    // Keep compensation alive until the structural terms have participated.
+    dot=projective_complex_add(dot,ComplexWide(parts(1.0),parts(0.0)));
+    terms=projective_complex_add(terms,xi);
+    terms=projective_complex_add(terms,ComplexWide(wide_neg(yi.re),wide_neg(yi.im)));
+    let overlap=projective_sum_value(dot);let tangent=projective_sum_value(terms);
+    // Factored quotient derivative retains small gradients at saturated distance.
+    let numerator=complex_mul(complex_conj(overlap),tangent);
+    var component=numerator.re;
+    if(i%2u==1u) { component=numerator.im; }
+    return wide_mul(parts(2.0),wide_mul(component,wide_mul(cache[offset+1u],cache[offset+radial])));
+}
 @compute @workgroup_size(256)
 fn coordinates_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
     let id=invocation(w,lane);if(id>=p.coordinates) { return; }
     let i=id%p.cols;let t=(id/p.cols)%p.steps;let b=id/(p.steps*p.cols);
-    let x=coordinate(b*p.steps+t,i);var gradient=parts(0.0);
+    let x=coordinate(b*p.steps+t,i);var gradient=parts(0.0);var close_gradient=wide_sum_zero();
     for(var k=0u;k<p.steps;k++) {
         let q=max(t,k);let key=min(t,k);let offset=4u*((b*p.steps+q)*p.steps+key);
         let y=coordinate(b*p.steps+k,i);
         let radial=select(3u,2u,k<=t);
-        let derivative=wide_add(wide_mul(cache[offset+1u],wide_sub(x,y)),wide_mul(cache[offset+radial],x));
+        var derivative=parts(0.0);
+        if(p.metric_kind==3u) {
+            derivative=projective_derivative(b*p.steps+t,b*p.steps+k,i,offset,radial);
+        } else if(p.metric_kind==2u) {
+            if(cache[offset+2u].hi!=0.0) {
+                let projected=fisher_close_pullbacks(b*p.steps+q,b*p.steps+key,i);
+                var value=projected.query;
+                if(k>t) {value=projected.key;}
+                let slope=wide_mul(parts(0.5),cache[offset+1u]);
+                close_gradient=wide_sum_add(close_gradient,wide_mul(pair_scale(offset/4u),wide_mul(slope,value)));
+            } else {derivative=wide_mul(cache[offset+1u],wide_sub(x,y));}
+        } else {
+            derivative=wide_add(wide_mul(cache[offset+1u],wide_sub(x,y)),wide_mul(cache[offset+radial],x));
+        }
         gradient=wide_add(gradient,wide_mul(pair_scale(offset/4u),derivative));
     }
-    output[id]=bitcast<u32>(checked(wide_float(gradient)));
+    if(p.metric_kind==2u) {
+        let offset=p.root_gradient_offset+4u*id;
+        output[offset]=bitcast<u32>(gradient.hi);output[offset+1u]=bitcast<u32>(gradient.lo);
+        output[offset+2u]=bitcast<u32>(gradient.exponent);output[offset+3u]=bitcast<u32>(gradient.tail);
+        let close_offset=offset+4u*p.coordinates;let projected=wide_sum_value(close_gradient);
+        output[close_offset]=bitcast<u32>(projected.hi);output[close_offset+1u]=bitcast<u32>(projected.lo);
+        output[close_offset+2u]=bitcast<u32>(projected.exponent);output[close_offset+3u]=bitcast<u32>(projected.tail);
+    } else { output[id]=bitcast<u32>(checked(wide_float(gradient))); }
+}
+fn root_gradient(id:u32)->Wide {
+    let offset=p.root_gradient_offset+4u*id;
+    return Wide(bitcast<f32>(output[offset]),bitcast<f32>(output[offset+1u]),
+        bitcast<i32>(output[offset+2u]),bitcast<f32>(output[offset+3u]));
+}
+@compute @workgroup_size(256)
+fn fisher_logits_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
+    let row=invocation(w,lane);if(row>=p.batch*p.steps) {return;}
+    var pivot=0u;
+    for(var i=1u;i<p.cols;i++) {
+        if(wide_sub(coordinate(row,i),coordinate(row,pivot)).hi>0.0) {pivot=i;}
+    }
+    let rp=coordinate(row,pivot);let gp=root_gradient(row*p.cols+pivot);
+    var dot=wide_sum_zero();
+    for(var i=0u;i<p.cols;i++) {
+        let r=coordinate(row,i);let g=root_gradient(row*p.cols+i);
+        let residual=wide_div(wide_difference_of_products(g,rp,gp,r),rp);
+        dot=wide_sum_add(dot,wide_mul(r,residual));
+    }
+    for(var i=0u;i<p.cols;i++) {
+        let r=coordinate(row,i);let g=root_gradient(row*p.cols+i);
+        let residual=wide_div(wide_difference_of_products(g,rp,gp,r),rp);
+        let dz=wide_mul(parts(0.5),wide_mul(r,wide_sub(residual,wide_mul(r,wide_sum_value(dot)))));
+        let offset=p.root_gradient_offset+4u*p.coordinates+4u*(row*p.cols+i);
+        let projected=Wide(bitcast<f32>(output[offset]),bitcast<f32>(output[offset+1u]),
+            bitcast<i32>(output[offset+2u]),bitcast<f32>(output[offset+3u]));
+        output[row*p.cols+i]=bitcast<u32>(checked(wide_float(wide_add(dz,projected))));
+    }
 }
 @compute @workgroup_size(256)
 fn gain_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {

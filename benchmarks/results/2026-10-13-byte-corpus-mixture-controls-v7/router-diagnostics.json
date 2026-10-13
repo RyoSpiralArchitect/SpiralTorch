@@ -1,0 +1,1609 @@
+{
+  "schema": "spiraltorch.byte_corpus.mixture_router_diagnostics.v1",
+  "request_sha256": "7733e760748e14944744a91a6c55a16ad21982a53af0375a4a2ac95d00e9a010",
+  "scope": "Derived CPU-f64 scalar diagnostics of retained final logits; not additional GPU measurements. No raw masses or logits published.",
+  "cases": [
+    {
+      "runtime": "native",
+      "name": "mixture-11-0-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0000386698010654829,
+          "entropy_nats": 0.6931471775692383
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000008305520167728453,
+          "entropy_nats": 0.693147180421982
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-11-0-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-11-1-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00026571477473835703,
+          "entropy_nats": 0.6931470393512555
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00003291253228576707,
+          "entropy_nats": 0.6931471783934757
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-11-1-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-11-2-train",
+      "seed": 11,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0003035470645017524,
+          "entropy_nats": 0.6931469962782932
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000043022926441427245,
+          "entropy_nats": 0.6931471768580009
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-11-2-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-11-3-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00015575732130096442,
+          "entropy_nats": 1.0986122332768857
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00001989650817990629,
+          "entropy_nats": 1.0986122877303757
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-11-3-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-0-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.000008757989234275954,
+          "entropy_nats": 0.6931471804065406
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0000063085190046274775,
+          "entropy_nats": 0.6931471804803505
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-0-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-1-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0000525345128948862,
+          "entropy_nats": 0.6931471750401952
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00012956892606880155,
+          "entropy_nats": 0.6931471469837318
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-1-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-2-train",
+      "seed": 23,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00006310936408371326,
+          "entropy_nats": 0.6931471725943615
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00013734290787581482,
+          "entropy_nats": 0.6931471428337961
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-2-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-3-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.000007455372114495429,
+          "entropy_nats": 1.0986122885338045
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00006627730571595603,
+          "entropy_nats": 1.0986122787459582
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-23-3-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-0-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00006248865214936172,
+          "entropy_nats": 0.693147172750282
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00004480574704590623,
+          "entropy_nats": 0.6931471765448354
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-0-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-1-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0003219279888872495,
+          "entropy_nats": 0.6931469732846709
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0009549469717367587,
+          "entropy_nats": 0.6931453567113988
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-1-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-2-train",
+      "seed": 37,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0002587349796227545,
+          "entropy_nats": 0.6931470466723599
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0009027457067180555,
+          "entropy_nats": 0.6931455506594377
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-2-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-3-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00013070290502215087,
+          "entropy_nats": 1.0986122475916769
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0004922776887968938,
+          "entropy_nats": 1.0986117419809074
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "mixture-37-3-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-0-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00003866976104771602,
+          "entropy_nats": 0.6931471775692445
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000008305629307092666,
+          "entropy_nats": 0.6931471804219784
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-0-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-1-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00026571474563452657,
+          "entropy_nats": 0.6931470393512866
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00003291246680214854,
+          "entropy_nats": 0.6931471783934844
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-1-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-2-train",
+      "seed": 11,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00030354726822845457,
+          "entropy_nats": 0.6931469962780459
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0000430229555452577,
+          "entropy_nats": 0.693147176857996
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-2-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-3-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0001557572081457015,
+          "entropy_nats": 1.0986122332769657
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00001989648635258856,
+          "entropy_nats": 1.0986122877303781
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-11-3-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-0-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00000875795649246669,
+          "entropy_nats": 0.6931471804065417
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000006308482624839407,
+          "entropy_nats": 0.6931471804803513
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-0-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-1-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00005253426915030612,
+          "entropy_nats": 0.6931471750402465
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0001295689406207723,
+          "entropy_nats": 0.6931471469837243
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-1-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-2-train",
+      "seed": 23,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00006310965512196232,
+          "entropy_nats": 0.6931471725942882
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0001373429515315605,
+          "entropy_nats": 0.6931471428337721
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-2-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-3-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.000007455377470322322,
+          "entropy_nats": 1.0986122885338048
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0000662772968240688,
+          "entropy_nats": 1.0986122787459607
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-23-3-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-0-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00006248862304558678,
+          "entropy_nats": 0.6931471727502893
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00004480577614973669,
+          "entropy_nats": 0.6931471765448302
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-0-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-1-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0003219278724719832,
+          "entropy_nats": 0.6931469732848208
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0009549465642846311,
+          "entropy_nats": 0.6931453567129552
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-1-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-2-train",
+      "seed": 37,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0002587347758959968,
+          "entropy_nats": 0.6931470466725708
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0009027459395479775,
+          "entropy_nats": 0.6931455506585971
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-2-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-3-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00013070291876404738,
+          "entropy_nats": 1.0986122475916655
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0004922775272297453,
+          "entropy_nats": 1.0986117419812618
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "mixture-37-3-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-0-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.000038669706478033916,
+          "entropy_nats": 0.6931471775692529
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000008305561549792895,
+          "entropy_nats": 0.6931471804219806
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-0-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-1-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00026571473108255583,
+          "entropy_nats": 0.693147039351302
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000032912463164169736,
+          "entropy_nats": 0.6931471783934848
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-1-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-2-train",
+      "seed": 11,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00030354688987876965,
+          "entropy_nats": 0.6931469962785053
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000043023002838982194,
+          "entropy_nats": 0.6931471768579878
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-2-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-3-train",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0001557571451020756,
+          "entropy_nats": 1.09861223327701
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0000198964606855645,
+          "entropy_nats": 1.09861228773038
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-11-3-frozen_router",
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-0-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.000008757960130501008,
+          "entropy_nats": 0.6931471804065416
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000006308487854433942,
+          "entropy_nats": 0.6931471804803513
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-0-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-1-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0000525344110314796,
+          "entropy_nats": 0.6931471750402166
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00012956880965353523,
+          "entropy_nats": 0.6931471469837921
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-1-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-2-train",
+      "seed": 23,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00006310926222025115,
+          "entropy_nats": 0.6931471725943874
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.00013734276963262015,
+          "entropy_nats": 0.693147142833872
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-2-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-3-train",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.000007454989322530636,
+          "entropy_nats": 1.0986122885338176
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0000662773129912475,
+          "entropy_nats": 1.0986122787459556
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-23-3-frozen_router",
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-0-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00006248870308112053,
+          "entropy_nats": 0.6931471727502693
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.000044805816167503565,
+          "entropy_nats": 0.693147176544823
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-0-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-1-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.0003219280034391092,
+          "entropy_nats": 0.6931469732846522
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0009549466515957894,
+          "entropy_nats": 0.6931453567126218
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-1-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-2-train",
+      "seed": 37,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00025873490686323386,
+          "entropy_nats": 0.6931470466724352
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0009027460850666857,
+          "entropy_nats": 0.6931455506580716
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-2-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 0.6931471805599453
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-3-train",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "train",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0.00013070306910423213,
+          "entropy_nats": 1.0986122475915776
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0.0004922777017199453,
+          "entropy_nats": 1.098611741980886
+        }
+      ]
+    },
+    {
+      "runtime": "torch",
+      "name": "mixture-37-3-frozen_router",
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "router_update": "frozen",
+      "heads": [
+        {
+          "head": 0,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        },
+        {
+          "head": 1,
+          "max_abs_mass_change_from_uniform": 0,
+          "entropy_nats": 1.0986122886681096
+        }
+      ]
+    }
+  ]
+}

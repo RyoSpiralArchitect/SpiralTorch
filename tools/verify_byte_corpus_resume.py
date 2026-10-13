@@ -37,7 +37,7 @@ def exact(left, right):
     return left == right
 
 
-def stored_parameters(record, cursor):
+def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None, mixture=None):
     """Extract tensors in Rust's documented owner order; no model mathematics.
 
     Full topology/operation validation remains ByteCorpusStudy's Rust preflight.
@@ -45,7 +45,12 @@ def stored_parameters(record, cursor):
     """
     require(set(record) == {"schema", "update_rule", "window_state", "attempted_revision", "model"},
             "incomplete model envelope")
-    require(record["schema"] == "spiraltorch.nn.byte_decoder_checkpoint.v1", "model schema")
+    metric_aware = pair_metric in (STUDY.FLAT, STUDY.FISHER)
+    require(pair_metric in (None, STUDY.POINCARE, STUDY.FLAT, STUDY.FISHER), "saved metric identity")
+    require(head_pair_metrics is None or pair_metric is None, "conflicting saved metric selectors")
+    require(mixture is None or (head_pair_metrics is None and pair_metric is None), "conflicting saved mixture selector")
+    query = mixture is not None and "query_projection" in mixture
+    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{5 if query else 4 if mixture is not None else 3 if head_pair_metrics is not None else 2 if metric_aware else 1}", "model schema")
     require(record["update_rule"] == "stateless_sgd.v1", "model update rule")
     require(record["window_state"] == "reset_positions_and_geometry.v1", "model window state")
     require(record["attempted_revision"] == str(cursor), "model clock")
@@ -60,12 +65,37 @@ def stored_parameters(record, cursor):
         parameters.extend(value["parameters"])
 
     geometry = model["geometry"]
+    require(not (metric_aware or head_pair_metrics is not None or mixture is not None) or geometry is not None, "metric-aware model requires geometry")
     if geometry is not None:
-        require(set(geometry) == {"projection", "curvature", "raw_decay", "raw_phase", "raw_gains"},
+        fields = {"projection", "curvature", "raw_decay", "raw_phase", "raw_gains"}
+        if mixture is not None:
+            fields.add("mixture")
+            saved = geometry.get("mixture")
+            require(type(saved) is dict and set(saved)==({"metrics","scales","raw_logits"} | ({"query_projections"} if query else set()))
+                    and exact(saved["metrics"],mixture["metrics"])
+                    and type(saved["scales"]) is list and len(saved["scales"])==len(mixture["scales"])
+                    and all(list(map(f32,a))==list(map(f32,b)) for a,b in zip(saved["scales"],mixture["scales"])), "saved mixture topology differs")
+            require(type(saved["raw_logits"]) is list and len(saved["raw_logits"])==len(geometry["raw_gains"]), "saved router block count")
+        elif head_pair_metrics is not None:
+            fields.add("head_pair_metrics")
+            require(exact(geometry.get("head_pair_metrics"), head_pair_metrics), "saved headwise metric differs")
+        elif metric_aware:
+            fields.add("pair_metric")
+            require(geometry.get("pair_metric") == pair_metric, "saved metric differs")
+        require(set(geometry) == fields,
                 "geometry envelope")
         graph(geometry["projection"])
         for values in [geometry["raw_decay"], geometry["raw_phase"], *geometry["raw_gains"]]:
             parameters.append({"shape": [len(values)], "values": values})
+        if mixture is not None:
+            for gains,values in zip(geometry["raw_gains"],geometry["mixture"]["raw_logits"]):
+                require(type(values) is list and len(values)==len(gains)*len(mixture["metrics"]), "saved router shape")
+                parameters.append({"shape":[len(gains),len(mixture["metrics"])],"values":values})
+            if query:
+                projections = geometry["mixture"]["query_projections"]
+                require(type(projections) is list and len(projections) == len(geometry["raw_gains"]), "saved query block count")
+                for projection in projections:
+                    graph(projection)
     for block in model["blocks"]:
         require(set(block) == {"pre", "heads", "qkv", "output", "feed_forward"}, "block envelope")
         for name in ("pre", "qkv", "output", "feed_forward"):
@@ -90,6 +120,8 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         require(report["engine"] == "spiraltorch", "foreign engine")
         require(report["request_sha256"] == request_hash, "report request identity")
         require(len(report["cases"]) == len(request["cases"]), "missing report cases")
+        if version >= 4:
+            require(exact(report.get("bias_calibration"), request["bias_calibration"]), "calibration recipe differs")
     require(len(checkpoint["cases"]) == len(request["cases"]), "missing checkpoint cases")
     summaries = []
     for case, full, prefix, resumed_case, saved in zip(request["cases"], baseline["cases"],
@@ -97,12 +129,22 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         for report in (full, prefix, resumed_case):
             require(all(exact(report[key], case[key]) for key in ("name", "seed", "geometry")),
                     "case identity/order differs")
-            if version == 2:
+            if version >= 2:
                 require(case["geometry_update"] in {"train", "frozen"}
                         and report.get("geometry_update") == case["geometry_update"], "case update policy differs")
-                trainable = sum(len(p["values"]) for p in case["parameters"]
-                                if case["geometry_update"] != "frozen" or not p["name"].startswith("geometry."))
+                trainable = STUDY.trainable_scalars(case)
                 require(exact(report.get("trainable_parameter_scalars"), trainable), "trainable count differs")
+            if "mixture" in case:
+                require(exact(report.get("mixture"),case["mixture"]) and "pair_metric" not in report and "head_pair_metrics" not in report, "report mixture differs")
+            elif "mixture" in report:
+                raise ValueError("foreign mixture report")
+            elif "head_pair_metrics" in case:
+                require(exact(report.get("head_pair_metrics"), case["head_pair_metrics"]) and "pair_metric" not in report, "report headwise metric differs")
+            elif version >= 3:
+                require("head_pair_metrics" not in report, "unexpected report headwise metric")
+                require("pair_metric" in report and exact(report["pair_metric"], case.get("pair_metric")), "report metric differs")
+            if version >= 4:
+                require(report.get("bias_initialization") == case["bias_initialization"], "initialization differs")
             require(exact(report["parameter_tensors"], len(case["parameters"])), "parameter count")
             require(exact(report["parameter_scalars"], sum(len(p["values"]) for p in case["parameters"])),
                     "parameter scalar count")
@@ -111,7 +153,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 require(len(values) == len(parameter["values"]), "weight shape")
                 for value in values:
                     f32(value)
-                if version == 2 and case["geometry_update"] == "frozen" and parameter["name"].startswith("geometry."):
+                if version >= 2 and STUDY.parameter_frozen(case,parameter["name"]):
                     require(list(map(f32, values)) == list(map(f32, parameter["values"])), "frozen weight bits differ")
         require(len(full["training"]) == total, "incomplete baseline training")
         require(exact([p["revision"] for p in full["training"]], list(range(1, total + 1))),
@@ -134,7 +176,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 "evaluation prefix differs or extra pause evaluation")
         require(saved["name"] == case["name"], "saved case identity")
         model = STUDY.decode_json(saved["model_json"])
-        stored = stored_parameters(model, cursor)
+        stored = stored_parameters(model, cursor, case.get("pair_metric"), case.get("head_pair_metrics"),case.get("mixture"))
         require((model["model"]["geometry"] is not None) is case["geometry"], "saved geometry mode")
         require(len(stored) == len(case["parameters"]), "saved tensor count")
         for parameter, expected, readback in zip(stored, case["parameters"], prefix["final_parameters"]):
@@ -153,6 +195,12 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         summaries.append({"name": case["name"], "updates": total,
                           "pause": cursor, "evaluation_revisions": evaluations,
                           "final_mean_ce": full["validation"][-1]["mean_ce"]})
+        if version >= 3:
+            summaries[-1]["geometry_update"] = case["geometry_update"]
+            field = "mixture" if "mixture" in case else "head_pair_metrics" if "head_pair_metrics" in case else "pair_metric"
+            summaries[-1][field] = case.get(field)
+        if version >= 4:
+            summaries[-1]["bias_initialization"] = case["bias_initialization"]
     return {"schema": f"spiraltorch.byte_corpus.resume_verification.v{version}", "passed": True,
             "request_sha256": request_hash, "exact_resumed_report_equal": True,
             "exact_training_and_evaluation_prefixes": True,

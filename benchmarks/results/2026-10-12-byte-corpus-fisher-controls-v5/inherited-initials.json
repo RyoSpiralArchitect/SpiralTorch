@@ -1,0 +1,9 @@
+{
+  "schema": "spiraltorch.byte_corpus.v5_inherited_initials.v1",
+  "prior_request_sha256": "276a2245277cc36995eef024a99614811fe12c5be1a0efd897eda2d27b11afff",
+  "current_request_sha256": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+  "unchanged_cases": 21,
+  "all_v4_initial_cases_equal": true,
+  "same_calibration_recipe": true,
+  "same_noncase_recipe": true
+}

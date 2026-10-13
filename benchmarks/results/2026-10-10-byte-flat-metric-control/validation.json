@@ -1,0 +1,287 @@
+{
+  "schema": "spiraltorch.byte_flat_metric.validation.v1",
+  "captured_date_jst": "2026-10-10",
+  "base_revision": "1a95eacb9ecab341ddc354f8f15c11dd1eb16e98",
+  "scope": "Synthetic numerical correctness and same-runtime resume for a parameter-matched metric replacement. No corpus quality or speed result, compute matching, or runtime attestation.",
+  "pair_metric": "euclidean_chord_squared.v1",
+  "distance_scale": 4,
+  "unchanged": [
+    "Initial parameter values and descriptors",
+    "Input bytes, targets, cotangents, external biases and batch windows",
+    "Causal complex encoder and bounded chart",
+    "All parameter ownership, all-gradient SGD and loss",
+    "Legacy Poincare/default model checkpoint v1 and corpus-study v1/v2"
+  ],
+  "configurations": [
+    {
+      "blocks": 1,
+      "batch": 2,
+      "steps": 4,
+      "width": 4,
+      "heads": 2,
+      "hidden": 6,
+      "qk_zero": true,
+      "parameter_tensors": 23,
+      "parameter_scalars": 2516
+    },
+    {
+      "blocks": 2,
+      "batch": 2,
+      "steps": 4,
+      "width": 4,
+      "heads": 2,
+      "hidden": 6,
+      "qk_zero": false,
+      "external_biases": true,
+      "topos": true,
+      "parameter_tensors": 37,
+      "parameter_scalars": 2678
+    }
+  ],
+  "reference": {
+    "runtime": "PyTorch",
+    "version": "2.12.1",
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 1,
+    "steps": 16,
+    "rate": 0.125,
+    "legacy_regeneration_byte_identical": true
+  },
+  "gates": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_relative_l2": 0.002,
+    "minimum_reference_geometry_l2": 1e-8,
+    "causality_report_max_abs_error": 0.000003,
+    "same_runtime_resume": "float32 bit-exact losses, all parameters, geometry gradients and embedding gradients; complete checkpoint topology and weights bound to revision7/16"
+  },
+  "validation": {
+    "cpu_kernel_contracts": {
+      "passed": 71,
+      "failed": 0
+    },
+    "euclidean_contract_subset": {
+      "passed": 4,
+      "failed": 0,
+      "included_in_total": 71
+    },
+    "cpu_model_checkpoints": {
+      "passed": 7,
+      "failed": 0
+    },
+    "native_pair_runtime": {
+      "passed": 7,
+      "failed": 0,
+      "env": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+      "backend": "Metal",
+      "adapter": "Apple M4"
+    },
+    "native_flat_model": {
+      "passed": true,
+      "cases": 2,
+      "updates_per_case": 16,
+      "resume_at": 7
+    },
+    "browser_flat_model": {
+      "passed": true,
+      "cases": 2,
+      "updates_per_case": 16,
+      "resume_at": 7,
+      "backend": "BrowserWebGpu",
+      "reported_adapter_name": ""
+    },
+    "legacy_native_model_tests": {
+      "passed": 2,
+      "full_model_cases": 4,
+      "frozen_rate_cases": 2
+    },
+    "legacy_browser_models": {
+      "passed": true,
+      "full_model_cases": 4,
+      "frozen_rate_cases": 2
+    },
+    "frozen_rate_independent_comparison": {
+      "native": true,
+      "browser": true,
+      "public_files": [
+        "native-rates-regression.json",
+        "browser-rates-regression.json"
+      ]
+    },
+    "verifier_tests": {
+      "flat_passed": 12,
+      "frozen_rate_regression_passed": 10,
+      "fabricated_unit_data_only": true
+    },
+    "original_raw_reports_reverified_after_review": true,
+    "repaired_verifier_output_byte_identical": true,
+    "native_and_wasm_release_builds": true,
+    "rustfmt": {
+      "toolchain": "nightly-2026-04-15",
+      "passed": true
+    },
+    "kernel_contracts_strict_clippy": {
+      "toolchain": "1.97.0",
+      "passed": true
+    },
+    "wgpu_strict_clippy": {
+      "toolchain": "1.99.0",
+      "passed": true,
+      "all_targets": true,
+      "extra_allow_flags": []
+    }
+  },
+  "reviews": [
+    {
+      "scope": "Read-only core, CPU/WGPU VJP and model checkpoint review",
+      "finding": "NaN guard test used a host upload that correctly rejects before GPU dispatch",
+      "resolution": "Assert host rejection; construct masked GPU overflow from finite operands; rerun all7 GPU pair tests"
+    },
+    {
+      "scope": "Read-only harness, checkpoint, independent Python verifier and legacy paths",
+      "findings": [
+        "Verifier accepted incomplete checkpoint payloads",
+        "Verifier ignored explicit runtime-control failures"
+      ],
+      "resolution": "Validate full topology/state against trace, all reported controls and duplicate fields; add deletion/corruption/one-ULP/type negatives"
+    },
+    {
+      "scope": "Focused static/stdlib re-review",
+      "open_findings": 0,
+      "checks": [
+        "12 verifier tests",
+        "Original counterexamples",
+        "One-ULP checkpoint corruption in both cases/revisions",
+        "Duplicate fields",
+        "Frozen reference hash"
+      ],
+      "limitation": "Reviewer did not execute device runs or reverify raw device files; parent separately replayed verifier on retained device reports"
+    }
+  ],
+  "retained_non_success": [
+    {
+      "file": "native-pair-tests.log",
+      "status": "6 passed,1 failed",
+      "reason": "Test setup incorrectly unwrapped host NaN upload rejection; repaired runtime suite has7 passed"
+    },
+    {
+      "file": "python-tests.log",
+      "status": "8 passed before review, insufficient verifier coverage",
+      "reason": "Do not use as final verifier qualification; review found false-positive counterexamples"
+    },
+    {
+      "file": "wgpu-clippy.log",
+      "status": "exit101",
+      "reason": "Clippy1.97 lacks existing chunks_exact_to_as_chunks lint; same strict command passed with1.99, no source lint relaxation"
+    }
+  ],
+  "reproduction": {
+    "guide": "docs/resident_byte_decoder.md#a-parameter-matched-flat-distance-control",
+    "raw_directory": "Local SpiralTorch validation / 2026-10-10-byte-flat-metric-control-v1",
+    "note": "Use a new output directory. Run native and browser GPU work serially. No new tensors or checkpoint payloads are public.",
+    "commands": [
+      "python3 -I -B tools/generate_resident_byte_geometry_torch_fixture.py \"$RAW/torch-reference.json\" --flat-metric",
+      "env CARGO_INCREMENTAL=0 cargo test --locked --release -p st-kernel-contracts",
+      "env CARGO_INCREMENTAL=0 cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::byte_decoder::checkpoint::tests -- --test-threads=1",
+      "env CARGO_INCREMENTAL=0 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu resident_tensor::poincare::tests -- --test-threads=1",
+      "env CARGO_INCREMENTAL=0 cargo run --locked --release -p st-nn --no-default-features --features wgpu --example resident_byte_flat_metric -- \"$RAW/torch-reference.json\" > \"$RAW/native.json\"",
+      "env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH RUSTFLAGS= CARGO_INCREMENTAL=0 cargo build --locked --release -p st-nn --no-default-features --features wgpu --target wasm32-unknown-unknown --example resident_byte_decoder_browser",
+      "wasm-bindgen --target web --out-dir target/resident-byte-decoder-web target/wasm32-unknown-unknown/release/examples/resident_byte_decoder_browser.wasm",
+      "cp \"$RAW/torch-reference.json\" target/resident-byte-decoder-web/flat-reference.json",
+      "python3 -I -S -m http.server 8771 --bind 127.0.0.1",
+      "python3 -I -S -B tools/verify_byte_flat_metric.py \"$RAW/torch-reference.json\" \"$RAW/native.json\" \"$RAW/native-comparison.json\"",
+      "python3 -I -S -B tools/verify_byte_flat_metric.py \"$RAW/torch-reference.json\" \"$RAW/browser.json\" \"$RAW/browser-comparison.json\"",
+      "env CARGO_INCREMENTAL=0 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_byte_decoder -- --test-threads=1 --nocapture",
+      "python3 -I -S -B tools/test_verify_byte_flat_metric.py",
+      "python3 -I -S -B tools/test_verify_byte_parameter_rates.py",
+      "env CARGO_INCREMENTAL=0 cargo clippy --locked --release -p st-kernel-contracts --all-targets -- -D warnings",
+      "env CARGO_INCREMENTAL=0 cargo +1.99.0 clippy --locked --release -p st-backend-wgpu --all-targets -- -D warnings",
+      "cargo +nightly-2026-04-15 fmt --all -- --check"
+    ],
+    "wasm_bindgen_version": "0.2.129",
+    "browser_pages": [
+      "crates/st-nn/tests/byte_flat_metric_browser.html",
+      "crates/st-nn/tests/byte_decoder_browser.html",
+      "crates/st-nn/tests/byte_parameter_rates_browser.html"
+    ]
+  },
+  "public_artifact_sha256": {
+    "browser-comparison.json": "3186d07a0762166f4876b24c721651d48b2e4569a734d2caecd397ab0262db6c",
+    "native-comparison.json": "62690f924f1610f65487f8ba1abfb2902a502639854fd987e35871162b7cb396",
+    "browser-rates-regression.json": "e6e8d927fc44ea3c474d7c9c70230453d856792c58fcbc79c7c613754e7c9915",
+    "native-rates-regression.json": "f48fcde26c8dcaec0b61cc0c1a3a3d723aedfd358c8031244065db1444a5e246"
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "5ebcba60b4ef92c1021489614603637bff9470a60d01ed303dfcb5b15046ab3f",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "760672c388a45f860b753183e14624e74e1c31f371df2df51573bba5791897d9",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "7fec74fd7f3dd9d6ebd39df70e927544366b50cce0646fa46d2f8c96809b1b19",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": "d5526e279a65a20f523697fe2964d78cac1ea5a54da0a1b2e1cd94b310fc9dd1",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": "d58c6dc08b1886ff5308e02800b3988214c131c66b704746d811cf2bdb1cb281",
+    "crates/st-kernel-contracts/src/lib.rs": "0602dd684ded51585e2130d883003929f58e08805cb968b91083b0cb1d79c5cf",
+    "crates/st-kernel-contracts/src/poincare.rs": "4a29003316cb97c09b3ab70dcb06c9d10e4e7e348f822d956d410e162a71f59b",
+    "crates/st-nn/Cargo.toml": "5cf480e20c0901fb9393586d04f0e3bc8d41e1bb19fcb242bcef9a0487114a7a",
+    "crates/st-nn/examples/resident_byte_decoder_browser.rs": "5b98cb4885b1c476402c160edd34dc9f60996f117cd134652af9e3446d35a285",
+    "crates/st-nn/examples/support/byte_decoder.rs": "51cbc3a3e59df7353f8157915ee3b65a21823445a6abb37e3bcb9a7d9351db74",
+    "crates/st-nn/examples/support/byte_decoder/checkpoint_controls.rs": "65d86cec98e50c35c3a7ebe5db2f6f39bf3ffc486f44688c1c26dbe0a1458e93",
+    "crates/st-nn/src/resident.rs": "cd8a8b5fa35f089e7354515c551ae5e3dc08827711dcd773400ac699b3a560c5",
+    "crates/st-nn/src/resident/byte_decoder.rs": "c0826415208488b5abf4d987a68de73c0530b960f676eb0231896e314a0e9be2",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint.rs": "63c9fcc1b4bbe076df31fe535dfc5a0373666fee52f3eda6c2a9f1e05f5a3577",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs": "02b2e23c9e05a16b8512cf5482846c2d849e82f0d618da42835c201eba2650e7",
+    "crates/st-nn/src/resident/byte_decoder/geometry.rs": "0fb9361a8612e497c3747b87e6356a62d74e6b8ddffdba02ca5080c1f10c6d36",
+    "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "f9c43a7236287839df3ae0b041efa3907f883a1d9f1b89846637162678d4cad2",
+    "docs/resident_byte_decoder.md": "6c1be7e19020c9eb32a9fba20eff8c131d8f11d3f17ac0f918f78f95896f3710",
+    "tools/generate_resident_byte_geometry_torch_fixture.py": "4e0aeba38e2c80f200213ecbab02320e9937bb4316f817f2d04fc824f0ef4c26",
+    "crates/st-backend-wgpu/src/resident_tensor/euclidean.rs": "74138da0ee05bb5cec152631f20448f38734393bbef8bd6ac7c828e91ac51a81",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/pair_spec.rs": "6eb236c802239623dc0101f7e416e25ff8e06fac5f08f70cd0d3bc5b070fb531",
+    "crates/st-kernel-contracts/src/euclidean.rs": "d0fe3a9b55128b4367b8601638f1c35661317d32522c2e472f08d8bb2335add3",
+    "crates/st-kernel-contracts/src/euclidean/tests.rs": "792a579e95bfe04ff0d426af45f5a1b718df6442d9bcad99af05c6e6aaa3331b",
+    "crates/st-kernel-contracts/src/pair_bias.rs": "748535c01a0c99f3c7af56548ef9261502b96c130338f555ec536d10fd12af58",
+    "crates/st-nn/examples/resident_byte_flat_metric.rs": "4edf397d885237c6d161e51e55e757bd29b2a126085152444e234c7cbc6b5388",
+    "crates/st-nn/tests/byte_flat_metric_browser.html": "24ed7561593c88f6b0c4b679e1d63c09defeeb42682c84075d19b47ec029a4f3",
+    "tools/test_verify_byte_flat_metric.py": "47544c325d053e3bcd36616111a1c92b8844a7877b16ede53b58f453e64268a6",
+    "tools/verify_byte_flat_metric.py": "577af075e2e3e036079a513f07345eeac5975525316affa92d2b2f73f2388089",
+    "Cargo.lock": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62",
+    "Cargo.toml": "0a756da3b71ab178232acdac4e08bd29222d17530e645857edc143f03df3cc05",
+    "rust-toolchain.toml": "a6a0bbd29ffaa8182dc22d1d9149709f1091e47df40ed96eb8a78a711c66a4ce",
+    "tools/verify_byte_parameter_rates.py": "b68e4a18d938a377d6665912e377cf1276bdd874b32e38ad824f863ecb0e2566"
+  },
+  "local_artifact_sha256": {
+    "torch-reference.json": "4dba919c3a5b59cbfa9a9646e1ba76b3e1029580460b2e086833d0360808d36a",
+    "native.json": "153d4f9319445113f78b797d03a28d64f1271538cfa4c1750792a0cbb17ac69f",
+    "browser.json": "f089fa4f3ae97a36c04d6526d7c532a340c3cbe7744c2218fcfde30aa2a1ec67",
+    "legacy-reference.json": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b",
+    "native-binary": "0ec4cbed27703b60eaa54a775d132d6b818f403d85f1a67c62f8b8ee70f2e6f1",
+    "resident_byte_decoder_browser.js": "885549e7b1c2a87ddfe12b99e4d6b822c02f5e6b42e732b7a878e86667fd48d6",
+    "resident_byte_decoder_browser_bg.wasm": "af3036a767ac2dea5437c093e2df653163545f105e46b89eb09fafb6058e1297",
+    "all-contract-tests.log": "2f28b95207a1bd42d04effa30fb407d7cb74fb06e1587316d3b89fbc5c9846b4",
+    "contract-tests.log": "3305fd340591eed55fe18710e646b880060824511cd8150e8177e1813d6533a8",
+    "checkpoint-tests.log": "9a4d239bd6938f5c4dd394cebe000fa058bb88bc8cf5321f3e0342fbcee1a908",
+    "native-pair-tests.log": "89fb3454dc8d32e06129f88510e4e99bc3bf2c7a69db4ec22177a6292d9cf6a3",
+    "native-pair-tests-fixed.log": "b215457f8ff583c9f90d30ab0c7d8f6496b763b8ec4d014627f645d62b6ba1e8",
+    "native-build.log": "b21af7f5bbbdf35508a5af7307076c558d4bd8d96f2511018ba55a1c6b83a5bb",
+    "native-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wasm-build.log": "42ccbb1ba700bccbe019dff36610512c1e39317cedc37161dd88ed50bc3d46cb",
+    "native-legacy.log": "6e3059f9d3fdf5fdd3ccbff57eed4684eb8a391b6df0e8ae0d167d8fece4db40",
+    "native-legacy-opaque.json": "e230881a6e1be2ba0d3197534d7992e526687c36184df89cbcb306f92c72d4a1",
+    "native-rates-opaque.json": "29d01376269845389193a790b7c0df81afac6d8ba5e211f679978cd666f8b187",
+    "browser-legacy.json": "e8ee8d5aface24441dc9d3a529a483efd9949b78e566cb9a3c460d0730996b1b",
+    "browser-rates.json": "625bd5c34e987bc146c0eb402e63b27f03f6a9e349b9bbfb43b36adf2b0f1365",
+    "python-tests.log": "8668f2f30d776625b44e3f9c8e4607e5ddada79971cdc62d5bb728a16ad8f7fb",
+    "python-tests-review-fixed.log": "3ff02e26b3a2356c150f32bd58a24e82cc33a8e63e01bcf0bbd2813334b0edf3",
+    "python-rates-regression.log": "44218f34457d1d6eb3c57fd87a89230ff13cb2eafc252f9dd1236cbac159b5ab",
+    "contracts-clippy.log": "7fc6bcf7973dcede0c223f87e02af0d0b5b4c2aafaffc1585fdec6cd3a7ff306",
+    "wgpu-clippy.log": "111378b0c3fbe60d684dc0c5ed799be0dc6569eabb5e1039b4fcebfc5c1567b2",
+    "wgpu-clippy-1.99.log": "d3b08ae739f9e94f7ed2adf41dd6e6a0e570e2a5953c98cdcf921f7a3a08e9c7",
+    "fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-comparison-review-fixed.json": "62690f924f1610f65487f8ba1abfb2902a502639854fd987e35871162b7cb396",
+    "browser-comparison-review-fixed.json": "3186d07a0762166f4876b24c721651d48b2e4569a734d2caecd397ab0262db6c"
+  },
+  "provenance_limits": [
+    "Source hashes plus base revision identify this patch, not a complete environment attestation",
+    "Raw reports remain private/local; public hashes alone cannot expose their numeric contents",
+    "Native legacy opaque JSON was extracted unchanged after the test-name prefix; other parsed/reserialized helper copies were not selected",
+    "Browser downloads are original Rust JSON strings",
+    "No native-to-browser bitwise equivalence or new flat cross-client checkpoint handoff claim"
+  ]
+}

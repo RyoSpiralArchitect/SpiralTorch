@@ -1,0 +1,110 @@
+[
+  {
+    "path": "crates/st-kernel-contracts/src/lib.rs",
+    "sha256": "9bee58fa2d60d4646be8241f4d6bf58c78683cb987869764a9640f70b4d79a3c"
+  },
+  {
+    "path": "crates/st-kernel-contracts/src/mixture.rs",
+    "sha256": "8e6c80844b2029eba481afbee83568ee2e940697818084a54ae904e9fd2b5587"
+  },
+  {
+    "path": "crates/st-backend-wgpu/src/resident_tensor.rs",
+    "sha256": "76fd23e5fce9f7b21c234fcb3a195c8b783cfcbf6d8a90e5a491b98da4463463"
+  },
+  {
+    "path": "crates/st-backend-wgpu/src/resident_tensor/mixture.rs",
+    "sha256": "72fbbb91c280c59174509c91c5f78777bd44206991914d4076900c566677dc34"
+  },
+  {
+    "path": "crates/st-backend-wgpu/src/resident_tensor/mixture/tests.rs",
+    "sha256": "bcaeec67a1f9ca16490ae80542ae7c7cd78747b105f32979660e0bf933b30529"
+  },
+  {
+    "path": "crates/st-backend-wgpu/src/resident_tensor/shaders/mixture_common.wgsl",
+    "sha256": "efb35bb0e34766b8b58246d2196812022f05574efa1c92b0768b284d36fe7d51"
+  },
+  {
+    "path": "crates/st-backend-wgpu/src/resident_tensor/shaders/mixture.wgsl",
+    "sha256": "256900da20910956c64357d649ce17d52925827617fb5a0affde26565fa307bb"
+  },
+  {
+    "path": "crates/st-backend-wgpu/src/resident_tensor/shaders/mixture_backward.wgsl",
+    "sha256": "eec174c7167b9e708f11699ae0374c688fce368cce31ed221db1faafde5017aa"
+  },
+  {
+    "path": "crates/st-nn/src/resident.rs",
+    "sha256": "a6502114b3ed0643c435db9d93218c2ca6cf392b392c7411d1aa32a3aeae0d77"
+  },
+  {
+    "path": "crates/st-nn/src/resident/byte_decoder.rs",
+    "sha256": "75c9c746b5cc4d846f71c8e4decb259c5dfe5fd479569eca610b660d5ae9a698"
+  },
+  {
+    "path": "crates/st-nn/src/resident/byte_decoder/geometry.rs",
+    "sha256": "ca0db8b3669492338a406f9db997b43025bd78ff54a00d39902dfb32f1fbe8cb"
+  },
+  {
+    "path": "crates/st-nn/src/resident/byte_decoder/training.rs",
+    "sha256": "e42a6a70873bb613a39c16e082dd2e73657477dbc3b1f60e1af04f190808a8bd"
+  },
+  {
+    "path": "crates/st-nn/src/resident/byte_decoder/training/geometry.rs",
+    "sha256": "e449591b556f5063f648ccee70aedbf3c1f1aabdc06a527735e969dc0830dbee"
+  },
+  {
+    "path": "crates/st-nn/src/resident/byte_decoder/tests.rs",
+    "sha256": "7c36a34a4e8140d35a46b97fb53d2d9ab6e58019814d99d86b482e3d1df21f26"
+  },
+  {
+    "path": "crates/st-nn/src/resident/byte_decoder/checkpoint.rs",
+    "sha256": "6fe22314f139234f054af98fd82e650c871ba7ea750ffecda10f04dd6893828b"
+  },
+  {
+    "path": "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs",
+    "sha256": "88b6111cc111e7b88f4c79f112c192c37dbfad31e260a377274d3e12e14b5885"
+  },
+  {
+    "path": "crates/st-nn/examples/resident_byte_flat_metric.rs",
+    "sha256": "a2755aef7879985bbd3b403b333f547f5a9838da6fbaaf26c551eaa99c465448"
+  },
+  {
+    "path": "crates/st-nn/examples/resident_byte_decoder_browser.rs",
+    "sha256": "fa79a3c9b13749b695cd54f22dd5cfaa8f94793fd37f92c319a18bad2903d4e0"
+  },
+  {
+    "path": "crates/st-nn/examples/support/byte_decoder.rs",
+    "sha256": "38a37302a6a7f36c7bba55562bce698ef136a7d9b522840c4c7b88e2f9211a54"
+  },
+  {
+    "path": "crates/st-nn/examples/support/byte_decoder/checkpoint_controls.rs",
+    "sha256": "83be3de67a48f2d7a4e225224e32ce3426e82df73a253458d49e7c425fb8c139"
+  },
+  {
+    "path": "crates/st-nn/examples/support/byte_decoder/mixture_controls.rs",
+    "sha256": "d68d5ad75e78ac3449c6e48a2b5b0578c01e833c6b9cd60744aa5eee1fbca359"
+  },
+  {
+    "path": "crates/st-nn/tests/byte_mixture_browser.html",
+    "sha256": "7e234f53677ccd36d01a4ac176f9d140a7787b96d906ebc758e7c8c97dc69079"
+  },
+  {
+    "path": "tools/generate_resident_byte_geometry_torch_fixture.py",
+    "sha256": "0ee08f3642a27da9b73fd1da15fe79bfaaacab887182a61bfb4d3999b037925b"
+  },
+  {
+    "path": "tools/verify_byte_flat_metric.py",
+    "sha256": "e914c3751ef875b1af4660eb4d80e2ce0c5da30de90c1eb15ceec4f0e28e1115"
+  },
+  {
+    "path": "tools/test_verify_byte_mixture.py",
+    "sha256": "cc233ba1f8ec169b28e9e25ede04632ce45cebd7079525df92652981a0b6fee4"
+  },
+  {
+    "path": "docs/learned_geometry_mixture.md",
+    "sha256": "32e84eee0f68ce4954e72636d45d473cb3ed51a117722a264c81806ec065aaa3"
+  },
+  {
+    "path": "docs/headwise_geometry_attention.md",
+    "sha256": "acaf0604537d0503cab0c7fe9642b2bc51e89ab6a1a8acd49f4b94f5bfb898db"
+  }
+]

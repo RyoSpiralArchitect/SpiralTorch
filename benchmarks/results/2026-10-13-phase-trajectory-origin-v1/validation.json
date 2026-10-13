@@ -1,0 +1,338 @@
+{
+  "schema": "spiraltorch.phase_trajectory_origin.validation.v1",
+  "created_utc": "2026-10-13T05:52:31.584Z",
+  "baseline_commit": "d7922413dae66bdc0ad976b319d957c9201cbc57",
+  "source_identity": "Baseline plus explicit source hashes below; no self-referential final-commit claim.",
+  "environment": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "0.2.129",
+    "python": "3.12",
+    "torch": "2.12.1",
+    "torch_device": "CPU",
+    "torch_threads": 1,
+    "native_adapter": "Apple M4 / Metal",
+    "browser_backend": "BrowserWebGpu; name withheld by runtime",
+    "runtime_opt_in": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+    "cargo_incremental": 0,
+    "rust_test_threads": 1
+  },
+  "commands": [
+    {
+      "log": "diagnosis.log",
+      "exit_code": 0,
+      "scope": "Initial all-37-tensor, both-runtime CPU diagnosis"
+    },
+    {
+      "log": "association.log",
+      "exit_code": 0,
+      "scope": "Initial six-case legacy exact replay and alternate association"
+    },
+    {
+      "log": "reference-tests.log",
+      "exit_code": 0,
+      "tests_passed": 3,
+      "scope": "Initial analytic tests before receipt hardening"
+    },
+    {
+      "log": "native-residual.log",
+      "exit_code": 0,
+      "tests_passed": 1,
+      "scope": "Fresh native harness: 60 forward/VJP cases, 64 updates, 12 guards, four association controls"
+    },
+    {
+      "log": "wasm-residual-build.log",
+      "exit_code": 0,
+      "scope": "Fresh WASM residual-attention release example"
+    },
+    {
+      "exit_code": 0,
+      "scope": "wasm-bindgen 0.2.129 web binding generation"
+    },
+    {
+      "log": "reference-tests-reviewed.log",
+      "exit_code": 0,
+      "tests_passed": 10,
+      "scope": "Analytic and negative receipt/replay tests"
+    },
+    {
+      "log": "reference-tests-optimized.log",
+      "exit_code": 0,
+      "tests_passed": 10,
+      "scope": "Same suite under optimized Python (-O)"
+    },
+    {
+      "log": "diagnosis-reviewed.log",
+      "exit_code": 0,
+      "scope": "Validated inputs, complete rerun; numerical output identical to initial diagnosis"
+    },
+    {
+      "log": "association-reviewed.log",
+      "exit_code": 0,
+      "scope": "Complete rerun under -O; all six exact replays; numerical comparisons identical to initial alternate association"
+    },
+    {
+      "exit_code": 1,
+      "scope": "Initial rustfmt invocation omitted edition, defaulted to Rust 2015 and rejected async syntax; invocation-only error"
+    },
+    {
+      "log": "rustfmt-reviewed.log",
+      "exit_code": 0,
+      "scope": "Correct --edition 2021 --check on four changed/new Rust files"
+    },
+    {
+      "exit_code": 1,
+      "scope": "Initial inline artifact packager had shell newline-quoting SyntaxError before writing outputs; invocation-only error"
+    },
+    {
+      "exit_code": 0,
+      "scope": "Corrected scalar packager verifies both reused receipts against previous published SHA-256 records and verifies both fresh boundary reports"
+    },
+    {
+      "exit_code": 0,
+      "scope": "git diff --check before staging"
+    }
+  ],
+  "browser": {
+    "fresh_run": true,
+    "report": "browser-residual.json",
+    "screenshot": "browser-residual.png",
+    "forward_vjp_cases": 60,
+    "plain_updates": 32,
+    "topos_updates": 32,
+    "guards": 12,
+    "association_controls": 4,
+    "passed": true,
+    "temporary_tab_closed": true,
+    "loopback_server_exit_code": 0
+  },
+  "qkv": {
+    "gpu_reports_reused_from": "d7922413dae66bdc0ad976b319d957c9201cbc57",
+    "new_gpu_trajectory": false,
+    "frozen_fixture_sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358",
+    "legacy_exact_replay_cases": 6,
+    "updates_per_case": 16,
+    "alternate_initial_output_checks": 12,
+    "alternate_initial_parameter_vjp_checks": 384,
+    "alternate_updated_parameter_family_checks": 192,
+    "alternate_geometry_gradient_checks": 1440,
+    "alternate_geometry_gradient_failures": 0,
+    "original_qualified_cases": {
+      "native": 4,
+      "browser": 4
+    },
+    "original_total_cases": 6,
+    "original_qualification_promoted": false,
+    "legacy_query_failure_resolved": false
+  },
+  "review": {
+    "mode": "local independent read-only source review",
+    "initial_findings": 2,
+    "closed_findings": 2,
+    "final_new_findings": 0,
+    "reviewer_ran_tests": false,
+    "artifact_numbers_verified_by": "parent, not reviewer"
+  },
+  "boundaries": [
+    "No runtime arithmetic or threshold change",
+    "Default Torch graph and original fixture unchanged",
+    "Alternate graph is diagnostic, not v1 qualification",
+    "f64 retains legacy constants and is not exact real arithmetic",
+    "No speed, corpus-quality, CUDA, PR, CI, merge or release claim",
+    "Raw model vectors, checkpoints, binaries and screenshots remain local"
+  ],
+  "repository": {
+    "branch": "spiralreality/geometry-router-sensitivity-v1",
+    "unrelated_tracked_deletions_preserved": 8240
+  },
+  "sources": [
+    {
+      "file": "tools/byte_projective_diagnostic_contract.py",
+      "bytes": 4890,
+      "sha256": "8e12e84b9194ba91bacfd61211002a1c113f5c5bbb65453eb0950c9e86ea0e3f"
+    },
+    {
+      "file": "tools/diagnose_byte_phase_trajectory.py",
+      "bytes": 5329,
+      "sha256": "86f1cd8e99b1c5a7dcca60c5b514422802ecd33f8f79e94ac395ef00cd00acfc"
+    },
+    {
+      "file": "tools/diagnose_byte_residual_association.py",
+      "bytes": 5345,
+      "sha256": "92bda361bd8d7105a75ba578cbd5f538f7c31bcbd79dbd86fc1ba2b6b9e7f24e"
+    },
+    {
+      "file": "tools/test_residual_association_reference.py",
+      "bytes": 7532,
+      "sha256": "bed8fe05e9d0b3e55e0b176ff65b8e6b2e781279563731c8237b1e4b78022d9a"
+    },
+    {
+      "file": "tools/generate_resident_byte_decoder_torch_fixture.py",
+      "bytes": 7428,
+      "sha256": "fa9df363e945592b850d33ef1c2eedfcb03c5f157592dd30ccbbef18037fa76a"
+    },
+    {
+      "file": "tools/diagnose_resident_byte_projective.py",
+      "bytes": 9928,
+      "sha256": "7c3a4a408e4beafcf3890dcd1db418e130fe310d47479673afe05d1370bfb87e"
+    },
+    {
+      "file": "crates/st-nn/src/resident/residual_attention.rs",
+      "bytes": 3043,
+      "sha256": "501f8c98f0b7575ddfee0e1e8120fb9d7ef3df32714e3f38dc08503be377b9a5"
+    },
+    {
+      "file": "crates/st-nn/examples/support/residual_association.rs",
+      "bytes": 2920,
+      "sha256": "1c41098fdc82071e02344e435b456e71b09e929eff42a5e52db1a3d98527c5ea"
+    },
+    {
+      "file": "crates/st-nn/examples/support/residual_attention.rs",
+      "bytes": 23870,
+      "sha256": "a5031c1cc2312e4c723735496bf37d4faeb90ea998b35ea953ce1a622f3b6687"
+    },
+    {
+      "file": "crates/st-nn/tests/resident_residual_attention.rs",
+      "bytes": 1258,
+      "sha256": "132e4d97863b8648eaa72745ed13b859c965b5edec73f3119015e36a2b6ba5e4"
+    },
+    {
+      "file": "crates/st-nn/tests/residual_attention_browser.html",
+      "bytes": 2634,
+      "sha256": "950bd819e61a51feb14b71fa0340f5af59b1c0d70226ea0ba09077e63700a65e"
+    },
+    {
+      "file": "crates/st-nn/examples/resident_residual_attention_browser.rs",
+      "bytes": 462,
+      "sha256": "2e043112b4741279e9fb0ae2b1d277e9fc0fa595fd2b0464c2ee125eecb9fda0"
+    },
+    {
+      "file": "crates/st-nn/tests/fixtures/residual_attention_torch.json",
+      "bytes": 1196634,
+      "sha256": "2dfec722e484bdbd840fb0000096765ac1b1dbdb7cefa544af053e144016d3f3"
+    },
+    {
+      "file": "Cargo.lock",
+      "bytes": 119721,
+      "sha256": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62"
+    }
+  ],
+  "raw_artifacts": [
+    {
+      "file": "protocol.json",
+      "bytes": 1587,
+      "sha256": "b00a4b04cdc76cf7284e33edb12f1a54e2a3aa9de68bfad6c6f5ae0b103106ee"
+    },
+    {
+      "file": "association-protocol.json",
+      "bytes": 1311,
+      "sha256": "2edb12d2eaa5229014a1d641accd39ddcff7544a63dba686f1c91aed0945c0fb"
+    },
+    {
+      "file": "diagnosis.json",
+      "bytes": 802149,
+      "sha256": "717c8606083c6f3a3302be5182408ebd37d5c1f56d66b7b55c3afe5470a2d51e"
+    },
+    {
+      "file": "diagnosis.log",
+      "bytes": 6460,
+      "sha256": "7cf99dfcf6b6e5e9d67dfe8216e6151dc760001b352a0c83039084af107e9af3"
+    },
+    {
+      "file": "association.json",
+      "bytes": 666495,
+      "sha256": "0259e530def724dae1d3dc620f1cc3f0917ff61a81e95a7070b68d51924e3e82"
+    },
+    {
+      "file": "association.log",
+      "bytes": 1680,
+      "sha256": "049339ab8d6ca901152a6155ebfb37855649c6fe6aac40b0d7c1a2d8ce5a7fcb"
+    },
+    {
+      "file": "diagnosis-reviewed.json",
+      "bytes": 802149,
+      "sha256": "717c8606083c6f3a3302be5182408ebd37d5c1f56d66b7b55c3afe5470a2d51e"
+    },
+    {
+      "file": "diagnosis-reviewed.log",
+      "bytes": 6460,
+      "sha256": "7cf99dfcf6b6e5e9d67dfe8216e6151dc760001b352a0c83039084af107e9af3"
+    },
+    {
+      "file": "association-reviewed.json",
+      "bytes": 666663,
+      "sha256": "6f3ec11f3202d4b2584bf1a0287f5c4f7078e4191d5f05286d71119d06b92cef"
+    },
+    {
+      "file": "association-reviewed.log",
+      "bytes": 1680,
+      "sha256": "049339ab8d6ca901152a6155ebfb37855649c6fe6aac40b0d7c1a2d8ce5a7fcb"
+    },
+    {
+      "file": "reference-tests.log",
+      "bytes": 671,
+      "sha256": "66f31e388a940f98cb4ec59fad308bf16174d433d1402fcd11c1abca7b69ead0"
+    },
+    {
+      "file": "reference-tests-reviewed.log",
+      "bytes": 1827,
+      "sha256": "7fbc69fe162bb6ef71bed105b75b6c1783261f890fccdefdb3b31fda3d6689bf"
+    },
+    {
+      "file": "reference-tests-optimized.log",
+      "bytes": 1827,
+      "sha256": "7de66ce12d2b4fc762e3a29a57d662cf531b80742f0d570ac2f010e84eec87be"
+    },
+    {
+      "file": "native-residual.log",
+      "bytes": 150120,
+      "sha256": "28948c252fc7ca98a236fb107c53dc97bb384cb2c5d1d6199cd10d3b0219388e"
+    },
+    {
+      "file": "native-residual.json",
+      "bytes": 53312,
+      "sha256": "6a9db7a05ad7e0d98a189f081def7789cb5714e3ddb2d0a52f612f25448a070c"
+    },
+    {
+      "file": "browser-residual.json",
+      "bytes": 53303,
+      "sha256": "555c9603aa4f362aa00e81d7bdd3f4b905b9f5de75d53684558c22aa77f3d9f1"
+    },
+    {
+      "file": "browser-residual.png",
+      "bytes": 73811,
+      "sha256": "66fc572a86d1e1bf50753631cac0ab7dfe75698da80cf9ecbae22dfb92b770db"
+    },
+    {
+      "file": "wasm-residual-build.log",
+      "bytes": 111362,
+      "sha256": "0c251c3066e6ffc6c3b3f22b52445def64e2bd527fcddf85fc8eaf8fb8d401e1"
+    },
+    {
+      "file": "rustfmt-reviewed.log",
+      "bytes": 1080,
+      "sha256": "f1f0392948ed889d184891d9a45afbc8aafc12b624caed602f75e6cc1331f0d0"
+    },
+    {
+      "file": "web/resident_residual_attention_browser.js",
+      "bytes": 47529,
+      "sha256": "9eddde8f87517fc04ee4da47957d5f943d6051b3a6201c320f308e0eddd553c9"
+    },
+    {
+      "file": "web/resident_residual_attention_browser_bg.wasm",
+      "bytes": 3973388,
+      "sha256": "19c943a3f638494614d61d403436947fe29e09d45f443f266504e8bc9dfd243e"
+    }
+  ],
+  "binaries": [
+    {
+      "file": "debug/deps/resident_residual_attention-18924ffc00a91f16",
+      "bytes": 29246320,
+      "sha256": "89270bade91061e4e31a628a6f72331e2fcd00d9fdde48f8780278a029973c98"
+    },
+    {
+      "file": "wasm32-unknown-unknown/release/examples/resident_residual_attention_browser.wasm",
+      "bytes": 4943131,
+      "sha256": "c7531db9fdd78a5df3faf2765370eeab4c094fe13469739bb65ebf9e7f0ab028"
+    }
+  ]
+}

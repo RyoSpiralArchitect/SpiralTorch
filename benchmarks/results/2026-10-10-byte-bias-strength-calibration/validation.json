@@ -1,0 +1,291 @@
+{
+  "schema": "spiraltorch.byte_bias_strength_calibration.validation.v1",
+  "date": "2026-10-10",
+  "timezone": "Asia/Tokyo",
+  "source_base": "570f40a5782b2243a630e0a57874e2ef92b134c9",
+  "scope": "One-time per-head initial score-strength matching and complete synthetic resident byte learning; not a corpus-quality or speed result.",
+  "fixture": {
+    "schema": "spiraltorch.resident_byte_bias_scale.torch_fixture.v1",
+    "sha256": "3eb8e538371d0aa968abfd1f9d3758b7f83464ce6b36e06fb0fe9c91f2e9a00b",
+    "torch": "2.12.1",
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 1,
+    "calibration_batches": 2,
+    "shape": [
+      2,
+      2,
+      4,
+      4
+    ],
+    "valid_pairs_per_head": 40,
+    "statistic": "sqrt(sum squared row-centered residuals over k<=q / total causal pairs); include diagonal and zero-energy first row; pair-count-weighted batches",
+    "reference_metric": "poincare_squared.v1",
+    "candidate_metric": "euclidean_chord_squared.v1",
+    "fit": "Scale each candidate softplus gain by reference_rms/candidate_rms; stable log-domain inverse, f32 quantization check, then rerun the same windows.",
+    "initialization": "Reference and candidate share all original parameters. Only candidate gains change. Each engine fits its own observations; fitted cross-engine parameter identity is NOT claimed.",
+    "gates": {
+      "postfit_relative_rms": 0.00001,
+      "element_atol": 0.000003,
+      "element_rtol": 0.00005,
+      "geometry_gradient_relative_l2": 0.002,
+      "minimum_reference_geometry_gradient_l2": 1e-8
+    },
+    "cases": [
+      {
+        "blocks": 1,
+        "qk_zero": true,
+        "external_biases": false,
+        "topos": false,
+        "parameter_tensors": 23,
+        "parameter_scalars": 2516
+      },
+      {
+        "blocks": 2,
+        "qk_zero": false,
+        "external_biases": true,
+        "topos": true,
+        "parameter_tensors": 37,
+        "parameter_scalars": 2678
+      }
+    ],
+    "updates": 16,
+    "sgd_rate": 0.125,
+    "resume_split": 7,
+    "no_tolerance_retuning": true,
+    "no_heldout_inputs_or_labels_used": true
+  },
+  "qualification": {
+    "selected_native": "native-review-fixed.json",
+    "selected_browser": "browser-review-fixed.json",
+    "native_passed": true,
+    "browser_passed": true,
+    "shared_rust_learner": true,
+    "checks": [
+      "Initial logits and every parameter VJP; embedding and external-bias VJPs",
+      "All16 CE losses, weights, geometry and embedding gradients against Torch",
+      "Fresh-owner resume at7 exactly matches all16 same-runtime trajectory records",
+      "Only raw gains change in the complete initial checkpoint",
+      "Actual learner device checkpoint at0 equals the calibrated checkpoint exactly",
+      "Owned scores exclude external biases and terminal targets",
+      "Ordinary and out-of-range accessors returnNone",
+      "Existing causality, tape ownership and checkpoint controls",
+      "Native wrong-fixture input exits1 at the frozen SHA gate with no report"
+    ],
+    "resumed_calibration": false,
+    "calibration_updates": 0,
+    "runtime_and_initial_model_identity": {
+      "native": {
+        "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "cases": [
+          {
+            "name": "calibrated_flat_causal_geometry_blocks1_metric_onlyTrue",
+            "window_selection_sha256": "43df29d177eb00cd5607917574ec87a9f66a5eef2e4d5ac2f987f50f0d973239",
+            "before_checkpoint_sha256": "58986930909949870c093774a158b27d7ace47e9ee47caaed0070131a55c032d",
+            "fitted_checkpoint_sha256": "dc40f637917035572b5d834cd15fd1d139f948eb59ee6477ba7a745cdb79a977",
+            "learner_initial_checkpoint_sha256": "dc40f637917035572b5d834cd15fd1d139f948eb59ee6477ba7a745cdb79a977"
+          },
+          {
+            "name": "calibrated_flat_causal_geometry_blocks2_metric_onlyFalse",
+            "window_selection_sha256": "43df29d177eb00cd5607917574ec87a9f66a5eef2e4d5ac2f987f50f0d973239",
+            "before_checkpoint_sha256": "301b71d99875d60fb142686ff0a3912cc655d4a10c9c350e49eacb5878af2a38",
+            "fitted_checkpoint_sha256": "4a4c24b8fc11e64db7f05e690607e7ff79f2d481e88d8ab1686e2395f12bddc0",
+            "learner_initial_checkpoint_sha256": "4a4c24b8fc11e64db7f05e690607e7ff79f2d481e88d8ab1686e2395f12bddc0"
+          }
+        ]
+      },
+      "browser": {
+        "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+        "cases": [
+          {
+            "name": "calibrated_flat_causal_geometry_blocks1_metric_onlyTrue",
+            "window_selection_sha256": "43df29d177eb00cd5607917574ec87a9f66a5eef2e4d5ac2f987f50f0d973239",
+            "before_checkpoint_sha256": "58986930909949870c093774a158b27d7ace47e9ee47caaed0070131a55c032d",
+            "fitted_checkpoint_sha256": "bcc2cadbd2745ae43cf4ed3cb0e506ffff92795f4f755f8ac74d6a108aa4d09f",
+            "learner_initial_checkpoint_sha256": "bcc2cadbd2745ae43cf4ed3cb0e506ffff92795f4f755f8ac74d6a108aa4d09f"
+          },
+          {
+            "name": "calibrated_flat_causal_geometry_blocks2_metric_onlyFalse",
+            "window_selection_sha256": "43df29d177eb00cd5607917574ec87a9f66a5eef2e4d5ac2f987f50f0d973239",
+            "before_checkpoint_sha256": "301b71d99875d60fb142686ff0a3912cc655d4a10c9c350e49eacb5878af2a38",
+            "fitted_checkpoint_sha256": "d0bc6a8c94dd742db1a81fae107ed050c1b0a007bc775917893de19f37424bc8",
+            "learner_initial_checkpoint_sha256": "d0bc6a8c94dd742db1a81fae107ed050c1b0a007bc775917893de19f37424bc8"
+          }
+        ]
+      }
+    },
+    "window_selection_hash_encoding": "UTF-8 compact JSON with separators comma/colon, no trailing newline",
+    "checkpoint_hash_encoding": "UTF-8 original Rust checkpoint JSON string, no added newline",
+    "raw_gain_bits": "Retained in local before/calibrated/learner checkpoints; not published as weights."
+  },
+  "regression": {
+    "legacy_fixture_byte_identical": true,
+    "native_legacy_report_byte_identical": true,
+    "browser_legacy_report_byte_identical": true,
+    "legacy_source_record": "benchmarks/results/2026-10-10-byte-flat-metric-control/validation.json",
+    "old_and_new_observations_identical_after_omitting_new_initial_checkpoint_field": true,
+    "corpus_v3_sources_unchanged": true,
+    "kernel_contract_tests": {
+      "passed": 80,
+      "log": "kernel-tests-final.log"
+    },
+    "byte_checkpoint_tests": {
+      "passed": 8,
+      "log": "checkpoint-tests.log"
+    },
+    "calibration_verifier_tests": {
+      "passed": 10,
+      "log": "verifier-tests-review-fixed.log"
+    },
+    "legacy_flat_verifier_tests": {
+      "passed": 12,
+      "log": "legacy-verifier-tests.log"
+    },
+    "kernel_contract_strict_clippy": {
+      "passed": true,
+      "log": "kernel-clippy.log"
+    },
+    "rustfmt": {
+      "passed": true,
+      "toolchain": "nightly-2026-04-15",
+      "log": "fmt-check.log"
+    },
+    "browser_script_syntax": {
+      "passed": true,
+      "log": "browser-syntax.log"
+    },
+    "workspace_wide_tests_or_lint_claim": false
+  },
+  "review": {
+    "method": "Independent read-only local agent; static/stdlib review, not a second device operator.",
+    "core_math_and_model_api": "No actionable correctness findings; strengthened distinct-head joint-permutation and wrong-head-count coverage.",
+    "finding": "P2: verifier could accept a one-f32-ULP fitted-gain/checkpoint splice while retaining another learner's evidence.",
+    "resolution": "Capture actual learner device checkpoint at revision0, require complete exact binding in Rust and verifier; add splice rejection test; native/browser rebuilt and rerun.",
+    "additional_guard": "Shared Rust harness and browser both reject a fixture SHA mismatch.",
+    "final_focused_review": "No additional findings; 10 verifier tests passed independently.",
+    "intermediate_artifacts": "native.json, native-final.json, browser-pre-review.json and their older comparisons do not qualify the repaired exact-initialization boundary. Original bytes retained; only review-fixed reports selected."
+  },
+  "reproduction": {
+    "guide": "docs/causal_bias_calibration.md",
+    "local_directory_label": "SpiralTorch validation / 2026-10-10-byte-bias-strength-calibration-v1",
+    "commands": [
+      "python3 -I -B tools/generate_resident_byte_geometry_torch_fixture.py \"$RAW/torch-fixture.json\" --calibrate-flat",
+      "env CARGO_INCREMENTAL=0 cargo build --locked --release -p st-nn --no-default-features --features wgpu --example resident_byte_flat_metric",
+      "target/release/examples/resident_byte_flat_metric \"$RAW/torch-fixture.json\" --calibrate > \"$RAW/native.json\"",
+      "python3 -I -S -B tools/verify_byte_bias_scale.py \"$RAW/torch-fixture.json\" \"$RAW/native.json\" \"$RAW/native-comparison.json\"",
+      "env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH RUSTFLAGS= CARGO_INCREMENTAL=0 cargo build --locked --release -p st-nn --no-default-features --features wgpu --target wasm32-unknown-unknown --example resident_byte_decoder_browser",
+      "wasm-bindgen target/wasm32-unknown-unknown/release/examples/resident_byte_decoder_browser.wasm --target web --out-dir target/resident-byte-decoder-web",
+      "cp \"$RAW/torch-fixture.json\" target/resident-byte-decoder-web/bias-scale-reference.json",
+      "python3 -I -m http.server 8771 --bind 127.0.0.1",
+      "python3 -I -S -B tools/verify_byte_bias_scale.py \"$RAW/torch-fixture.json\" \"$RAW/browser.json\" \"$RAW/browser-comparison.json\"",
+      "env CARGO_INCREMENTAL=0 cargo test --locked -p st-kernel-contracts --lib",
+      "env -u SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS CARGO_INCREMENTAL=0 cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::byte_decoder::checkpoint::tests -- --test-threads=1",
+      "python3 -I -S -B tools/test_verify_byte_bias_scale.py",
+      "python3 -I -S -B tools/test_verify_byte_flat_metric.py",
+      "env CARGO_INCREMENTAL=0 cargo clippy --locked --release -p st-kernel-contracts --all-targets -- -D warnings",
+      "cargo +nightly-2026-04-15 fmt --all -- --check"
+    ],
+    "wasm_bindgen": "0.2.129",
+    "browser_page": "crates/st-nn/tests/byte_bias_scale_browser.html",
+    "browser_download": "Original Rust JSON string; no JavaScript reserialization",
+    "note": "Use fresh output paths. Run device work serially. Preserve legacy reports and fixtures, and do not change frozen criteria to accept a new input."
+  },
+  "source_sha256": {
+    "Cargo.lock": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62",
+    "crates/st-nn/Cargo.toml": "5cf480e20c0901fb9393586d04f0e3bc8d41e1bb19fcb242bcef9a0487114a7a",
+    "crates/st-kernel-contracts/src/lib.rs": "11d6abe4f56f17daec9d1a739d2e365f3f9341feb606b806435cece43ad0bb75",
+    "crates/st-kernel-contracts/src/causal_bias.rs": "af8d27eeec4046adde2c474ebcb7e109c4ced5f4cc7737e8b3fbe5d5da9d6af0",
+    "crates/st-kernel-contracts/src/causal_bias/tests.rs": "c26a2bcb228992625868a989546e2d5c00c5556f322e77dbd87b6cfd3b40c401",
+    "crates/st-nn/src/resident/byte_decoder/geometry.rs": "0d41b533b89525995085dba331278ce33a8454f81e72d3710c642490a2a00050",
+    "crates/st-nn/src/resident/byte_decoder/training.rs": "981e53b88e27bcb89a0d859fdeefe259c9388081d3428787257db75336ae9ea6",
+    "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "0195b15eea88aaf9515ef739b9772c23147eeca04d1e37c8da7dcbd39647663c",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs": "853d515ce4396f2108321ee8ab861a07feea922acb2be0a33a2a52bd88abc814",
+    "crates/st-nn/examples/resident_byte_flat_metric.rs": "d0f8fcefb2845edefc32f08fb9acf1c4e6edab9cea25c84bef09d4a3589269a3",
+    "crates/st-nn/examples/resident_byte_decoder_browser.rs": "55f2cabadf6467eb12f23a25e567994410bfe4d1eea3348d9e48498e7865a499",
+    "crates/st-nn/examples/support/byte_decoder.rs": "11684fb440e7941d44c858beac11953cd63c57f1d71d35d5549138c765de48cf",
+    "crates/st-nn/examples/support/byte_decoder/bias_scale_controls.rs": "5142d103d8432217e96fbf1c19c8d0262d384f87c25f0ed735fde825e1727ef4",
+    "crates/st-nn/examples/support/byte_decoder/checkpoint_controls.rs": "4f0c5cadc18476b23e8c8b356a96dd6fcd71a8ca4052bf1355d3aa6760440128",
+    "crates/st-nn/tests/byte_bias_scale_browser.html": "017b5539874ebfbe181c67aa6687534497400f6bf1345b9b7d52547d1cf3c2cd",
+    "tools/byte_bias_scale_reference.py": "f288eca2b7abbfaf3db95945b09b4af85311d1339b8f1175fb580c9a3de5d54f",
+    "tools/generate_resident_byte_geometry_torch_fixture.py": "36febf75ed2c2ea1af1fb9b5c4fb58820740cf45c9cc7c4a47debf88e5995f5c",
+    "tools/generate_resident_byte_decoder_torch_fixture.py": "47b5af2f4bfbf5ce6bf367d9d32f762db86d6b5ac2117c8e5a264376dcd78430",
+    "tools/generate_causal_zspace_wave_torch_fixture.py": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa",
+    "tools/generate_poincare_bias_torch_fixture.py": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18",
+    "tools/verify_byte_bias_scale.py": "e5aa990481b936e6bc75161c415f9aceb8819362c8fc3f0b4061af9720073525",
+    "tools/test_verify_byte_bias_scale.py": "6c5edb9b08f69205a2bca45e926c39fc5f6c2c60639dade3ec2773f70cc1411c",
+    "tools/verify_byte_flat_metric.py": "577af075e2e3e036079a513f07345eeac5975525316affa92d2b2f73f2388089",
+    "tools/verify_byte_parameter_rates.py": "b68e4a18d938a377d6665912e377cf1276bdd874b32e38ad824f863ecb0e2566",
+    "tools/test_verify_byte_flat_metric.py": "47544c325d053e3bcd36616111a1c92b8844a7877b16ede53b58f453e64268a6",
+    "docs/resident_byte_decoder.md": "7bed48166f72e4a42891133131da63a89d52411df008e436e3b5f045ebef9dd8",
+    "docs/causal_bias_calibration.md": "bd45044b1907f69879ab4601f2aa4f36353b2dddd9d6e73fcc0b609377f591d7"
+  },
+  "public_artifact_sha256": {
+    "README.md": "9aa9c04188dc2b42ed0682b7c41d1c9fe36681acd509c012abc125acf69f2caf",
+    "native-comparison.json": "a431f215e46fe21a1e185b6212c70596d341232dadd319541e81724f14a85171",
+    "browser-comparison.json": "70fb93ecf75cc7aac1e9a660d623babcdf537bb481e55622f954d7d6f7e5cded"
+  },
+  "local_artifact_sha256": {
+    "browser-legacy-flat-comparison.json": "3186d07a0762166f4876b24c721651d48b2e4569a734d2caecd397ab0262db6c",
+    "browser-legacy-flat-review-fixed.json": "f089fa4f3ae97a36c04d6526d7c532a340c3cbe7744c2218fcfde30aa2a1ec67",
+    "browser-pre-review.json": "dffb154085202d0cf9ff4bc2a0f6354ef71d8bb41db90bb0f44560cfc02c3d4a",
+    "browser-review-fixed-comparison.json": "eeede4efaea32545cc712ab350ffef09afd4e0e6196a9c5a15b4ef9fb3ee21fd",
+    "browser-review-fixed-verifier.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "browser-review-fixed.json": "0a6e1f241f850326079da5fe59b6dd1b3bdaa952583c7a57e82ba2060965fd5f",
+    "browser-syntax.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "checkpoint-tests.log": "59c92a8a3dd25993cdf0c920424728bc3bb38cfe5a8eb27e5f1096132a9130f0",
+    "fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "http.log": "adbb59826b4463296015775ac887856b187f2f3d935b17f1225074057395b752",
+    "kernel-clippy.log": "72982c40cbd24d8b26f935c418fa33b2ba6aa4ab1f1d2f853a409213c8ecd09a",
+    "kernel-tests-final.log": "224454917319e4d34ae3cedfa3781ec3054a18b91d9204590a653360b54fef4d",
+    "kernel-tests.log": "e19af4947594709b4587987cdf01bb75eaf6f1026348a5a65d604b4854a3faed",
+    "legacy-flat-fixture.json": "4dba919c3a5b59cbfa9a9646e1ba76b3e1029580460b2e086833d0360808d36a",
+    "legacy-flat-generation.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "legacy-verifier-tests.log": "ab22ecd4a5af7da7f364fecc7f39bb3bf438f538c103f24667ee209703072dc8",
+    "native-binary": "8c3f51ad7a72ec9362993905ad443ea58c017a807bb04c001b27303cd59a08a7",
+    "native-binary-review-fixed": "c89fce4ce32d22c48461a7a7711f864c2f3a6b965b02c0b1f3cbbc43d00634dd",
+    "native-build-accessor-controls.log": "2722a0a8d83c272a31fe589e1d5aa29956ecbb008cb22a4d71bef910200debe1",
+    "native-build-review-fixed.log": "d0003407793e6605afcecb71fda264eeb81da1088d58e1624290c861ddde3d7b",
+    "native-build.log": "a8fd71150f56f4d0fb8efa69a08e98fdcbb4470490bba3d206ca815be72f8997",
+    "native-comparison.json": "5db59216f4b02d0fff21c71f4c6d6155ba24f69b868eab26d80b69c3dde9047d",
+    "native-final-comparison.json": "a37485fc26576a3ebe798e129abf99f13b7668ef6ba801f46765a76298359bf7",
+    "native-final-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-final-verifier.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-final.json": "ba687c7b072cfa80e5eb5aa5313ea33b0b78ba9f5a248aa12c2d0ff07d5cfe60",
+    "native-legacy-flat-comparison.json": "62690f924f1610f65487f8ba1abfb2902a502639854fd987e35871162b7cb396",
+    "native-legacy-flat-review-fixed-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-legacy-flat-review-fixed.json": "153d4f9319445113f78b797d03a28d64f1271538cfa4c1750792a0cbb17ac69f",
+    "native-legacy-flat-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-legacy-flat.json": "153d4f9319445113f78b797d03a28d64f1271538cfa4c1750792a0cbb17ac69f",
+    "native-review-fixed-comparison.json": "f15a76bf9e91aa961f6d82d2cc41da51d2dfd48f1d90f1f63805c24e934374b0",
+    "native-review-fixed-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-review-fixed-verifier.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-review-fixed.json": "d89b7c0db388ffe4bfb49ced147f80713905857a31499d32c3a12597ef763071",
+    "native-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-verifier.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native.json": "82f824ddb7929e31056e4ef710f817eaaf008d8403d6eb8a1d173d11131deda8",
+    "resident_byte_decoder_browser-review-fixed.js": "12cefa3aead6aff44e76a8bd97a6967f2e0a5e4f1528e9d08c316cc50372ce9b",
+    "resident_byte_decoder_browser.js": "8e180555c5da79e7bbca0a6d8c01cd24026bbc9fda3ebe631f6d262aa6e83e9b",
+    "resident_byte_decoder_browser_bg-review-fixed.wasm": "7609e818ca29eee977b0d79d7539712ce729c332785d88983521ce66da0d74a7",
+    "resident_byte_decoder_browser_bg.wasm": "7188516d02506e51b7d259eb2e24fcc43ab59229625218835b75ccba2a98995f",
+    "torch-fixture.json": "3eb8e538371d0aa968abfd1f9d3758b7f83464ce6b36e06fb0fe9c91f2e9a00b",
+    "torch-generation.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "verifier-tests-final.log": "650a22be2686b3ae570ac7a91565e865b3ea3ba7e6afa95dfdba61e2c2a3df93",
+    "verifier-tests-review-fixed.log": "4d783db7a2b008db7fd3b5172419b1a38b00698914d2033070cb2db71f5213dd",
+    "verifier-tests.log": "38bdb108966bc5e8339865ba9c3eea5c97cdb8fcaf3d93c3306c3279c95607cd",
+    "wasm-build-accessor-controls.log": "e0243cad38567861b29f43f6c5ea94423891e14ec15b1e44d8d12d61bb11c229",
+    "wasm-build-review-fixed.log": "d26b618bf9b3fb94875009f6fef071d141c812b3ff7e5d432857414249b93141",
+    "wasm-build.log": "0ec77a7c6eabb0b13e2c95a677d85fdeb8997a89b68e10b853e1e00e57ac2d97",
+    "wrong-fixture-stdout.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wrong-fixture.log": "03ea3c9d9174149a7581e6b15aafcbcacd6d34808ad6878a268c54e8e1e982d5"
+  },
+  "limits": [
+    "One-time full-score host snapshot, not optimized device-resident calibration or differentiable normalization.",
+    "Equal centered RMS does not equate attention distributions or raw-parameter learning dynamics.",
+    "Flat distance still uses the same nonlinear bounded chart; no flat-encoder or curvature-to-zero claim.",
+    "Engine-local fitted initialization may differ by ULPs; exact resume is within each runtime only.",
+    "Synthetic correctness only: calibrated corpus arms, head-wise mixtures, extra geometry families and pretrained FT are not implemented by this patch.",
+    "Public hashes bind retained local artifacts but do not expose unpublished tensors or attest execution.",
+    "Known vendored-wgpu and example-support dead-code warnings remain; no blanket lint claim.",
+    "No deletion or cleanup of user weights, experiments or preexisting removed archives."
+  ]
+}

@@ -1,0 +1,66 @@
+//! Local synthetic correctness harness, not a general model import API.
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "support/byte_decoder.rs"]
+mod support;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let mut args = std::env::args_os().skip(1);
+    let path = args.next().ok_or(
+        "usage: resident_byte_flat_metric <local-torch-fixture.json> [--calibrate|--fisher-rao|--headwise|--mixture|--query-mixture|--projective|--query-pullback|--module-projective]",
+    )?;
+    let mode = match args.next() {
+        None => 0,
+        Some(flag) if flag == "--calibrate" => 1,
+        Some(flag) if flag == "--fisher-rao" => 2,
+        Some(flag) if flag == "--headwise" => 3,
+        Some(flag) if flag == "--mixture" => 4,
+        Some(flag) if flag == "--query-mixture" => 5,
+        Some(flag) if flag == "--projective" => 6,
+        Some(flag) if flag == "--query-pullback" => 7,
+        Some(flag) if flag == "--module-projective" => 8,
+        _ => return Err("unknown mode".into()),
+    };
+    if args.next().is_some() {
+        return Err("expected exactly one local fixture".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    const LIMIT: u64 = 64 * 1024 * 1024;
+    if !file.metadata()?.is_file() {
+        return Err("fixture must be a regular file".into());
+    }
+    let mut input = String::new();
+    file.take(LIMIT + 1).read_to_string(&mut input)?;
+    if input.len() as u64 > LIMIT {
+        return Err("fixture exceeds 64 MiB".into());
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.flat.metric")?;
+    let report = match mode {
+        1 => pollster::block_on(support::run_bias_scale(runtime, &input))?,
+        2 => pollster::block_on(support::run_fisher_rao(runtime, &input))?,
+        3 => pollster::block_on(support::run_headwise(runtime, &input))?,
+        4 => pollster::block_on(support::run_mixture(runtime, &input))?,
+        5 => pollster::block_on(support::run_query_mixture(runtime, &input))?,
+        6 => pollster::block_on(support::run_projective(runtime, &input))?,
+        7 => pollster::block_on(support::run_query_pullback(runtime, &input))?,
+        8 => pollster::block_on(support::run_module_projective(runtime, &input))?,
+        _ => pollster::block_on(support::run_flat_metric(runtime, &input))?,
+    };
+    println!("{report}");
+    if report["passed"] == false {
+        return Err("qualification failed; raw measurements were retained in the report".into());
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}

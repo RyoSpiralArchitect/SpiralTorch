@@ -1,0 +1,647 @@
+{
+  "schema": "spiraltorch.matched_geometry_learning.validation.v2",
+  "baseline_commit": "e198459189eb412275cc7ed9a42c1ca84d74e5d9",
+  "source_identity": "Baseline commit plus listed source hashes; no production arithmetic or tolerance changes.",
+  "environment": {
+    "rust": "1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "0.2.129",
+    "python": "3.12",
+    "torch": "2.12.1",
+    "torch_device": "cpu",
+    "torch_threads": 1,
+    "node": "24.14.0",
+    "native_backend": "Metal",
+    "browser_backend": "WASM/WebGPU",
+    "serialized_gpu_runs": true,
+    "incremental_builds": false
+  },
+  "criterion": "Frozen protocol.json before new measurements; original v1 results are not promoted.",
+  "protocol_sha256": "e2ca4ee19773ad222ad92abc7c70d78fc281b3b6385224ed0daa4dc4632364c2",
+  "fixture_identity": {
+    "schema": "spiraltorch.module_projective_fixture_identity.v2",
+    "fixture_sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7",
+    "legacy_fixture_sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358",
+    "execution_contract": {
+      "residual": "projection_bias_before_residual.v1",
+      "router_coordinate_vjp": "same_runtime_full_minus_stop.v1"
+    },
+    "legacy_initial_state_exact": true,
+    "cases": 6,
+    "updates": 16
+  },
+  "measured": {
+    "native": {
+      "qualified_cases": 6,
+      "updates": 96,
+      "learning_geometry_vjps": 720,
+      "max_learning_geometry_relative_l2": 0.0018354366643319622,
+      "exact_checkpoint_continuations": 6,
+      "paired_query_cases": 2
+    },
+    "browser": {
+      "qualified_cases": 6,
+      "updates": 96,
+      "learning_geometry_vjps": 720,
+      "max_learning_geometry_relative_l2": 0.0018713102345431646,
+      "exact_checkpoint_continuations": 6,
+      "paired_query_cases": 2
+    }
+  },
+  "legacy": {
+    "regenerated_default_fixture_byte_identical": true,
+    "fresh_native_report_byte_identical_to_original": true,
+    "fresh_native_exit_code": 1,
+    "archived_native": {
+      "file": "native-projective.json",
+      "bytes": 11798072,
+      "sha256": "dd2dc654d3b3e24ae981cdba9e814a40eef6b8424199de2c9139e09852a50fd2"
+    },
+    "archived_browser": {
+      "file": "browser-lm.json",
+      "bytes": 11940016,
+      "sha256": "b8ba0f9171b4155ddb35cc87cf4cee048f53ec4b628f08d7955321a89b0f8e6d"
+    },
+    "browser_v1_rerun_this_increment": false,
+    "original_qualification": "4/6"
+  },
+  "tests": {
+    "python_normal": 30,
+    "python_optimized": 30,
+    "rust_example": 8
+  },
+  "attempts": [
+    {
+      "name": "legacy_reference",
+      "log": "legacy-reference.log",
+      "observed_exit_code": 0,
+      "scope": "Default v1 regeneration; byte-identical retained reference."
+    },
+    {
+      "name": "module_reference",
+      "log": "reference.log",
+      "observed_exit_code": 0,
+      "scope": "Explicit v2 fixture before GPU measurements."
+    },
+    {
+      "name": "initial_python",
+      "log": "python-reference-tests.log",
+      "observed_exit_code": 0,
+      "scope": "21 tests, before review fixes."
+    },
+    {
+      "name": "initial_rust",
+      "log": "rust-harness-tests.log",
+      "observed_exit_code": 0,
+      "scope": "6 tests, before review fixes."
+    },
+    {
+      "name": "initial_native_build",
+      "log": "native-build.log",
+      "observed_exit_code": 0,
+      "scope": "Superseded by final build."
+    },
+    {
+      "name": "initial_native",
+      "log": "native.log",
+      "observed_exit_code": 0,
+      "scope": "6/6, before final failure retention and causal witnesses."
+    },
+    {
+      "name": "initial_wasm_build",
+      "log": "wasm-build.log",
+      "observed_exit_code": 0,
+      "scope": "Superseded; not a browser run."
+    },
+    {
+      "name": "intermediate_rust",
+      "log": "rust-harness-tests-reviewed.log",
+      "observed_exit_code": 0,
+      "scope": "7 tests, before final causal witnesses."
+    },
+    {
+      "name": "intermediate_python_optimized",
+      "log": "reviewed/python-tests-optimized.log",
+      "observed_exit_code": 0,
+      "scope": "28 tests."
+    },
+    {
+      "name": "intermediate_python",
+      "log": "reviewed/python-tests.log",
+      "observed_exit_code": 0,
+      "scope": "28 tests."
+    },
+    {
+      "name": "intermediate_native_build",
+      "log": "reviewed/native-build.log",
+      "observed_exit_code": 0,
+      "scope": "Superseded by final build."
+    },
+    {
+      "name": "intermediate_native",
+      "log": "reviewed/native.log",
+      "observed_exit_code": 0,
+      "scope": "6/6, before raw causal witnesses."
+    },
+    {
+      "name": "intermediate_wasm_build",
+      "log": "reviewed/wasm-build.log",
+      "observed_exit_code": 0,
+      "scope": "Superseded; not a browser run."
+    },
+    {
+      "name": "negative_preparation_failure",
+      "log": "reviewed/negative-stopped.log",
+      "observed_exit_code": 1,
+      "scope": "JavaScript JSON number normalization reached checkpoint identity rejection; NOT the intended stopped-VJP control."
+    },
+    {
+      "name": "intermediate_legacy",
+      "log": "reviewed/legacy-native.log",
+      "observed_exit_code": 1,
+      "scope": "Expected original v1 qualification failure."
+    },
+    {
+      "name": "intermediate_negative",
+      "log": "reviewed/negative-stopped-r2.log",
+      "observed_exit_code": 1,
+      "scope": "Corrected Python serialization: intended finite stopped-VJP failure, complete observations retained."
+    },
+    {
+      "name": "final_rust",
+      "log": "final/rust-tests.log",
+      "observed_exit_code": 0,
+      "scope": "8 tests."
+    },
+    {
+      "name": "final_python_optimized",
+      "log": "final/python-tests-optimized.log",
+      "observed_exit_code": 0,
+      "scope": "30 tests under -O."
+    },
+    {
+      "name": "final_python",
+      "log": "final/python-tests.log",
+      "observed_exit_code": 0,
+      "scope": "30 tests."
+    },
+    {
+      "name": "final_native_build",
+      "log": "final/native-build.log",
+      "observed_exit_code": 0,
+      "scope": "Final native release build."
+    },
+    {
+      "name": "final_native",
+      "log": "final/native.log",
+      "observed_exit_code": 0,
+      "scope": "Fresh final v2 run: 6/6 and 96 updates."
+    },
+    {
+      "name": "final_native_validation",
+      "log": "final/native-validator.log",
+      "observed_exit_code": 0,
+      "scope": "6 cases, 96 steps and 18 causal witnesses independently checked."
+    },
+    {
+      "name": "final_legacy",
+      "log": "final/legacy-native.log",
+      "observed_exit_code": 1,
+      "scope": "Fresh v1 report byte-identical to the archived original."
+    },
+    {
+      "name": "final_negative",
+      "log": "final/negative-stopped.log",
+      "observed_exit_code": 1,
+      "scope": "Reads reviewed/negative-stopped-reference-r2.json; complete failed report retained."
+    },
+    {
+      "name": "final_rustfmt",
+      "log": "final/rustfmt-check.log",
+      "observed_exit_code": 0,
+      "scope": "Six modified Rust sources pass formatting check."
+    },
+    {
+      "name": "final_wasm_build",
+      "log": "final/wasm-build.log",
+      "observed_exit_code": 0,
+      "scope": "Final WASM release build."
+    },
+    {
+      "name": "final_publisher",
+      "log": "final/publisher.log",
+      "observed_exit_code": 0,
+      "scope": "Independent final native/browser validation; scalar-only publication."
+    }
+  ],
+  "exit_code_provenance": "Parent-observed shell/tool completion results; original logs retained and hashed. Browser success is a downloaded report, not a shell exit.",
+  "browser": {
+    "fresh": true,
+    "explicit_run": true,
+    "qualified_cases": 6,
+    "schema": "spiraltorch.module_projective_bundle.browser.v2",
+    "fixture_sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7",
+    "report": "final/browser.json",
+    "screenshot": "final/browser.png",
+    "generated_bindings_exit_code": 0,
+    "loopback_whitelist": true,
+    "owned_tab_closed": true,
+    "server_shutdown_exit_code": 0
+  },
+  "negative_control": "negative-control.json; failed preparation attempt is retained, not counted as the intended control.",
+  "review": {
+    "independent_read_only": true,
+    "source_only": true,
+    "findings_closed": 4,
+    "tests_or_runtime_reproduction_by_reviewer": false,
+    "final_source_recheck": "No new findings within the bounded review scope.",
+    "detail": "review.md"
+  },
+  "preserved_unrelated_tracked_deletions": 8240,
+  "sources": [
+    {
+      "file": "Cargo.lock",
+      "bytes": 119721,
+      "sha256": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62"
+    },
+    {
+      "file": "Cargo.toml",
+      "bytes": 1488,
+      "sha256": "0a756da3b71ab178232acdac4e08bd29222d17530e645857edc143f03df3cc05"
+    },
+    {
+      "file": "crates/st-nn/Cargo.toml",
+      "bytes": 6334,
+      "sha256": "5cf480e20c0901fb9393586d04f0e3bc8d41e1bb19fcb242bcef9a0487114a7a"
+    },
+    {
+      "file": "crates/st-nn/examples/resident_byte_decoder_browser.rs",
+      "bytes": 6678,
+      "sha256": "f90f2c45888fc8dee617edf7e38431b985fd38efe60a5928b46344f08b4a6572"
+    },
+    {
+      "file": "crates/st-nn/examples/resident_byte_flat_metric.rs",
+      "bytes": 2802,
+      "sha256": "f8ef6fe0da159117521043c1732dd8c9b486fb3b13e1287419812b6b1136ff54"
+    },
+    {
+      "file": "crates/st-nn/examples/support/byte_decoder.rs",
+      "bytes": 49309,
+      "sha256": "e5a00094e2c0f5fa68157a6f248074ab95576720e8637445eb39878c9722d23c"
+    },
+    {
+      "file": "crates/st-nn/examples/support/byte_decoder/projective_controls.rs",
+      "bytes": 18206,
+      "sha256": "3f2a06086a0895e2604ccc29944be8864979c90839fec624550759e58d9b6c4a"
+    },
+    {
+      "file": "crates/st-nn/examples/support/byte_decoder/query_controls.rs",
+      "bytes": 10160,
+      "sha256": "bb0381d86fe62f54aba2270b7cfef01e6cf1fc9107cda69c90717ed02c90b16e"
+    },
+    {
+      "file": "crates/st-nn/examples/support/byte_decoder/query_pullback_controls.rs",
+      "bytes": 13442,
+      "sha256": "c7d65f3032696c7289e9da19e1ab6e56f26143ca8f80614433174086c8783c88"
+    },
+    {
+      "file": "crates/st-nn/tests/byte_module_projective_browser.html",
+      "bytes": 4343,
+      "sha256": "de707f2a98743c46234c28a2624bc1c6b968e47f05819f125ea2115ac339b9f8"
+    },
+    {
+      "file": "tools/byte_projective_diagnostic_contract.py",
+      "bytes": 4908,
+      "sha256": "f6c6c53d3dfb2fcb710ae1fe7a84afef3c317c6318db5eb4ac50394d63837857"
+    },
+    {
+      "file": "tools/generate_resident_byte_geometry_torch_fixture.py",
+      "bytes": 17414,
+      "sha256": "ad28d4bb8454ccb153920327fcd28062f52649e325ea1c9ed097a3ef7453acb7"
+    },
+    {
+      "file": "tools/generate_resident_byte_projective_torch_fixture.py",
+      "bytes": 2613,
+      "sha256": "b8b725c218bb28b2ce7435b60b8fe986d81775c0e182ffee6b0f8e279aa9d543"
+    },
+    {
+      "file": "tools/test_module_residual_geometry_reference.py",
+      "bytes": 3297,
+      "sha256": "927b5bfe1131d0b3cbdbb72ceb96b0d802b27d2a3f32fd479c2c86951612a6b0"
+    },
+    {
+      "file": "tools/test_residual_association_reference.py",
+      "bytes": 7532,
+      "sha256": "bed8fe05e9d0b3e55e0b176ff65b8e6b2e781279563731c8237b1e4b78022d9a"
+    },
+    {
+      "file": "tools/test_validate_resident_query_pullback.py",
+      "bytes": 4160,
+      "sha256": "a907e95d22bd24356393d9181363eda99bc82b70fed4b33f23e592a708fd7d5c"
+    },
+    {
+      "file": "tools/test_validate_module_projective_results.py",
+      "bytes": 6584,
+      "sha256": "4fbcabf4d9f011fc6fabba315e519b301a1796077102afdc2537a8d0a15dfbab"
+    },
+    {
+      "file": "tools/validate_resident_query_pullback.py",
+      "bytes": 8264,
+      "sha256": "dd199ad55d3e1c925793c6904d0ad5566ebb1173fd2c8050fa5e2d4c61475359"
+    },
+    {
+      "file": "tools/validate_module_projective_results.py",
+      "bytes": 11591,
+      "sha256": "d5eb1f67b43f8dd91c434ed4987fd08a1ff9ea6cc13fbfe3e7b323bfef4b0643"
+    }
+  ],
+  "binaries": [
+    {
+      "file": "release/examples/resident_byte_flat_metric",
+      "bytes": 7472848,
+      "sha256": "aba99677726b06c0ed47ba710621db443165bbb42bb0ebd2c145ed573cc213af"
+    },
+    {
+      "file": "debug/examples/resident_byte_flat_metric-e61cab35f33e5a90",
+      "bytes": 2202424,
+      "sha256": "9b9015f5ea3befac5c5c5b25af17354ee10ae913b62f70c06067daef6c61398b"
+    },
+    {
+      "file": "wasm32-unknown-unknown/release/examples/resident_byte_decoder_browser.wasm",
+      "bytes": 12712522,
+      "sha256": "0208b19a051709c4973a7fda7af0ca8446f09f3c6b7e7bcca024966c157633c0"
+    }
+  ],
+  "bindgen_binary": {
+    "name": "wasm-bindgen",
+    "sha256": "6ad2f953d8abcb36d6b084df221fb2f0716217854c1b8df938aa2f5678d1b948"
+  },
+  "private_artifacts": [
+    {
+      "file": "protocol.json",
+      "bytes": 2655,
+      "sha256": "e2ca4ee19773ad222ad92abc7c70d78fc281b3b6385224ed0daa4dc4632364c2"
+    },
+    {
+      "file": "fixture-identity.json",
+      "bytes": 468,
+      "sha256": "0711e2c55687e5c24e6ceb58906323e6dff20a49fea90f1de977fd5aa767f1d9"
+    },
+    {
+      "file": "legacy-reference.json",
+      "bytes": 7466211,
+      "sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358"
+    },
+    {
+      "file": "reference.json",
+      "bytes": 7548074,
+      "sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7"
+    },
+    {
+      "file": "native.json",
+      "bytes": 11960230,
+      "sha256": "7280a10c902538c200140fe9ad16dfa09a188d327a9a11850b0b9c3f934119a2"
+    },
+    {
+      "file": "reviewed/reference.json",
+      "bytes": 7548074,
+      "sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7"
+    },
+    {
+      "file": "reviewed/fixture-identity.json",
+      "bytes": 468,
+      "sha256": "0711e2c55687e5c24e6ceb58906323e6dff20a49fea90f1de977fd5aa767f1d9"
+    },
+    {
+      "file": "reviewed/native.json",
+      "bytes": 11960294,
+      "sha256": "1f92b750ba91ceba7fbcc6ceeb62652621f245ece098be5d9d55757088f342c5"
+    },
+    {
+      "file": "reviewed/legacy-native.json",
+      "bytes": 11798072,
+      "sha256": "dd2dc654d3b3e24ae981cdba9e814a40eef6b8424199de2c9139e09852a50fd2"
+    },
+    {
+      "file": "reviewed/negative-stopped-reference.json",
+      "bytes": 7171780,
+      "sha256": "20c600bb638126ed1992ae0424b3408c62f4d28f7e23be9112b08f34c6b44967"
+    },
+    {
+      "file": "reviewed/negative-stopped.json",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "reviewed/negative-stopped-reference-r2.json",
+      "bytes": 7547773,
+      "sha256": "e4fbdc7da2abe3aaf5c7af065d1b71547c188eb9a3596b79850af5f30756276c"
+    },
+    {
+      "file": "reviewed/negative-stopped-r2.json",
+      "bytes": 11960475,
+      "sha256": "c5cca836e9854b9820c136ed9ba3e676093b3912ef5a9897cd5d1312a3ecefa3"
+    },
+    {
+      "file": "final/reference.json",
+      "bytes": 7548074,
+      "sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7"
+    },
+    {
+      "file": "final/fixture-identity.json",
+      "bytes": 468,
+      "sha256": "0711e2c55687e5c24e6ceb58906323e6dff20a49fea90f1de977fd5aa767f1d9"
+    },
+    {
+      "file": "final/native.json",
+      "bytes": 12590326,
+      "sha256": "7fde1d879c429bd7ebec3044e4c5a928c9a93ee3c25bcf5ec736851321f24339"
+    },
+    {
+      "file": "final/legacy-native.json",
+      "bytes": 11798072,
+      "sha256": "dd2dc654d3b3e24ae981cdba9e814a40eef6b8424199de2c9139e09852a50fd2"
+    },
+    {
+      "file": "final/negative-stopped.json",
+      "bytes": 12590507,
+      "sha256": "706c8b4640ab7e87c925a7b7188d225a306c77eeb4c239e3b387f74dd4798c22"
+    },
+    {
+      "file": "final/browser.json",
+      "bytes": 12575479,
+      "sha256": "28edf11cb2fb879c9017f668e77d002bf3876dbe72efff772bb261e833762af8"
+    },
+    {
+      "file": "final/browser.png",
+      "bytes": 99845,
+      "sha256": "1304183634df05bfca53b3178bf4f7f1dd86eca99b8248e8fa72498c75263d26"
+    },
+    {
+      "file": "final/scalar-results.json",
+      "bytes": 401588,
+      "sha256": "ccb474933e2b9315ba288314bed1bf3688f2a7b109350ddec33db934dfa76912"
+    },
+    {
+      "file": "serve.cjs",
+      "bytes": 1561,
+      "sha256": "851ffbb6d609b99469a17acd59b652ff9c9f0478fb7f130c62c8cb5b76a4e1f3"
+    },
+    {
+      "file": "final/collect-public-receipts.cjs",
+      "bytes": 11846,
+      "sha256": "922865f3f0c4d11d2df46209e85a8de4f06e7c9403dc9859fed124c734fce5fc"
+    },
+    {
+      "file": "final/web/resident_byte_decoder_browser.js",
+      "bytes": 50823,
+      "sha256": "6dc1ac40f337f5a2f908799eb50377a0a1ae0f526d29377b872df4e290a3221d"
+    },
+    {
+      "file": "final/web/resident_byte_decoder_browser_bg.wasm",
+      "bytes": 11720372,
+      "sha256": "40b178c5b9a5eafad901f15d931b702f698fcb01bab2a16b6a243cb342c5710f"
+    },
+    {
+      "file": "legacy-reference.log",
+      "bytes": 263,
+      "sha256": "99d90fd4f7311f1b0353bea12181a3d022b88219262fbb76756bb734e8a1ca1f"
+    },
+    {
+      "file": "reference.log",
+      "bytes": 256,
+      "sha256": "8b094a2098c23062186bc9f9fbc08253ffbc59f634f387a48ec482fe5bdfc3de"
+    },
+    {
+      "file": "python-reference-tests.log",
+      "bytes": 3761,
+      "sha256": "63246249aa65b1a74af3fe8f35810d9449941e2c0ef42089251707bac7bf46d9"
+    },
+    {
+      "file": "rust-harness-tests.log",
+      "bytes": 116327,
+      "sha256": "fe97f764624004ba6107b3421c6b4090697a78e7e001c7891c5167badda2b86b"
+    },
+    {
+      "file": "native-build.log",
+      "bytes": 115350,
+      "sha256": "e9c2613336511d5799e4563f2c118aa42280ccf26c08a26945a08a3635156c06"
+    },
+    {
+      "file": "native.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "wasm-build.log",
+      "bytes": 111362,
+      "sha256": "e0a5e32718ba2e6ac4c310932f772920b2cfd30a2363d1f44f753f7937a70259"
+    },
+    {
+      "file": "rust-harness-tests-reviewed.log",
+      "bytes": 116436,
+      "sha256": "96ceb86ca012a2efa1a712d7d5c03162de54ca2c70ce84443e240ac2a5835de6"
+    },
+    {
+      "file": "reviewed/python-tests-optimized.log",
+      "bytes": 4997,
+      "sha256": "fd21750a6ba15a871df8780dca879bbb7b947448c7aff60e11c32b2f51b0bb28"
+    },
+    {
+      "file": "reviewed/python-tests.log",
+      "bytes": 4997,
+      "sha256": "759869f038be26fa72c500555abedefd394202947fbf699ce0666e8697f78f33"
+    },
+    {
+      "file": "reviewed/native-build.log",
+      "bytes": 115350,
+      "sha256": "75bb6403dc9c7759fe940d4b6958c70298b8c22057082f736fe501912d875de6"
+    },
+    {
+      "file": "reviewed/native.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "reviewed/wasm-build.log",
+      "bytes": 111362,
+      "sha256": "fb93d4183cca8f0ba3ae2e61e59ceb92e71e28432fe0af73bd98d6d12d4175df"
+    },
+    {
+      "file": "reviewed/negative-stopped.log",
+      "bytes": 55,
+      "sha256": "2c83f7a0453d72e8aed8ff0d0a15fd405f727a11fe7df24c7fceb39d5d56f587"
+    },
+    {
+      "file": "reviewed/legacy-native.log",
+      "bytes": 76,
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b"
+    },
+    {
+      "file": "reviewed/negative-stopped-r2.log",
+      "bytes": 76,
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b"
+    },
+    {
+      "file": "final/rust-tests.log",
+      "bytes": 116539,
+      "sha256": "ef301665b06f7dcbf4ac110ec7131c6ca3c11bf058e181fce3e553f17520521c"
+    },
+    {
+      "file": "final/python-tests-optimized.log",
+      "bytes": 5361,
+      "sha256": "9fae55cd9ee5cfc2cedd0a1c58cbccd906620c96f8ad34a67f62aa148ad51e01"
+    },
+    {
+      "file": "final/python-tests.log",
+      "bytes": 5361,
+      "sha256": "0dcad050053c7875f63217bfa7477d2145b1d66eaebb8b7204d2d7de96bbd31e"
+    },
+    {
+      "file": "final/native-build.log",
+      "bytes": 115350,
+      "sha256": "8b590d9477d3b67f69811eb7ddbb9c4c41d5b66d94d1273d88ecf7266ab112e9"
+    },
+    {
+      "file": "final/native.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "final/native-validator.log",
+      "bytes": 54,
+      "sha256": "774c856450cc05222434695d0f782e150c62b320d71658ee1a936a9ea125530c"
+    },
+    {
+      "file": "final/legacy-native.log",
+      "bytes": 76,
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b"
+    },
+    {
+      "file": "final/negative-stopped.log",
+      "bytes": 76,
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b"
+    },
+    {
+      "file": "final/rustfmt-check.log",
+      "bytes": 1620,
+      "sha256": "c24b6da18ede511bdd6cae3576ba6c595942a2e4046e6f885aee6d772cbcf537"
+    },
+    {
+      "file": "final/wasm-build.log",
+      "bytes": 111362,
+      "sha256": "b02dbc22d89c95e170c7172946ae3d646d510a82237ebd699b92f3dbebcd3c07"
+    },
+    {
+      "file": "final/publisher.log",
+      "bytes": 79,
+      "sha256": "75be530a49a61ae4b703af816b4fe4748021f7a46d30313251ebfdec1f4e8430"
+    }
+  ],
+  "boundaries": [
+    "Raw model vectors, weights, checkpoints, binaries and screenshots remain local.",
+    "Only six tiny synthetic cases and two fixed seeds, not a large mixture or held-out corpus study.",
+    "No language-quality, throughput, CUDA, production-equivalence, PR, CI, merge or release claim.",
+    "The v2 publisher omits adapter metadata and raw causal witnesses after verification.",
+    "Finite intended stopped-VJP failures remain failed; malformed/nonfinite inputs abort."
+  ]
+}

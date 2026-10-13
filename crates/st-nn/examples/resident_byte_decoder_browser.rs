@@ -29,3 +29,147 @@ pub async fn run_resident_byte_parameter_rates() -> Result<String, wasm_bindgen:
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(report.to_string())
 }
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_flat_metric(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.flat_metric.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let report = support::run_flat_metric(runtime, fixture_json)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(report.to_string())
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_projective(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.projective.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    support::run_projective(runtime, fixture_json)
+        .await
+        .map(|r| r.to_string())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_module_projective(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.module_projective.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    support::run_module_projective(runtime, fixture_json)
+        .await
+        .map(|r| r.to_string())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_query_pullback(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.query_pullback.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    support::run_query_pullback(runtime, fixture_json)
+        .await
+        .map(|r| r.to_string())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_fisher_rao(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.fisher_rao.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let report = support::run_fisher_rao(runtime, fixture_json)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(report.to_string())
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_headwise(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.headwise.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let report = support::run_headwise(runtime, fixture_json)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(report.to_string())
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_query_mixture(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.query_mixture.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    support::run_query_mixture(runtime, fixture_json)
+        .await
+        .map(|r| r.to_string())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_mixture(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.mixture.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let report = support::run_mixture(runtime, fixture_json)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(report.to_string())
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_resident_byte_bias_scale(
+    fixture_json: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_backend_wgpu::runtime::WgpuRuntime;
+    use wasm_bindgen::JsValue;
+    let runtime = WgpuRuntime::request_headless("byte_decoder.bias_scale.browser")
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let report = support::run_bias_scale(runtime, fixture_json)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(report.to_string())
+}

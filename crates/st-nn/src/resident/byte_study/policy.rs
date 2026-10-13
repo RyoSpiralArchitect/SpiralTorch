@@ -7,11 +7,30 @@ pub(super) enum GeometryUpdate {
     Frozen,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum BiasInitialization {
+    Original,
+    MatchedPoincareRms,
+}
+
+pub(super) fn explicit_initialization<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<BiasInitialization>, D::Error> {
+    BiasInitialization::deserialize(deserializer).map(Some)
+}
+
 // Absence belongs to v1 only; explicit null must not silently select training.
 pub(super) fn explicit_update<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<Option<GeometryUpdate>, D::Error> {
     GeometryUpdate::deserialize(deserializer).map(Some)
+}
+
+pub(super) fn explicit_metric<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<ByteDecoderPairMetric>, D::Error> {
+    ByteDecoderPairMetric::deserialize(deserializer).map(Some)
 }
 
 pub(super) fn same_bits(left: &[f32], right: &[f32]) -> bool {
@@ -23,18 +42,115 @@ pub(super) fn same_bits(left: &[f32], right: &[f32]) -> bool {
 }
 
 impl Case {
+    pub(super) fn matched(&self) -> bool {
+        self.bias_initialization == Some(BiasInitialization::MatchedPoincareRms)
+    }
     pub(super) fn frozen(&self) -> bool {
         self.geometry_update == Some(GeometryUpdate::Frozen)
+    }
+    pub(super) fn router_frozen(&self) -> bool {
+        self.mixture
+            .as_ref()
+            .is_some_and(|m| m.router_update == GeometryUpdate::Frozen)
+    }
+    pub(super) fn parameter_frozen(&self, name: &str) -> bool {
+        (self.frozen() && name.starts_with("geometry."))
+            || (self.router_frozen() && name.starts_with("geometry.mixture_logits."))
+            || self
+                .mixture
+                .as_ref()
+                .and_then(|m| m.query_projection.as_ref())
+                .is_some_and(|q| {
+                    name.starts_with("geometry.query_projection.")
+                        && (name.ends_with(".bias") || q.weight_update == GeometryUpdate::Frozen)
+                })
     }
 }
 
 impl Request {
     pub(super) fn controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v2"
+        self.schema != "spiraltorch.byte_corpus.request.v1"
+    }
+
+    pub(super) fn metric_controls(&self) -> bool {
+        matches!(
+            self.schema.as_str(),
+            "spiraltorch.byte_corpus.request.v3"
+                | "spiraltorch.byte_corpus.request.v4"
+                | "spiraltorch.byte_corpus.request.v5"
+                | "spiraltorch.byte_corpus.request.v6"
+                | "spiraltorch.byte_corpus.request.v7"
+                | "spiraltorch.byte_corpus.request.v8"
+        )
+    }
+
+    pub(super) fn calibration_controls(&self) -> bool {
+        matches!(
+            self.schema.as_str(),
+            "spiraltorch.byte_corpus.request.v4"
+                | "spiraltorch.byte_corpus.request.v5"
+                | "spiraltorch.byte_corpus.request.v6"
+                | "spiraltorch.byte_corpus.request.v7"
+                | "spiraltorch.byte_corpus.request.v8"
+        )
+    }
+
+    pub(super) fn fisher_controls(&self) -> bool {
+        matches!(
+            self.schema.as_str(),
+            "spiraltorch.byte_corpus.request.v5"
+                | "spiraltorch.byte_corpus.request.v6"
+                | "spiraltorch.byte_corpus.request.v7"
+                | "spiraltorch.byte_corpus.request.v8"
+        )
+    }
+
+    pub(super) fn headwise_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v6"
+    }
+
+    pub(super) fn mixture_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v7" || self.query_controls()
+    }
+
+    pub(super) fn query_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v8"
+    }
+
+    pub(super) fn arms_per_seed(&self) -> usize {
+        if self.query_controls() {
+            25
+        } else if self.mixture_controls() {
+            17
+        } else if self.headwise_controls() {
+            21
+        } else if self.fisher_controls() {
+            9
+        } else if self.calibration_controls() {
+            7
+        } else if self.metric_controls() {
+            5
+        } else if self.controls() {
+            3
+        } else {
+            2
+        }
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.controls() {
+        if self.query_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v8"
+        } else if self.mixture_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v7"
+        } else if self.headwise_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v6"
+        } else if self.fisher_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v5"
+        } else if self.calibration_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v4"
+        } else if self.metric_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v3"
+        } else if self.controls() {
             "spiraltorch.byte_corpus.checkpoint.v2"
         } else {
             CHECKPOINT_SCHEMA
@@ -42,6 +158,48 @@ impl Request {
     }
 
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.query_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v8"
+            } else {
+                "spiraltorch.byte_corpus.partial.v8"
+            };
+        }
+        if self.mixture_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v7"
+            } else {
+                "spiraltorch.byte_corpus.partial.v7"
+            };
+        }
+        if self.headwise_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v6"
+            } else {
+                "spiraltorch.byte_corpus.partial.v6"
+            };
+        }
+        if self.fisher_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v5"
+            } else {
+                "spiraltorch.byte_corpus.partial.v5"
+            };
+        }
+        if self.calibration_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v4"
+            } else {
+                "spiraltorch.byte_corpus.partial.v4"
+            };
+        }
+        if self.metric_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v3"
+            } else {
+                "spiraltorch.byte_corpus.partial.v3"
+            };
+        }
         match (self.controls(), complete) {
             (false, true) => "spiraltorch.byte_corpus.result.v1",
             (false, false) => "spiraltorch.byte_corpus.partial.v1",
@@ -51,6 +209,15 @@ impl Request {
     }
 
     pub(super) fn validate_modes(&self, cases: &[&Case]) -> Result<()> {
+        if cases
+            .iter()
+            .any(|c| c.bias_initialization.is_some() != self.calibration_controls())
+        {
+            return Err("v4/v5 require explicit bias initialization on every arm".into());
+        }
+        if !self.metric_controls() && cases.iter().any(|c| c.pair_metric.is_some()) {
+            return Err("v1/v2 do not admit an explicit pair metric".into());
+        }
         if !self.controls() {
             if cases.len() != 2
                 || cases[0].geometry == cases[1].geometry
@@ -60,37 +227,139 @@ impl Request {
             }
             return Ok(());
         }
-        if cases.len() != 3 || cases.iter().any(|c| c.geometry_update.is_none()) {
-            return Err("v2 requires three explicit update policies per seed".into());
+        if cases.len() != self.arms_per_seed() || cases.iter().any(|c| c.geometry_update.is_none())
+        {
+            return Err(
+                "control study needs each required arm with an explicit update policy".into(),
+            );
         }
-        for (geometry, update) in [
-            (false, GeometryUpdate::Train),
-            (true, GeometryUpdate::Train),
-            (true, GeometryUpdate::Frozen),
-        ] {
+        let original = self
+            .calibration_controls()
+            .then_some(BiasInitialization::Original);
+        let mut modes = if self.metric_controls() {
+            use ByteDecoderPairMetric::{EuclideanChordSquared, PoincareSquared};
+            vec![
+                (false, GeometryUpdate::Train, None, original),
+                (true, GeometryUpdate::Train, Some(PoincareSquared), original),
+                (
+                    true,
+                    GeometryUpdate::Frozen,
+                    Some(PoincareSquared),
+                    original,
+                ),
+                (
+                    true,
+                    GeometryUpdate::Train,
+                    Some(EuclideanChordSquared),
+                    original,
+                ),
+                (
+                    true,
+                    GeometryUpdate::Frozen,
+                    Some(EuclideanChordSquared),
+                    original,
+                ),
+            ]
+        } else {
+            vec![
+                (false, GeometryUpdate::Train, None, None),
+                (true, GeometryUpdate::Train, None, None),
+                (true, GeometryUpdate::Frozen, None, None),
+            ]
+        };
+        if self.calibration_controls() {
+            for update in [GeometryUpdate::Train, GeometryUpdate::Frozen] {
+                modes.push((
+                    true,
+                    update,
+                    Some(ByteDecoderPairMetric::EuclideanChordSquared),
+                    Some(BiasInitialization::MatchedPoincareRms),
+                ));
+            }
+        }
+        if self.fisher_controls() {
+            for update in [GeometryUpdate::Train, GeometryUpdate::Frozen] {
+                modes.push((
+                    true,
+                    update,
+                    Some(ByteDecoderPairMetric::CategoricalFisherRaoSquared),
+                    Some(BiasInitialization::MatchedPoincareRms),
+                ));
+            }
+        }
+        for (geometry, update, metric, initialization) in modes {
             if cases
                 .iter()
-                .filter(|c| c.geometry == geometry && c.geometry_update == Some(update))
+                .filter(|c| {
+                    c.head_pair_metrics.is_none()
+                        && c.mixture.is_none()
+                        && c.geometry == geometry
+                        && c.geometry_update == Some(update)
+                        && c.pair_metric == metric
+                        && c.bias_initialization == initialization
+                })
                 .count()
                 != 1
             {
-                return Err(
-                    "v2 needs ordinary, learned geometry and frozen geometry once per seed".into(),
-                );
+                return Err("missing or repeated geometry metric/update arm for seed".into());
             }
         }
-        let geometric = cases.iter().filter(|c| c.geometry).collect::<Vec<_>>();
-        let (a, b) = (&geometric[0].parameters, &geometric[1].parameters);
-        if a.len() != b.len()
-            || a.iter().zip(b).any(|(a, b)| {
-                a.name != b.name || a.shape != b.shape || !same_bits(&a.values, &b.values)
-            })
+        if self.headwise_controls() {
+            headwise::validate_modes(cases)?;
+        }
+        if self.mixture_controls() {
+            mixture::validate_modes(cases)?;
+        }
+        if self.query_controls() {
+            query::validate_modes(cases, &self.config)?;
+        }
+        let geometric = cases
+            .iter()
+            .filter(|c| c.geometry && c.mixture.is_none())
+            .collect::<Vec<_>>();
+        let equal = |a: &Case, b: &Case, skip_gains: bool| {
+            let (a, b) = (&a.parameters, &b.parameters);
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(a, b)| {
+                    a.name == b.name
+                        && a.shape == b.shape
+                        && ((skip_gains && a.name.starts_with("geometry.raw_gain."))
+                            || same_bits(&a.values, &b.values))
+                })
+        };
+        if geometric[1..]
+            .iter()
+            .any(|b| !equal(geometric[0], b, self.calibration_controls()))
         {
-            return Err("learned and frozen geometry must start bitwise identical".into());
+            return Err("geometry arms differ outside the permitted initial gain treatment".into());
+        }
+        // Matched gains differ by metric, but each trained/frozen pair must be
+        // bit-identical. Original arms still share every initial geometry bit.
+        for (matched, metric) in [
+            (false, None),
+            (true, Some(ByteDecoderPairMetric::EuclideanChordSquared)),
+            (
+                true,
+                Some(ByteDecoderPairMetric::CategoricalFisherRaoSquared),
+            ),
+        ] {
+            let group: Vec<_> = geometric
+                .iter()
+                .filter(|c| c.matched() == matched && (!matched || c.pair_metric == metric))
+                .collect();
+            if group
+                .get(1..)
+                .is_some_and(|rest| rest.iter().any(|b| !equal(group[0], b, false)))
+            {
+                return Err("geometry arms within one initialization treatment must start bitwise identical".into());
+            }
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod metric_tests;
 
 #[cfg(test)]
 mod tests {

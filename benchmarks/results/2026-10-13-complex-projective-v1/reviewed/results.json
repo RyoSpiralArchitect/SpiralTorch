@@ -1,0 +1,1963 @@
+{
+  "schema": "spiraltorch.complex_projective_learning.public.v1",
+  "scope": "Synthetic QKV byte-model correctness. No language-quality, FT-efficacy, or speed claim.",
+  "qualified": false,
+  "fixture_sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358",
+  "original_thresholds_preserved": true,
+  "native": {
+    "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "passed": false,
+    "passed_cases": 4,
+    "cases": [
+      {
+        "name": "projective_causal_geometry_blocks1_metric_onlyTrue",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2516,
+        "parameter_slots": 23,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 1.1920928955078125e-7,
+        "max_loss_error": 9.5367431640625e-7,
+        "max_mixture_error": 0,
+        "max_geometry_gradient_relative_l2": 0.000020232681649074258,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551061630249023,
+              5.626056671142578
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31640,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 23,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.0003438293933868408,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              7
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.0003019990399479866,
+            "output_contrast_relative_l2": 0.000324010196253486,
+            "pullback_contrast_relative_l2": 0,
+            "qk_scores_zero": true,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.551061630249023,
+            "reference_loss": 5.551061630249023
+          },
+          {
+            "revision": 2,
+            "loss": 5.461988925933838,
+            "reference_loss": 5.461988925933838
+          },
+          {
+            "revision": 3,
+            "loss": 5.373680591583252,
+            "reference_loss": 5.37368106842041
+          },
+          {
+            "revision": 4,
+            "loss": 5.285241603851318,
+            "reference_loss": 5.285242080688477
+          },
+          {
+            "revision": 5,
+            "loss": 5.195911407470703,
+            "reference_loss": 5.195911407470703
+          },
+          {
+            "revision": 6,
+            "loss": 5.105067729949951,
+            "reference_loss": 5.105068206787109
+          },
+          {
+            "revision": 7,
+            "loss": 5.012083053588867,
+            "reference_loss": 5.012083530426025
+          },
+          {
+            "revision": 8,
+            "loss": 4.91621732711792,
+            "reference_loss": 4.916217803955078
+          },
+          {
+            "revision": 9,
+            "loss": 4.816628456115723,
+            "reference_loss": 4.816628456115723
+          },
+          {
+            "revision": 10,
+            "loss": 4.712430953979492,
+            "reference_loss": 4.712430953979492
+          },
+          {
+            "revision": 11,
+            "loss": 4.602730751037598,
+            "reference_loss": 4.602730751037598
+          },
+          {
+            "revision": 12,
+            "loss": 4.486642837524414,
+            "reference_loss": 4.486642837524414
+          },
+          {
+            "revision": 13,
+            "loss": 4.363308906555176,
+            "reference_loss": 4.363309860229492
+          },
+          {
+            "revision": 14,
+            "loss": 4.231923580169678,
+            "reference_loss": 4.2319231033325195
+          },
+          {
+            "revision": 15,
+            "loss": 4.091756820678711,
+            "reference_loss": 4.091757774353027
+          },
+          {
+            "revision": 16,
+            "loss": 3.9422078132629395,
+            "reference_loss": 3.9422078132629395
+          }
+        ]
+      },
+      {
+        "name": "projective_causal_geometry_blocks2_metric_onlyFalse",
+        "passed": false,
+        "failures": [
+          {
+            "gate": "geometry_relative_l2",
+            "step": 12,
+            "geometry_slot": 3,
+            "parameter": "geometry.raw_phase",
+            "threshold": 0.002,
+            "failed": true,
+            "relative_l2": 0.0033325099062151363,
+            "reference_norm": 0.0000010149392052779514,
+            "actual_norm": 0.0000010122747588960086
+          }
+        ],
+        "steps": 16,
+        "parameter_count": 2678,
+        "parameter_slots": 37,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 9.96515154838562e-7,
+        "max_loss_error": 0.000002384185791015625,
+        "max_mixture_error": 0,
+        "max_geometry_gradient_relative_l2": 0.0033325099062151363,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523894309997559,
+              5.480717658996582
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 35337,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 37,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.001141965389251709,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              8
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.0011731982231140137,
+            "output_contrast_relative_l2": 0.0000758755551145025,
+            "pullback_contrast_relative_l2": 0.0000012661399822515946,
+            "qk_scores_zero": false,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.523786544799805,
+            "reference_loss": 5.5237860679626465
+          },
+          {
+            "revision": 2,
+            "loss": 5.410416603088379,
+            "reference_loss": 5.410416603088379
+          },
+          {
+            "revision": 3,
+            "loss": 5.3199143409729,
+            "reference_loss": 5.319914817810059
+          },
+          {
+            "revision": 4,
+            "loss": 5.228734016418457,
+            "reference_loss": 5.228733539581299
+          },
+          {
+            "revision": 5,
+            "loss": 5.138955116271973,
+            "reference_loss": 5.138955593109131
+          },
+          {
+            "revision": 6,
+            "loss": 5.055533409118652,
+            "reference_loss": 5.0555338859558105
+          },
+          {
+            "revision": 7,
+            "loss": 5.018049240112305,
+            "reference_loss": 5.0180487632751465
+          },
+          {
+            "revision": 8,
+            "loss": 4.952641487121582,
+            "reference_loss": 4.95264196395874
+          },
+          {
+            "revision": 9,
+            "loss": 4.940103054046631,
+            "reference_loss": 4.940103054046631
+          },
+          {
+            "revision": 10,
+            "loss": 4.837245941162109,
+            "reference_loss": 4.837243556976318
+          },
+          {
+            "revision": 11,
+            "loss": 4.620209217071533,
+            "reference_loss": 4.620208740234375
+          },
+          {
+            "revision": 12,
+            "loss": 4.4794721603393555,
+            "reference_loss": 4.4794721603393555
+          },
+          {
+            "revision": 13,
+            "loss": 4.350403785705566,
+            "reference_loss": 4.350403785705566
+          },
+          {
+            "revision": 14,
+            "loss": 4.213932991027832,
+            "reference_loss": 4.21393346786499
+          },
+          {
+            "revision": 15,
+            "loss": 4.071170806884766,
+            "reference_loss": 4.071171760559082
+          },
+          {
+            "revision": 16,
+            "loss": 3.92724871635437,
+            "reference_loss": 3.9272496700286865
+          }
+        ]
+      },
+      {
+        "name": "four_way_shared_causal_geometry_blocks1_metric_onlyTrue",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2524,
+        "parameter_slots": 24,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 8.591450750827789e-8,
+        "max_loss_error": 9.5367431640625e-7,
+        "max_mixture_error": 5.960464477539063e-8,
+        "max_geometry_gradient_relative_l2": 0.000019711184331835076,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551128387451172,
+              5.6264142990112305
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31893,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 24,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.0025871098041534424,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              8
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.0019155293703079224,
+            "output_contrast_relative_l2": 0.00004528072364610761,
+            "pullback_contrast_relative_l2": 0.000006003698086010976,
+            "qk_scores_zero": true,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.551128387451172,
+            "reference_loss": 5.551128387451172
+          },
+          {
+            "revision": 2,
+            "loss": 5.462039470672607,
+            "reference_loss": 5.462039947509766
+          },
+          {
+            "revision": 3,
+            "loss": 5.373721122741699,
+            "reference_loss": 5.373721599578857
+          },
+          {
+            "revision": 4,
+            "loss": 5.2852783203125,
+            "reference_loss": 5.2852783203125
+          },
+          {
+            "revision": 5,
+            "loss": 5.195947647094727,
+            "reference_loss": 5.195948600769043
+          },
+          {
+            "revision": 6,
+            "loss": 5.105107307434082,
+            "reference_loss": 5.105107307434082
+          },
+          {
+            "revision": 7,
+            "loss": 5.0121307373046875,
+            "reference_loss": 5.0121307373046875
+          },
+          {
+            "revision": 8,
+            "loss": 4.916276931762695,
+            "reference_loss": 4.916276931762695
+          },
+          {
+            "revision": 9,
+            "loss": 4.816704750061035,
+            "reference_loss": 4.816704750061035
+          },
+          {
+            "revision": 10,
+            "loss": 4.712527275085449,
+            "reference_loss": 4.712527275085449
+          },
+          {
+            "revision": 11,
+            "loss": 4.602849960327148,
+            "reference_loss": 4.602849960327148
+          },
+          {
+            "revision": 12,
+            "loss": 4.486788749694824,
+            "reference_loss": 4.486788749694824
+          },
+          {
+            "revision": 13,
+            "loss": 4.363485336303711,
+            "reference_loss": 4.363484859466553
+          },
+          {
+            "revision": 14,
+            "loss": 4.232132911682129,
+            "reference_loss": 4.232132911682129
+          },
+          {
+            "revision": 15,
+            "loss": 4.09200382232666,
+            "reference_loss": 4.092004299163818
+          },
+          {
+            "revision": 16,
+            "loss": 3.942497730255127,
+            "reference_loss": 3.9424972534179688
+          }
+        ]
+      },
+      {
+        "name": "four_way_shared_causal_geometry_blocks2_metric_onlyFalse",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2694,
+        "parameter_slots": 39,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 6.854534149169922e-7,
+        "max_loss_error": 0.000001430511474609375,
+        "max_mixture_error": 5.960464477539063e-8,
+        "max_geometry_gradient_relative_l2": 0.00015853941212562933,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523837566375732,
+              5.481236934661865
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 35698,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 39,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.005871951580047607,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              10
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.008063104003667831,
+            "output_contrast_relative_l2": 0.000012106355666334673,
+            "pullback_contrast_relative_l2": 0.0000026226930943401714,
+            "qk_scores_zero": false,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.523721694946289,
+            "reference_loss": 5.523722171783447
+          },
+          {
+            "revision": 2,
+            "loss": 5.410604953765869,
+            "reference_loss": 5.410604953765869
+          },
+          {
+            "revision": 3,
+            "loss": 5.320141792297363,
+            "reference_loss": 5.320141792297363
+          },
+          {
+            "revision": 4,
+            "loss": 5.228941440582275,
+            "reference_loss": 5.228941917419434
+          },
+          {
+            "revision": 5,
+            "loss": 5.139017105102539,
+            "reference_loss": 5.139017105102539
+          },
+          {
+            "revision": 6,
+            "loss": 5.053028106689453,
+            "reference_loss": 5.053028106689453
+          },
+          {
+            "revision": 7,
+            "loss": 5.00673246383667,
+            "reference_loss": 5.006731986999512
+          },
+          {
+            "revision": 8,
+            "loss": 4.947339057922363,
+            "reference_loss": 4.947339057922363
+          },
+          {
+            "revision": 9,
+            "loss": 4.933511257171631,
+            "reference_loss": 4.933511734008789
+          },
+          {
+            "revision": 10,
+            "loss": 4.896817207336426,
+            "reference_loss": 4.896815776824951
+          },
+          {
+            "revision": 11,
+            "loss": 4.625453948974609,
+            "reference_loss": 4.625453948974609
+          },
+          {
+            "revision": 12,
+            "loss": 4.485776424407959,
+            "reference_loss": 4.485776424407959
+          },
+          {
+            "revision": 13,
+            "loss": 4.354923248291016,
+            "reference_loss": 4.354922771453857
+          },
+          {
+            "revision": 14,
+            "loss": 4.217459678649902,
+            "reference_loss": 4.217459678649902
+          },
+          {
+            "revision": 15,
+            "loss": 4.070989608764648,
+            "reference_loss": 4.070990085601807
+          },
+          {
+            "revision": 16,
+            "loss": 3.915614366531372,
+            "reference_loss": 3.915614366531372
+          }
+        ]
+      },
+      {
+        "name": "four_way_query_contextual_query_causal_geometry_blocks1_metric_onlyTrue",
+        "passed": false,
+        "failures": [
+          {
+            "gate": "router_pullback_contrast",
+            "threshold": 0.002,
+            "failed": true,
+            "relative_l2": 0.0027952589727485854,
+            "reference_norm": 0.000056211859544171476,
+            "actual_norm": 0.00005619763766279589
+          }
+        ],
+        "steps": 16,
+        "parameter_count": 2564,
+        "parameter_slots": 26,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 1.8998980522155762e-7,
+        "max_loss_error": 9.5367431640625e-7,
+        "max_mixture_error": 5.960464477539063e-8,
+        "max_geometry_gradient_relative_l2": 0.000049444252403032844,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551129341125488,
+              5.6264142990112305
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 32624,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 26,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.0026920735836029053,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              10
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.001965731382369995,
+            "output_contrast_relative_l2": 0.00005552691648503614,
+            "pullback_contrast_relative_l2": 4.057301284632225e-7,
+            "qk_scores_zero": true,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": {
+          "shared_output_max_difference": 0.0000502169132232666,
+          "pullback": {
+            "failed": true,
+            "relative_l2": 0.0027952589727485854,
+            "reference_norm": 0.000056211859544171476,
+            "actual_norm": 0.00005619763766279589
+          },
+          "maximum_update_relative_l2": 0.00003457489996048392
+        },
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.551129341125488,
+            "reference_loss": 5.551129341125488
+          },
+          {
+            "revision": 2,
+            "loss": 5.462039947509766,
+            "reference_loss": 5.462040424346924
+          },
+          {
+            "revision": 3,
+            "loss": 5.373722076416016,
+            "reference_loss": 5.373722553253174
+          },
+          {
+            "revision": 4,
+            "loss": 5.285279273986816,
+            "reference_loss": 5.285279273986816
+          },
+          {
+            "revision": 5,
+            "loss": 5.195949077606201,
+            "reference_loss": 5.195949077606201
+          },
+          {
+            "revision": 6,
+            "loss": 5.105108261108398,
+            "reference_loss": 5.105108737945557
+          },
+          {
+            "revision": 7,
+            "loss": 5.012131690979004,
+            "reference_loss": 5.012131214141846
+          },
+          {
+            "revision": 8,
+            "loss": 4.916277885437012,
+            "reference_loss": 4.916277885437012
+          },
+          {
+            "revision": 9,
+            "loss": 4.81670618057251,
+            "reference_loss": 4.81670618057251
+          },
+          {
+            "revision": 10,
+            "loss": 4.712529182434082,
+            "reference_loss": 4.712529182434082
+          },
+          {
+            "revision": 11,
+            "loss": 4.602852821350098,
+            "reference_loss": 4.602852821350098
+          },
+          {
+            "revision": 12,
+            "loss": 4.486791610717773,
+            "reference_loss": 4.486791610717773
+          },
+          {
+            "revision": 13,
+            "loss": 4.363488674163818,
+            "reference_loss": 4.363488674163818
+          },
+          {
+            "revision": 14,
+            "loss": 4.232137203216553,
+            "reference_loss": 4.232137203216553
+          },
+          {
+            "revision": 15,
+            "loss": 4.092009544372559,
+            "reference_loss": 4.092010498046875
+          },
+          {
+            "revision": 16,
+            "loss": 3.9425039291381836,
+            "reference_loss": 3.9425041675567627
+          }
+        ]
+      },
+      {
+        "name": "four_way_query_contextual_query_causal_geometry_blocks2_metric_onlyFalse",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2774,
+        "parameter_slots": 43,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 2.384185791015625e-7,
+        "max_loss_error": 9.5367431640625e-7,
+        "max_mixture_error": 8.940696716308594e-8,
+        "max_geometry_gradient_relative_l2": 0.000025720461509379413,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523838996887207,
+              5.481241226196289
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 37116,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 43,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.006063908338546753,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              14
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.00790969654917717,
+            "output_contrast_relative_l2": 0.000014553044215428608,
+            "pullback_contrast_relative_l2": 0.000009364263385986527,
+            "qk_scores_zero": false,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": {
+          "shared_output_max_difference": 0.00015947967767715454,
+          "pullback": {
+            "failed": false,
+            "relative_l2": 0.0018302698059555044,
+            "reference_norm": 0.0001503564222610769,
+            "actual_norm": 0.00015031345399620604
+          },
+          "maximum_update_relative_l2": 0.000019098047097369528
+        },
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.5237226486206055,
+            "reference_loss": 5.5237226486206055
+          },
+          {
+            "revision": 2,
+            "loss": 5.410604476928711,
+            "reference_loss": 5.410604476928711
+          },
+          {
+            "revision": 3,
+            "loss": 5.320141792297363,
+            "reference_loss": 5.320141792297363
+          },
+          {
+            "revision": 4,
+            "loss": 5.228941917419434,
+            "reference_loss": 5.228942394256592
+          },
+          {
+            "revision": 5,
+            "loss": 5.139019966125488,
+            "reference_loss": 5.139019966125488
+          },
+          {
+            "revision": 6,
+            "loss": 5.0530500411987305,
+            "reference_loss": 5.0530500411987305
+          },
+          {
+            "revision": 7,
+            "loss": 5.00681209564209,
+            "reference_loss": 5.006812572479248
+          },
+          {
+            "revision": 8,
+            "loss": 4.947284698486328,
+            "reference_loss": 4.947285175323486
+          },
+          {
+            "revision": 9,
+            "loss": 4.93332052230835,
+            "reference_loss": 4.93332052230835
+          },
+          {
+            "revision": 10,
+            "loss": 4.897529602050781,
+            "reference_loss": 4.897530555725098
+          },
+          {
+            "revision": 11,
+            "loss": 4.625514030456543,
+            "reference_loss": 4.625514030456543
+          },
+          {
+            "revision": 12,
+            "loss": 4.48586368560791,
+            "reference_loss": 4.48586368560791
+          },
+          {
+            "revision": 13,
+            "loss": 4.354996204376221,
+            "reference_loss": 4.354996204376221
+          },
+          {
+            "revision": 14,
+            "loss": 4.217534065246582,
+            "reference_loss": 4.217534065246582
+          },
+          {
+            "revision": 15,
+            "loss": 4.071059703826904,
+            "reference_loss": 4.071059703826904
+          },
+          {
+            "revision": 16,
+            "loss": 3.915651321411133,
+            "reference_loss": 3.915651559829712
+          }
+        ]
+      }
+    ],
+    "projective_boundary": {
+      "analytic_cancellation_cases": 5,
+      "cases": 8,
+      "max_relative_error": 0,
+      "nonzero_endpoint_components": 30
+    },
+    "reported_query_guard": {
+      "all_parameter_gradients_guarded": true,
+      "atomic_rejections": 2,
+      "embedding_gradient_guarded": true,
+      "fault_block": 1,
+      "finite_control": true
+    }
+  },
+  "browser": {
+    "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+    "passed": false,
+    "passed_cases": 4,
+    "cases": [
+      {
+        "name": "projective_causal_geometry_blocks1_metric_onlyTrue",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2516,
+        "parameter_slots": 23,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 1.1920928955078125e-7,
+        "max_loss_error": 4.76837158203125e-7,
+        "max_mixture_error": 0,
+        "max_geometry_gradient_relative_l2": 0.000010775746643633916,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551061630249023,
+              5.626056671142578
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31640,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 23,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.0003438293933868408,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              7
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.0003019990399479866,
+            "output_contrast_relative_l2": 0.000324010196253486,
+            "pullback_contrast_relative_l2": 0,
+            "qk_scores_zero": true,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.551061630249023,
+            "reference_loss": 5.551061630249023
+          },
+          {
+            "revision": 2,
+            "loss": 5.461988925933838,
+            "reference_loss": 5.461988925933838
+          },
+          {
+            "revision": 3,
+            "loss": 5.373680591583252,
+            "reference_loss": 5.37368106842041
+          },
+          {
+            "revision": 4,
+            "loss": 5.285241603851318,
+            "reference_loss": 5.285242080688477
+          },
+          {
+            "revision": 5,
+            "loss": 5.195911407470703,
+            "reference_loss": 5.195911407470703
+          },
+          {
+            "revision": 6,
+            "loss": 5.105067729949951,
+            "reference_loss": 5.105068206787109
+          },
+          {
+            "revision": 7,
+            "loss": 5.012083053588867,
+            "reference_loss": 5.012083530426025
+          },
+          {
+            "revision": 8,
+            "loss": 4.91621732711792,
+            "reference_loss": 4.916217803955078
+          },
+          {
+            "revision": 9,
+            "loss": 4.816628456115723,
+            "reference_loss": 4.816628456115723
+          },
+          {
+            "revision": 10,
+            "loss": 4.712430953979492,
+            "reference_loss": 4.712430953979492
+          },
+          {
+            "revision": 11,
+            "loss": 4.602730751037598,
+            "reference_loss": 4.602730751037598
+          },
+          {
+            "revision": 12,
+            "loss": 4.486642837524414,
+            "reference_loss": 4.486642837524414
+          },
+          {
+            "revision": 13,
+            "loss": 4.363309860229492,
+            "reference_loss": 4.363309860229492
+          },
+          {
+            "revision": 14,
+            "loss": 4.231923580169678,
+            "reference_loss": 4.2319231033325195
+          },
+          {
+            "revision": 15,
+            "loss": 4.091757297515869,
+            "reference_loss": 4.091757774353027
+          },
+          {
+            "revision": 16,
+            "loss": 3.9422078132629395,
+            "reference_loss": 3.9422078132629395
+          }
+        ]
+      },
+      {
+        "name": "projective_causal_geometry_blocks2_metric_onlyFalse",
+        "passed": false,
+        "failures": [
+          {
+            "gate": "geometry_relative_l2",
+            "step": 12,
+            "geometry_slot": 3,
+            "parameter": "geometry.raw_phase",
+            "threshold": 0.002,
+            "failed": true,
+            "relative_l2": 0.0033704006436958227,
+            "reference_norm": 0.0000010149392052779514,
+            "actual_norm": 0.0000010122393234507016
+          }
+        ],
+        "steps": 16,
+        "parameter_count": 2678,
+        "parameter_slots": 37,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 0.0000010319054126739502,
+        "max_loss_error": 0.00000286102294921875,
+        "max_mixture_error": 0,
+        "max_geometry_gradient_relative_l2": 0.0033704006436958227,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523894309997559,
+              5.480717658996582
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 35337,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 37,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.001141965389251709,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              8
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.0011731982231140137,
+            "output_contrast_relative_l2": 0.0000758755551145025,
+            "pullback_contrast_relative_l2": 0,
+            "qk_scores_zero": false,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.523786544799805,
+            "reference_loss": 5.5237860679626465
+          },
+          {
+            "revision": 2,
+            "loss": 5.410416603088379,
+            "reference_loss": 5.410416603088379
+          },
+          {
+            "revision": 3,
+            "loss": 5.3199143409729,
+            "reference_loss": 5.319914817810059
+          },
+          {
+            "revision": 4,
+            "loss": 5.228734016418457,
+            "reference_loss": 5.228733539581299
+          },
+          {
+            "revision": 5,
+            "loss": 5.138955116271973,
+            "reference_loss": 5.138955593109131
+          },
+          {
+            "revision": 6,
+            "loss": 5.055533409118652,
+            "reference_loss": 5.0555338859558105
+          },
+          {
+            "revision": 7,
+            "loss": 5.018049240112305,
+            "reference_loss": 5.0180487632751465
+          },
+          {
+            "revision": 8,
+            "loss": 4.952641487121582,
+            "reference_loss": 4.95264196395874
+          },
+          {
+            "revision": 9,
+            "loss": 4.940103054046631,
+            "reference_loss": 4.940103054046631
+          },
+          {
+            "revision": 10,
+            "loss": 4.837246417999268,
+            "reference_loss": 4.837243556976318
+          },
+          {
+            "revision": 11,
+            "loss": 4.620209217071533,
+            "reference_loss": 4.620208740234375
+          },
+          {
+            "revision": 12,
+            "loss": 4.4794721603393555,
+            "reference_loss": 4.4794721603393555
+          },
+          {
+            "revision": 13,
+            "loss": 4.350403785705566,
+            "reference_loss": 4.350403785705566
+          },
+          {
+            "revision": 14,
+            "loss": 4.21393346786499,
+            "reference_loss": 4.21393346786499
+          },
+          {
+            "revision": 15,
+            "loss": 4.071171283721924,
+            "reference_loss": 4.071171760559082
+          },
+          {
+            "revision": 16,
+            "loss": 3.92724871635437,
+            "reference_loss": 3.9272496700286865
+          }
+        ]
+      },
+      {
+        "name": "four_way_shared_causal_geometry_blocks1_metric_onlyTrue",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2524,
+        "parameter_slots": 24,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 8.940696716308594e-8,
+        "max_loss_error": 9.5367431640625e-7,
+        "max_mixture_error": 5.960464477539063e-8,
+        "max_geometry_gradient_relative_l2": 0.0000310938376944476,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551128387451172,
+              5.6264142990112305
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31893,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 24,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.0025871098041534424,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              8
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.0019155293703079224,
+            "output_contrast_relative_l2": 0.00004528072364610761,
+            "pullback_contrast_relative_l2": 0.00000599257239086127,
+            "qk_scores_zero": true,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.551128387451172,
+            "reference_loss": 5.551128387451172
+          },
+          {
+            "revision": 2,
+            "loss": 5.462039470672607,
+            "reference_loss": 5.462039947509766
+          },
+          {
+            "revision": 3,
+            "loss": 5.373721122741699,
+            "reference_loss": 5.373721599578857
+          },
+          {
+            "revision": 4,
+            "loss": 5.2852783203125,
+            "reference_loss": 5.2852783203125
+          },
+          {
+            "revision": 5,
+            "loss": 5.195947647094727,
+            "reference_loss": 5.195948600769043
+          },
+          {
+            "revision": 6,
+            "loss": 5.105107307434082,
+            "reference_loss": 5.105107307434082
+          },
+          {
+            "revision": 7,
+            "loss": 5.0121307373046875,
+            "reference_loss": 5.0121307373046875
+          },
+          {
+            "revision": 8,
+            "loss": 4.916276931762695,
+            "reference_loss": 4.916276931762695
+          },
+          {
+            "revision": 9,
+            "loss": 4.816704750061035,
+            "reference_loss": 4.816704750061035
+          },
+          {
+            "revision": 10,
+            "loss": 4.712527275085449,
+            "reference_loss": 4.712527275085449
+          },
+          {
+            "revision": 11,
+            "loss": 4.602849960327148,
+            "reference_loss": 4.602849960327148
+          },
+          {
+            "revision": 12,
+            "loss": 4.486788749694824,
+            "reference_loss": 4.486788749694824
+          },
+          {
+            "revision": 13,
+            "loss": 4.363485336303711,
+            "reference_loss": 4.363484859466553
+          },
+          {
+            "revision": 14,
+            "loss": 4.232132911682129,
+            "reference_loss": 4.232132911682129
+          },
+          {
+            "revision": 15,
+            "loss": 4.092004299163818,
+            "reference_loss": 4.092004299163818
+          },
+          {
+            "revision": 16,
+            "loss": 3.942497730255127,
+            "reference_loss": 3.9424972534179688
+          }
+        ]
+      },
+      {
+        "name": "four_way_shared_causal_geometry_blocks2_metric_onlyFalse",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2694,
+        "parameter_slots": 39,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 4.172325134277344e-7,
+        "max_loss_error": 0.000001430511474609375,
+        "max_mixture_error": 5.960464477539063e-8,
+        "max_geometry_gradient_relative_l2": 0.00010231230102037634,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523837566375732,
+              5.481236934661865
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 35696,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 39,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.005871951580047607,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              10
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.008063104003667831,
+            "output_contrast_relative_l2": 0.00001211410786705367,
+            "pullback_contrast_relative_l2": 0.000002662134301426191,
+            "qk_scores_zero": false,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": null,
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.523721694946289,
+            "reference_loss": 5.523722171783447
+          },
+          {
+            "revision": 2,
+            "loss": 5.410604953765869,
+            "reference_loss": 5.410604953765869
+          },
+          {
+            "revision": 3,
+            "loss": 5.320141792297363,
+            "reference_loss": 5.320141792297363
+          },
+          {
+            "revision": 4,
+            "loss": 5.228941440582275,
+            "reference_loss": 5.228941917419434
+          },
+          {
+            "revision": 5,
+            "loss": 5.139017105102539,
+            "reference_loss": 5.139017105102539
+          },
+          {
+            "revision": 6,
+            "loss": 5.053028106689453,
+            "reference_loss": 5.053028106689453
+          },
+          {
+            "revision": 7,
+            "loss": 5.0067315101623535,
+            "reference_loss": 5.006731986999512
+          },
+          {
+            "revision": 8,
+            "loss": 4.947339057922363,
+            "reference_loss": 4.947339057922363
+          },
+          {
+            "revision": 9,
+            "loss": 4.933511257171631,
+            "reference_loss": 4.933511734008789
+          },
+          {
+            "revision": 10,
+            "loss": 4.896817207336426,
+            "reference_loss": 4.896815776824951
+          },
+          {
+            "revision": 11,
+            "loss": 4.625453948974609,
+            "reference_loss": 4.625453948974609
+          },
+          {
+            "revision": 12,
+            "loss": 4.485776901245117,
+            "reference_loss": 4.485776424407959
+          },
+          {
+            "revision": 13,
+            "loss": 4.354923248291016,
+            "reference_loss": 4.354922771453857
+          },
+          {
+            "revision": 14,
+            "loss": 4.217459678649902,
+            "reference_loss": 4.217459678649902
+          },
+          {
+            "revision": 15,
+            "loss": 4.070989608764648,
+            "reference_loss": 4.070990085601807
+          },
+          {
+            "revision": 16,
+            "loss": 3.915614366531372,
+            "reference_loss": 3.915614366531372
+          }
+        ]
+      },
+      {
+        "name": "four_way_query_contextual_query_causal_geometry_blocks1_metric_onlyTrue",
+        "passed": false,
+        "failures": [
+          {
+            "gate": "router_pullback_contrast",
+            "threshold": 0.002,
+            "failed": true,
+            "relative_l2": 0.0027777239375494363,
+            "reference_norm": 0.000056211859544171476,
+            "actual_norm": 0.000056196917162043587
+          }
+        ],
+        "steps": 16,
+        "parameter_count": 2564,
+        "parameter_slots": 26,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 2.086162567138672e-7,
+        "max_loss_error": 9.5367431640625e-7,
+        "max_mixture_error": 5.960464477539063e-8,
+        "max_geometry_gradient_relative_l2": 0.00005750606341009048,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551129341125488,
+              5.6264142990112305
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 32626,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 26,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.0026920735836029053,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              10
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.001965731382369995,
+            "output_contrast_relative_l2": 0.00005552691648503614,
+            "pullback_contrast_relative_l2": 0.0000016728681751492887,
+            "qk_scores_zero": true,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": {
+          "shared_output_max_difference": 0.0000502169132232666,
+          "pullback": {
+            "failed": true,
+            "relative_l2": 0.0027777239375494363,
+            "reference_norm": 0.000056211859544171476,
+            "actual_norm": 0.000056196917162043587
+          },
+          "maximum_update_relative_l2": 0.0000466901972370963
+        },
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.551129341125488,
+            "reference_loss": 5.551129341125488
+          },
+          {
+            "revision": 2,
+            "loss": 5.462039947509766,
+            "reference_loss": 5.462040424346924
+          },
+          {
+            "revision": 3,
+            "loss": 5.373722076416016,
+            "reference_loss": 5.373722553253174
+          },
+          {
+            "revision": 4,
+            "loss": 5.285279273986816,
+            "reference_loss": 5.285279273986816
+          },
+          {
+            "revision": 5,
+            "loss": 5.195949077606201,
+            "reference_loss": 5.195949077606201
+          },
+          {
+            "revision": 6,
+            "loss": 5.105108261108398,
+            "reference_loss": 5.105108737945557
+          },
+          {
+            "revision": 7,
+            "loss": 5.012131690979004,
+            "reference_loss": 5.012131214141846
+          },
+          {
+            "revision": 8,
+            "loss": 4.916277885437012,
+            "reference_loss": 4.916277885437012
+          },
+          {
+            "revision": 9,
+            "loss": 4.81670618057251,
+            "reference_loss": 4.81670618057251
+          },
+          {
+            "revision": 10,
+            "loss": 4.712529182434082,
+            "reference_loss": 4.712529182434082
+          },
+          {
+            "revision": 11,
+            "loss": 4.6028523445129395,
+            "reference_loss": 4.602852821350098
+          },
+          {
+            "revision": 12,
+            "loss": 4.486791610717773,
+            "reference_loss": 4.486791610717773
+          },
+          {
+            "revision": 13,
+            "loss": 4.363488674163818,
+            "reference_loss": 4.363488674163818
+          },
+          {
+            "revision": 14,
+            "loss": 4.232137203216553,
+            "reference_loss": 4.232137203216553
+          },
+          {
+            "revision": 15,
+            "loss": 4.092009544372559,
+            "reference_loss": 4.092010498046875
+          },
+          {
+            "revision": 16,
+            "loss": 3.9425039291381836,
+            "reference_loss": 3.9425041675567627
+          }
+        ]
+      },
+      {
+        "name": "four_way_query_contextual_query_causal_geometry_blocks2_metric_onlyFalse",
+        "passed": true,
+        "failures": [],
+        "steps": 16,
+        "parameter_count": 2774,
+        "parameter_slots": 43,
+        "resume_exact_recomputed": true,
+        "output_max_abs_error": 5.960464477539063e-8,
+        "max_parameter_error": 5.736947059631348e-7,
+        "max_loss_error": 0.0000019073486328125,
+        "max_mixture_error": 1.7881393432617188e-7,
+        "max_geometry_gradient_relative_l2": 0.0001210991081865083,
+        "reported_controls": {
+          "causality": {
+            "extension_max_abs_error": 0,
+            "other_document_max_abs_error": 0,
+            "prefix_max_abs_error": 0,
+            "sensitivity_control": true,
+            "suffix_gradient_zero": true
+          },
+          "tapes": {
+            "atomic_rejection": true,
+            "foreign_tape": true,
+            "good_bad_good": true,
+            "invalid_bias_preserves_tape": true,
+            "recovery": true,
+            "retained_gradients": true,
+            "retained_output": true,
+            "stale_gradient": true,
+            "superseded_tape": true
+          },
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523838996887207,
+              5.481241226196289
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 37109,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 43,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          },
+          "metric": {
+            "detached_embedding_gradient_separation": 0.006063908338546753,
+            "detached_output_max_abs_error": 5.960464477539063e-8,
+            "geometry_parameter_slots": [
+              2,
+              14
+            ],
+            "off_output_max_abs_error": 5.960464477539063e-8,
+            "off_output_separation": 0.00790969654917717,
+            "output_contrast_relative_l2": 0.000014553044215428608,
+            "pullback_contrast_relative_l2": 0.000009364263385986527,
+            "qk_scores_zero": false,
+            "relative_checker_negative_controls": 3
+          }
+        },
+        "router": {
+          "shared_output_max_difference": 0.00015947967767715454,
+          "pullback": {
+            "failed": false,
+            "relative_l2": 0.0018302698059555044,
+            "reference_norm": 0.0001503564222610769,
+            "actual_norm": 0.00015031345399620604
+          },
+          "maximum_update_relative_l2": 0.00007996448726231353
+        },
+        "trace": [
+          {
+            "revision": 1,
+            "loss": 5.5237226486206055,
+            "reference_loss": 5.5237226486206055
+          },
+          {
+            "revision": 2,
+            "loss": 5.410604476928711,
+            "reference_loss": 5.410604476928711
+          },
+          {
+            "revision": 3,
+            "loss": 5.320141792297363,
+            "reference_loss": 5.320141792297363
+          },
+          {
+            "revision": 4,
+            "loss": 5.228941917419434,
+            "reference_loss": 5.228942394256592
+          },
+          {
+            "revision": 5,
+            "loss": 5.139019966125488,
+            "reference_loss": 5.139019966125488
+          },
+          {
+            "revision": 6,
+            "loss": 5.0530500411987305,
+            "reference_loss": 5.0530500411987305
+          },
+          {
+            "revision": 7,
+            "loss": 5.00681209564209,
+            "reference_loss": 5.006812572479248
+          },
+          {
+            "revision": 8,
+            "loss": 4.947285175323486,
+            "reference_loss": 4.947285175323486
+          },
+          {
+            "revision": 9,
+            "loss": 4.933320999145508,
+            "reference_loss": 4.93332052230835
+          },
+          {
+            "revision": 10,
+            "loss": 4.897528648376465,
+            "reference_loss": 4.897530555725098
+          },
+          {
+            "revision": 11,
+            "loss": 4.625513553619385,
+            "reference_loss": 4.625514030456543
+          },
+          {
+            "revision": 12,
+            "loss": 4.485862731933594,
+            "reference_loss": 4.48586368560791
+          },
+          {
+            "revision": 13,
+            "loss": 4.3549957275390625,
+            "reference_loss": 4.354996204376221
+          },
+          {
+            "revision": 14,
+            "loss": 4.217534065246582,
+            "reference_loss": 4.217534065246582
+          },
+          {
+            "revision": 15,
+            "loss": 4.071059226989746,
+            "reference_loss": 4.071059703826904
+          },
+          {
+            "revision": 16,
+            "loss": 3.915651321411133,
+            "reference_loss": 3.915651559829712
+          }
+        ]
+      }
+    ],
+    "projective_boundary": {
+      "analytic_cancellation_cases": 5,
+      "cases": 8,
+      "max_relative_error": 0,
+      "nonzero_endpoint_components": 30
+    },
+    "reported_query_guard": {
+      "all_parameter_gradients_guarded": true,
+      "atomic_rejections": 2,
+      "embedding_gradient_guarded": true,
+      "fault_block": 1,
+      "finite_control": true
+    }
+  },
+  "same_state_diagnostic": {
+    "scope": "diagnostic, original failed gates remain failed",
+    "rows": [
+      {
+        "case": "projective_causal_geometry_blocks2_metric_onlyFalse",
+        "step": 12,
+        "parameter": "geometry.raw_phase",
+        "frozen_reference_norm": 0.0000010149392052779511,
+        "frozen_relative_l2": 0.0033325099062151368,
+        "cpu_f32_same_native_state": {
+          "relative_l2": 0.000024399100558807603,
+          "gradient_norm": 0.0000010122587832411074,
+          "loss": 4.4794721603393555
+        },
+        "cpu_f64_same_native_state": {
+          "relative_l2": 0.000042890647289773706,
+          "gradient_norm": 0.0000010123082977251012,
+          "loss": 4.479472294719365
+        }
+      }
+    ]
+  },
+  "initial_study": {
+    "results_sha256": "0ecb94265f2d14e381de0a5805ec554de7e563fa01e6e41489df76f28d12cd91",
+    "validation_sha256": "29b56d37ff07261e3061a1c9bc454da2a595859ea80c97c321af54c2a3db278d"
+  }
+}

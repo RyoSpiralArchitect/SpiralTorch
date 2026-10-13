@@ -1,0 +1,124 @@
+{
+  "schema": "spiraltorch.byte_corpus.metric_controls.v1",
+  "passed": true,
+  "existing_cases_identical": 9,
+  "data_schedule_rate_identical": true,
+  "all_geometric_initial_bits_identical": true,
+  "pairs": [
+    {
+      "seed": 11,
+      "pair_metric": "poincare_squared.v1",
+      "initial_loss_equal": true,
+      "first_backbone_update_bits_equal": true,
+      "frozen_geometry_bits_unchanged": true,
+      "embeddings_changed": [
+        "token_embedding",
+        "position_embedding"
+      ],
+      "learned_geometry_changed": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ]
+    },
+    {
+      "seed": 11,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "initial_loss_equal": true,
+      "first_backbone_update_bits_equal": true,
+      "frozen_geometry_bits_unchanged": true,
+      "embeddings_changed": [
+        "token_embedding",
+        "position_embedding"
+      ],
+      "learned_geometry_changed": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ]
+    },
+    {
+      "seed": 23,
+      "pair_metric": "poincare_squared.v1",
+      "initial_loss_equal": true,
+      "first_backbone_update_bits_equal": true,
+      "frozen_geometry_bits_unchanged": true,
+      "embeddings_changed": [
+        "token_embedding",
+        "position_embedding"
+      ],
+      "learned_geometry_changed": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ]
+    },
+    {
+      "seed": 23,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "initial_loss_equal": true,
+      "first_backbone_update_bits_equal": true,
+      "frozen_geometry_bits_unchanged": true,
+      "embeddings_changed": [
+        "token_embedding",
+        "position_embedding"
+      ],
+      "learned_geometry_changed": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ]
+    },
+    {
+      "seed": 37,
+      "pair_metric": "poincare_squared.v1",
+      "initial_loss_equal": true,
+      "first_backbone_update_bits_equal": true,
+      "frozen_geometry_bits_unchanged": true,
+      "embeddings_changed": [
+        "token_embedding",
+        "position_embedding"
+      ],
+      "learned_geometry_changed": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ]
+    },
+    {
+      "seed": 37,
+      "pair_metric": "euclidean_chord_squared.v1",
+      "initial_loss_equal": true,
+      "first_backbone_update_bits_equal": true,
+      "frozen_geometry_bits_unchanged": true,
+      "embeddings_changed": [
+        "token_embedding",
+        "position_embedding"
+      ],
+      "learned_geometry_changed": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ]
+    }
+  ],
+  "scope": "Input lineage and within-runtime first-step controls only; use the independent Torch comparator and separate resume verifier",
+  "input_sha256": {
+    "request": "759ed1282bad72c2351fcc9c78fef0f661087bf57f578f96e741882763204849",
+    "old_request": "0782ac7a078005b6b4b20c4c7e56c9629363a995228d2d0cd654541623e456ee",
+    "baseline": "76e1aabde9134ca7df8b3aef6adaf53b98fda8b706d83176ff4cc00467b931ea",
+    "first_step": "21f4badf85648ce19c8f6fe70f298c86056e5bcfd355011fbb52196f7a8abc3c"
+  }
+}

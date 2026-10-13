@@ -1,0 +1,29 @@
+{
+  "schema": "spiraltorch.query_pullback_paired.protocol.v1",
+  "frozen_utc": "2026-10-13 04:23 UTC",
+  "baseline_commit": "fa6113be2db7562746997875adfde95f114bc4fe",
+  "fixture_sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358",
+  "runtimes": [
+    "native WGPU/Metal",
+    "browser WASM/WebGPU"
+  ],
+  "cases": "The last two contextual four-way cases of the immutable six-case projective v1 fixture",
+  "comparison": "(runtime Full embedding VJP - runtime StopCoordinates VJP) vs (Torch CPU f32 Full - Torch CPU f32 coordinates.detach router VJP). Same captured forward, weights and cotangent.",
+  "gates": {
+    "paired_relative_l2_max": 0.002,
+    "reference_l2_must_exceed": 1e-8,
+    "ordinary_abs_tol": 0.000003,
+    "ordinary_rel_tol": 0.00005,
+    "unchanged_unrelated_parameters": "bit-exact",
+    "repeat_full": "bit-exact",
+    "forward_and_weights": "bit-exact",
+    "negative_controls": [
+      "zero contrast",
+      "wrong sign contrast"
+    ],
+    "independent_stopped_vjps": "Every parameter and embedding: ordinary tolerance; geometry slots additionally 0.002 relative L2 and nonzero reference."
+  },
+  "preservation": "Legacy projective-v1 criteria and failures are not replaced or waived. New native/browser full reports must reproduce their respective archived reports' outputs, VJPs, update traces and checkpoint bytes. Old failure status retained. Same-state f64 is diagnostic only.",
+  "scope": "No corpus learning, general LLM quality, throughput, parameter/compute-matched superiority, CUDA or universal geometry qualification claim. Full stays default. StopCoordinates is a per-call training ablation, not frozen router parameters.",
+  "revision_policy": "Any changed gate after observing outputs requires a separate recorded protocol; no threshold tuning."
+}

@@ -1,6 +1,66 @@
 //! A causal metric encoder, owned and updated by the complete byte model.
 use super::*;
-use st_kernel_contracts::{causal_wave::CausalWaveSpec, poincare::PoincareBiasSpec};
+use st_kernel_contracts::{
+    causal_wave::CausalWaveSpec,
+    elementwise::ElementwiseOp,
+    graph::GraphError,
+    poincare::PoincareBiasSpec,
+    pointwise::{PointwiseChain, PointwiseStep},
+};
+
+// Validate the augmented graph at the portable boundary and compile that same
+// graph on the device. The shared logit table owns one extra stage and slot.
+pub(super) fn query_graph(
+    projection: &InferencePlan,
+    logits: &[f32],
+) -> Result<GraphDefinition, InferenceError> {
+    let graph = projection.graph_definition()?;
+    let mut parameters = graph.parameters().to_vec();
+    if parameters.is_empty() {
+        return Err(InferenceError::ByteDecoder(
+            "query projection must be trainable and tokenwise on causal coordinates",
+        ));
+    }
+    let index = parameters.len();
+    parameters.push(GraphParameter {
+        role: ParameterRole::Bias,
+        shape: vec![logits.len()],
+        values: logits.to_vec(),
+    });
+    let mut stages = graph.stages().to_vec();
+    stages.push(GraphStage::Pointwise {
+        chain: PointwiseChain::new(
+            2,
+            vec![PointwiseStep {
+                op: ElementwiseOp::Add,
+                rhs: Some(1),
+            }],
+        )
+        .map_err(GraphError::from)?,
+        parameters: vec![index],
+    });
+    Ok(GraphDefinition::new(
+        graph.input_layout().clone(),
+        stages,
+        parameters,
+    )?)
+}
+
+/// Pair metric only: projection, causal wave, chart and parameter ownership stay
+/// identical. The flat control uses 4*||x-y||^2, the origin-local Poincare scale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ByteDecoderPairMetric {
+    #[serde(rename = "poincare_squared.v1")]
+    PoincareSquared,
+    #[serde(rename = "euclidean_chord_squared.v1")]
+    EuclideanChordSquared,
+    /// Rowwise softmax of the same chart, then radius-two categorical distance.
+    #[serde(rename = "categorical_fisher_rao_squared.v1")]
+    CategoricalFisherRaoSquared,
+    /// Complex chart (1,z), then 1-|u^H v|^2; not geodesic distance.
+    #[serde(rename = "complex_projective_chord_squared.v1")]
+    ComplexProjectiveChordSquared,
+}
 
 /// Projection parameters, two wave vectors and one head-gain vector per block.
 /// These are absolute slots in the byte model, not a separate optimizer owner.
@@ -10,6 +70,8 @@ pub struct ByteDecoderGeometryParameterLayout {
     raw_decay: usize,
     raw_phase: usize,
     raw_gains: Range<usize>,
+    mixture_logits: Option<Range<usize>>,
+    query_projections: Vec<Range<usize>>,
 }
 
 impl ByteDecoderGeometryParameterLayout {
@@ -26,11 +88,49 @@ impl ByteDecoderGeometryParameterLayout {
         self.raw_gains.clone()
     }
     pub fn all(&self) -> Range<usize> {
-        self.projection.start..self.raw_gains.end
+        self.projection.start
+            ..self
+                .query_projections
+                .last()
+                .or(self.mixture_logits.as_ref())
+                .map_or(self.raw_gains.end, |r| r.end)
+    }
+    pub fn mixture_logits(&self) -> Option<Range<usize>> {
+        self.mixture_logits.clone()
+    }
+    /// Per-block contextual projection slots, empty for shared routing.
+    pub fn query_projections(&self) -> &[Range<usize>] {
+        &self.query_projections
     }
 }
 
-/// Tokenwise projection -> causal wave -> bounded chart -> Poincare pair bias.
+/// Ordered components and fixed positive scales, with a trainable `[head,component]`
+/// logit table for each block. Scales calibrate units; they are not optimizer slots.
+#[derive(Clone, Debug)]
+pub struct ByteDecoderGeometryMixture {
+    metrics: Vec<ByteDecoderPairMetric>,
+    scales: Vec<Vec<f32>>,
+    raw_logits: Vec<Vec<f32>>,
+    query_projections: Vec<InferencePlan>,
+}
+impl ByteDecoderGeometryMixture {
+    pub fn metrics(&self) -> &[ByteDecoderPairMetric] {
+        &self.metrics
+    }
+    pub fn scales(&self) -> &[Vec<f32>] {
+        &self.scales
+    }
+    pub fn raw_logits(&self) -> &[Vec<f32>] {
+        &self.raw_logits
+    }
+    /// Tokenwise graphs from causal wave coordinates to head/component logits.
+    /// Their outputs are added to the shared logit table. Empty means shared-only.
+    pub fn query_projections(&self) -> &[InferencePlan] {
+        &self.query_projections
+    }
+}
+
+/// Tokenwise projection -> causal wave -> bounded chart -> selected pair bias.
 /// Each document/window starts at zero state. Curvature is frozen; decay,
 /// phase and per-head softplus gains are learned. Raw gain zero is not "off".
 #[derive(Clone, Debug)]
@@ -40,6 +140,8 @@ pub struct ByteDecoderGeometryPlan {
     raw_decay: Vec<f32>,
     raw_phase: Vec<f32>,
     raw_gains: Vec<Vec<f32>>,
+    head_metrics: Vec<Vec<ByteDecoderPairMetric>>,
+    mixture: Option<ByteDecoderGeometryMixture>,
 }
 
 impl ByteDecoderGeometryPlan {
@@ -81,16 +183,171 @@ impl ByteDecoderGeometryPlan {
             PoincareBiasSpec::new(shape, gain.len(), curvature)?;
         }
         Ok(Self {
+            mixture: None,
             projection: projection.clone(),
             wave,
             raw_decay: raw_decay.to_vec(),
             raw_phase: raw_phase.to_vec(),
             raw_gains: raw_gains.to_vec(),
+            head_metrics: raw_gains
+                .iter()
+                .map(|g| vec![ByteDecoderPairMetric::PoincareSquared; g.len()])
+                .collect(),
         })
     }
 
     pub fn projection(&self) -> &InferencePlan {
         &self.projection
+    }
+    /// The common metric, or `None` when blocks/heads use different metrics.
+    pub fn pair_metric(&self) -> Option<ByteDecoderPairMetric> {
+        if self.mixture.is_some() {
+            return None;
+        }
+        let first = self.head_metrics[0][0];
+        self.head_metrics
+            .iter()
+            .flatten()
+            .all(|&m| m == first)
+            .then_some(first)
+    }
+    /// Complete block-major/head-major routing. This is frozen topology, not a
+    /// learned selector; coordinates remain shared across the consuming heads.
+    pub fn head_pair_metrics(&self) -> Option<&[Vec<ByteDecoderPairMetric>]> {
+        self.mixture
+            .is_none()
+            .then_some(self.head_metrics.as_slice())
+    }
+    pub fn mixture(&self) -> Option<&ByteDecoderGeometryMixture> {
+        self.mixture.as_ref()
+    }
+    /// Replace fixed routing with a learned convex mixture of distinct metrics.
+    /// Each block supplies flattened `[heads,components]` logits and fixed scales.
+    /// The shared gain remains independent of the normalized mixture weights.
+    pub fn with_mixture(
+        mut self,
+        metrics: &[ByteDecoderPairMetric],
+        raw_logits: &[Vec<f32>],
+        scales: &[Vec<f32>],
+    ) -> Result<Self, InferenceError> {
+        if !(2..=4).contains(&metrics.len())
+            || metrics
+                .iter()
+                .enumerate()
+                .any(|(i, m)| metrics[..i].contains(m))
+            || raw_logits.len() != self.raw_gains.len()
+            || scales.len() != self.raw_gains.len()
+        {
+            return Err(InferenceError::ByteDecoder(
+                "mixture requires distinct metrics and a router/scale table per block",
+            ));
+        }
+        for ((logits, scale), gains) in raw_logits.iter().zip(scales).zip(&self.raw_gains) {
+            let [batch, steps, _] = self.wave.shape();
+            let positions = steps
+                .checked_mul(steps)
+                .ok_or(InferenceError::PortableAddressSpace)?;
+            st_kernel_contracts::mixture::HeadwiseMixtureSpec::new([
+                batch,
+                gains.len(),
+                positions,
+                metrics.len(),
+            ])
+            .map_err(|_| InferenceError::PortableAddressSpace)?;
+            let len = gains
+                .len()
+                .checked_mul(metrics.len())
+                .ok_or(InferenceError::PortableAddressSpace)?;
+            u32::try_from(len).map_err(|_| InferenceError::PortableAddressSpace)?;
+            if logits.len() != len
+                || scale.len() != len
+                || logits.iter().any(|v| !v.is_finite())
+                || scale.iter().any(|v| !v.is_finite() || *v <= 0.)
+            {
+                return Err(InferenceError::ByteDecoder("mixture logits/scales must match every head/component and be finite; scales must be positive"));
+            }
+        }
+        self.mixture = Some(ByteDecoderGeometryMixture {
+            metrics: metrics.to_vec(),
+            raw_logits: raw_logits.to_vec(),
+            scales: scales.to_vec(),
+            query_projections: Vec::new(),
+        });
+        Ok(self)
+    }
+    /// Learn position-dependent mixtures from the causal wave coordinates.
+    /// Each graph must preserve batch/time and emit flattened `[heads,components]`
+    /// logits. Zero output recovers the shared mixture's initial function.
+    pub fn with_query_projections(
+        mut self,
+        projections: &[InferencePlan],
+    ) -> Result<Self, InferenceError> {
+        let mixture = self.mixture.as_mut().ok_or(InferenceError::ByteDecoder(
+            "query projections require a geometry mixture",
+        ))?;
+        if projections.len() != self.raw_gains.len() {
+            return Err(InferenceError::ByteDecoder(
+                "one query projection is required per block",
+            ));
+        }
+        let [batch, steps, _] = self.wave.shape();
+        for ((projection, gains), logits) in projections
+            .iter()
+            .zip(&self.raw_gains)
+            .zip(&mixture.raw_logits)
+        {
+            let cols = gains
+                .len()
+                .checked_mul(mixture.metrics.len())
+                .ok_or(InferenceError::PortableAddressSpace)?;
+            if projection.input_layout() != self.projection.output_layout()
+                || projection.output_layout().shape() != [batch, steps, cols]
+            {
+                return Err(InferenceError::ByteDecoder(
+                    "query projection must be trainable and tokenwise on causal coordinates",
+                ));
+            }
+            query_graph(projection, logits)?;
+            st_kernel_contracts::mixture::QuerywiseMixtureSpec::new([
+                batch,
+                gains.len(),
+                steps,
+                steps,
+                mixture.metrics.len(),
+            ])
+            .map_err(|_| InferenceError::PortableAddressSpace)?;
+        }
+        mixture.query_projections = projections.to_vec();
+        Ok(self)
+    }
+    /// Select a metric without changing initial values or trainable scalar count.
+    /// The flat metric retains the nonlinear bounded chart, not a linear encoder.
+    pub fn with_pair_metric(mut self, metric: ByteDecoderPairMetric) -> Self {
+        self.mixture = None;
+        for head in self.head_metrics.iter_mut().flatten() {
+            *head = metric;
+        }
+        self
+    }
+    /// Assign one metric to every block/head without adding parameters or
+    /// detaching any coordinate pullback. Shapes must match the raw gain grid.
+    pub fn with_head_pair_metrics(
+        mut self,
+        metrics: &[Vec<ByteDecoderPairMetric>],
+    ) -> Result<Self, InferenceError> {
+        if metrics.len() != self.raw_gains.len()
+            || metrics
+                .iter()
+                .zip(&self.raw_gains)
+                .any(|(m, g)| m.len() != g.len())
+        {
+            return Err(InferenceError::ByteDecoder(
+                "geometry metric routing must cover every block/head",
+            ));
+        }
+        self.head_metrics = metrics.to_vec();
+        self.mixture = None;
+        Ok(self)
     }
     pub fn curvature(&self) -> f32 {
         self.wave.curvature()
@@ -103,6 +360,21 @@ impl ByteDecoderGeometryPlan {
     }
     pub fn raw_gains(&self) -> &[Vec<f32>] {
         &self.raw_gains
+    }
+
+    fn replace_initial_raw_gains(&mut self, raw_gains: &[Vec<f32>]) -> Result<(), InferenceError> {
+        if raw_gains.len() != self.raw_gains.len()
+            || raw_gains
+                .iter()
+                .zip(&self.raw_gains)
+                .any(|(new, old)| new.len() != old.len() || new.iter().any(|v| !v.is_finite()))
+        {
+            return Err(InferenceError::ByteDecoder(
+                "initial geometry gains must preserve every block/head shape and be finite",
+            ));
+        }
+        self.raw_gains = raw_gains.to_vec();
+        Ok(())
     }
 
     #[cfg(feature = "wgpu")]
@@ -121,11 +393,41 @@ impl ByteDecoderGeometryPlan {
                 values: v.clone(),
             });
         }
+        if let Some(mixture) = &self.mixture {
+            for (logits, gains) in mixture.raw_logits.iter().zip(&self.raw_gains) {
+                values.push(GraphParameter {
+                    role: ParameterRole::Gate,
+                    shape: vec![gains.len(), mixture.metrics.len()],
+                    values: logits.clone(),
+                });
+            }
+            for projection in &mixture.query_projections {
+                values.extend(projection.graph_definition()?.parameters().iter().cloned());
+            }
+        }
         Ok(values)
     }
 }
 
 impl ByteDecoderPlan {
+    pub fn causal_geometry(&self) -> Option<&ByteDecoderGeometryPlan> {
+        self.geometry.as_ref()
+    }
+
+    /// Reinitialize gains in a frozen plan, e.g. after one-time bias calibration.
+    /// Does not mutate a compiled owner or implement an optimizer update. All
+    /// other parameters, metric, topology and ownership ranges stay unchanged.
+    pub fn with_initial_geometry_raw_gains(
+        mut self,
+        raw_gains: &[Vec<f32>],
+    ) -> Result<Self, InferenceError> {
+        self.geometry
+            .as_mut()
+            .ok_or(InferenceError::ByteDecoder("model has no causal geometry"))?
+            .replace_initial_raw_gains(raw_gains)?;
+        Ok(self)
+    }
+
     /// Add learned causal geometry without changing the ownership/SGD boundary.
     /// Omit this builder for the ordinary byte decoder; no fake zero-gain mode.
     pub fn with_causal_geometry(
@@ -154,9 +456,23 @@ impl ByteDecoderPlan {
         let gain = phase
             .checked_add(1)
             .ok_or(InferenceError::PortableAddressSpace)?;
-        let end = gain
+        let gain_end = gain
             .checked_add(geometry.raw_gains.len())
             .ok_or(InferenceError::PortableAddressSpace)?;
+        let logits_end = gain_end
+            .checked_add(geometry.mixture.as_ref().map_or(0, |m| m.raw_logits.len()))
+            .ok_or(InferenceError::PortableAddressSpace)?;
+        let mut end = logits_end;
+        let mut query_projections = Vec::new();
+        if let Some(mixture) = &geometry.mixture {
+            for projection in &mixture.query_projections {
+                let next = end
+                    .checked_add(projection.graph_definition()?.parameters().len())
+                    .ok_or(InferenceError::PortableAddressSpace)?;
+                query_projections.push(end..next);
+                end = next;
+            }
+        }
         let shift = end - 2;
         for range in self
             .parameters
@@ -177,7 +493,9 @@ impl ByteDecoderPlan {
             projection: 2..decay,
             raw_decay: decay,
             raw_phase: phase,
-            raw_gains: gain..end,
+            raw_gains: gain..gain_end,
+            mixture_logits: geometry.mixture.is_some().then_some(gain_end..logits_end),
+            query_projections,
         });
         self.geometry = Some(geometry);
         Ok(self)

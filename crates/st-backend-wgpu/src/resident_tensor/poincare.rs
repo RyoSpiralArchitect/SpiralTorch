@@ -1,10 +1,40 @@
 //! Resident causal metric score bias. Coordinates are not projected or clipped.
 use super::*;
+use st_kernel_contracts::euclidean::{EuclideanBiasError, EuclideanBiasSpec};
+use st_kernel_contracts::fisher_rao::{FisherRaoBiasSpec, FisherRaoError};
 use st_kernel_contracts::poincare::{PoincareBiasSpec, PoincareError};
+use st_kernel_contracts::projective::{ProjectiveBiasSpec, ProjectiveError};
+pub(super) mod fisher_chart;
+mod pair_spec;
+use pair_spec::PairSpec;
 
 #[derive(Clone, Debug)]
 pub struct ResidentPoincareBiasForward {
     spec: PoincareBiasSpec,
+    tape: PairForward,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResidentEuclideanBiasForward {
+    spec: EuclideanBiasSpec,
+    tape: PairForward,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResidentFisherRaoBiasForward {
+    spec: FisherRaoBiasSpec,
+    tape: PairForward,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResidentProjectiveBiasForward {
+    spec: ProjectiveBiasSpec,
+    tape: PairForward,
+}
+
+#[derive(Clone, Debug)]
+struct PairForward {
+    spec: PairSpec,
     coordinates: ResidentTensor,
     raw_gain: ResidentTensor,
     cache: ResidentTensor,
@@ -12,12 +42,14 @@ pub struct ResidentPoincareBiasForward {
 }
 
 #[derive(Clone, Debug)]
-pub struct ResidentPoincareBiasVjp {
+pub struct ResidentPairBiasVjp {
     coordinates: ResidentTensor,
     raw_gain: ResidentTensor,
 }
 
-impl ResidentPoincareBiasVjp {
+pub type ResidentPoincareBiasVjp = ResidentPairBiasVjp;
+
+impl ResidentPairBiasVjp {
     pub fn coordinates(&self) -> &ResidentTensor {
         &self.coordinates
     }
@@ -42,11 +74,15 @@ struct Params {
     gain_offset: u32,
     seed_offset: u32,
     curvature_magnitude: f32,
-    padding: [u32; 3],
+    distance_scale: f32,
+    metric_kind: u32,
+    root_gradient_offset: u32,
 }
 
 fn source() -> String {
     include_str!("shaders/poincare.wgsl")
+        .replace("FISHER_MATH", include_str!("shaders/fisher_math.wgsl"))
+        .replace("FISHER_PAIR", include_str!("shaders/fisher_pair.wgsl"))
         .replace("ROUNDED_ADD", include_str!("../shaders/rounded_add.wgsl"))
         .replace(
             "WIDE_ARITHMETIC",
@@ -62,6 +98,7 @@ pub(super) struct PoincareKernels {
     scores: wgpu::ComputePipeline,
     pair_seeds: wgpu::ComputePipeline,
     coordinates_vjp: wgpu::ComputePipeline,
+    fisher_logits_vjp: wgpu::ComputePipeline,
     gain_vjp: wgpu::ComputePipeline,
 }
 
@@ -111,13 +148,15 @@ impl PoincareKernels {
             scores: pipeline("scores"),
             pair_seeds: pipeline("prepare_pair_seeds"),
             coordinates_vjp: pipeline("coordinates_vjp"),
+            fisher_logits_vjp: pipeline("fisher_logits_vjp"),
             gain_vjp: pipeline("gain_vjp"),
             layout,
         }
     }
 }
 
-fn sizes(spec: PoincareBiasSpec, limits: &wgpu::Limits) -> Result<(usize, usize), TensorError> {
+fn sizes(spec: impl Into<PairSpec>, limits: &wgpu::Limits) -> Result<(usize, usize), TensorError> {
+    let spec = spec.into();
     if limits.max_storage_buffers_per_shader_stage < 6
         || limits.max_bindings_per_bind_group < 7
         || limits.max_uniform_buffers_per_shader_stage < 1
@@ -129,11 +168,20 @@ fn sizes(spec: PoincareBiasSpec, limits: &wgpu::Limits) -> Result<(usize, usize)
         .pairs_len()
         .checked_mul(16)
         .ok_or(PoincareError::Overflow)?;
-    let gradients = spec
+    let mut gradients = spec
         .coordinates_len()
         .checked_add(spec.heads())
         .and_then(|len| spec.pairs_len().checked_mul(4)?.checked_add(len))
         .ok_or(PoincareError::Overflow)?;
+    if matches!(spec, PairSpec::FisherRao(_)) {
+        // A finite final logit VJP can have unrepresentable f32 root cotangents.
+        // Keep far-root and already projected close-logit records separately.
+        gradients = spec
+            .coordinates_len()
+            .checked_mul(8)
+            .and_then(|n| gradients.checked_add(n))
+            .ok_or(PoincareError::Overflow)?;
+    }
     for count in [cache, gradients, spec.scores_len()] {
         storage_limit(count, limits)?;
     }
@@ -148,10 +196,7 @@ fn sizes(spec: PoincareBiasSpec, limits: &wgpu::Limits) -> Result<(usize, usize)
     Ok((cache, gradients))
 }
 
-fn preflight(
-    spec: PoincareBiasSpec,
-    tensors: &[&ResidentTensor],
-) -> Result<(usize, usize), TensorError> {
+fn preflight(spec: PairSpec, tensors: &[&ResidentTensor]) -> Result<(usize, usize), TensorError> {
     let context = tensors[0].device.runtime().context();
     let limits = context.device().limits();
     for t in tensors {
@@ -161,7 +206,7 @@ fn preflight(
     sizes(spec, &limits)
 }
 
-fn params(spec: PoincareBiasSpec) -> Params {
+fn params(spec: PairSpec) -> Params {
     let [batch, steps, cols] = spec.shape();
     Params {
         batch: batch as u32,
@@ -176,8 +221,25 @@ fn params(spec: PoincareBiasSpec) -> Params {
         coordinates_offset: 0,
         gain_offset: 0,
         seed_offset: 0,
-        curvature_magnitude: -spec.curvature(),
-        padding: [0; 3],
+        curvature_magnitude: match spec {
+            PairSpec::Poincare(s) => -s.curvature(),
+            PairSpec::Euclidean(_) | PairSpec::FisherRao(_) | PairSpec::Projective(_) => 0.,
+        },
+        distance_scale: match spec {
+            PairSpec::Poincare(_) | PairSpec::FisherRao(_) | PairSpec::Projective(_) => 0.,
+            PairSpec::Euclidean(s) => s.scale(),
+        },
+        metric_kind: match spec {
+            PairSpec::Poincare(_) => 0,
+            PairSpec::Euclidean(_) => 1,
+            PairSpec::FisherRao(_) => 2,
+            PairSpec::Projective(_) => 3,
+        },
+        root_gradient_offset: if matches!(spec, PairSpec::FisherRao(_)) {
+            (spec.coordinates_len() + spec.heads() + 4 * spec.pairs_len()) as u32
+        } else {
+            0
+        },
     }
 }
 
@@ -235,6 +297,45 @@ fn dispatch(
 }
 
 impl ResidentTensor {
+    /// Interleaved complex chart `[B,T,2*C]` -> anchored projective chord bias.
+    /// Uses `u=(1,z)/sqrt(1+|z|^2)`, not a geodesic distance. The zero chart is
+    /// regular; both endpoint VJPs stay resident. Future scores are zero, so
+    /// the consumer must still apply a structural causal attention mask.
+    pub fn causal_projective_bias(
+        &self,
+        raw_gain: &Self,
+    ) -> Result<ResidentProjectiveBiasForward, TensorError> {
+        let shape =
+            <[usize; 3]>::try_from(self.layout.shape()).map_err(|_| ProjectiveError::Shape)?;
+        if raw_gain.layout.shape().len() != 1 {
+            return Err(ProjectiveError::Shape.into());
+        }
+        let spec = ProjectiveBiasSpec::new(shape, raw_gain.layout.shape()[0])?;
+        Ok(ResidentProjectiveBiasForward {
+            spec,
+            tape: self.causal_pair_bias(raw_gain, spec.into())?,
+        })
+    }
+
+    /// Rowwise logits -> sqrt(softmax) -> squared categorical Fisher-Rao bias.
+    /// Both endpoint and simplex-map derivatives remain resident. Future scores
+    /// are zero; the consumer must still apply a structural causal mask.
+    pub fn causal_fisher_rao_bias(
+        &self,
+        raw_gain: &Self,
+    ) -> Result<ResidentFisherRaoBiasForward, TensorError> {
+        let shape =
+            <[usize; 3]>::try_from(self.layout.shape()).map_err(|_| FisherRaoError::Shape)?;
+        if raw_gain.layout.shape().len() != 1 {
+            return Err(FisherRaoError::Shape.into());
+        }
+        let spec = FisherRaoBiasSpec::new(shape, raw_gain.layout.shape()[0])?;
+        preflight(spec.into(), &[self, raw_gain])?;
+        let roots = fisher_chart::roots(self)?;
+        let tape = roots.causal_pair_bias(raw_gain, spec.into())?;
+        Ok(ResidentFisherRaoBiasForward { spec, tape })
+    }
+
     /// `[B,T,C]` open-ball coordinates and `[H]` gains -> `[B,H,T,T]` bias.
     /// Future bias is zero, not -infinity: still apply a structural causal mask.
     pub fn causal_poincare_bias(
@@ -248,6 +349,36 @@ impl ResidentTensor {
             return Err(PoincareError::Shape.into());
         }
         let spec = PoincareBiasSpec::new(shape, raw_gain.layout.shape()[0], curvature)?;
+        Ok(ResidentPoincareBiasForward {
+            spec,
+            tape: self.causal_pair_bias(raw_gain, spec.into())?,
+        })
+    }
+
+    /// `-softplus(raw_gain[h]) * scale * ||x_q - x_k||^2` for k <= q.
+    /// Future entries are zero, not a replacement for a causal attention mask.
+    pub fn causal_euclidean_bias(
+        &self,
+        raw_gain: &Self,
+        scale: f32,
+    ) -> Result<ResidentEuclideanBiasForward, TensorError> {
+        let shape =
+            <[usize; 3]>::try_from(self.layout.shape()).map_err(|_| EuclideanBiasError::Shape)?;
+        if raw_gain.layout.shape().len() != 1 {
+            return Err(EuclideanBiasError::Shape.into());
+        }
+        let spec = EuclideanBiasSpec::new(shape, raw_gain.layout.shape()[0], scale)?;
+        Ok(ResidentEuclideanBiasForward {
+            spec,
+            tape: self.causal_pair_bias(raw_gain, spec.into())?,
+        })
+    }
+
+    fn causal_pair_bias(
+        &self,
+        raw_gain: &Self,
+        spec: PairSpec,
+    ) -> Result<PairForward, TensorError> {
         let (cache_len, _) = preflight(spec, &[self, raw_gain])?;
         let device = &self.device;
         let context = device.runtime().context();
@@ -295,7 +426,7 @@ impl ResidentTensor {
         )?;
         context.queue().submit(Some(encoder.finish()));
         let family = device.guard_together(&[&scores, &cache, &coordinates, &raw_gain])?;
-        Ok(ResidentPoincareBiasForward {
+        Ok(PairForward {
             spec,
             coordinates,
             raw_gain,
@@ -307,15 +438,62 @@ impl ResidentTensor {
 
 impl ResidentPoincareBiasForward {
     pub fn scores(&self) -> &ResidentTensor {
-        &self.scores
+        &self.tape.scores
     }
     pub fn spec(&self) -> PoincareBiasSpec {
         self.spec
     }
     pub fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPoincareBiasVjp, TensorError> {
+        self.tape.backward(seed)
+    }
+}
+
+impl ResidentEuclideanBiasForward {
+    pub fn scores(&self) -> &ResidentTensor {
+        &self.tape.scores
+    }
+    pub fn spec(&self) -> EuclideanBiasSpec {
+        self.spec
+    }
+    pub fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
+        self.tape.backward(seed)
+    }
+}
+
+impl ResidentFisherRaoBiasForward {
+    pub fn scores(&self) -> &ResidentTensor {
+        &self.tape.scores
+    }
+    pub fn spec(&self) -> FisherRaoBiasSpec {
+        self.spec
+    }
+    pub fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
+        self.tape.backward(seed)
+    }
+}
+
+impl ResidentProjectiveBiasForward {
+    pub fn scores(&self) -> &ResidentTensor {
+        &self.tape.scores
+    }
+    pub fn spec(&self) -> ProjectiveBiasSpec {
+        self.spec
+    }
+    pub fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
+        self.tape.backward(seed)
+    }
+}
+
+impl PairForward {
+    fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
         let s = self.spec;
         if seed.layout.shape() != s.score_shape() {
-            return Err(PoincareError::Length.into());
+            return Err(match s {
+                PairSpec::Poincare(_) => PoincareError::Length.into(),
+                PairSpec::Euclidean(_) => EuclideanBiasError::Length.into(),
+                PairSpec::FisherRao(_) => FisherRaoError::Length.into(),
+                PairSpec::Projective(_) => ProjectiveError::Length.into(),
+            });
         }
         let (_, len) = preflight(s, &[&self.scores, seed])?;
         let device = &self.scores.device;
@@ -372,9 +550,20 @@ impl ResidentPoincareBiasForward {
             p,
             s.heads(),
         )?;
+        if matches!(s, PairSpec::FisherRao(_)) {
+            dispatch(
+                device,
+                &mut encoder,
+                kernels,
+                &kernels.fisher_logits_vjp,
+                &buffers,
+                p,
+                s.shape()[0] * s.shape()[1],
+            )?;
+        }
         context.queue().submit(Some(encoder.finish()));
         let family = device.guard_together(&[&packed, &seed])?;
-        Ok(ResidentPoincareBiasVjp {
+        Ok(ResidentPairBiasVjp {
             coordinates: family[0]
                 .narrow(0, 0, s.coordinates_len())?
                 .reshape(&s.shape())?,

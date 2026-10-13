@@ -1,0 +1,162 @@
+{
+  "schema": "spiraltorch.fisher_close_chart.validation.v1",
+  "source_commit": "00ac21598b66dca4b05d234d6b2e29cbd2da3975",
+  "python_and_wasm_source_commit": "f6e3ea41761d3225e99582e98a654ccac4926c57",
+  "source_sha256": {
+    "crates/st-kernel-contracts/src/compensated.rs": "793dea1dfeece9b40970e466d8669b8a17c26b29de26959c03f862809afe6128",
+    "crates/st-kernel-contracts/src/projective.rs": "0e173affdc85838e6ba2220b616646c1cfbd964e32e4eab38fd9c6a9f59573e0",
+    "crates/st-kernel-contracts/src/fisher_rao.rs": "ee7ccb43bf8f16ea0313c3440716adb71f38d7ec5d2b8f1375d5846a3ce609fa",
+    "crates/st-kernel-contracts/src/fisher_rao/tests.rs": "49fdec52a8b12e356c89c53ef0343922c1c1dc69952a5fb18b9a5da8321ce30b",
+    "crates/st-kernel-contracts/src/fisher_rao/close_chart.rs": "c4962baf21f20b50a957f6d9354e7d488eb1a71fc88223c879e67ac8d034d8ba",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "c2b4f2078b80f8edebe9f8d3ceb60eb041c5f829aa82917ea62ef5f5bb1a34f6",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/fisher_chart.rs": "fdbb9ac51f67e4c4d9481f978d6e838865c7d70568adf257898d6e8a810b8335",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": "52f0f088d53ae6659e56cff81a335055eabc157517bd6b57a55e0cce0031f5e0",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": "2943b55b33e2dd20fa03ac6164331b106c3fa5d6fcb5517c3a3d4ecc2b6fd990",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/fisher_chart.wgsl": "c305d55f6f2527b773d5850f99c921a395d7089f9707fd0a552e5c8c6b002d0f",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/fisher_math.wgsl": "a0d8d947120e592b0f61fbad0b98cfa2e8e2443142b4bc5d0c3a843ca0521fb4",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/fisher_pair.wgsl": "b9fb872374b4d913b2fa290f221ffd850e2c8523f90a5c0cdee676f1f0cce654"
+  },
+  "scope": "Nearby Fisher distance and covariance boundary repair, with a frozen six-case learning regression. Not arbitrary-precision transcendental math, model quality, or speed qualification.",
+  "boundary_tests": {
+    "first_order_logit_exponents": [
+      -30,
+      -60,
+      -90,
+      -120,
+      -149
+    ],
+    "common_offsets": [
+      0,
+      "2^100"
+    ],
+    "second_order": {
+      "epsilon": "2^-149",
+      "gain_and_seed": "2^127",
+      "scale": "gain^2 * epsilon^2 = 2^-44",
+      "key_uniform_query_perturbed_pivot_coefficients": [
+        -0.1111111111111111,
+        0.3333333333333333
+      ],
+      "key_perturbed_query_uniform_pivot_coefficients": [
+        0.3333333333333333,
+        -0.1111111111111111
+      ]
+    },
+    "mixed_close_far_and_threshold_transition": true
+  },
+  "tests": {
+    "kernel_passed": 118,
+    "wgpu_passed": 337,
+    "wgpu_ignored": 1,
+    "ignored": "Existing explicit frozen-fixture timestamp experiment",
+    "native_clippy": true,
+    "wasm_clippy": true,
+    "strict_kernel_rustdoc": true,
+    "workspace_format": true,
+    "installed_python_passed": 8,
+    "installed_python_skipped": 1,
+    "python_skip": "CPU-only artifact rejection requires a separate CPU-only wheel"
+  },
+  "learning": {
+    "fixture_sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7",
+    "native_cases": 6,
+    "browser_cases": 6,
+    "python_cases": 6,
+    "updates_per_runtime": 96,
+    "geometry_step_vjps_per_runtime": 720,
+    "python_exact_resumed_updates": 54,
+    "native_maximum_geometry_relative_l2": 0.0018354366643319622,
+    "browser_maximum_geometry_relative_l2": 0.0018713102345431646,
+    "frozen_relative_gate": 0.002,
+    "thresholds_changed": false
+  },
+  "wheel": {
+    "version": "0.4.30",
+    "wheel": "spiraltorch-0.4.30-cp38-abi3-macosx_14_0_arm64.whl",
+    "wheel_sha256": "607d1a39ed1a010ab1562c02f145ba7bce064c247f7cdf9f4c1ed51583ac5034",
+    "installed_files": {
+      "spiraltorch/__init__.py": "dc6f4fe51a16f0e268cd44d5d573b28128ae6d896f86d23e4feb4a9c5a0cd702",
+      "spiraltorch/spiraltorch.abi3.so": "4ad6bd8832634660f6b7ecfe072d63ff2042d943eb6404b164a24c57bfe617da"
+    },
+    "python": "3.12.6",
+    "harness_sha256": "a3e97e7d8f88a0b2bfb78302a82c9bddeccfc761332c952d2dfba307e1ec2a2c"
+  },
+  "review": {
+    "kind": "Independent read-only source review",
+    "initial_finding": "Swapped key/query loses second-order key-weight contribution",
+    "initial_finding_reproduced_on_cpu_and_gpu": true,
+    "follow_up_actionable_findings": 0,
+    "scope": "Both endpoint orders, decomposed key masses, derivative scaling and storage integration",
+    "runtime_checks_by": "Parent, separately from static reviewer"
+  },
+  "cost": {
+    "close_pair_backward": "O(projected_columns^2) per pair",
+    "packed_chart_bytes_per_coordinate": 20,
+    "pair_cache_bytes": 64,
+    "backward_words": "9N + H + 4P",
+    "single_native_harness_seconds_before": 19.45,
+    "single_native_harness_seconds_after": 66.29,
+    "timing_scope": "One sequential run each, including setup/compilation/harness. Not kernel timing, controlled performance qualification or a PyTorch comparison."
+  },
+  "retained_attempts": [
+    "Initial independently normalized charts lost small first-order differences.",
+    "Root projection then lost a second-order pivot gradient.",
+    "First direct covariance used rounded key weights and failed with swapped endpoints.",
+    "First mass-expansion shader used dynamically indexed let-array; local var-array fixes WGSL validation.",
+    "First isolated Python invocation omitted the validator sibling-module directory; the second adds only tools, preserving installed-package identity checks."
+  ],
+  "release": {
+    "version": "0.4.30 candidate",
+    "ready": false,
+    "published": false,
+    "tag_created": false,
+    "reason": "Wave time/batch cancellation review and official multi-platform release gates remain open. Fisher close-path cost is recorded, not claimed optimized."
+  },
+  "raw_sha256": {
+    "fisher-covariance-baseline-native.json": "1336de3859e040e505504d59c5579515ee7df232a1a71631b340f1916c1c341f",
+    "fisher-covariance-baseline-time.log": "fc37d9dce9edc50140ba57df5a4f0c876632a1cd74a1e9e44c0b4d1fcbf4cab4",
+    "fisher-covariance-final-native.log": "c1fb8267a1e4fb433dea78c0793bd03c34b856b783f1707ef818fb4013864693",
+    "fisher-covariance-full-native.log": "1617dd5be4a544b5530470d9944f631fd7664916aeca77c67915ae1ac7827854",
+    "fisher-covariance-lm-build.log": "ab460567471d31ee45c5aac46cbc3caeb11e506c8e10f7e4c8a57b4b13839a5d",
+    "fisher-covariance-native-clippy.log": "1ca9c5880958ffa0361d89d69e84cd5a71e9a20c44fac0759d4f583bf09d90be",
+    "fisher-covariance-rustdoc.log": "74dc4f69466d6ee66c0991ff87c9d0dcd8accf5e1ddd9dd7f69356499fdc1211",
+    "fisher-covariance-wasm-clippy.log": "e39750a5c1a0295fdc70d169825a5d7d3a8aba44a264b8502c346bbd9f5bebd0",
+    "fisher-final/browser.json": "7647c6c7aad7947aa87df97de38cf8bca0869ae8841bbd16181afbe71c348b00",
+    "fisher-final/fixture-identity.json": "0711e2c55687e5c24e6ceb58906323e6dff20a49fea90f1de977fd5aa767f1d9",
+    "fisher-final/native.json": "9f3b3737f7e4e3c29ed201d170b237545063e7877641380e4e363cb0b7d3c3f8",
+    "fisher-final/python.json": "1378dec53f64a106c62c134cbe5d550e48df495bbaca0a9c306c801be1f39265",
+    "fisher-final/reference.json": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7",
+    "fisher-final/web/resident_byte_decoder_browser.js": "6dc1ac40f337f5a2f908799eb50377a0a1ae0f526d29377b872df4e290a3221d",
+    "fisher-final/web/resident_byte_decoder_browser_bg.wasm": "4653996fb47e4a4ad9f827003409d3d8cf762c7f993ad0b6ea18088d0452edb6",
+    "fisher-mass-bindgen.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fisher-mass-browser-scalars.json": "e8b4de41da7c4ecb87f891d63bc21e5bd4f3cd60714600004e1c075b894cc071",
+    "fisher-mass-expansion-after.log": "069e21242d4b247c19bdf09d55b24de8a314ba1ac1a28beed8765a51e160cd57",
+    "fisher-mass-expansion-reviewed.log": "1a9ed853c829a74565cb578cdad85fc75ede879b83fb7b1dcdf1a2ab571547e2",
+    "fisher-mass-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fisher-mass-full-native.log": "b5272d33dc23d669cd61b70dbc8f86b32ae98746c758e512aea28d73f7efe71e",
+    "fisher-mass-lm-build.log": "ab460567471d31ee45c5aac46cbc3caeb11e506c8e10f7e4c8a57b4b13839a5d",
+    "fisher-mass-native-clippy.log": "1ae74db1443c5af5aa2bd0d782c9ca57ac26732d35b6acb11a4ddeea363e8ba1",
+    "fisher-mass-native-lm.json": "9f3b3737f7e4e3c29ed201d170b237545063e7877641380e4e363cb0b7d3c3f8",
+    "fisher-mass-native-scalars.json": "b4a08aa28550d3ca87547fd3efa7d4870640919eb905964f2c2299cbcedde560",
+    "fisher-mass-native-time.log": "aaff53b202de4c8c4aeb83db83c33e50adb4c0e26a7edfbe3d73753c15066f53",
+    "fisher-mass-python-api-tests.log": "ee4ac850f8c97b7b978c9a01fa5f421faaffdc9402646e0149e9f0413402ceaf",
+    "fisher-mass-python-learning-v2.log": "ecdac8d887ebd3d2636d1b58fab8e5ebb448ed3ba8415372d2075d088b074de0",
+    "fisher-mass-python-learning.log": "7ac6db958c189c3ec4427925cb26d374a15428f46df80d5e1feb1b3fd7471fed",
+    "fisher-mass-rustdoc.log": "74dc4f69466d6ee66c0991ff87c9d0dcd8accf5e1ddd9dd7f69356499fdc1211",
+    "fisher-mass-wasm-build.log": "2ee561855558ad2564b2298f7a1ac7723c9eb25c68136e9ba7159bfc6171aaf3",
+    "fisher-mass-wasm-clippy.log": "cec221b1412f37a5cd45e24470540532cd8950e585e2e21e390350d2f1039fa0",
+    "fisher-mass-wheel-build.log": "2d0ffb0e0a32a6c25fb48dd3e71147b8398ae6f5753bd5a036a87087b22fb57c",
+    "fisher-mass-wheel-install.log": "9e20b563c17eb2d69464d9aba7fe78ceee248c19354509aa3d1f09d61b6f14af",
+    "fisher-pair-chart-cpu-after.log": "07fd3e92d21a894516d8d49f937c3927e7c35ac1fcdb347a9bb48cb615fab9c0",
+    "fisher-pair-chart-cpu-before.log": "0ed8082de8623cfc409b85192a5d544af891e599c34e175060251a22124c5d80",
+    "fisher-pair-chart-full-native.log": "56bc591c352699915f8d7d524735dd2a9c382d0247bff07b434de0317d25ef20",
+    "fisher-pair-chart-gpu-after.log": "ba818ed6711317079fc668454cd8c09ddea311df6f687dd21e2a865c5f5f07f2",
+    "fisher-pair-chart-gpu-before.log": "5109776b4a0b8006f14d69905525f2dce5e963be75d0288977ea7516a588efac",
+    "fisher-pair-chart-native-clippy.log": "5d815aa4a5c24d9b1bbfbab0fa8a9acb9cd9a92b048cd24910a778e78323311d",
+    "fisher-second-order-after.log": "26625c87ef0139c4aee82a007a33698238f6dc12007c723b17a1134c98e1d139",
+    "fisher-second-order-cpu-before.log": "50f5f29e265c6ce7a76121b441614731cce35a491ffbaaf002b70eb7d0158d6b",
+    "fisher-second-order-gpu-before.log": "bcd1b63caff346b774a6a65c21818d9518996f09e636ce709ab737855767ea45",
+    "fisher-swapped-cpu-before.log": "3c2ee838581709c78fe96576865db02740bc6d3e9b1149a52f04ce828dc2223d",
+    "fisher-swapped-gpu-before.log": "73027a260c56c11ea35b1631690a6ef06664c4293a63a90f1252aec217116efd"
+  }
+}

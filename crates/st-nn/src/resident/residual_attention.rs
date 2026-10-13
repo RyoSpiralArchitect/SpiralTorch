@@ -19,6 +19,9 @@ pub use training::{
 /// LayerNorm -> Linear -> GELU -> Linear `feed_forward`. Both branches are
 /// existing portable InferencePlans, so explicit Topos/Scaler operations keep
 /// their semantics and trainable parameters instead of being silently discarded.
+/// The attention output projection, including its bias, finishes before the
+/// first residual add: `x + (attention_value @ weight + bias)`. Reassociating
+/// this as `(x + attention_value @ weight) + bias` can change f32 trajectories.
 /// This is one block, not token embedding, a KV cache, or a complete decoder.
 #[derive(Clone, Debug)]
 pub struct ResidualAttentionPlan {

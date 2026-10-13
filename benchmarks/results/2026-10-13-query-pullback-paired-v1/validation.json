@@ -1,0 +1,319 @@
+{
+  "schema": "spiraltorch.query_pullback_paired.validation_receipt.v1",
+  "validated_utc": "2026-10-13 04:42 UTC",
+  "source_base": "fa6113be2db7562746997875adfde95f114bc4fe",
+  "source_state": "Listed source files plus base; 8240 pre-existing tracked deletions preserved and not staged. Test-only snapshot-order changes are included in final source and final test run.",
+  "source_files": [
+    {
+      "sha256": "3307260d6aa7d90b2b399233c371b0898dd1b1d087af405463bfe561d3fb5be2",
+      "path": "crates/st-nn/src/resident.rs"
+    },
+    {
+      "sha256": "9c0b62f1b4a94677cc75d6780043f1d79596f8e0c1dbe3fa5af5035d6c041a4c",
+      "path": "crates/st-nn/src/resident/byte_decoder.rs"
+    },
+    {
+      "sha256": "ccfacc43e6cc8c0132b9d2038825efb9e217980488daa769d980c1b77eb86a2a",
+      "path": "crates/st-nn/src/resident/byte_decoder/training.rs"
+    },
+    {
+      "sha256": "a38e12adde8e31dc8027dc1add007c51253edd44fa8f3645f8b51537f5189658",
+      "path": "crates/st-nn/src/resident/byte_decoder/training/geometry.rs"
+    },
+    {
+      "sha256": "713a583417baeb905c04a9e847b643d941571abf2cf5f22d25bfc369926f7f5e",
+      "path": "crates/st-nn/src/resident/byte_decoder/training/tests.rs"
+    },
+    {
+      "sha256": "6c1db0d21766315f6c6ef489af03eff27b612425351d2df0278aaccb0c1b1215",
+      "path": "crates/st-nn/src/resident/byte_decoder/training/tests/query_pullback.rs"
+    },
+    {
+      "sha256": "4a6314f16a114e1f8c2e0c3ebf07ad3ae0cab9342dc378fdb0052b20b2c9e998",
+      "path": "crates/st-nn/examples/support/byte_decoder.rs"
+    },
+    {
+      "sha256": "1b75688ae41d096dca452bf335f76670d5d0d62590b44aae0e209c4d81eb9274",
+      "path": "crates/st-nn/examples/support/byte_decoder/projective_controls.rs"
+    },
+    {
+      "sha256": "4df183f37312ac0041df993e04739633a7e76793807abb22119395f45becb69d",
+      "path": "crates/st-nn/examples/support/byte_decoder/query_pullback_controls.rs"
+    },
+    {
+      "sha256": "90a061af77ca18509c73306e3045b2a7853706f94395f7e13842f14121cfc1c7",
+      "path": "crates/st-nn/examples/resident_byte_flat_metric.rs"
+    },
+    {
+      "sha256": "6f28cfcb83def0c5050f10077a127881e637c5ad4d6d628568947aef262de8b5",
+      "path": "crates/st-nn/examples/resident_byte_decoder_browser.rs"
+    },
+    {
+      "sha256": "c9cf9cd429e619110d060b70c5879607c72fbe39492e709aa186c09261de85a2",
+      "path": "crates/st-nn/tests/byte_query_pullback_browser.html"
+    },
+    {
+      "sha256": "01b8f06cf64ac0bad76b8040901c1f68a054e630d33ae8a8122f6331470f44fe",
+      "path": "tools/diagnose_resident_byte_projective.py"
+    },
+    {
+      "sha256": "95c74cb47ce97ad9b7cfeeec5fb6b1afb07b33643a2817bb233e03afb26eeacc",
+      "path": "tools/validate_resident_query_pullback.py"
+    },
+    {
+      "sha256": "a907e95d22bd24356393d9181363eda99bc82b70fed4b33f23e592a708fd7d5c",
+      "path": "tools/test_validate_resident_query_pullback.py"
+    },
+    {
+      "sha256": "c9c7bfbdaffb0561cc26b577f9cc76efde0e15900ac90a727fdd202ff2263052",
+      "path": "docs/complex_projective_geometry.md"
+    },
+    {
+      "sha256": "7c183d179269c2e972a1d8e2b45c3501f30d8ab0e56ba0192d4b842eb0315e00",
+      "path": "docs/query_coordinate_pullback.md"
+    }
+  ],
+  "environment": {
+    "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "wasm-bindgen 0.2.129",
+    "torch": "2.12.1; isolated Python CPU f32/f64; one thread",
+    "native_adapter": "Apple M4 / Metal",
+    "cargo_incremental": 0,
+    "gpu_runtime_tests_explicitly_enabled": true
+  },
+  "verification": {
+    "native_release_build": {
+      "exit_code": 0
+    },
+    "wasm_release_build": {
+      "exit_code": 0
+    },
+    "native_paired": {
+      "exit_code": 0,
+      "cases_passed": 2,
+      "cases_total": 2
+    },
+    "native_legacy": {
+      "exit_code": 1,
+      "cases_qualified": 4,
+      "cases_total": 6,
+      "entire_archived_report_exact": true
+    },
+    "browser_paired": {
+      "cases_passed": 2,
+      "cases_total": 2
+    },
+    "browser_legacy": {
+      "qualification_passed": false,
+      "cases_qualified": 4,
+      "cases_total": 6,
+      "entire_archived_report_exact": true
+    },
+    "after_review_observations": "Native paired, native legacy, browser bundle and scalar output exactly reproduce pre-review observations; each VJP is now frozen before subsequent backwards.",
+    "byte_decoder_tests": {
+      "exit_code": 0,
+      "passed": 32,
+      "ignored": 0,
+      "new_tests": 4
+    },
+    "native_harness_tests": {
+      "exit_code": 0,
+      "passed": 4
+    },
+    "scalar_publication_tests": {
+      "exit_code": 0,
+      "passed": 7
+    },
+    "independent_diagnostic": {
+      "exit_code": 0,
+      "initial_cpu_f32_cases_bit_exact": 6,
+      "phase_same_state_rows": 32,
+      "final_reproduction_byte_exact": true,
+      "not_fully_qualified_f64_oracle": true
+    },
+    "scalar_publisher": {
+      "exit_code": 0,
+      "stopped_parameter_tensors_per_runtime": [
+        26,
+        43
+      ],
+      "embeddings_per_runtime": 2,
+      "raw_tensor_payloads_published": false
+    },
+    "stopped_training_resume": "Native test: one stopped CE update, checkpoint restore, two more stopped CE updates with exact checkpoint bytes. Default remains Full before and after restore.",
+    "not_validated": [
+      "stopped-mode browser training/resume",
+      "large corpus or LLM FT benefit",
+      "speed improvement",
+      "CUDA",
+      "general geometry superiority"
+    ],
+    "rustfmt": "check passed; existing stable-toolchain configuration warnings retained",
+    "git_diff_check": "passed on scoped source"
+  },
+  "review": {
+    "core": {
+      "agent": "01a13379-ca9b-79d3-aa29-197fa239a4fe",
+      "result": "No actionable introduced bugs found in 11 scoped files vs fa6113be. Source-only. No builds/GPU, archived parity or independent stopped VJP reproduction. 2026-10-13 reviewer 01a13379-ca9b-79d3-aa29-197fa239a4fe."
+    },
+    "evidence": {
+      "agent": "01a13385-c5d3-78e1-801c-a540b4cf1d1a",
+      "initial": "P2: snapshot each VJP immediately, before subsequent backwards; current delayed read could miss buffer alias/overwrite. No evidence of actual core aliasing. 7 existing +3 in-memory mutation tests passed. Read-only.",
+      "follow_up": "P2 fixed in controls and core tests: independent immediate host snapshots of Full and Stop embedding/all-parameter VJPs; retention/repeat now checked against originals. No introduced concrete issue. Source-only, no runtime tests."
+    },
+    "no_independent_gpu_reproduction": true
+  },
+  "final_private_artifact_hashes": [
+    {
+      "sha256": "5c176d189f8b80c2c06f2517d5df5afd7cca4b19944bfe1c31fd010262eeab70",
+      "role": "resident-byte-paired-qualified"
+    },
+    {
+      "sha256": "6b35403d26ff9215aa8877c1dc98648574cb9d57a1e15a6c6d0ba83359baf3fb",
+      "role": "web/resident_byte_decoder_browser.js"
+    },
+    {
+      "sha256": "da3e697a27b11b9d0f181d211bd932500624da9689885a280dfe654c2a3030ac",
+      "role": "web/resident_byte_decoder_browser_bg.wasm"
+    },
+    {
+      "sha256": "e6885719c5e07fe973276927dce6fafcdfb9e1258b53306243d3c225513ba19c",
+      "role": "native-build.log"
+    },
+    {
+      "sha256": "43e2f99b72ccbebc1c321929e29b47ee949095e945a5d2a444ea88e272edd9bc",
+      "role": "wasm-build.log"
+    },
+    {
+      "sha256": "5047195756f4dea60272795fbc63bd13c35a67d5762c0b3c9686244bb992699e",
+      "role": "native-paired.json"
+    },
+    {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "native-paired.log"
+    },
+    {
+      "sha256": "41e19a6599b73464938e7e016be74e1696b1ad37fb06bbe57c6639d48f0c860c",
+      "role": "native-legacy.json"
+    },
+    {
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b",
+      "role": "native-legacy.log"
+    },
+    {
+      "sha256": "7b6e6e12febe891bfc3f7a3ea7b56988a98e3947fb18a433689b791fbc1aeaae",
+      "role": "browser.json"
+    },
+    {
+      "sha256": "445c56db5cf0c1dc6606b5d511e37159e52b6571be129fdac1423d72c93d9c4e",
+      "role": "query-pullback-browser.png"
+    },
+    {
+      "sha256": "9247dcaa7d8d231e79bb4cc47a58f19b2d2c3b92faf8f35ca3dd7960a14ad948",
+      "role": "byte-decoder-tests.log"
+    },
+    {
+      "sha256": "eb0c490ec7df85de397b524b5fba8d37cf53699b0f34ae85af9b54f7eda00df1",
+      "role": "harness-tests.log"
+    },
+    {
+      "sha256": "9510759c14634ba9f89c4bc41c92822a65ab1b896fa16953e0a34c621ca1e262",
+      "role": "publication-tests.log"
+    },
+    {
+      "sha256": "d59f2d569f654389640e1c655461c5a955d6add7d96f8cb16d82f97dda1c0b12",
+      "role": "diagnostic.log"
+    },
+    {
+      "sha256": "78223b496f76070ac240c9721ffcb755c36cfe84c94f8d063f5a099ea8d19932",
+      "role": "diagnostic/stopped-reference.json"
+    },
+    {
+      "sha256": "d19c1a211d70b6077c4dca215f6d75effc3d473b607d9c7641857eced9927939",
+      "role": "publication.log"
+    },
+    {
+      "sha256": "55db6ac12f78a66059ff2bcaede5c34c04c389d1b78c2b53797cd6537f3113d0",
+      "role": "paired-protocol.json"
+    }
+  ],
+  "retained_initial_private_artifact_hashes": [
+    {
+      "sha256": "505ee08658d27d5376b33f42078c47c415fbcccf46d85af0fef2268f585c1040",
+      "role": "resident-byte-paired-qualified"
+    },
+    {
+      "sha256": "6b35403d26ff9215aa8877c1dc98648574cb9d57a1e15a6c6d0ba83359baf3fb",
+      "role": "web/resident_byte_decoder_browser.js"
+    },
+    {
+      "sha256": "de6ce5326281f8a8197e0caccf6f98ef9c2fdd38d887f201911d735710777a84",
+      "role": "web/resident_byte_decoder_browser_bg.wasm"
+    },
+    {
+      "sha256": "b5a3417669234430e32ac155c5c09d4b7cf69c86f0a8c0568ad33a4dd845b5ae",
+      "role": "native-build.log"
+    },
+    {
+      "sha256": "3639cf69d0581e3082d5a0ec5f880ebddc6a81f6a96a1f813a6edd37cdd8d538",
+      "role": "wasm-build.log"
+    },
+    {
+      "sha256": "5047195756f4dea60272795fbc63bd13c35a67d5762c0b3c9686244bb992699e",
+      "role": "native-paired.json"
+    },
+    {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "native-paired.log"
+    },
+    {
+      "sha256": "41e19a6599b73464938e7e016be74e1696b1ad37fb06bbe57c6639d48f0c860c",
+      "role": "native-legacy.json"
+    },
+    {
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b",
+      "role": "native-legacy.log"
+    },
+    {
+      "sha256": "7b6e6e12febe891bfc3f7a3ea7b56988a98e3947fb18a433689b791fbc1aeaae",
+      "role": "browser.json"
+    },
+    {
+      "sha256": "445c56db5cf0c1dc6606b5d511e37159e52b6571be129fdac1423d72c93d9c4e",
+      "role": "query-pullback-browser.png"
+    },
+    {
+      "sha256": "c03c71eed771c850d43f2f313552055b0dca4a9eb434b846e93818e71785947e",
+      "role": "query-pullback-tests.log"
+    },
+    {
+      "sha256": "ee82ac05c8c522bb4c1b0f5baf5a5e282da164e6648542eec9546daddd957fcd",
+      "role": "query-pullback-tests-r2.log"
+    },
+    {
+      "sha256": "c09dbb4ced572ce175f984ed85810d90125983dca3c2ed0ede275b7e17344bba",
+      "role": "byte-decoder-tests.log"
+    },
+    {
+      "sha256": "5beb9423834d4a4edd76786c82b1969103bc25ec913e269920a649c72a2a2f01",
+      "role": "harness-tests.log"
+    },
+    {
+      "sha256": "9745b11c2fb9740351a3cddcacd44a2ecde95a668a772f72b72aace29f04d5eb",
+      "role": "publication-tests.log"
+    },
+    {
+      "sha256": "d59f2d569f654389640e1c655461c5a955d6add7d96f8cb16d82f97dda1c0b12",
+      "role": "diagnostic-r2.log"
+    },
+    {
+      "sha256": "78223b496f76070ac240c9721ffcb755c36cfe84c94f8d063f5a099ea8d19932",
+      "role": "diagnostic/stopped-reference.json"
+    },
+    {
+      "sha256": "55db6ac12f78a66059ff2bcaede5c34c04c389d1b78c2b53797cd6537f3113d0",
+      "role": "paired-protocol.json"
+    }
+  ],
+  "preservation": "Original projective-v1 numerical failures and protocol remain unchanged. Initial weak unit-test fixture failure, pre-review outputs and rejected historical candidates retained. No PR, CI, merge, release or general qualification is asserted."
+}

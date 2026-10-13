@@ -1,0 +1,3773 @@
+{
+  "schema": "spiraltorch.fisher_rao_attention.scalar_trajectories.v1",
+  "cases": [
+    {
+      "runtime": "native",
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "trace": [
+        {
+          "revision": 1,
+          "reference_loss": 5.551050186157227,
+          "observed_loss": 5.551049709320068,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.439415174115206e-06,
+              "observed_l2": 9.439423118019372e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.684214423518399e-06,
+              "observed_l2": 3.684219792088735e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 3.7627185867582815e-06,
+              "observed_l2": 3.7627229060404952e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 5.489250706790144e-06,
+              "observed_l2": 5.489255455297355e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.3951193348812415e-06,
+              "observed_l2": 1.3951213771563103e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.2008385301673096e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.609773924610695e-07
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 4.76837158203125e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 6.933444812376405e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.9082797281243946e-07
+            }
+          ]
+        },
+        {
+          "revision": 2,
+          "reference_loss": 5.461981773376465,
+          "observed_loss": 5.461981773376465,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 8.133425881116173e-06,
+              "observed_l2": 8.133411412856273e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.7607776483568615e-06,
+              "observed_l2": 2.760773409881748e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 3.30648932430343e-06,
+              "observed_l2": 3.306484549314516e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.837749744456293e-06,
+              "observed_l2": 4.837740433396188e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.2449639770356597e-06,
+              "observed_l2": 1.2449600146708962e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 2.2052711708694773e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 8.031176401647473e-07
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 8.940696716308594e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.293915113573814e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 3.2236140449023154e-07
+            }
+          ]
+        },
+        {
+          "revision": 3,
+          "reference_loss": 5.37367582321167,
+          "observed_loss": 5.373676300048828,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 6.989380755698134e-06,
+              "observed_l2": 6.989377322444595e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.008066050417094e-06,
+              "observed_l2": 2.0080677394057587e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.8534152945729965e-06,
+              "observed_l2": 2.853415288498409e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.2608555661155684e-06,
+              "observed_l2": 4.2608541975170195e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.1072734158736412e-06,
+              "observed_l2": 1.1072724736254908e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 3.0658392278593963e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.0375652430645463e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2516975402832031e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.8298723021756115e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.5491270787935696e-07
+            }
+          ]
+        },
+        {
+          "revision": 4,
+          "reference_loss": 5.285238742828369,
+          "observed_loss": 5.285238265991211,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 6.109176244217779e-06,
+              "observed_l2": 6.109179040066995e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.5124897816228517e-06,
+              "observed_l2": 1.5124902520225517e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.4606777561560283e-06,
+              "observed_l2": 2.4606802519999385e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.7717482804333137e-06,
+              "observed_l2": 3.771748050120298e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.0029749334640684e-06,
+              "observed_l2": 1.00297618645898e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 3.804380559069162e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.1856625231502177e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.5497207641601562e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 2.304241869458879e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 5.877936757599122e-07
+            }
+          ]
+        },
+        {
+          "revision": 5,
+          "reference_loss": 5.195908546447754,
+          "observed_loss": 5.195908546447754,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 5.400750063014362e-06,
+              "observed_l2": 5.400753718030409e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.3301772579825343e-06,
+              "observed_l2": 1.3301855929829837e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.11037467440884e-06,
+              "observed_l2": 2.11037921392814e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.3631328268695965e-06,
+              "observed_l2": 3.363134164404609e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 9.187180872934591e-07,
+              "observed_l2": 9.187214606066597e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 4.434466400455155e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.2587953812658572e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.817941665649414e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 2.717899909239842e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 6.9510363278929e-07
+            }
+          ]
+        },
+        {
+          "revision": 6,
+          "reference_loss": 5.105064392089844,
+          "observed_loss": 5.105064392089844,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 4.714593609982471e-06,
+              "observed_l2": 4.714593858942163e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.5535664289982222e-06,
+              "observed_l2": 1.5535631366002198e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.7556921676939483e-06,
+              "observed_l2": 1.7556940901309531e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.0354568844094247e-06,
+              "observed_l2": 3.0354534914275906e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 8.262975201650096e-07,
+              "observed_l2": 8.262975390746484e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.016941265135883e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.2756603773514027e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.0265579223632812e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 3.1023415995785317e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 8.024520884654677e-07
+            }
+          ]
+        },
+        {
+          "revision": 7,
+          "reference_loss": 5.012078762054443,
+          "observed_loss": 5.012078285217285,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 4.031793154663186e-06,
+              "observed_l2": 4.03179565600969e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.087406877213717e-06,
+              "observed_l2": 2.087408335644418e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.388532498730493e-06,
+              "observed_l2": 1.3885336292164862e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.8036386531540504e-06,
+              "observed_l2": 2.803640543685983e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 7.177752292438938e-07,
+              "observed_l2": 7.177754966406418e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.498972670645449e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.2708209640901366e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.205371856689453e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 3.457872168054801e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 9.098254157587139e-07
+            }
+          ]
+        },
+        {
+          "revision": 8,
+          "reference_loss": 4.916210651397705,
+          "observed_loss": 4.916211128234863,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.4810689594442135e-06,
+              "observed_l2": 3.481069578091907e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.6620489755073456e-06,
+              "observed_l2": 2.662059324467828e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.0617739754592334e-06,
+              "observed_l2": 1.0617724809928936e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6724307833812203e-06,
+              "observed_l2": 2.6724351204566604e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 6.174219380669362e-07,
+              "observed_l2": 6.174218429063435e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.905378309833922e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.3073500144497513e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.3245811462402344e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 3.7848949432373047e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 9.920189963038706e-07
+            }
+          ]
+        },
+        {
+          "revision": 9,
+          "reference_loss": 4.816619873046875,
+          "observed_loss": 4.816619873046875,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.154677189909207e-06,
+              "observed_l2": 3.154683143093449e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.0576654904148216e-06,
+              "observed_l2": 3.0576689821505757e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 8.379856907264081e-07,
+              "observed_l2": 8.379865418672223e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.622482986800979e-06,
+              "observed_l2": 2.6224876807857104e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.540075662782472e-07,
+              "observed_l2": 5.540078368131255e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.233838941847611e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.4315588290935082e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.4437904357910156e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.113692189572098e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.0745380149674383e-06
+            }
+          ]
+        },
+        {
+          "revision": 10,
+          "reference_loss": 4.712419509887695,
+          "observed_loss": 4.712419509887695,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.005471349526745e-06,
+              "observed_l2": 3.005466512317072e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.2087575388200096e-06,
+              "observed_l2": 3.2087584796916845e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.285905329200676e-07,
+              "observed_l2": 7.285886535901366e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6214022259255943e-06,
+              "observed_l2": 2.621398667540909e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.327504481309285e-07,
+              "observed_l2": 5.327497386266329e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.562303732647678e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.643896996069719e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.5331974029541016e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.414995542845301e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.1573128604261636e-06
+            }
+          ]
+        },
+        {
+          "revision": 11,
+          "reference_loss": 4.602715492248535,
+          "observed_loss": 4.602715492248535,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.936608323531359e-06,
+              "observed_l2": 2.936606910139903e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.161653025854731e-06,
+              "observed_l2": 3.1616512609790277e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.987209945165975e-07,
+              "observed_l2": 6.987209333918717e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6327237097924367e-06,
+              "observed_l2": 2.6327229080461767e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.390968242207173e-07,
+              "observed_l2": 5.390961679203921e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.891283616158971e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.9060030154881113e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.6226043701171875e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.719153286360368e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.2402923134973534e-06
+            }
+          ]
+        },
+        {
+          "revision": 12,
+          "reference_loss": 4.486623764038086,
+          "observed_loss": 4.486624240875244,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.8793451117588326e-06,
+              "observed_l2": 2.8793456030845462e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.980039546846254e-06,
+              "observed_l2": 2.980033258060862e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.063671357992142e-07,
+              "observed_l2": 7.063689549334941e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.622277198586288e-06,
+              "observed_l2": 2.622277736480231e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.552813801962184e-07,
+              "observed_l2": 5.55281253373055e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 7.215090086575851e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.187682080193801e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.7120113372802734e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.025404185770363e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.3234378880962442e-06
+            }
+          ]
+        },
+        {
+          "revision": 13,
+          "reference_loss": 4.363286972045898,
+          "observed_loss": 4.363286972045898,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.792838936559441e-06,
+              "observed_l2": 2.792834159959961e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.7164521402333823e-06,
+              "observed_l2": 2.7164494231601068e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.171206868688285e-07,
+              "observed_l2": 7.171201773407486e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.5637440280341923e-06,
+              "observed_l2": 2.5637393200922127e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.668510932933415e-07,
+              "observed_l2": 5.668502378558161e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 7.540753197528839e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.463654347726702e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.8014183044433594e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.334948683847907e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.4067201282031473e-06
+            }
+          ]
+        },
+        {
+          "revision": 14,
+          "reference_loss": 4.231895923614502,
+          "observed_loss": 4.23189640045166,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.658081335964964e-06,
+              "observed_l2": 2.6580843983985366e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.406337445531011e-06,
+              "observed_l2": 2.4063384380378137e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.095887078636734e-07,
+              "observed_l2": 7.095894414685328e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.44260236700223e-06,
+              "observed_l2": 2.4426048645239026e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.653439087662267e-07,
+              "observed_l2": 5.65344948864583e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 7.85681299205876e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.719025564622221e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.8908252716064453e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.616868138987516e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.4901161193847656e-06
+            }
+          ]
+        },
+        {
+          "revision": 15,
+          "reference_loss": 4.0917253494262695,
+          "observed_loss": 4.091724872589111,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.4705314371638347e-06,
+              "observed_l2": 2.4705201081076308e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.0770813799833327e-06,
+              "observed_l2": 2.077075481146756e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.719567332772374e-07,
+              "observed_l2": 6.719508767264047e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.2544248145411515e-06,
+              "observed_l2": 2.254412811921868e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.4721815185761e-07,
+              "observed_l2": 5.472145666522287e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 8.15849121778942e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.9528847880334303e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.9802322387695312e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.8710575103759766e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.5736077764563662e-06
+            }
+          ]
+        },
+        {
+          "revision": 16,
+          "reference_loss": 3.9421699047088623,
+          "observed_loss": 3.9421699047088623,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.238910344923619e-06,
+              "observed_l2": 2.2389259977080764e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.749626587953719e-06,
+              "observed_l2": 1.749622001970132e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.014655823127987e-07,
+              "observed_l2": 6.01473048626137e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.0040431038128534e-06,
+              "observed_l2": 2.0040561147393647e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.139366514078695e-07,
+              "observed_l2": 5.139407365135909e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 8.406662136512942e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.1519852707618598e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 3.069639205932617e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 6.095139616056128e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.6337001411516364e-06
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "runtime": "native",
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "trace": [
+        {
+          "revision": 1,
+          "reference_loss": 5.523787021636963,
+          "observed_loss": 5.523787498474121,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.644082638435092e-05,
+              "observed_l2": 3.644083935512619e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.6316683209748496e-05,
+              "observed_l2": 3.631664668399295e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.343681028537643e-06,
+              "observed_l2": 7.343695909193945e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.3593840181832934e-05,
+              "observed_l2": 4.359383056533101e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.038170314452999e-06,
+              "observed_l2": 5.038180134402566e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 3.991305913622947e-06,
+              "observed_l2": 3.991316546880015e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 4.534063968341831e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.540199748216e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 9.257927278881709e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.441209561015722e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 6.136673772923351e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.887944301026084e-07
+            }
+          ]
+        },
+        {
+          "revision": 2,
+          "reference_loss": 5.41037130355835,
+          "observed_loss": 5.410370826721191,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.4793642474739746e-05,
+              "observed_l2": 1.4793652121347803e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.68716778998361e-06,
+              "observed_l2": 9.687188886286875e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 8.093350741121029e-07,
+              "observed_l2": 8.09338902594307e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 7.405709164589688e-06,
+              "observed_l2": 7.4057128149627954e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.3327119679970103e-06,
+              "observed_l2": 2.33271424883317e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.0265341440253388e-06,
+              "observed_l2": 1.0265375206193238e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.393866592357346e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 5.61652253441877e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 9.555351461101412e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 6.141466178005904e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 3.371747880871523e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 3.6378370570342845e-07
+            }
+          ]
+        },
+        {
+          "revision": 3,
+          "reference_loss": 5.319852828979492,
+          "observed_loss": 5.319852828979492,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.498290554546797e-05,
+              "observed_l2": 1.4982896096381164e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.3663570177846457e-05,
+              "observed_l2": 1.3663566288731585e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 3.1351853453758703e-07,
+              "observed_l2": 3.1351890534868335e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 1.3487152495516745e-05,
+              "observed_l2": 1.348716608950108e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 3.095668599370828e-06,
+              "observed_l2": 3.0956652951006553e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.5235352738481037e-06,
+              "observed_l2": 1.5235329356589536e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.872382182918509e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 7.300572972094548e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 9.852811846027697e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 7.812316579140833e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.3392836387637365e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 1.737759081973225e-07
+            }
+          ]
+        },
+        {
+          "revision": 4,
+          "reference_loss": 5.228670120239258,
+          "observed_loss": 5.228670120239258,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.690646688403156e-05,
+              "observed_l2": 1.690647294094255e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.8545283543936556e-05,
+              "observed_l2": 1.854528208424396e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 4.0293873055089905e-06,
+              "observed_l2": 4.029390677673864e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 1.1950441353187605e-05,
+              "observed_l2": 1.1950412220486133e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.7127758891971918e-06,
+              "observed_l2": 1.7127762992469472e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 3.0724573661242288e-06,
+              "observed_l2": 3.0724614816959754e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 8.28069775256783e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 9.224723163221316e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.0172157386467464e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 9.285802999274083e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.430433734452279e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 2.6987150723151616e-07
+            }
+          ]
+        },
+        {
+          "revision": 5,
+          "reference_loss": 5.138921737670898,
+          "observed_loss": 5.138921737670898,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.7501984738451203e-05,
+              "observed_l2": 1.7501975042239068e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.1688876886669027e-05,
+              "observed_l2": 2.1688859628275328e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.181418995155019e-06,
+              "observed_l2": 2.181416468709698e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.5712473026031533e-05,
+              "observed_l2": 2.5712447521199545e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 4.621107048487451e-06,
+              "observed_l2": 4.621100183449301e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 2.1325565383821027e-06,
+              "observed_l2": 2.1325602702510735e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 9.77184334323901e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.1382222161171965e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 7.731391055031327e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.2211899350148987e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.0150305250839235e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.915124923727108e-07
+            }
+          ]
+        },
+        {
+          "revision": 6,
+          "reference_loss": 5.056035995483398,
+          "observed_loss": 5.056035995483398,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 7.160095912307714e-05,
+              "observed_l2": 7.160097130577564e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 7.539607915173585e-05,
+              "observed_l2": 7.53961096759111e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.157177559898833e-05,
+              "observed_l2": 2.15717821773718e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.322335230809587e-05,
+              "observed_l2": 3.322334309409029e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.4314323726499712e-05,
+              "observed_l2": 1.431433747259343e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 6.0034028846117525e-06,
+              "observed_l2": 6.003414985069402e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.3798339488865609e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.5853545370301174e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 3.2042694224633247e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.201093676048616e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 8.663202437012573e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 1.2222586068159268e-06
+            }
+          ]
+        },
+        {
+          "revision": 7,
+          "reference_loss": 5.020293712615967,
+          "observed_loss": 5.020293235778809,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.970012608760708e-05,
+              "observed_l2": 9.969999037489636e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.00356343988577e-05,
+              "observed_l2": 9.003562405866418e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.820563123398828e-05,
+              "observed_l2": 2.8205584935937054e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 8.286578977440252e-05,
+              "observed_l2": 8.286567898669642e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.3446187868276927e-05,
+              "observed_l2": 2.344615478630664e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 9.048078014326233e-06,
+              "observed_l2": 9.048069618043827e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.5321753528922617e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.7035085036607085e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.3953089607619793e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 2.01685991964331e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 2.1696418193818684e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 7.598131170262076e-07
+            }
+          ]
+        },
+        {
+          "revision": 8,
+          "reference_loss": 4.954955101013184,
+          "observed_loss": 4.954955101013184,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.276666365278861e-05,
+              "observed_l2": 9.276644262114595e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.358239265534885e-05,
+              "observed_l2": 9.358239953292793e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.090195608837431e-05,
+              "observed_l2": 2.09018665813402e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 6.784026708540188e-05,
+              "observed_l2": 6.784009235617585e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.503551224216396e-05,
+              "observed_l2": 2.5035426753537395e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 2.7201373452578147e-06,
+              "observed_l2": 2.720105639566654e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.9736390766606073e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.0839587004130472e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 3.1496134317770964e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.955127750081054e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.0745380149674383e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 7.21437837893379e-07
+            }
+          ]
+        },
+        {
+          "revision": 9,
+          "reference_loss": 4.940216064453125,
+          "observed_loss": 4.940215110778809,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 0.00036273408621999515,
+              "observed_l2": 0.00036273656743913155
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 0.00019772480686882764,
+              "observed_l2": 0.00019772586849018406
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 0.00011552162620087979,
+              "observed_l2": 0.00011552241645681795
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 0.00029268223182081,
+              "observed_l2": 0.0002926840129175706
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 6.644145320104348e-05,
+              "observed_l2": 6.644199846699173e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 5.796331714302937e-05,
+              "observed_l2": 5.796364198791205e-05
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.244291479272109e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.4551640161534495e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.4239554626764163e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.361802445302492e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 7.2239747527175475e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 6.7319613683679805e-06
+            }
+          ]
+        },
+        {
+          "revision": 10,
+          "reference_loss": 4.825263500213623,
+          "observed_loss": 4.825265407562256,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 7.979313183542428e-05,
+              "observed_l2": 7.979359346835175e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 5.647542293735532e-05,
+              "observed_l2": 5.647581853156269e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.9497130464581128e-05,
+              "observed_l2": 1.949723376870642e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 5.938897529042523e-05,
+              "observed_l2": 5.93895030452428e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.0398054483020736e-05,
+              "observed_l2": 2.0398236374716892e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 5.6701268407696075e-06,
+              "observed_l2": 5.670159412102112e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.025871276303609e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.385550018048319e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2476606211238806e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.9293077265900394e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.718188626089883e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 6.016601021483642e-06
+            }
+          ]
+        },
+        {
+          "revision": 11,
+          "reference_loss": 4.619340896606445,
+          "observed_loss": 4.6193413734436035,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.116112109908234e-05,
+              "observed_l2": 9.116098199006838e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 7.089700603169029e-05,
+              "observed_l2": 7.089675397027352e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.838245207046217e-05,
+              "observed_l2": 2.8382378702340758e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 6.2938749079663e-05,
+              "observed_l2": 6.293859585346673e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.482094399873006e-05,
+              "observed_l2": 1.482091470125836e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 6.714059354898796e-06,
+              "observed_l2": 6.714039783786923e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.824189681309735e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.737059643052943e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.5296025634441957e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.601419234063541e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 6.559558181948886e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 6.744088425756568e-06
+            }
+          ]
+        },
+        {
+          "revision": 12,
+          "reference_loss": 4.478731155395508,
+          "observed_loss": 4.478731155395508,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 5.4396543140134673e-05,
+              "observed_l2": 5.439630847487763e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.041154132450446e-05,
+              "observed_l2": 3.041089563824964e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.1360539037346882e-05,
+              "observed_l2": 2.1360469151264938e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.2654521569373303e-05,
+              "observed_l2": 2.2654457853841436e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.0759200997888374e-05,
+              "observed_l2": 1.0759215086040385e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 9.048757133779475e-06,
+              "observed_l2": 9.048790961033724e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.573096901404329e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.7163215387320795e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2962639944508533e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.367560426569977e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 5.234699667085808e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 5.657733666937011e-06
+            }
+          ]
+        },
+        {
+          "revision": 13,
+          "reference_loss": 4.350063800811768,
+          "observed_loss": 4.350064277648926,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.3340097027699094e-05,
+              "observed_l2": 2.3339319386019078e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.8509887540245295e-05,
+              "observed_l2": 2.8509118590430093e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.755128398339042e-06,
+              "observed_l2": 6.754862498276088e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6383133827853623e-05,
+              "observed_l2": 2.6382738464316104e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.3884842326019161e-06,
+              "observed_l2": 1.3883918558771809e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.3174849077776255e-06,
+              "observed_l2": 1.3175312096995695e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.622853095760406e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.889510877581979e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2976199481557358e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.612629724978069e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 5.370044406783213e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 5.541789728633786e-06
+            }
+          ]
+        },
+        {
+          "revision": 14,
+          "reference_loss": 4.214028358459473,
+          "observed_loss": 4.2140278816223145,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 6.379342195889178e-05,
+              "observed_l2": 6.379277612961383e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 4.515254180777645e-05,
+              "observed_l2": 4.515172761332548e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.4392633363803095e-05,
+              "observed_l2": 2.4392443238363753e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.642503056464878e-05,
+              "observed_l2": 2.6424638265835546e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.224318213038897e-05,
+              "observed_l2": 1.2243125386906757e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 8.465817074021465e-06,
+              "observed_l2": 8.465781589312035e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.3796203144830525e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.880518663418126e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.053704929711697e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.390358869513431e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 3.863397254109472e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.538278238982952e-06
+            }
+          ]
+        },
+        {
+          "revision": 15,
+          "reference_loss": 4.072910785675049,
+          "observed_loss": 4.072910308837891,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 5.576881937739668e-05,
+              "observed_l2": 5.576751456472905e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 6.215650918443515e-05,
+              "observed_l2": 6.215511499153642e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.8104783289129106e-05,
+              "observed_l2": 1.810434747910288e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.609183737139528e-05,
+              "observed_l2": 4.609119809170062e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 4.455300367756721e-06,
+              "observed_l2": 4.455210121186226e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 3.54171280766196e-06,
+              "observed_l2": 3.5415836563453698e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.524166121898356e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.1151628832166886e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.1558076818842157e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.788885369385945e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.425318742866785e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.964211763512882e-06
+            }
+          ]
+        },
+        {
+          "revision": 16,
+          "reference_loss": 3.9325575828552246,
+          "observed_loss": 3.93255615234375,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 0.00012026871281717042,
+              "observed_l2": 0.00012026785680818022
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.672747319224809e-05,
+              "observed_l2": 9.672636561921062e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 4.3035855998224584e-05,
+              "observed_l2": 4.303566585780632e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 6.534878467490006e-05,
+              "observed_l2": 6.53481457969525e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.2036056628148453e-05,
+              "observed_l2": 2.2035935218562875e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.2543791058824596e-05,
+              "observed_l2": 1.2543767406984067e-05
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.279556865181375e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.040766873627707e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 8.121830031015707e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.283957012142167e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.6963779295394072e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 3.4253228934275166e-06
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "trace": [
+        {
+          "revision": 1,
+          "reference_loss": 5.551050186157227,
+          "observed_loss": 5.551049709320068,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.439415174115206e-06,
+              "observed_l2": 9.43942763174543e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.684214423518399e-06,
+              "observed_l2": 3.6842224163012077e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 3.7627185867582815e-06,
+              "observed_l2": 3.7627254073573936e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 5.489250706790144e-06,
+              "observed_l2": 5.48926041186296e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.3951193348812415e-06,
+              "observed_l2": 1.3951228260495885e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.2008385301673096e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.609773924610695e-07
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 4.76837158203125e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 6.933444812376405e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.9082797281243946e-07
+            }
+          ]
+        },
+        {
+          "revision": 2,
+          "reference_loss": 5.461981773376465,
+          "observed_loss": 5.461981773376465,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 8.133425881116173e-06,
+              "observed_l2": 8.133410823286597e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.7607776483568615e-06,
+              "observed_l2": 2.76077376254921e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 3.30648932430343e-06,
+              "observed_l2": 3.306484094545281e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.837749744456293e-06,
+              "observed_l2": 4.8377404460953825e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.2449639770356597e-06,
+              "observed_l2": 1.2449598614044795e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 2.2052711708694773e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 8.031176401647473e-07
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 8.940696716308594e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.293915113573814e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 3.2236140449023154e-07
+            }
+          ]
+        },
+        {
+          "revision": 3,
+          "reference_loss": 5.37367582321167,
+          "observed_loss": 5.373676300048828,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 6.989380755698134e-06,
+              "observed_l2": 6.989376244458767e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.008066050417094e-06,
+              "observed_l2": 2.008068351396001e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.8534152945729965e-06,
+              "observed_l2": 2.853415060833563e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.2608555661155684e-06,
+              "observed_l2": 4.260853750379766e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.1072734158736412e-06,
+              "observed_l2": 1.1072721144281165e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 3.0658392278593963e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.0375652430645463e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2516975402832031e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.8298723021756115e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.5491270787935696e-07
+            }
+          ]
+        },
+        {
+          "revision": 4,
+          "reference_loss": 5.285238742828369,
+          "observed_loss": 5.285238265991211,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 6.109176244217779e-06,
+              "observed_l2": 6.109179898943561e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.5124897816228517e-06,
+              "observed_l2": 1.5124899026141524e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.4606777561560283e-06,
+              "observed_l2": 2.4606804759280898e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.7717482804333137e-06,
+              "observed_l2": 3.771748733246714e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.0029749334640684e-06,
+              "observed_l2": 1.0029764129455043e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 3.804380559069162e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.1856625231502177e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.5497207641601562e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 2.304241869458879e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 5.877936757599122e-07
+            }
+          ]
+        },
+        {
+          "revision": 5,
+          "reference_loss": 5.195908546447754,
+          "observed_loss": 5.195908546447754,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 5.400750063014362e-06,
+              "observed_l2": 5.4007536687880465e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.3301772579825343e-06,
+              "observed_l2": 1.330185715429726e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.11037467440884e-06,
+              "observed_l2": 2.110379212813775e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.3631328268695965e-06,
+              "observed_l2": 3.363134372369663e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 9.187180872934591e-07,
+              "observed_l2": 9.187214477765267e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 4.434466400455155e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.2587953812658572e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.817941665649414e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 2.717899909239842e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 6.9510363278929e-07
+            }
+          ]
+        },
+        {
+          "revision": 6,
+          "reference_loss": 5.105064392089844,
+          "observed_loss": 5.105064392089844,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 4.714593609982471e-06,
+              "observed_l2": 4.714593594322026e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.5535664289982222e-06,
+              "observed_l2": 1.5535632008708631e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.7556921676939483e-06,
+              "observed_l2": 1.7556940829806963e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.0354568844094247e-06,
+              "observed_l2": 3.0354532045805014e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 8.262975201650096e-07,
+              "observed_l2": 8.262976413441422e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.016941265135883e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.2756603773514027e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.0265579223632812e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 3.1023415995785317e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 8.024520884654677e-07
+            }
+          ]
+        },
+        {
+          "revision": 7,
+          "reference_loss": 5.012078762054443,
+          "observed_loss": 5.012078285217285,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 4.031793154663186e-06,
+              "observed_l2": 4.031795728851656e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.087406877213717e-06,
+              "observed_l2": 2.087406079600453e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.388532498730493e-06,
+              "observed_l2": 1.3885327408574348e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.8036386531540504e-06,
+              "observed_l2": 2.803639558064233e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 7.177752292438938e-07,
+              "observed_l2": 7.177751916095843e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.498972670645449e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.2708209640901366e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.205371856689453e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 3.457872168054801e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 9.098254157587139e-07
+            }
+          ]
+        },
+        {
+          "revision": 8,
+          "reference_loss": 4.916210651397705,
+          "observed_loss": 4.916211128234863,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.4810689594442135e-06,
+              "observed_l2": 3.4810694815911885e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.6620489755073456e-06,
+              "observed_l2": 2.662058967243136e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.0617739754592334e-06,
+              "observed_l2": 1.0617727095084766e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6724307833812203e-06,
+              "observed_l2": 2.6724347806394336e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 6.174219380669362e-07,
+              "observed_l2": 6.174217834108454e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.905378309833922e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.3073500144497513e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.3245811462402344e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 3.7848949432373047e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 9.920189963038706e-07
+            }
+          ]
+        },
+        {
+          "revision": 9,
+          "reference_loss": 4.816619873046875,
+          "observed_loss": 4.816619873046875,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.154677189909207e-06,
+              "observed_l2": 3.154683731470191e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.0576654904148216e-06,
+              "observed_l2": 3.0576687909995214e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 8.379856907264081e-07,
+              "observed_l2": 8.379866553085777e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.622482986800979e-06,
+              "observed_l2": 2.622487712224379e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.540075662782472e-07,
+              "observed_l2": 5.540079200301552e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.233838941847611e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.4315588290935082e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.4437904357910156e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.113692189572098e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.0745380149674383e-06
+            }
+          ]
+        },
+        {
+          "revision": 10,
+          "reference_loss": 4.712419509887695,
+          "observed_loss": 4.712419509887695,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.005471349526745e-06,
+              "observed_l2": 3.005466512317072e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.2087575388200096e-06,
+              "observed_l2": 3.2087584796916845e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.285905329200676e-07,
+              "observed_l2": 7.285886535901366e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6214022259255943e-06,
+              "observed_l2": 2.621398667540909e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.327504481309285e-07,
+              "observed_l2": 5.327497386266329e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.562303732647678e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.643896996069719e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.5331974029541016e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.414995542845301e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.1573128604261636e-06
+            }
+          ]
+        },
+        {
+          "revision": 11,
+          "reference_loss": 4.602715492248535,
+          "observed_loss": 4.602715492248535,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.936608323531359e-06,
+              "observed_l2": 2.9366105118845236e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.161653025854731e-06,
+              "observed_l2": 3.1616562944402558e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.987209945165975e-07,
+              "observed_l2": 6.987213929092969e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6327237097924367e-06,
+              "observed_l2": 2.6327266927144046e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.390968242207173e-07,
+              "observed_l2": 5.390975520829266e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.891283616158971e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.9060030154881113e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.6226043701171875e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.719153286360368e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.2402923134973534e-06
+            }
+          ]
+        },
+        {
+          "revision": 12,
+          "reference_loss": 4.486623764038086,
+          "observed_loss": 4.486624240875244,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.8793451117588326e-06,
+              "observed_l2": 2.87934562288486e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.980039546846254e-06,
+              "observed_l2": 2.980033594021235e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.063671357992142e-07,
+              "observed_l2": 7.063688982152875e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.622277198586288e-06,
+              "observed_l2": 2.6222782044844613e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.552813801962184e-07,
+              "observed_l2": 5.552812299607183e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 7.215090086575851e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.187682080193801e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.7120113372802734e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.025404185770363e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.3234378880962442e-06
+            }
+          ]
+        },
+        {
+          "revision": 13,
+          "reference_loss": 4.363286972045898,
+          "observed_loss": 4.363286972045898,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.792838936559441e-06,
+              "observed_l2": 2.792834159959961e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.7164521402333823e-06,
+              "observed_l2": 2.7164494702275313e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.171206868688285e-07,
+              "observed_l2": 7.171201773407486e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.5637440280341923e-06,
+              "observed_l2": 2.5637393200922127e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.668510932933415e-07,
+              "observed_l2": 5.668502378558161e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 7.540753197528839e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.463654347726702e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.8014183044433594e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.334948683847907e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.4067201282031473e-06
+            }
+          ]
+        },
+        {
+          "revision": 14,
+          "reference_loss": 4.231895923614502,
+          "observed_loss": 4.23189640045166,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.658081335964964e-06,
+              "observed_l2": 2.6580843983985366e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.406337445531011e-06,
+              "observed_l2": 2.4063384380378137e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.095887078636734e-07,
+              "observed_l2": 7.095894414685328e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.44260236700223e-06,
+              "observed_l2": 2.4426048645239026e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.653439087662267e-07,
+              "observed_l2": 5.65344948864583e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 7.85681299205876e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.719025564622221e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.8908252716064453e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.616868138987516e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.4901161193847656e-06
+            }
+          ]
+        },
+        {
+          "revision": 15,
+          "reference_loss": 4.0917253494262695,
+          "observed_loss": 4.091724872589111,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.4705314371638347e-06,
+              "observed_l2": 2.4705201081076308e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.0770813799833327e-06,
+              "observed_l2": 2.077075481146756e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.719567332772374e-07,
+              "observed_l2": 6.719508767264047e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.2544248145411515e-06,
+              "observed_l2": 2.254412811921868e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.4721815185761e-07,
+              "observed_l2": 5.472145666522287e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 8.15849121778942e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.9528847880334303e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 2.9802322387695312e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.8710575103759766e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.5736077764563662e-06
+            }
+          ]
+        },
+        {
+          "revision": 16,
+          "reference_loss": 3.9421699047088623,
+          "observed_loss": 3.9421699047088623,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.238910344923619e-06,
+              "observed_l2": 2.238926461540339e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.749626587953719e-06,
+              "observed_l2": 1.7496231870742804e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.014655823127987e-07,
+              "observed_l2": 6.014739536685916e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.0040431038128534e-06,
+              "observed_l2": 2.0040579519364886e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.139366514078695e-07,
+              "observed_l2": 5.139412401407402e-07
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 8.406662136512942e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.1519852707618598e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 3.069639205932617e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 6.095139616056128e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.6337001411516364e-06
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "runtime": "browser",
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "trace": [
+        {
+          "revision": 1,
+          "reference_loss": 5.523787021636963,
+          "observed_loss": 5.523787498474121,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 3.644082638435092e-05,
+              "observed_l2": 3.644083827040712e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.6316683209748496e-05,
+              "observed_l2": 3.631664626844177e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 7.343681028537643e-06,
+              "observed_l2": 7.34369634607799e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.3593840181832934e-05,
+              "observed_l2": 4.3593830709676205e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 5.038170314452999e-06,
+              "observed_l2": 5.038180317864249e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 3.991305913622947e-06,
+              "observed_l2": 3.991316408560927e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 4.534063968341831e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.540199748216e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 9.257927278881709e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.441209561015722e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 6.136673772923351e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.887944301026084e-07
+            }
+          ]
+        },
+        {
+          "revision": 2,
+          "reference_loss": 5.41037130355835,
+          "observed_loss": 5.410370826721191,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.4793642474739746e-05,
+              "observed_l2": 1.4793655031522613e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.68716778998361e-06,
+              "observed_l2": 9.687193230012061e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 8.093350741121029e-07,
+              "observed_l2": 8.093420047344943e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 7.405709164589688e-06,
+              "observed_l2": 7.4057154794400235e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.3327119679970103e-06,
+              "observed_l2": 2.332714043362959e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.0265341440253388e-06,
+              "observed_l2": 1.0265374844610568e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.393866592357346e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 5.61652253441877e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 9.555351461101412e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 6.141466178005904e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 3.371747880871523e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 3.6378370570342845e-07
+            }
+          ]
+        },
+        {
+          "revision": 3,
+          "reference_loss": 5.319852828979492,
+          "observed_loss": 5.319852828979492,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.498290554546797e-05,
+              "observed_l2": 1.4982895563163241e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.3663570177846457e-05,
+              "observed_l2": 1.366356902469e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 3.1351853453758703e-07,
+              "observed_l2": 3.1351813094457865e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 1.3487152495516745e-05,
+              "observed_l2": 1.348717423843042e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 3.095668599370828e-06,
+              "observed_l2": 3.0956651257482984e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.5235352738481037e-06,
+              "observed_l2": 1.5235334085398151e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 6.872382182918509e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 7.300572972094548e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 9.852811846027697e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 7.812316579140833e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.3392836387637365e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 1.737759081973225e-07
+            }
+          ]
+        },
+        {
+          "revision": 4,
+          "reference_loss": 5.228670120239258,
+          "observed_loss": 5.228670120239258,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.690646688403156e-05,
+              "observed_l2": 1.6906475631453582e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 1.8545283543936556e-05,
+              "observed_l2": 1.8545289336278324e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 4.0293873055089905e-06,
+              "observed_l2": 4.0293910496781904e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 1.1950441353187605e-05,
+              "observed_l2": 1.1950412736001295e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.7127758891971918e-06,
+              "observed_l2": 1.712776101717158e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 3.0724573661242288e-06,
+              "observed_l2": 3.072461873445033e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 8.28069775256783e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 9.224723163221316e-06
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.0172157386467464e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 9.285802999274083e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.430433734452279e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 2.6987150723151616e-07
+            }
+          ]
+        },
+        {
+          "revision": 5,
+          "reference_loss": 5.138921737670898,
+          "observed_loss": 5.138921737670898,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 1.7501984738451203e-05,
+              "observed_l2": 1.7501976412427552e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.1688876886669027e-05,
+              "observed_l2": 2.1688863389755015e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.181418995155019e-06,
+              "observed_l2": 2.18141906169795e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.5712473026031533e-05,
+              "observed_l2": 2.571244919491723e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 4.621107048487451e-06,
+              "observed_l2": 4.621103514896455e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 2.1325565383821027e-06,
+              "observed_l2": 2.1325619380589356e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 9.77184334323901e-06
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.1382222161171965e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 7.731391055031327e-07
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.2211899350148987e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.0150305250839235e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.915124923727108e-07
+            }
+          ]
+        },
+        {
+          "revision": 6,
+          "reference_loss": 5.056035995483398,
+          "observed_loss": 5.056035995483398,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 7.160095912307714e-05,
+              "observed_l2": 7.160101173687611e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 7.539607915173585e-05,
+              "observed_l2": 7.539613871614276e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.157177559898833e-05,
+              "observed_l2": 2.1571790858636013e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 3.322335230809587e-05,
+              "observed_l2": 3.3223366243932565e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.4314323726499712e-05,
+              "observed_l2": 1.4314345308319145e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 6.0034028846117525e-06,
+              "observed_l2": 6.003413393263338e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.3798339488865609e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.5853545370301174e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 3.2042694224633247e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.201093676048616e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 8.663202437012573e-07
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 1.2222586068159268e-06
+            }
+          ]
+        },
+        {
+          "revision": 7,
+          "reference_loss": 5.020293712615967,
+          "observed_loss": 5.020293235778809,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.970012608760708e-05,
+              "observed_l2": 9.970008114288962e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.00356343988577e-05,
+              "observed_l2": 9.003564070719727e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.820563123398828e-05,
+              "observed_l2": 2.8205606216289676e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 8.286578977440252e-05,
+              "observed_l2": 8.286572861824106e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.3446187868276927e-05,
+              "observed_l2": 2.3446172719880006e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 9.048078014326233e-06,
+              "observed_l2": 9.04808804430916e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.5321753528922617e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 1.7035085036607085e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.3953089607619793e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 2.01685991964331e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 2.1696418193818684e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 7.598131170262076e-07
+            }
+          ]
+        },
+        {
+          "revision": 8,
+          "reference_loss": 4.954955101013184,
+          "observed_loss": 4.954955101013184,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.276666365278861e-05,
+              "observed_l2": 9.276641450775303e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.358239265534885e-05,
+              "observed_l2": 9.358237038364011e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.090195608837431e-05,
+              "observed_l2": 2.0901856136966593e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 6.784026708540188e-05,
+              "observed_l2": 6.78400604902541e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.503551224216396e-05,
+              "observed_l2": 2.5035432826939867e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 2.7201373452578147e-06,
+              "observed_l2": 2.720089450958999e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 1.9736390766606073e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 2.0839587004130472e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 3.1496134317770964e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 1.955127750081054e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.0745380149674383e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 7.21437837893379e-07
+            }
+          ]
+        },
+        {
+          "revision": 9,
+          "reference_loss": 4.940216064453125,
+          "observed_loss": 4.940215110778809,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 0.00036273408621999515,
+              "observed_l2": 0.00036273717306517235
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 0.00019772480686882764,
+              "observed_l2": 0.00019772614030073846
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 0.00011552162620087979,
+              "observed_l2": 0.00011552263593517561
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 0.00029268223182081,
+              "observed_l2": 0.00029268440169260364
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 6.644145320104348e-05,
+              "observed_l2": 6.644213079946522e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 5.796331714302937e-05,
+              "observed_l2": 5.796369049788926e-05
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.244291479272109e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.4551640161534495e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.4239554626764163e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.361802445302492e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 7.2239747527175475e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 6.7319613683679805e-06
+            }
+          ]
+        },
+        {
+          "revision": 10,
+          "reference_loss": 4.825263500213623,
+          "observed_loss": 4.825265407562256,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 7.979313183542428e-05,
+              "observed_l2": 7.979382404028978e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 5.647542293735532e-05,
+              "observed_l2": 5.6475933079736364e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.9497130464581128e-05,
+              "observed_l2": 1.9497298503626256e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 5.938897529042523e-05,
+              "observed_l2": 5.938970041391316e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.0398054483020736e-05,
+              "observed_l2": 2.039831755690011e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 5.6701268407696075e-06,
+              "observed_l2": 5.670165521804211e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.025871276303609e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.385550018048319e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2476606211238806e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 4.9293077265900394e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.718188626089883e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 6.016601021483642e-06
+            }
+          ]
+        },
+        {
+          "revision": 11,
+          "reference_loss": 4.619340896606445,
+          "observed_loss": 4.619340896606445,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 9.116112109908234e-05,
+              "observed_l2": 9.116104964550684e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 7.089700603169029e-05,
+              "observed_l2": 7.089677293509597e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.838245207046217e-05,
+              "observed_l2": 2.8382406426502195e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 6.2938749079663e-05,
+              "observed_l2": 6.293865955085927e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.482094399873006e-05,
+              "observed_l2": 1.4820933741661882e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 6.714059354898796e-06,
+              "observed_l2": 6.7140458681205704e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.824189681309735e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.737059643052943e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.5296025634441957e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.601419234063541e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 6.559558181948886e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 6.744088425756568e-06
+            }
+          ]
+        },
+        {
+          "revision": 12,
+          "reference_loss": 4.478731155395508,
+          "observed_loss": 4.478731155395508,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 5.4396543140134673e-05,
+              "observed_l2": 5.439625539545339e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 3.041154132450446e-05,
+              "observed_l2": 3.04108091750154e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.1360539037346882e-05,
+              "observed_l2": 2.136045821247349e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.2654521569373303e-05,
+              "observed_l2": 2.2654439140242294e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.0759200997888374e-05,
+              "observed_l2": 1.0759209219616797e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 9.048757133779475e-06,
+              "observed_l2": 9.048788365558936e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.573096901404329e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.7163215387320795e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2962639944508533e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.367560426569977e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 5.234699667085808e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 5.657733666937011e-06
+            }
+          ]
+        },
+        {
+          "revision": 13,
+          "reference_loss": 4.350063800811768,
+          "observed_loss": 4.350063323974609,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 2.3340097027699094e-05,
+              "observed_l2": 2.333918670814808e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 2.8509887540245295e-05,
+              "observed_l2": 2.8508989255917674e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 6.755128398339042e-06,
+              "observed_l2": 6.754818571134951e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.6383133827853623e-05,
+              "observed_l2": 2.638266754417094e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.3884842326019161e-06,
+              "observed_l2": 1.388371810813072e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.3174849077776255e-06,
+              "observed_l2": 1.3175404270926134e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.622853095760406e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.889510877581979e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.2976199481557358e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.612629724978069e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 5.370044406783213e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 5.541789728633786e-06
+            }
+          ]
+        },
+        {
+          "revision": 14,
+          "reference_loss": 4.214028358459473,
+          "observed_loss": 4.214028358459473,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 6.379342195889178e-05,
+              "observed_l2": 6.379262764786336e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 4.515254180777645e-05,
+              "observed_l2": 4.515156620967158e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 2.4392633363803095e-05,
+              "observed_l2": 2.439239094496895e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 2.642503056464878e-05,
+              "observed_l2": 2.6424537258727544e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 1.224318213038897e-05,
+              "observed_l2": 1.2243103156562176e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 8.465817074021465e-06,
+              "observed_l2": 8.465767520128817e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.3796203144830525e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 3.880518663418126e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.053704929711697e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.390358869513431e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 3.863397254109472e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.538278238982952e-06
+            }
+          ]
+        },
+        {
+          "revision": 15,
+          "reference_loss": 4.072910785675049,
+          "observed_loss": 4.072909832000732,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 5.576881937739668e-05,
+              "observed_l2": 5.576722365779495e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 6.215650918443515e-05,
+              "observed_l2": 6.215482971399524e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 1.8104783289129106e-05,
+              "observed_l2": 1.810424442332692e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 4.609183737139528e-05,
+              "observed_l2": 4.6091022621469994e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 4.455300367756721e-06,
+              "observed_l2": 4.4551774721648e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 3.54171280766196e-06,
+              "observed_l2": 3.541550221309889e-06
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.524166121898356e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.1151628832166886e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 1.1558076818842157e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.788885369385945e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 4.425318742866785e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 4.964211763512882e-06
+            }
+          ]
+        },
+        {
+          "revision": 16,
+          "reference_loss": 3.9325575828552246,
+          "observed_loss": 3.93255615234375,
+          "geometry_gradient_norms": [
+            {
+              "parameter": "geometry.projection.weight",
+              "reference_l2": 0.00012026871281717042,
+              "observed_l2": 0.00012026759686775819
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "reference_l2": 9.672747319224809e-05,
+              "observed_l2": 9.672608203268109e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "reference_l2": 4.3035855998224584e-05,
+              "observed_l2": 4.3035603881225634e-05
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "reference_l2": 6.534878467490006e-05,
+              "observed_l2": 6.534795852933042e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "reference_l2": 2.2036056628148453e-05,
+              "observed_l2": 2.2035908494915604e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "reference_l2": 1.2543791058824596e-05,
+              "observed_l2": 1.2543783613644921e-05
+            }
+          ],
+          "geometry_updates": [
+            {
+              "parameter": "geometry.projection.weight",
+              "delta_from_initial_l2": 5.279556865181375e-05
+            },
+            {
+              "parameter": "geometry.projection.bias",
+              "delta_from_initial_l2": 4.040766873627707e-05
+            },
+            {
+              "parameter": "geometry.raw_decay",
+              "delta_from_initial_l2": 8.121830031015707e-06
+            },
+            {
+              "parameter": "geometry.raw_phase",
+              "delta_from_initial_l2": 5.283957012142167e-05
+            },
+            {
+              "parameter": "geometry.raw_gain.0",
+              "delta_from_initial_l2": 1.6963779295394072e-06
+            },
+            {
+              "parameter": "geometry.raw_gain.1",
+              "delta_from_initial_l2": 3.4253228934275166e-06
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "schema": "spiraltorch.module_projective.negative_control.v2",
+  "scope": "Deliberately zeroed first contextual stopped geometry VJP oracle; failure retention, not model performance.",
+  "input": {
+    "file": "reviewed/negative-stopped-reference-r2.json",
+    "bytes": 7547773,
+    "sha256": "e4fbdc7da2abe3aaf5c7af065d1b71547c188eb9a3596b79850af5f30756276c"
+  },
+  "report": {
+    "file": "final/negative-stopped.json",
+    "bytes": 12590507,
+    "sha256": "706c8b4640ab7e87c925a7b7188d225a306c77eeb4c239e3b387f74dd4798c22"
+  },
+  "expected_exit_code": 1,
+  "observed_exit_code": 1,
+  "passed": false,
+  "retained_cases": 6,
+  "retained_learning_steps": 96,
+  "retained_paired_cases": 2,
+  "paired": [
+    {
+      "name": "four_way_query_contextual_query_causal_geometry_blocks1_metric_onlyTrue",
+      "passed": false,
+      "failures": [
+        {
+          "gate": "numeric_absolute_relative",
+          "label": "stopped parameter VJP 2",
+          "atol": 0.000003,
+          "rtol": 0.00005,
+          "step": 0,
+          "maximum_absolute_error": 0.0016940433997660875
+        },
+        {
+          "gate": "stopped_geometry_relative_l2",
+          "slot": 2,
+          "threshold": 0.002
+        }
+      ]
+    },
+    {
+      "name": "four_way_query_contextual_query_causal_geometry_blocks2_metric_onlyFalse",
+      "passed": true,
+      "failures": []
+    }
+  ]
+}

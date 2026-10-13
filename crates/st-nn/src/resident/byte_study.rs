@@ -1,10 +1,10 @@
-//! Bounded paired/three-arm corpus studies with request-bound, all-case resume.
+//! Bounded matched corpus studies with request-bound, all-case resume.
 //! Native and browser clients share model math, data order and acceptance gates.
 use crate::{
     resident::{
         AttentionInferencePlan, AttentionMask, ByteDecoderCheckpoint, ByteDecoderGeometryPlan,
-        ByteDecoderPlan, ByteLmBatch, InferenceOp, InferencePlan, ResidentByteDecoder,
-        ResidualAttentionPlan, ToposResonatorKernel,
+        ByteDecoderPairMetric, ByteDecoderPlan, ByteLmBatch, InferenceOp, InferencePlan,
+        ResidentByteDecoder, ResidualAttentionPlan, ToposResonatorKernel,
     },
     Tensor,
 };
@@ -25,12 +25,28 @@ type Result<T> = ByteCorpusStudyResult<T>;
 /// Input and checkpoint JSON are bounded before deserialization.
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
+mod calibration;
+mod headwise;
+mod mixture;
 mod policy;
-use policy::GeometryUpdate;
+mod query;
+pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
+pub use headwise::ByteCorpusHeadwiseControls;
+pub use mixture::ByteCorpusMixtureControls;
+use policy::{BiasInitialization, GeometryUpdate};
+pub use query::ByteCorpusQueryMixtureControls;
 
 /// A fixed request: documents, initial models, SGD rate and all selected windows.
 /// v1 pairs ordinary/learned geometry; v2 adds identical-initialization frozen
-/// geometry. This is a bounded study protocol, not an arbitrary scheduler.
+/// geometry; v3 crosses learned/frozen with Poincare/flat pair distance.
+/// v4 adds a prepared, gain-only RMS-matched flat learned/frozen pair.
+/// v5 retains those seven arms and adds a matched Fisher-Rao learned/frozen pair.
+/// v6 retains v5 and adds every ordered heterogeneous two-head assignment.
+/// v7 separately extends v5 with all two/three-metric mixtures, pairing learned
+/// routers with fixed routers while both coordinate encoders continue learning.
+/// v8 retains v7 and adds zero-initialized contextual projections, trained/frozen,
+/// with a frozen zero projection bias and the same trainable shared intercept.
+/// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
     request_sha256: String,
@@ -119,7 +135,7 @@ struct Config {
     curvature: f32,
 }
 
-#[derive(Deserialize, PartialEq)]
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct Parameter {
     name: String,
@@ -127,7 +143,7 @@ struct Parameter {
     values: Vec<f32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Case {
     name: String,
@@ -135,6 +151,14 @@ struct Case {
     geometry: bool,
     #[serde(default, deserialize_with = "policy::explicit_update")]
     geometry_update: Option<GeometryUpdate>,
+    #[serde(default, deserialize_with = "policy::explicit_metric")]
+    pair_metric: Option<ByteDecoderPairMetric>,
+    #[serde(default, deserialize_with = "headwise::explicit_metrics")]
+    head_pair_metrics: Option<Vec<Vec<ByteDecoderPairMetric>>>,
+    #[serde(default, deserialize_with = "mixture::explicit_mixture")]
+    mixture: Option<mixture::MixtureSpec>,
+    #[serde(default, deserialize_with = "policy::explicit_initialization")]
+    bias_initialization: Option<BiasInitialization>,
     parameters: Vec<Parameter>,
 }
 
@@ -150,6 +174,14 @@ struct Request {
     checkpoint_every: usize,
     rate: f32,
     cases: Vec<Case>,
+    #[serde(default, deserialize_with = "calibration::explicit_spec")]
+    bias_calibration: Option<calibration::CalibrationSpec>,
+    #[serde(default, deserialize_with = "headwise::explicit_spec")]
+    headwise_controls: Option<headwise::HeadwiseSpec>,
+    #[serde(default, deserialize_with = "mixture::explicit_spec")]
+    mixture_controls: Option<mixture::MixtureControlsSpec>,
+    #[serde(default, deserialize_with = "query::explicit_spec")]
+    query_controls: Option<query::QueryControlsSpec>,
 }
 
 fn parse(input: &[u8]) -> Result<Request> {
@@ -161,16 +193,23 @@ fn parse(input: &[u8]) -> Result<Request> {
     // Bounds belong to this interactive study runner, not the public model API.
     if !matches!(
         r.schema.as_str(),
-        "spiraltorch.byte_corpus.request.v1" | "spiraltorch.byte_corpus.request.v2"
+        "spiraltorch.byte_corpus.request.v1"
+            | "spiraltorch.byte_corpus.request.v2"
+            | "spiraltorch.byte_corpus.request.v3"
+            | "spiraltorch.byte_corpus.request.v4"
+            | "spiraltorch.byte_corpus.request.v5"
+            | "spiraltorch.byte_corpus.request.v6"
+            | "spiraltorch.byte_corpus.request.v7"
+            | "spiraltorch.byte_corpus.request.v8"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
         || !(2..=256).contains(&c.hidden)
         || c.heads == 0
-        || c.width % c.heads != 0
+        || !c.width.is_multiple_of(c.heads)
         || !(1..=4).contains(&c.blocks.len())
         || !(2..=32).contains(&c.geometry_cols)
-        || c.geometry_cols % 2 != 0
+        || !c.geometry_cols.is_multiple_of(2)
         || !c.curvature.is_finite()
         || c.curvature >= 0.
         || r.rate <= 0.
@@ -178,11 +217,28 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(1..=1024).contains(&r.train_batches.len())
         || !(1..=128).contains(&r.validation_batches.len())
         || !(1..=64).contains(&r.checkpoint_every)
-        || !(2..=16).contains(&r.cases.len())
-        || r.cases.len() % if r.controls() { 3 } else { 2 } != 0
+        || !(2..=if r.query_controls() {
+            75
+        } else if r.mixture_controls() {
+            51
+        } else if r.headwise_controls() {
+            63
+        } else if r.fisher_controls() {
+            27
+        } else if r.calibration_controls() {
+            21
+        } else {
+            16
+        })
+            .contains(&r.cases.len())
+        || !r.cases.len().is_multiple_of(r.arms_per_seed())
     {
         return Err("invalid study configuration".into());
     }
+    calibration::validate_spec(&r)?;
+    headwise::validate_spec(&r)?;
+    mixture::validate_spec(&r)?;
+    query::validate_spec(&r)?;
     if r.train_documents.is_empty()
         || r.validation_documents.is_empty()
         || r.train_documents
@@ -297,13 +353,44 @@ fn plan(c: &Config, case: &Case) -> Result<ByteDecoderPlan> {
         let gains = (0..c.blocks.len())
             .map(|i| p.values(&format!("geometry.raw_gain.{i}"), &[c.heads]))
             .collect::<Result<Vec<_>>>()?;
-        Some(ByteDecoderGeometryPlan::new(
-            &projection,
-            &decay,
-            &phase,
-            &gains,
-            c.curvature,
-        )?)
+        let geometry =
+            ByteDecoderGeometryPlan::new(&projection, &decay, &phase, &gains, c.curvature)?;
+        Some(if let Some(mix) = &case.mixture {
+            let routers = (0..c.blocks.len())
+                .map(|i| {
+                    p.values(
+                        &format!("geometry.mixture_logits.{i}"),
+                        &[c.heads, mix.metrics.len()],
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let geometry = geometry.with_mixture(&mix.metrics, &routers, &mix.scales)?;
+            if mix.query_projection.is_some() {
+                let input = NdLayout::contiguous(&[c.batch, c.steps, c.geometry_cols])?;
+                let projections = (0..c.blocks.len())
+                    .map(|i| {
+                        Ok(InferencePlan::from_operations(
+                            input.clone(),
+                            vec![p.linear(
+                                &format!("geometry.query_projection.{i}"),
+                                c.geometry_cols,
+                                c.heads * mix.metrics.len(),
+                            )?],
+                        )?)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                geometry.with_query_projections(&projections)?
+            } else {
+                geometry
+            }
+        } else if let Some(metrics) = &case.head_pair_metrics {
+            geometry.with_head_pair_metrics(metrics)?
+        } else {
+            geometry.with_pair_metric(
+                case.pair_metric
+                    .unwrap_or(ByteDecoderPairMetric::PoincareSquared),
+            )
+        })
     } else {
         None
     };
@@ -480,7 +567,7 @@ impl ByteCorpusStudy {
     }
 
     fn evaluation_boundary(&self, revision: usize) -> bool {
-        revision % self.request.checkpoint_every == 0 || revision == self.total_updates()
+        revision.is_multiple_of(self.request.checkpoint_every) || revision == self.total_updates()
     }
 
     fn checked_models(
@@ -527,6 +614,8 @@ impl ByteCorpusStudy {
                     || model.topology_json()? != initial.topology_json()?
                     || (cursor == 0 && model.to_json()? != initial.to_json()?)
                     || (case.frozen() && !model.geometry_parameters_match(&initial)?)
+                    || (case.router_frozen() && !mixture::routers_match(&model, &initial))
+                    || !query::frozen_projections_match(case, &model, &initial)?
                 {
                     return Err(
                         "checkpoint model revision, topology or initial/frozen values differ"
@@ -598,6 +687,9 @@ impl ByteCorpusStudy {
             return Err("real GPU required for this resident learning study".into());
         }
         let r = &self.request;
+        // This only verifies the frozen initialization on the selected device.
+        // Fitting is a separate preparation API; resume never changes gains.
+        calibration::verify_initial(r, &runtime).await?;
         let start = resume.map_or(0, ByteCorpusStudyCheckpoint::completed_updates);
         let documents: Vec<_> = r.train_documents.iter().map(Vec::as_slice).collect();
         let mut reports = Vec::new();
@@ -607,18 +699,22 @@ impl ByteCorpusStudy {
                 Some(models) => models[index].restore_wgpu(runtime.clone())?,
                 None => plan(&r.config, case)?.compile_training_wgpu(runtime.clone())?,
             };
-            let rates = if case.frozen() {
-                let mut rates = vec![r.rate; model.parameter_layout().len()];
-                rates[model
-                    .parameter_layout()
-                    .geometry()
-                    .ok_or("missing frozen geometry")?
-                    .all()]
-                .fill(0.);
-                Some(rates)
-            } else {
-                None
-            };
+            // The request order is the validated model owner order. A single
+            // policy drives rates, frozen checkpoint guards and reported counts.
+            if model.parameter_layout().len() != case.parameters.len() {
+                return Err("compiled parameter count differs".into());
+            }
+            let rates: Vec<_> = case
+                .parameters
+                .iter()
+                .map(|p| {
+                    if case.parameter_frozen(&p.name) {
+                        0.
+                    } else {
+                        r.rate
+                    }
+                })
+                .collect();
             let (mut training, mut evaluations) = if let Some(checkpoint) = resume {
                 let saved = &checkpoint.cases[index];
                 (saved.training.clone(), saved.validation.clone())
@@ -650,10 +746,7 @@ impl ByteCorpusStudy {
                 let loss =
                     tape.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
                 let gradients = model.backward(&tape, loss.prediction_gradient())?;
-                let update = match &rates {
-                    Some(rates) => model.sgd_with_rates(&gradients, rates)?,
-                    None => model.sgd(&gradients, r.rate)?,
-                };
+                let update = model.sgd_with_rates(&gradients, &rates)?;
                 pending.push((update, loss.value().clone()));
                 if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
                     // Bounded bursts; all receipts are drained even at a pause
@@ -678,16 +771,15 @@ impl ByteCorpusStudy {
                 }
             }
             let final_values = read_many(&model, model.parameter_snapshot().values()).await?;
-            if case.frozen()
-                && case
-                    .parameters
-                    .iter()
-                    .zip(&final_values)
-                    .any(|(p, values)| {
-                        p.name.starts_with("geometry.") && !policy::same_bits(&p.values, values)
-                    })
+            if case
+                .parameters
+                .iter()
+                .zip(&final_values)
+                .any(|(p, values)| {
+                    case.parameter_frozen(&p.name) && !policy::same_bits(&p.values, values)
+                })
             {
-                return Err("frozen geometry changed during the study".into());
+                return Err("frozen geometry/router changed during the study".into());
             }
             let mut report = json!({"name":case.name,"seed":case.seed,"geometry":case.geometry,
                 "parameter_tensors":case.parameters.len(),
@@ -699,9 +791,19 @@ impl ByteCorpusStudy {
                 report["trainable_parameter_scalars"] = json!(case
                     .parameters
                     .iter()
-                    .filter(|p| !case.frozen() || !p.name.starts_with("geometry."))
+                    .filter(|p| !case.parameter_frozen(&p.name))
                     .map(|p| p.values.len())
                     .sum::<usize>());
+            }
+            if let Some(mix) = &case.mixture {
+                report["mixture"] = json!(mix);
+            } else if let Some(metrics) = &case.head_pair_metrics {
+                report["head_pair_metrics"] = json!(metrics);
+            } else if r.metric_controls() {
+                report["pair_metric"] = json!(case.pair_metric);
+            }
+            if r.calibration_controls() {
+                report["bias_initialization"] = json!(case.bias_initialization);
             }
             reports.push(report);
             if capture {
@@ -719,9 +821,12 @@ impl ByteCorpusStudy {
             }
         }
         let schema = r.report_schema(stop_after == self.total_updates());
-        let report = json!({"schema":schema,"engine":"spiraltorch","request_sha256":self.request_sha256,
+        let mut report = json!({"schema":schema,"engine":"spiraltorch","request_sha256":self.request_sha256,
             "adapter":format!("{:?}",runtime.adapter_info()),"cases":reports,
             "scope":"Document-held-out byte corpus pilot; no language-quality superiority or speed claim"});
+        if r.calibration_controls() {
+            report["bias_calibration"] = json!(r.bias_calibration);
+        }
         let checkpoint = capture.then(|| ByteCorpusStudyCheckpoint {
             schema: r.checkpoint_schema().to_owned(),
             request_sha256: self.request_sha256.clone(),

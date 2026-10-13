@@ -1,0 +1,47 @@
+{
+  "schema": "spiraltorch.resident_byte_geometry_fisher_rao.comparison.v1",
+  "passed": true,
+  "cases": [
+    {
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "metric": "categorical_fisher_rao_squared.v1",
+      "parameter_tensors": 23,
+      "parameter_scalars": 2516,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 5.139366514078695e-07,
+      "logit_max_abs_error": 5.960464477539063e-08,
+      "loss_max_abs_error": 4.76837158203125e-07,
+      "parameter_max_abs_error": 8.940696716308594e-08,
+      "initial_vjp_max_abs_error": 1.1920928955078125e-07,
+      "geometry_relative_l2": 1.406036311088303e-05,
+      "embedding_gradient_max_abs_error": 2.738088369369507e-07,
+      "bias_gradient_max_abs_error": 0.0
+    },
+    {
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "metric": "categorical_fisher_rao_squared.v1",
+      "parameter_tensors": 37,
+      "parameter_scalars": 2678,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 3.1351853453758703e-07,
+      "logit_max_abs_error": 5.960464477539063e-08,
+      "loss_max_abs_error": 1.9073486328125e-06,
+      "parameter_max_abs_error": 6.854534149169922e-07,
+      "initial_vjp_max_abs_error": 3.427267074584961e-07,
+      "geometry_relative_l2": 9.894303339775058e-05,
+      "embedding_gradient_max_abs_error": 3.9637088775634766e-06,
+      "bias_gradient_max_abs_error": 2.7939677238464355e-09
+    }
+  ],
+  "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation",
+  "wide_pullback_control": {
+    "coordinates_relative_l2": 1.4935083798019115e-07,
+    "raw_gain_relative_l2": 4.2933908348411005e-08
+  },
+  "input_sha256": {
+    "reference": "d338e0532d3df792c8bf234c04dc9fcee37df64106878d3a792db5a235207c46",
+    "report": "5ecea5113874297ea782ed3b0929a2519e35484e14c8f7bf482d342613d0f3f0"
+  }
+}

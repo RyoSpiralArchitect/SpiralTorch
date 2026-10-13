@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""Check retained reports and first-update controls for calibrated v4/v5 studies."""
+import argparse
+import importlib.util
+import math
+from pathlib import Path
+import struct
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+study, resume = load("byte_corpus_study"), load("verify_byte_corpus_resume")
+
+
+def require(ok, message):
+    if not ok:
+        raise ValueError(message)
+
+
+def bits(values):
+    require(all(type(x) in (float, int) and math.isfinite(x) for x in values), "invalid parameter scalar")
+    return [struct.pack("<f", x) for x in values]
+
+
+def validate_report(report, request, request_hash, cursor):
+    version = study.request_version(request)
+    total = len(request["train_batches"])
+    kind = "result" if cursor == total else "partial"
+    require(report["schema"] == f"spiraltorch.byte_corpus.{kind}.v{version}"
+            and report["engine"] == "spiraltorch" and report["request_sha256"] == request_hash,
+            "request-derived report identity")
+    require(len(report["cases"]) == len(request["cases"]), "request-derived case count")
+    if version >= 4:
+        require(resume.exact(report.get("bias_calibration"), request["bias_calibration"]), "request-derived calibration")
+    revisions = [0] + [r for r in range(1, cursor + 1) if r % request["checkpoint_every"] == 0 or r == total]
+    for row, spec in zip(report["cases"], request["cases"]):
+        metric_field = "mixture" if "mixture" in spec else "head_pair_metrics" if "head_pair_metrics" in spec else "pair_metric"
+        require(all(k not in row for k in {"mixture","head_pair_metrics","pair_metric"}-{metric_field}), "exclusive case metric")
+        for key in ("name", "seed", "geometry", "geometry_update", metric_field):
+            require(key in row and resume.exact(row[key], spec.get(key)), "request-derived case metadata")
+        if version >= 4:
+            require(row.get("bias_initialization") == spec["bias_initialization"], "request-derived initialization")
+        require(resume.exact(row["parameter_tensors"], len(spec["parameters"]))
+                and resume.exact(row["parameter_scalars"], sum(len(p["values"]) for p in spec["parameters"]))
+                and resume.exact(row["trainable_parameter_scalars"], study.trainable_scalars(spec)), "request-derived parameter counts")
+        require(resume.exact([p["revision"] for p in row["training"]], list(range(1, cursor + 1))), "request-derived complete training history")
+        for point in row["training"]:
+            bits([point["ce"]])
+        require(resume.exact([p["revision"] for p in row["validation"]], revisions), "request-derived evaluation schedule")
+        for point in row["validation"]:
+            losses = point["batch_losses"]
+            require(len(losses) == len(request["validation_batches"]), "request-derived evaluation coverage")
+            bits(losses)
+            require(resume.exact(point["target_bytes"], request["config"]["batch"] * request["config"]["steps"] * len(losses)), "request-derived target count")
+            mean = math.fsum(losses) / len(losses)
+            study.close([point["mean_ce"], point["bits_per_byte"]], [mean, mean / math.log(2)], "evaluation aggregation")
+        require(len(row["final_parameters"]) == len(spec["parameters"]), "request-derived tensor count")
+        for desc, values in zip(spec["parameters"], row["final_parameters"]):
+            require(len(values) == len(desc["values"]), "request-derived tensor shape")
+            packed = bits(values)
+            if study.parameter_frozen(spec,desc["name"]):
+                require(packed == bits(desc["values"]), "request-derived frozen bits")
+
+
+def verify(request_raw, source_raw, full, retained, first):
+    request, source = map(study.decode_json, (request_raw, source_raw))
+    version, source_version = study.request_version(request), study.request_version(source)
+    require((version, source_version) in ((4, 3), (5, 4), (6, 5),(7,5)), "control schema")
+    if version in (6,7):
+        field = "headwise_controls" if version==6 else "mixture_controls"
+        require(request[field]["source_request_sha256"] == study.digest(source_raw), "control source binding")
+        for key in source:
+            if key not in ("schema", "cases"):
+                require(resume.exact(source[key], request.get(key)), "headwise source recipe")
+        require(resume.exact(source["cases"], request["cases"][:len(source["cases"])]), "headwise source initial cases")
+    if version == 4:
+        require(request["bias_calibration"]["source_request_sha256"] == study.digest(source_raw), "source binding")
+    else:
+        require(resume.exact(request["bias_calibration"], source["bias_calibration"]), "shared v3 source and calibration recipe")
+    validate_report(full, request, study.digest(request_raw), len(request["train_batches"]))
+    validate_report(retained, source, study.digest(source_raw), len(source["train_batches"]))
+    validate_report(first, request, study.digest(request_raw), 1)
+    require(full["schema"] == f"spiraltorch.byte_corpus.result.v{version}"
+            and retained["schema"] == f"spiraltorch.byte_corpus.result.v{source_version}"
+            and retained["engine"] == "spiraltorch"
+            and retained["request_sha256"] == study.digest(source_raw), "baseline identity")
+    require(full["adapter"] == retained["adapter"] == first["adapter"], "runtime differs")
+    for report in (full, first):
+        require(report["engine"] == "spiraltorch" and report["request_sha256"] == study.digest(request_raw)
+                and resume.exact(report.get("bias_calibration"), request["bias_calibration"]), "calibrated report identity")
+        require([c["name"] for c in report["cases"]] == [c["name"] for c in request["cases"]], "report order/coverage")
+    require(len(retained["cases"]) == len(source["cases"]), "retained case coverage")
+    old_names = []
+    for old, new, spec in zip(retained["cases"], full["cases"], source["cases"]):
+        copy = dict(new)
+        if source_version == 3:
+            require(copy.pop("bias_initialization") == study.ORIGINAL, "inherited initialization")
+        require(copy["name"] == spec["name"], "inherited identity")
+        require(resume.exact(copy, old), "inherited full case report changed")
+        old_names.append(old["name"])
+    for spec, result, prefix in zip(request["cases"], full["cases"], first["cases"]):
+        metric_field = "mixture" if "mixture" in spec else "head_pair_metrics" if "head_pair_metrics" in spec else "pair_metric"
+        require(all(resume.exact(prefix[k], result[k]) for k in ("name", "seed", "geometry", "geometry_update", metric_field, "bias_initialization", "parameter_tensors", "parameter_scalars", "trainable_parameter_scalars")), "first-step case metadata")
+        require(resume.exact(prefix["training"], result["training"][:1])
+                and [p["revision"] for p in prefix["training"]] == [1]
+                and resume.exact(prefix["validation"], [p for p in result["validation"] if p["revision"] <= 1]), "first-step prefix or evaluation schedule")
+        require(len(prefix["final_parameters"]) == len(spec["parameters"]), "first-step parameter count")
+        for desc, value in zip(spec["parameters"], prefix["final_parameters"]):
+            require(len(value) == len(desc["values"]), "first-step parameter shape")
+            bits(value)
+    pairs = []
+    for seed in sorted({c["seed"] for c in request["cases"]}):
+        modes = [(study.POINCARE, study.ORIGINAL), (study.FLAT, study.ORIGINAL), (study.FLAT, study.MATCHED)]
+        if version >= 5:
+            modes.append((study.FISHER, study.MATCHED))
+        if version == 6:
+            modes.extend(([list(route)], study.MATCHED) for route in load("byte_corpus_headwise").ROUTES)
+        for metric, initialization in modes:
+            field = "head_pair_metrics" if isinstance(metric, list) else "pair_metric"
+            indices = [i for i, c in enumerate(request["cases"]) if c["seed"] == seed
+                       and c.get(field) == metric and c["bias_initialization"] == initialization]
+            trained = next(i for i in indices if not study.frozen(request["cases"][i]))
+            fixed = next(i for i in indices if study.frozen(request["cases"][i]))
+            a, b = first["cases"][trained], first["cases"][fixed]
+            require(resume.exact(a["validation"][0], b["validation"][0]) and resume.exact(a["training"], b["training"]), "same-initialization forward differs")
+            moving = []
+            for desc, learned, frozen_values in zip(request["cases"][trained]["parameters"], a["final_parameters"], b["final_parameters"]):
+                original = bits(desc["values"])
+                if desc["name"].startswith("geometry."):
+                    require(bits(frozen_values) == original, "frozen initial bits changed")
+                    if bits(learned) != original:
+                        moving.append(desc["name"])
+                else:
+                    require(bits(learned) == bits(frozen_values), "first backbone update differs")
+                    if desc["name"] in ("token_embedding", "position_embedding"):
+                        require(bits(learned) != original, "embedding did not learn")
+            require(bool(moving), "trained geometry did not change")
+            pairs.append(dict(seed=seed, bias_initialization=initialization,
+                              first_backbone_update_bits_identical=True, both_embeddings_moved=True,
+                              frozen_initial_bits_preserved=True, moving_geometry_families=moving))
+            pairs[-1][field] = metric
+        if version == 7:
+            for metrics in load("byte_corpus_mixture").COMBINATIONS:
+                indices = [next(i for i,c in enumerate(request["cases"]) if c["seed"]==seed
+                    and c.get("mixture",{}).get("metrics")==list(metrics) and c["mixture"]["router_update"]==u) for u in ("train","frozen")]
+                a,b = [first["cases"][i] for i in indices]
+                require(resume.exact(a["validation"][0],b["validation"][0]) and resume.exact(a["training"],b["training"]), "router twin initial forward differs")
+                moving=[]
+                for desc,x,y in zip(request["cases"][indices[0]]["parameters"],a["final_parameters"],b["final_parameters"]):
+                    if desc["name"].startswith("geometry.mixture_logits."):
+                        require(bits(y)==bits(desc["values"]), "fixed router moved")
+                        require(bits(x)!=bits(desc["values"]), "learned router did not move")
+                    else:
+                        require(bits(x)==bits(y), "first non-router update differs; fixed router may be detached")
+                        if bits(x)!=bits(desc["values"]): moving.append(desc["name"])
+                require(all(n in moving for n in ("token_embedding","position_embedding","geometry.projection.weight","geometry.raw_gain.0")), "router twin disconnected encoder")
+                pairs.append(dict(seed=seed,metrics=list(metrics),first_non_router_update_bits_identical=True,
+                    fixed_router_bits_preserved=True,learned_router_moved=True,moving_non_router_families=moving))
+    return dict(schema=f"spiraltorch.byte_corpus.calibrated_controls.v{version-3}", passed=True,
+                request_sha256=study.digest(request_raw), source_request_sha256=study.digest(source_raw),
+                inherited_full_reports_exact=old_names, pairs=pairs,
+                scope="Same-runtime inheritance and separately executed first-update controls, not quality or speed evidence")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ("request", "source", "full", "retained", "first", "output"):
+        parser.add_argument(name, type=Path)
+    args = parser.parse_args()
+    raw = {n: getattr(args, n).read_bytes() for n in ("request", "source", "full", "retained", "first")}
+    result = verify(raw["request"], raw["source"], *(study.decode_json(raw[n]) for n in ("full", "retained", "first")))
+    result["input_sha256"] = {n: study.digest(v) for n, v in raw.items()}
+    study.write_new(args.output, result)
+    print(f"Verified {len(result['inherited_full_reports_exact'])} inherited reports and {len(result['pairs'])} first-update pairs")
+
+
+if __name__ == "__main__":
+    main()

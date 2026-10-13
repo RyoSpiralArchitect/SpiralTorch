@@ -1,0 +1,648 @@
+{
+  "schema": "spiraltorch.byte_corpus.calibrated_controls.v4",
+  "passed": true,
+  "request_sha256": "7733e760748e14944744a91a6c55a16ad21982a53af0375a4a2ac95d00e9a010",
+  "source_request_sha256": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+  "inherited_full_reports_exact": [
+    "seed11_ordinary",
+    "seed11_geometry",
+    "seed11_geometry_frozen",
+    "seed11_flat",
+    "seed11_flat_frozen",
+    "seed23_ordinary",
+    "seed23_geometry",
+    "seed23_geometry_frozen",
+    "seed23_flat",
+    "seed23_flat_frozen",
+    "seed37_ordinary",
+    "seed37_geometry",
+    "seed37_geometry_frozen",
+    "seed37_flat",
+    "seed37_flat_frozen",
+    "seed11_flat_rms_matched",
+    "seed11_flat_frozen_rms_matched",
+    "seed23_flat_rms_matched",
+    "seed23_flat_frozen_rms_matched",
+    "seed37_flat_rms_matched",
+    "seed37_flat_frozen_rms_matched",
+    "seed11_flat_fisher_rao_rms_matched",
+    "seed11_flat_frozen_fisher_rao_rms_matched",
+    "seed23_flat_fisher_rao_rms_matched",
+    "seed23_flat_frozen_fisher_rao_rms_matched",
+    "seed37_flat_fisher_rao_rms_matched",
+    "seed37_flat_frozen_fisher_rao_rms_matched"
+  ],
+  "pairs": [
+    {
+      "seed": 11,
+      "bias_initialization": "original",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "poincare_squared.v1"
+    },
+    {
+      "seed": 11,
+      "bias_initialization": "original",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "euclidean_chord_squared.v1"
+    },
+    {
+      "seed": 11,
+      "bias_initialization": "matched_poincare_rms",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "euclidean_chord_squared.v1"
+    },
+    {
+      "seed": 11,
+      "bias_initialization": "matched_poincare_rms",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "categorical_fisher_rao_squared.v1"
+    },
+    {
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 11,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 11,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 23,
+      "bias_initialization": "original",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "poincare_squared.v1"
+    },
+    {
+      "seed": 23,
+      "bias_initialization": "original",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "euclidean_chord_squared.v1"
+    },
+    {
+      "seed": 23,
+      "bias_initialization": "matched_poincare_rms",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "euclidean_chord_squared.v1"
+    },
+    {
+      "seed": 23,
+      "bias_initialization": "matched_poincare_rms",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "categorical_fisher_rao_squared.v1"
+    },
+    {
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 23,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 23,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 37,
+      "bias_initialization": "original",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "poincare_squared.v1"
+    },
+    {
+      "seed": 37,
+      "bias_initialization": "original",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "euclidean_chord_squared.v1"
+    },
+    {
+      "seed": 37,
+      "bias_initialization": "matched_poincare_rms",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "euclidean_chord_squared.v1"
+    },
+    {
+      "seed": 37,
+      "bias_initialization": "matched_poincare_rms",
+      "first_backbone_update_bits_identical": true,
+      "both_embeddings_moved": true,
+      "frozen_initial_bits_preserved": true,
+      "moving_geometry_families": [
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0"
+      ],
+      "pair_metric": "categorical_fisher_rao_squared.v1"
+    },
+    {
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 37,
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    },
+    {
+      "seed": 37,
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "first_non_router_update_bits_identical": true,
+      "fixed_router_bits_preserved": true,
+      "learned_router_moved": true,
+      "moving_non_router_families": [
+        "token_embedding",
+        "position_embedding",
+        "geometry.projection.weight",
+        "geometry.projection.bias",
+        "geometry.raw_decay",
+        "geometry.raw_phase",
+        "geometry.raw_gain.0",
+        "block.0.pre.gain",
+        "block.0.pre.bias",
+        "block.0.qkv.weight",
+        "block.0.qkv.bias",
+        "block.0.output.weight",
+        "block.0.output.bias",
+        "block.0.feed.gain",
+        "block.0.feed.bias",
+        "block.0.up.weight",
+        "block.0.up.bias",
+        "block.0.down.weight",
+        "block.0.down.bias",
+        "head.gain",
+        "head.bias",
+        "head.output.weight",
+        "head.output.bias"
+      ]
+    }
+  ],
+  "scope": "Same-runtime inheritance and separately executed first-update controls, not quality or speed evidence",
+  "input_sha256": {
+    "request": "7733e760748e14944744a91a6c55a16ad21982a53af0375a4a2ac95d00e9a010",
+    "source": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+    "full": "9bd4948b88a79a6a7f1db8378c01cdc14655b68f16149aae9ba4a1b6e8991af6",
+    "retained": "48a2d82b6408633f9cc188e3f2aff178abec47a526d155b5781f7cd336f4ecc6",
+    "first": "d3f40f374145629abde7867aca4bb9db1845a911bc4d45c8c19bc45f0447e3b0"
+  }
+}

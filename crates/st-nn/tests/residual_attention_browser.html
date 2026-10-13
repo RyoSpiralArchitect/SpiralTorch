@@ -12,6 +12,13 @@ try {
   const {default: init, run_residual_attention_checks} = await import("/target/residual-attention-web/resident_residual_attention_browser.js");
   await init();
   const report = JSON.parse(await run_residual_attention_checks());
+  const identities = new Set(["24/-1", "24/1", "48/-1", "48/1"]);
+  if (report.residual_association?.contract !== "projection_bias_before_residual.v1"
+      || report.residual_association.cases.length !== 4
+      || report.residual_association.cases.some(c => !identities.delete(`${c.exponent}/${c.sign}`)
+        || c.passed !== true || c.output !== c.sign || c.reassociated_control !== 0
+        || c.input_gradient !== 2 || c.output_bias_gradient !== 2)
+      || identities.size !== 0) throw Error("Incomplete residual association controls");
   if (report.passed !== true || report.checks.length !== 60 || report.training.length !== 2
       || Object.keys(report.guards).length !== 12 || Object.values(report.guards).some(v => v !== true)
       || report.checks.some(check => ![12,13].includes(check.max_abs_error.parameters.length))
@@ -22,7 +29,7 @@ try {
   }
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
-  document.querySelector("#summary").textContent = "Passed: 60 forward/VJP cases, 32 plain + 32 Topos updates, 12 guard checks. Correctness only, not a speed or language-quality benchmark.";
+  document.querySelector("#summary").textContent = "Passed: 60 forward/VJP cases, 32 plain + 32 Topos updates, 12 guards and 4 residual-association controls. Correctness only, not a speed or language-quality benchmark.";
   const download = document.querySelector("#download");
   download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
   download.download = "resident-residual-attention.json";

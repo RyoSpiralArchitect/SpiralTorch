@@ -1,0 +1,415 @@
+{
+  "schema": "spiraltorch.wave_batch_adjoint.validation.v1",
+  "created_utc": "2026-10-13 05:21:09 UTC",
+  "baseline_commit": "830494be48041a3a5368718e86ac273b2a14f0e3",
+  "source_identity": "Baseline commit plus the source SHA-256 values below. No source hash claims to be a self-referential final commit.",
+  "environment": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "0.2.129",
+    "native_adapter": "Apple M4 / Metal",
+    "browser_backend": "BrowserWebGpu; adapter name is withheld by runtime",
+    "torch_reference": "Frozen CPU f32 fixture; no regenerated oracle or threshold change",
+    "gpu_runtime_opt_in": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+    "incremental": "0",
+    "test_threads": 1
+  },
+  "commands": [
+    {
+      "log": "cpu-before.log",
+      "exit_code": 101,
+      "tests_passed": 0,
+      "tests_failed": 2,
+      "scope": "New regressions on baseline CPU implementation"
+    },
+    {
+      "log": "gpu-before.log",
+      "exit_code": 101,
+      "tests_passed": 0,
+      "tests_failed": 2,
+      "scope": "New regressions on baseline WGPU implementation"
+    },
+    {
+      "log": "cpu-after.log",
+      "exit_code": 0,
+      "tests_passed": 9,
+      "tests_failed": 0,
+      "scope": "All causal_wave pure contract tests"
+    },
+    {
+      "log": "gpu-after.log",
+      "exit_code": 0,
+      "tests_passed": 6,
+      "tests_failed": 0,
+      "scope": "All resident_tensor::causal_wave WGPU tests, runtime enabled"
+    },
+    {
+      "log": "native-wave.log",
+      "exit_code": 101,
+      "scope": "Initial integration compile failed: implicit nested support module path; repaired with explicit path"
+    },
+    {
+      "log": "native-wave-r2.log",
+      "exit_code": 0,
+      "tests_passed": 1,
+      "scope": "Native wave harness: 10 frozen Torch, 9 radial, 36 batch, 2 recoverable and 2 final-overflow controls, streaming and 16 updates"
+    },
+    {
+      "log": "native-lm-build.log",
+      "exit_code": 0,
+      "scope": "Release resident_byte_flat_metric build"
+    },
+    {
+      "log": "native-projective.log",
+      "exit_code": 1,
+      "qualified_cases": 4,
+      "total_cases": 6,
+      "scope": "Original QKV qualification: inherited failures remain, not a passing run"
+    },
+    {
+      "log": "native-paired.log",
+      "exit_code": 0,
+      "qualified_cases": 2,
+      "total_cases": 2,
+      "scope": "Same-runtime paired query VJPs"
+    },
+    {
+      "log": "wasm-wave-build.log",
+      "exit_code": 0,
+      "scope": "WASM wave build"
+    },
+    {
+      "log": "wasm-lm-build.log",
+      "exit_code": 0,
+      "scope": "WASM resident byte decoder build"
+    },
+    {
+      "log": "byte-decoder-tests.log",
+      "exit_code": 0,
+      "tests_passed": 32,
+      "tests_failed": 0,
+      "scope": "Resident byte-decoder tests including checkpoint, guards and query-pullback training; runtime enabled"
+    },
+    {
+      "log": "publisher-tests.log",
+      "exit_code": 0,
+      "tests_passed": 15,
+      "scope": "Initial publication tests; not final review coverage"
+    },
+    {
+      "log": "publisher-tests-r2.log",
+      "exit_code": 0,
+      "tests_passed": 18,
+      "tests_failed": 0,
+      "scope": "Reviewed publication tests: 11 wave + 7 existing paired"
+    },
+    {
+      "log": "browser-validator-tests.log",
+      "exit_code": 0,
+      "tests_passed": 6,
+      "tests_failed": 0,
+      "scope": "Actual HTML batch checker, four hostile-input cases plus both retained runtime receipts"
+    },
+    {
+      "exit_code": 0,
+      "scope": "Final scalar publisher with full raw native/browser inputs; no new model failure signatures, full original failures retained"
+    },
+    {
+      "exit_code": 0,
+      "scope": "rustfmt --check on all six changed/new Rust files; existing stable-toolchain config warnings only"
+    },
+    {
+      "exit_code": 0,
+      "scope": "git diff --check"
+    },
+    {
+      "exit_code": 0,
+      "scope": "cmp original and reviewed browser wave downloads: byte-identical results"
+    }
+  ],
+  "browser": {
+    "wave_passed": true,
+    "reviewed_page_rerun_passed": true,
+    "reviewed_download_identical_to_original": true,
+    "model_qualified_cases": 4,
+    "model_total_cases": 6,
+    "paired_query_passed": true,
+    "full_mode_resume_cases": 6,
+    "raw_downloads": [
+      "browser-wave.json",
+      "browser-wave-reviewed.json",
+      "browser-lm.json"
+    ],
+    "screenshots_local_only": true
+  },
+  "boundaries": {
+    "default_primal_unchanged": true,
+    "exact_parameters_after_all_16_steps_in_each_six_case_run_vs_baseline": true,
+    "no_new_model_failure_signature": true,
+    "old_projective_qualification_passed": false,
+    "native_phase_gate_slightly_worse": true,
+    "logical_gpu_temporary_payload_delta_bytes": "12*B*C",
+    "new_bindings": 0,
+    "new_dispatches": 0,
+    "shader_f64_required": false,
+    "cpu_fallback_added": false,
+    "corpus_or_ft_efficacy_established": false,
+    "speed_measured": false,
+    "cuda_validated": false
+  },
+  "review": {
+    "core": "Read-only independent source review of five core Rust/WGSL files; no actionable findings.",
+    "harness_publication": "Four validator/browser issues found, fixed and independently verified with no remaining actionable findings.",
+    "reviewer_runtime_execution": false,
+    "parent_executed_tests": true
+  },
+  "repository": {
+    "intentional_unrelated_deleted_tracked_files_preserved": 8240,
+    "pr_created": false,
+    "ci_trigger_requested": false,
+    "merge_performed": false
+  },
+  "sources": [
+    {
+      "file": "Cargo.lock",
+      "bytes": 119721,
+      "sha256": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62"
+    },
+    {
+      "file": "crates/st-kernel-contracts/src/causal_wave.rs",
+      "bytes": 12085,
+      "sha256": "c59e248e6261bcfe887a14b0e0da3717ef697befba48d11c0231d9ffdb55e35a"
+    },
+    {
+      "file": "crates/st-kernel-contracts/src/causal_wave/tests.rs",
+      "bytes": 11722,
+      "sha256": "065d352eaaa86f55b3a412d56846c6c32721f28c91d33231563c76ff65a9ef4a"
+    },
+    {
+      "file": "crates/st-backend-wgpu/src/resident_tensor/causal_wave.rs",
+      "bytes": 16019,
+      "sha256": "440f74fa835e2506c6c65e6e5033d6825b9e8833c424571b68097414c585d65a"
+    },
+    {
+      "file": "crates/st-backend-wgpu/src/resident_tensor/causal_wave/tests.rs",
+      "bytes": 11539,
+      "sha256": "162c8ebf11a67794f5f56c64fdb4b4a9a8a55345d3ee07a62bcaadb55cabe707"
+    },
+    {
+      "file": "crates/st-backend-wgpu/src/resident_tensor/shaders/causal_wave_backward.wgsl",
+      "bytes": 4848,
+      "sha256": "f00a422693de858d91ca7734c2ecdda9937fcf1a814b2f17f6ccc532aa8d1e11"
+    },
+    {
+      "file": "crates/st-backend-wgpu/tests/support/causal_wave.rs",
+      "bytes": 22250,
+      "sha256": "16dd77109e3c9f47b73269bf52ad779fdb4ff41ef7fbe9a29a176dff1fb5ac9d"
+    },
+    {
+      "file": "crates/st-backend-wgpu/tests/support/causal_wave/batch_reduction.rs",
+      "bytes": 4921,
+      "sha256": "08be446ae1bef83a28188c402b372f4908034f32b24b4a74b63af60d208152d9"
+    },
+    {
+      "file": "crates/st-backend-wgpu/tests/causal_zspace_wave_browser.html",
+      "bytes": 5301,
+      "sha256": "782e007ba4556ff070fc61dff524f7e806de3b16cd3e5f91f520abe2c7000690"
+    },
+    {
+      "file": "crates/st-backend-wgpu/tests/fixtures/causal_zspace_wave_torch.json",
+      "bytes": 82064,
+      "sha256": "6d999fa45310ada0514624a003712c699f5d81418b947e8722013cd038ece721"
+    },
+    {
+      "file": "crates/st-nn/examples/support/byte_decoder/query_controls.rs",
+      "bytes": 9216,
+      "sha256": "99da4113086b94d122219b5b2cb1478a58f9ea969c2e1fdffe8caf032d2de98a"
+    },
+    {
+      "file": "tools/validate_causal_wave_batch_results.py",
+      "bytes": 12333,
+      "sha256": "9946cc72c9e8be14079c73a74ecf40742716ec05895f4983b3b5442db8801bb4"
+    },
+    {
+      "file": "tools/test_validate_causal_wave_batch_results.py",
+      "bytes": 9583,
+      "sha256": "fd67c4584969d33dc73478827f5d2defe5e0299b2e6daeb21859d32f5c051370"
+    },
+    {
+      "file": "tools/test_causal_wave_batch_browser.cjs",
+      "bytes": 2704,
+      "sha256": "b41695519f56c0d4213e26cec2d837f83beb09e870a4864006aebcca5883f63e"
+    },
+    {
+      "file": "tools/validate_resident_query_pullback.py",
+      "bytes": 8246,
+      "sha256": "95c74cb47ce97ad9b7cfeeec5fb6b1afb07b33643a2817bb233e03afb26eeacc"
+    },
+    {
+      "file": "tools/test_validate_resident_query_pullback.py",
+      "bytes": 4160,
+      "sha256": "a907e95d22bd24356393d9181363eda99bc82b70fed4b33f23e592a708fd7d5c"
+    },
+    {
+      "file": "docs/causal_wave_batch_gradients.md",
+      "bytes": 3150,
+      "sha256": "348539e54e18fc6c534088dcbab7d5e18a782f43bf66617faf83bd6475937fc1"
+    },
+    {
+      "file": "docs/complex_projective_geometry.md",
+      "bytes": 6816,
+      "sha256": "69d9596ae86b11dc511ba5e35f529744b54c7b5a9865556e83ccf2b857e93503"
+    }
+  ],
+  "raw_artifacts": [
+    {
+      "file": "protocol.json",
+      "bytes": 2363,
+      "sha256": "2ec6d6b6b0386fe5c988ba08e3c55e47ce3ea0aeec81c87fbf0fd89a27e2dbba"
+    },
+    {
+      "file": "cpu-before.log",
+      "bytes": 1566,
+      "sha256": "4163314b21e64d524e7462d2cbd03a37340a95c0ec84724b65db66eb99186c9a"
+    },
+    {
+      "file": "gpu-before.log",
+      "bytes": 115615,
+      "sha256": "0fbb4b826db7d965c875830d093da8fc3363b0e0b9e74368b75e2c7e0e76280a"
+    },
+    {
+      "file": "cpu-after.log",
+      "bytes": 1303,
+      "sha256": "4bdef865ef995952637520b59a5ee9f0c21bbac0b5d65cfd774715931a206690"
+    },
+    {
+      "file": "gpu-after.log",
+      "bytes": 115239,
+      "sha256": "2b39e26fb3da0013a721406833f5781bc81afa5459ec0ad7a9dd76523b81bd8d"
+    },
+    {
+      "file": "native-wave.log",
+      "bytes": 116254,
+      "sha256": "3d0866086515421d1dd6b6c0abb6ff87beda8505fa2be5d5352eb656c539e424"
+    },
+    {
+      "file": "native-wave-r2.log",
+      "bytes": 129030,
+      "sha256": "72953005254dee15133db7edd9b7c72c54d5826894973cedefb59bb70b485ccf"
+    },
+    {
+      "file": "native-wave.json",
+      "bytes": 22262,
+      "sha256": "27c85e163ba2c3e410508b0eb2f160d0427613be1e8e2155d18a9d1883ab876d"
+    },
+    {
+      "file": "native-lm-build.log",
+      "bytes": 115942,
+      "sha256": "07c9a24998d79d39a64874e0de311cb535564e0f48de684d3c82755474902e9d"
+    },
+    {
+      "file": "resident-lm-wave-candidate",
+      "bytes": 7433296,
+      "sha256": "40bf5da3c39ea03089352ff10cdbfab04645161bf82a66583f6f8ca9a74afbb8"
+    },
+    {
+      "file": "native-projective.json",
+      "bytes": 11798072,
+      "sha256": "dd2dc654d3b3e24ae981cdba9e814a40eef6b8424199de2c9139e09852a50fd2"
+    },
+    {
+      "file": "native-projective.log",
+      "bytes": 76,
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b"
+    },
+    {
+      "file": "native-paired.json",
+      "bytes": 156715,
+      "sha256": "f46b803b6dc8b91afd8a2a9df2abd553b8e4575d19ddd7c98c76cb6f1d22bfaf"
+    },
+    {
+      "file": "native-paired.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "wasm-wave-build.log",
+      "bytes": 111128,
+      "sha256": "8a10f781e99ab3987e92866c7a33ae7312d93b48dd3a4e1f7f05721e94686da9"
+    },
+    {
+      "file": "wasm-lm-build.log",
+      "bytes": 111954,
+      "sha256": "421e94f31ee4fe56c323deff1af26d3a05cd27f3e26a653bf27b807dc8aaeb6a"
+    },
+    {
+      "file": "wave-web/causal_zspace_wave_browser.js",
+      "bytes": 47538,
+      "sha256": "d3bc04d9b51efa0c9be1c17e642b3866bde6500f9c1479a06773046ce4c304c9"
+    },
+    {
+      "file": "wave-web/causal_zspace_wave_browser_bg.wasm",
+      "bytes": 1079433,
+      "sha256": "8d7f115155ffefc9f7c107731158ad44d251c080ac2c34a77fbae53c2f7e4844"
+    },
+    {
+      "file": "lm-web/resident_byte_decoder_browser.js",
+      "bytes": 50463,
+      "sha256": "6b35403d26ff9215aa8877c1dc98648574cb9d57a1e15a6c6d0ba83359baf3fb"
+    },
+    {
+      "file": "lm-web/resident_byte_decoder_browser_bg.wasm",
+      "bytes": 11677673,
+      "sha256": "2cb8691ba72659f6339e4c1f85c18930400dfcfc38dd288f451a7d436af95527"
+    },
+    {
+      "file": "browser-wave.json",
+      "bytes": 22259,
+      "sha256": "674284898588910c26b3523e04d4eb06aaf87533aa563143bae673f6de87a00e"
+    },
+    {
+      "file": "browser-wave.png",
+      "bytes": 67136,
+      "sha256": "919eb7fe9d59e1063d5570456354ffce1fdfc563e1897ca96eca89a16dddd625"
+    },
+    {
+      "file": "browser-lm.json",
+      "bytes": 11940016,
+      "sha256": "b8ba0f9171b4155ddb35cc87cf4cee048f53ec4b628f08d7955321a89b0f8e6d"
+    },
+    {
+      "file": "browser-lm.png",
+      "bytes": 61150,
+      "sha256": "445c56db5cf0c1dc6606b5d511e37159e52b6571be129fdac1423d72c93d9c4e"
+    },
+    {
+      "file": "browser-wave-reviewed.json",
+      "bytes": 22259,
+      "sha256": "674284898588910c26b3523e04d4eb06aaf87533aa563143bae673f6de87a00e"
+    },
+    {
+      "file": "browser-wave-reviewed.png",
+      "bytes": 67136,
+      "sha256": "919eb7fe9d59e1063d5570456354ffce1fdfc563e1897ca96eca89a16dddd625"
+    },
+    {
+      "file": "byte-decoder-tests.log",
+      "bytes": 119263,
+      "sha256": "7a3ea492b4ea41666b1223bae54bb91a81a80f086f967b7bb6899061ac94442b"
+    },
+    {
+      "file": "publisher-tests.log",
+      "bytes": 2673,
+      "sha256": "8a1f445e812cf495dc21b66a26967c7ff64866490ffdfbe96b778587e51a4c8a"
+    },
+    {
+      "file": "publisher-tests-r2.log",
+      "bytes": 3278,
+      "sha256": "b8d93054af707324f69a1f96862676e1605888a13bfc312d173c6f73ee3f2912"
+    },
+    {
+      "file": "browser-validator-tests.log",
+      "bytes": 537,
+      "sha256": "39c233bdd9ede5549dd90fb12618faaa605ca55e4fae82294ed663105d548236"
+    }
+  ]
+}

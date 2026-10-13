@@ -1,0 +1,1491 @@
+{
+  "schema": "spiraltorch.geometry_router_sensitivity.v1",
+  "request_sha256": "7733e760748e14944744a91a6c55a16ad21982a53af0375a4a2ac95d00e9a010",
+  "native_sha256": "9bd4948b88a79a6a7f1db8378c01cdc14655b68f16149aae9ba4a1b6e8991af6",
+  "scope": "Read-only CPU-f32 probe of initial and native-final weights on all 128 declared training batches. No held-out use or parameter updates; query decomposition is not quality evidence.",
+  "torch_version": "2.12.1",
+  "cases": [
+    {
+      "name": "mixture-11-0-train",
+      "seed": 11,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.617798060178757,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9961165133945691
+          ],
+          [
+            0.9961165133945691,
+            1
+          ]
+        ],
+        [
+          [
+            1,
+            0.9961165134383357
+          ],
+          [
+            0.9961165134383357,
+            0.9999999999999998
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.1163712254724274,
+        0.0843183824355691
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8921873132397391,
+        0.5339625726527756
+      ],
+      "within_batch_query_retention": [
+        0.1614224861359994,
+        0.15415811256318473
+      ],
+      "across_batch_retention": [
+        0.24195226605099715,
+        0.4371337171238792
+      ],
+      "query_gradient_l2_sum": [
+        0.10592539887595581,
+        0.09232673879313254
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.017098741231504185,
+        0.01423291579146348
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.4142642612569034e-9
+    },
+    {
+      "name": "mixture-11-0-train",
+      "seed": 11,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.6363306809216738,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.995491836631455
+          ],
+          [
+            0.995491836631455,
+            0.9999999999999998
+          ]
+        ],
+        [
+          [
+            1,
+            0.9954918365915822
+          ],
+          [
+            0.9954918365915822,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.1136585198892135,
+        0.0819298193387965
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8865710880204056,
+        0.5052699336437372
+      ],
+      "within_batch_query_retention": [
+        0.1629032747587428,
+        0.16132577238176649
+      ],
+      "across_batch_retention": [
+        0.10112174165966899,
+        0.14852173706821795
+      ],
+      "query_gradient_l2_sum": [
+        0.03074970169486725,
+        0.0271822593374471
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.005009227103948339,
+        0.004385198982695137
+      ],
+      "max_query_to_shared_gradient_abs_error": 5.477279185761574e-10
+    },
+    {
+      "name": "mixture-11-1-train",
+      "seed": 11,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.618106584995985,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9385672256346094
+          ],
+          [
+            0.9385672256346094,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1,
+            0.9385672256798441
+          ],
+          [
+            0.9385672256798441,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.11292557072510334,
+        0.08214819834111609
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8761066776275132,
+        0.5243385690473767
+      ],
+      "within_batch_query_retention": [
+        0.18554113263336638,
+        0.1827525342221643
+      ],
+      "across_batch_retention": [
+        0.4511341284658983,
+        0.34449684058736213
+      ],
+      "query_gradient_l2_sum": [
+        0.47728785833576104,
+        0.42170273544719994
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.08855652982777082,
+        0.0770672435913947
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.2673808669205755e-9
+    },
+    {
+      "name": "mixture-11-1-train",
+      "seed": 11,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.6368567161262035,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9323971352511986
+          ],
+          [
+            0.9323971352511986,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1,
+            0.9323971351737179
+          ],
+          [
+            0.9323971351737179,
+            0.9999999999999999
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.10948379478558934,
+        0.07911880765423973
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8648140620405428,
+        0.4937737518844081
+      ],
+      "within_batch_query_retention": [
+        0.17149407420839774,
+        0.18118084139309742
+      ],
+      "across_batch_retention": [
+        0.4816995292968537,
+        0.41023400296445867
+      ],
+      "query_gradient_l2_sum": [
+        0.14205931441685046,
+        0.12681807064987147
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.024362330608597462,
+        0.022977004744192987
+      ],
+      "max_query_to_shared_gradient_abs_error": 4.2246028897352517e-10
+    },
+    {
+      "name": "mixture-11-2-train",
+      "seed": 11,
+      "state": "initial",
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.61798869818449,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9428240679153411
+          ],
+          [
+            0.9428240679153411,
+            1
+          ]
+        ],
+        [
+          [
+            1.0000000000000002,
+            0.9428240678956318
+          ],
+          [
+            0.9428240678956318,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.11297259229787926,
+        0.08209916957258656
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8713901566961786,
+        0.5215158218677861
+      ],
+      "within_batch_query_retention": [
+        0.18421779107647665,
+        0.17604056774412183
+      ],
+      "across_batch_retention": [
+        0.5236036917286646,
+        0.2863105391079245
+      ],
+      "query_gradient_l2_sum": [
+        0.4560851461023283,
+        0.400266371247779
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.08401899815776305,
+        0.07046311924333845
+      ],
+      "max_query_to_shared_gradient_abs_error": 9.098357622860931e-10
+    },
+    {
+      "name": "mixture-11-2-train",
+      "seed": 11,
+      "state": "native_128",
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.636837651953101,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9371380870011078
+          ],
+          [
+            0.9371380870011078,
+            1
+          ]
+        ],
+        [
+          [
+            1,
+            0.9371380870240833
+          ],
+          [
+            0.9371380870240833,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.10881204978980463,
+        0.07854510448848373
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8569339226217418,
+        0.48929376704039684
+      ],
+      "within_batch_query_retention": [
+        0.17441965297238995,
+        0.18692097125712892
+      ],
+      "across_batch_retention": [
+        0.5250266883083574,
+        0.4519240732857762
+      ],
+      "query_gradient_l2_sum": [
+        0.13356823673293058,
+        0.12043585829696991
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.02329692549909178,
+        0.022511987607055566
+      ],
+      "max_query_to_shared_gradient_abs_error": 4.983107260159159e-10
+    },
+    {
+      "name": "mixture-11-3-train",
+      "seed": 11,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.617975577712059,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9961165134914997,
+            0.9385672256522637
+          ],
+          [
+            0.9961165134914997,
+            1.0000000000000002,
+            0.9428240680282506
+          ],
+          [
+            0.9385672256522637,
+            0.9428240680282506,
+            0.9999999999999998
+          ]
+        ],
+        [
+          [
+            1,
+            0.996116513437539,
+            0.9385672258479362
+          ],
+          [
+            0.996116513437539,
+            1,
+            0.9428240680917435
+          ],
+          [
+            0.9385672258479362,
+            0.9428240680917435,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.11410416431962034,
+        0.0828272700923236
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8792640278354859,
+        0.5262281596591276
+      ],
+      "within_batch_query_retention": [
+        0.18250008510109683,
+        0.17684222321650883
+      ],
+      "across_batch_retention": [
+        0.47166228292033024,
+        0.29958902518777825
+      ],
+      "query_gradient_l2_sum": [
+        0.3664938895641819,
+        0.32523131801284294
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.06688516603449518,
+        0.05751462933702654
+      ],
+      "max_query_to_shared_gradient_abs_error": 8.397051942665712e-10
+    },
+    {
+      "name": "mixture-11-3-train",
+      "seed": 11,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.636669095605612,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9954521024811774,
+            0.9322951782801471
+          ],
+          [
+            0.9954521024811774,
+            1.0000000000000002,
+            0.936994374007826
+          ],
+          [
+            0.9322951782801471,
+            0.936994374007826,
+            1
+          ]
+        ],
+        [
+          [
+            1.0000000000000002,
+            0.9954521024609057,
+            0.9322951782874668
+          ],
+          [
+            0.9954521024609057,
+            1,
+            0.9369943740172609
+          ],
+          [
+            0.9322951782874668,
+            0.9369943740172609,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.1106554478573969,
+        0.07981990887869017
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8686128424325473,
+        0.49557588282947324
+      ],
+      "within_batch_query_retention": [
+        0.17328123642288143,
+        0.18351033100645897
+      ],
+      "across_batch_retention": [
+        0.48190637803508446,
+        0.4113432502686188
+      ],
+      "query_gradient_l2_sum": [
+        0.10926355146042611,
+        0.0984066561106223
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.018933323293017768,
+        0.018058638036099077
+      ],
+      "max_query_to_shared_gradient_abs_error": 3.5996094993606675e-10
+    },
+    {
+      "name": "mixture-23-0-train",
+      "seed": 23,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.602362785488367,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9969872990828952
+          ],
+          [
+            0.9969872990828952,
+            1
+          ]
+        ],
+        [
+          [
+            1.0000000000000002,
+            0.9969872990513632
+          ],
+          [
+            0.9969872990513632,
+            0.9999999999999999
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13923866966245413,
+        0.10662338629350643
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.891847031878967,
+        0.5933229244902863
+      ],
+      "within_batch_query_retention": [
+        0.22292390028735842,
+        0.1830113817576471
+      ],
+      "across_batch_retention": [
+        0.4841132126989892,
+        0.4586873188456798
+      ],
+      "query_gradient_l2_sum": [
+        0.1273435206784864,
+        0.08575426000961402
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.028387914305972067,
+        0.015694005615964002
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.4269971870817244e-9
+    },
+    {
+      "name": "mixture-23-0-train",
+      "seed": 23,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.62972579151392,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9965866817868617
+          ],
+          [
+            0.9965866817868617,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            0.9999999999999999,
+            0.9965866818622715
+          ],
+          [
+            0.9965866818622715,
+            0.9999999999999999
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.12941445251733086,
+        0.10021916265367281
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8810168663405676,
+        0.5423303973378554
+      ],
+      "within_batch_query_retention": [
+        0.22299760685020062,
+        0.19283495336586176
+      ],
+      "across_batch_retention": [
+        0.4464334537776458,
+        0.08688716136689012
+      ],
+      "query_gradient_l2_sum": [
+        0.04362378632290233,
+        0.031038010751329212
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.009727999951751732,
+        0.005985213355801685
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.091929213714593e-9
+    },
+    {
+      "name": "mixture-23-1-train",
+      "seed": 23,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.603081751614809,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.8922359677557673
+          ],
+          [
+            0.8922359677557673,
+            1
+          ]
+        ],
+        [
+          [
+            1,
+            0.8922359676679831
+          ],
+          [
+            0.8922359676679831,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13882428889836795,
+        0.10509282574794554
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8970429567943012,
+        0.5967795961272633
+      ],
+      "within_batch_query_retention": [
+        0.1769433543155452,
+        0.16114010552022448
+      ],
+      "across_batch_retention": [
+        0.11553531616743132,
+        0.4303926677642308
+      ],
+      "query_gradient_l2_sum": [
+        0.9918858677532821,
+        0.612400091694501
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.175507612538451,
+        0.09868221539624704
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.8662831280380487e-9
+    },
+    {
+      "name": "mixture-23-1-train",
+      "seed": 23,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.6301242783665657,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.8781657289175369
+          ],
+          [
+            0.8781657289175369,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1.0000000000000002,
+            0.8781657287329839
+          ],
+          [
+            0.8781657287329839,
+            0.9999999999999999
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.12660750267702525,
+        0.09814907415692886
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8775985197766414,
+        0.5406052362186355
+      ],
+      "within_batch_query_retention": [
+        0.20079050418135808,
+        0.17244708770559247
+      ],
+      "across_batch_retention": [
+        0.5091697712011957,
+        0.3196839850748987
+      ],
+      "query_gradient_l2_sum": [
+        0.29148324282453336,
+        0.1991416014332255
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.05852706728715528,
+        0.03434138920818758
+      ],
+      "max_query_to_shared_gradient_abs_error": 2.7424178483670403e-9
+    },
+    {
+      "name": "mixture-23-2-train",
+      "seed": 23,
+      "state": "initial",
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.602849412709475,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.8975621058288746
+          ],
+          [
+            0.8975621058288746,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1,
+            0.8975621059215707
+          ],
+          [
+            0.8975621059215707,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13881223020956845,
+        0.10502666722048559
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8920647528127453,
+        0.5934677913107409
+      ],
+      "within_batch_query_retention": [
+        0.17345622115664344,
+        0.16782114026638542
+      ],
+      "across_batch_retention": [
+        0.20146101953383888,
+        0.4940689870455492
+      ],
+      "query_gradient_l2_sum": [
+        0.979955903996886,
+        0.6034126620027068
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.1699794480074423,
+        0.10126540098846928
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.5133991837501526e-9
+    },
+    {
+      "name": "mixture-23-2-train",
+      "seed": 23,
+      "state": "native_128",
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.6302484553307295,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.8863565228857693
+          ],
+          [
+            0.8863565228857693,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1,
+            0.8863565230795389
+          ],
+          [
+            0.8863565230795389,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.12550032478052486,
+        0.09733738719955198
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.867821589706129,
+        0.5348690984195746
+      ],
+      "within_batch_query_retention": [
+        0.20840256700026283,
+        0.17834660949120706
+      ],
+      "across_batch_retention": [
+        0.43845796440748935,
+        0.3094229638726266
+      ],
+      "query_gradient_l2_sum": [
+        0.27900509515129873,
+        0.1918848626173538
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.05814537803568324,
+        0.034222014660491115
+      ],
+      "max_query_to_shared_gradient_abs_error": 2.381759678371509e-9
+    },
+    {
+      "name": "mixture-23-3-train",
+      "seed": 23,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.602716460824013,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9969872990408176,
+            0.8922359679376308
+          ],
+          [
+            0.9969872990408176,
+            1.0000000000000002,
+            0.8975621060172698
+          ],
+          [
+            0.8922359679376308,
+            0.8975621060172698,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1,
+            0.9969872990665232,
+            0.8922359677076942
+          ],
+          [
+            0.9969872990665232,
+            1,
+            0.8975621059388987
+          ],
+          [
+            0.8922359677076942,
+            0.8975621059388987,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13930416501256992,
+        0.10589013571473771
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8935191016162215,
+        0.5944352263919762
+      ],
+      "within_batch_query_retention": [
+        0.17424248759289854,
+        0.16458098727990644
+      ],
+      "across_batch_retention": [
+        0.15858089959326166,
+        0.44458093009140515
+      ],
+      "query_gradient_l2_sum": [
+        0.7524476038496688,
+        0.4697401320731403
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.13110834227808216,
+        0.07731029470159108
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.320813680649735e-9
+    },
+    {
+      "name": "mixture-23-3-train",
+      "seed": 23,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.630009286105633,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9965692552270283,
+            0.8791444915870585
+          ],
+          [
+            0.9965692552270283,
+            1.0000000000000002,
+            0.8877090597235161
+          ],
+          [
+            0.8791444915870585,
+            0.8877090597235161,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1,
+            0.9965692552284506,
+            0.8791444915776011
+          ],
+          [
+            0.9965692552284506,
+            1,
+            0.8877090592699507
+          ],
+          [
+            0.8791444915776011,
+            0.8877090592699507,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.12753060220974888,
+        0.09888322912667746
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8753581306556248,
+        0.5392188621769771
+      ],
+      "within_batch_query_retention": [
+        0.2021168021535333,
+        0.17528086009050423
+      ],
+      "across_batch_retention": [
+        0.4604834625114895,
+        0.29374333498316924
+      ],
+      "query_gradient_l2_sum": [
+        0.2182536872668125,
+        0.15226698893629204
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.04411273732858547,
+        0.02668948878414456
+      ],
+      "max_query_to_shared_gradient_abs_error": 3.0375630899470707e-9
+    },
+    {
+      "name": "mixture-37-0-train",
+      "seed": 37,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.605918679386377,
+      "component_row_centered_cosine": [
+        [
+          [
+            0.9999999999999998,
+            0.9963620601696338
+          ],
+          [
+            0.9963620601696338,
+            0.9999999999999998
+          ]
+        ],
+        [
+          [
+            0.9999999999999998,
+            0.9963620601637161
+          ],
+          [
+            0.9963620601637161,
+            0.9999999999999998
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13369121099484715,
+        0.12934447657028159
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8993294000057459,
+        1.0260627143428582
+      ],
+      "within_batch_query_retention": [
+        0.19439107424421898,
+        0.20197371813013645
+      ],
+      "across_batch_retention": [
+        0.4421892638307074,
+        0.7099519979571329
+      ],
+      "query_gradient_l2_sum": [
+        0.12804461405168316,
+        0.11941102648710693
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.024890730076693107,
+        0.024117889005337192
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.4533725334331393e-9
+    },
+    {
+      "name": "mixture-37-0-train",
+      "seed": 37,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.624360168352723,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9956319939797047
+          ],
+          [
+            0.9956319939797047,
+            1
+          ]
+        ],
+        [
+          [
+            1,
+            0.9956319939652939
+          ],
+          [
+            0.9956319939652939,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.133165306644365,
+        0.1310425871125176
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.9277655752064197,
+        1.0816754483119368
+      ],
+      "within_batch_query_retention": [
+        0.18884575657046163,
+        0.19600482369255884
+      ],
+      "across_batch_retention": [
+        0.24776996121299527,
+        0.00998141189270755
+      ],
+      "query_gradient_l2_sum": [
+        0.03705613600595334,
+        0.030454081082497274
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.0069978940396221824,
+        0.00596914679329377
+      ],
+      "max_query_to_shared_gradient_abs_error": 5.551772375156361e-10
+    },
+    {
+      "name": "mixture-37-1-train",
+      "seed": 37,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.608195871114731,
+      "component_row_centered_cosine": [
+        [
+          [
+            0.9999999999999999,
+            0.9322001374858087
+          ],
+          [
+            0.9322001374858087,
+            0.9999999999999999
+          ]
+        ],
+        [
+          [
+            1,
+            0.9322001375221234
+          ],
+          [
+            0.9322001375221234,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.1314615716017613,
+        0.1269068406574192
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8971598515892084,
+        1.023587318445243
+      ],
+      "within_batch_query_retention": [
+        0.2118810519580019,
+        0.24603285949844456
+      ],
+      "across_batch_retention": [
+        0.6918304594707446,
+        0.8724796664216906
+      ],
+      "query_gradient_l2_sum": [
+        0.6703376919219702,
+        0.7071970387928691
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.14203185533152604,
+        0.173993709683042
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.5916157281026244e-9
+    },
+    {
+      "name": "mixture-37-1-train",
+      "seed": 37,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.624502796679735,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9224520890215279
+          ],
+          [
+            0.9224520890215279,
+            1
+          ]
+        ],
+        [
+          [
+            0.9999999999999998,
+            0.922452088994115
+          ],
+          [
+            0.922452088994115,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13044024153515466,
+        0.12761090411533615
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.9220056091722413,
+        1.071987822417158
+      ],
+      "within_batch_query_retention": [
+        0.17714476229096512,
+        0.17400220287298593
+      ],
+      "across_batch_retention": [
+        0.10223503837328381,
+        0.24085155200844974
+      ],
+      "query_gradient_l2_sum": [
+        0.17141757897363646,
+        0.14369997006630691
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.030365726279777572,
+        0.02500411134431954
+      ],
+      "max_query_to_shared_gradient_abs_error": 7.02016222930979e-10
+    },
+    {
+      "name": "mixture-37-2-train",
+      "seed": 37,
+      "state": "initial",
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.608518362045288,
+      "component_row_centered_cosine": [
+        [
+          [
+            0.9999999999999999,
+            0.9355477919316278
+          ],
+          [
+            0.9355477919316278,
+            1
+          ]
+        ],
+        [
+          [
+            1.0000000000000002,
+            0.9355477916651928
+          ],
+          [
+            0.9355477916651928,
+            0.9999999999999998
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13144833944558343,
+        0.12679292128926534
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8932236829760148,
+        1.0190965140274155
+      ],
+      "within_batch_query_retention": [
+        0.20492308248232946,
+        0.2332082086732316
+      ],
+      "across_batch_retention": [
+        0.6609819683761324,
+        0.8538321708058053
+      ],
+      "query_gradient_l2_sum": [
+        0.646510195729957,
+        0.6732007668388228
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.13248486216523694,
+        0.15699594491192773
+      ],
+      "max_query_to_shared_gradient_abs_error": 2.1786945580970496e-9
+    },
+    {
+      "name": "mixture-37-2-train",
+      "seed": 37,
+      "state": "native_128",
+      "metrics": [
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.6245252043008804,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9262314227006789
+          ],
+          [
+            0.9262314227006789,
+            0.9999999999999998
+          ]
+        ],
+        [
+          [
+            1.0000000000000002,
+            0.9262314227024013
+          ],
+          [
+            0.9262314227024013,
+            1
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.1292723258529378,
+        0.12631509598983826
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.9098460692100854,
+        1.057699248231214
+      ],
+      "within_batch_query_retention": [
+        0.1781513273607219,
+        0.17612893984383024
+      ],
+      "across_batch_retention": [
+        0.04771873260593214,
+        0.24683580122931276
+      ],
+      "query_gradient_l2_sum": [
+        0.16135406467967156,
+        0.1377943928904823
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.028745440797731264,
+        0.024269580336224863
+      ],
+      "max_query_to_shared_gradient_abs_error": 7.308358362934086e-10
+    },
+    {
+      "name": "mixture-37-3-train",
+      "seed": 37,
+      "state": "initial",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 5.607507035136223,
+      "component_row_centered_cosine": [
+        [
+          [
+            1,
+            0.9963620601444111,
+            0.9322001375400377
+          ],
+          [
+            0.9963620601444111,
+            1,
+            0.9355477918473186
+          ],
+          [
+            0.9322001375400377,
+            0.9355477918473186,
+            0.9999999999999999
+          ]
+        ],
+        [
+          [
+            0.9999999999999998,
+            0.9963620602426821,
+            0.9322001373820304
+          ],
+          [
+            0.9963620602426821,
+            1,
+            0.9355477916127924
+          ],
+          [
+            0.9322001373820304,
+            0.9355477916127924,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.13235254626147963,
+        0.12784738472200274
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.8964939719928866,
+        1.022827692530701
+      ],
+      "within_batch_query_retention": [
+        0.20483119545871048,
+        0.23303364709622384
+      ],
+      "across_batch_retention": [
+        0.6528740722189037,
+        0.8480158662739312
+      ],
+      "query_gradient_l2_sum": [
+        0.514585975588918,
+        0.5352640932247741
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.10540326054616489,
+        0.12473454380382226
+      ],
+      "max_query_to_shared_gradient_abs_error": 1.3681074051419273e-9
+    },
+    {
+      "name": "mixture-37-3-train",
+      "seed": 37,
+      "state": "native_128",
+      "metrics": [
+        "poincare_squared.v1",
+        "euclidean_chord_squared.v1",
+        "categorical_fisher_rao_squared.v1"
+      ],
+      "train_batches": 128,
+      "mean_train_ce": 3.624438565224409,
+      "component_row_centered_cosine": [
+        [
+          [
+            1.0000000000000002,
+            0.9956080310645211,
+            0.921708243899078
+          ],
+          [
+            0.9956080310645211,
+            0.9999999999999999,
+            0.9249921597587286
+          ],
+          [
+            0.921708243899078,
+            0.9249921597587286,
+            1.0000000000000002
+          ]
+        ],
+        [
+          [
+            1,
+            0.9956080310674035,
+            0.9217082438447205
+          ],
+          [
+            0.9956080310674035,
+            1.0000000000000002,
+            0.924992159618138
+          ],
+          [
+            0.9217082438447205,
+            0.924992159618138,
+            1.0000000000000002
+          ]
+        ]
+      ],
+      "mean_attention_total_variation": [
+        0.1311403324336453,
+        0.12854632342465777
+      ],
+      "geometry_to_qk_centered_rms_ratio": [
+        0.9194454188591155,
+        1.070232894259005
+      ],
+      "within_batch_query_retention": [
+        0.17843013505863223,
+        0.17537282199445844
+      ],
+      "across_batch_retention": [
+        0.0808830275621183,
+        0.22748064209685062
+      ],
+      "query_gradient_l2_sum": [
+        0.13199741523462952,
+        0.11147507152036153
+      ],
+      "router_batch_gradient_l2_sum": [
+        0.023552316627705305,
+        0.019549697874559888
+      ],
+      "max_query_to_shared_gradient_abs_error": 9.356142527394695e-10
+    }
+  ]
+}

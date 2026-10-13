@@ -3,18 +3,25 @@ use super::*;
 use std::ops::Range;
 
 mod geometry;
-pub use geometry::{ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan};
+pub use geometry::{
+    ByteDecoderGeometryMixture, ByteDecoderGeometryParameterLayout, ByteDecoderGeometryPlan,
+    ByteDecoderPairMetric,
+};
 mod checkpoint;
 #[cfg(feature = "wgpu")]
 pub use checkpoint::ByteDecoderCheckpointReadback;
-pub use checkpoint::{ByteDecoderCheckpoint, BYTE_DECODER_CHECKPOINT_SCHEMA};
+pub use checkpoint::{
+    ByteDecoderCheckpoint, BYTE_DECODER_CHECKPOINT_SCHEMA, BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA,
+};
 
 #[cfg(feature = "wgpu")]
 mod training;
 #[cfg(feature = "wgpu")]
 pub use training::{
-    ByteDecoderBias, ByteDecoderBiasGradient, ResidentByteBatch, ResidentByteDecoder,
-    ResidentByteDecoderForward, ResidentByteDecoderVjp,
+    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderQueryPullback, ResidentByteBatch,
+    ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
 
 pub const BYTE_LM_VOCAB: usize = 256;

@@ -16,7 +16,10 @@ public JavaScript facade methods for this primitive are not provided yet.
 Inputs are a finite drive `[B,T,2P]`, raw decay `[P]`, raw phase `[P]`, and explicit
 raw initial state `[B,2P]`. Empty axes, odd channel counts, invalid curvature,
 length mismatches and nonportable addressing are errors. Pairs of adjacent
-channels are real/imaginary components of a complex state.
+channels are real/imaginary components of a complex state. The common contract
+also rejects time axes longer than `MAX_STEPS = 1,048,576` before allocation:
+this bounds the reverse scan's extended exponents, even for tiny decay.
+Longer documents require explicit stateful chunks, not an implicit reset.
 
 ```text
 rho[p]   = 0.99 * sigmoid(raw_decay[p])
@@ -106,15 +109,24 @@ scan and rotation contraction; narrowing each chart component earlier invents
 phase gradients even for a mathematically radial seed. Global cotangent scaling
 is avoided because it can erase a small but recoverable component.
 
-This remains O(`B*T*C`) rather than evaluating a dense Jacobian, but carries
-extra arithmetic and 16-byte/value adjoint scratch. No nearly-parallel residual
-is snapped to zero. Public inputs/VJPs and per-batch parameter partials are f32.
-These implementations are not arbitrary-precision; chunk seams use public f32
-cotangents, and tested chunk equivalence is tolerance-bounded, not universally
-bitwise identical.
+The chart and reverse scan remain O(`B*T*C`) rather than evaluating a dense
+Jacobian. Parameter sums additionally retain an adaptive expansion across
+**both time and batch**, rather than rounding each batch's total first. CPU
+keeps f64 contraction terms; GPU keeps all three stored Wide components as
+scaled f32 terms, including separated exponents. Final rounding retains tiny
+midpoint tails through subnormal and overflow boundaries. This protects the
+sum of the **stored contractions**, not exact primitive products, nonlinear
+charts, rotations, or the recurrence. Reduction work depends on the number of
+retained parts and can grow quadratically in adversarial cancellation cases.
+
+GPU backward scratch is `10*B*T*C + 8*P` 32-bit words: chart adjoints, per-time
+parameter terms, and two rounding slots per parameter. No nearly-parallel
+residual is snapped to zero. Public inputs/VJPs and chunk seams are f32. These
+implementations are not arbitrary-precision; tested chunk equivalence is
+tolerance-bounded, not universally bitwise identical.
 
 The GPU scans each complex channel over time, projects whole rows, performs
-reverse scans, and deterministically reduces parameter partials over batch.
+reverse scans, and deterministically reduces parameter terms over time and batch.
 No floating-point atomics or host readback are used in forward/backward.
 Arbitrary validated strided/offset inputs are packed on the GPU. Storage,
 bindings, uniforms and dispatch limits are checked before execution, including

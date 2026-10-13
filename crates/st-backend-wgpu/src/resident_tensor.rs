@@ -16,12 +16,16 @@ pub mod classification;
 mod concatenate;
 mod convolution;
 pub mod embedding;
+pub mod euclidean;
+pub mod fisher_rao;
 pub(crate) mod guard_capture;
 pub mod loss;
+pub mod mixture;
 pub mod normalization;
 pub mod poincare;
 pub mod pointwise;
 pub mod profile;
+pub mod projective;
 mod validity;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
@@ -30,7 +34,15 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 #[derive(Debug, Error)]
 pub enum TensorError {
     #[error(transparent)]
+    Mixture(#[from] st_kernel_contracts::mixture::MixtureError),
+    #[error(transparent)]
     Poincare(#[from] st_kernel_contracts::poincare::PoincareError),
+    #[error(transparent)]
+    Euclidean(#[from] st_kernel_contracts::euclidean::EuclideanBiasError),
+    #[error(transparent)]
+    FisherRao(#[from] st_kernel_contracts::fisher_rao::FisherRaoError),
+    #[error(transparent)]
+    Projective(#[from] st_kernel_contracts::projective::ProjectiveError),
     #[error(transparent)]
     CausalWave(#[from] st_kernel_contracts::causal_wave::CausalWaveError),
     #[error(transparent)]
@@ -83,7 +95,9 @@ struct Kernels {
     concatenate: std::sync::OnceLock<concatenate::ConcatenateKernels>,
     embedding: std::sync::OnceLock<embedding::EmbeddingKernels>,
     causal_wave: std::sync::OnceLock<causal_wave::CausalWaveKernels>,
+    mixture: std::sync::OnceLock<mixture::MixtureKernels>,
     poincare: std::sync::OnceLock<poincare::PoincareKernels>,
+    fisher_chart: std::sync::OnceLock<poincare::fisher_chart::FisherChartKernels>,
     guard_capture: std::sync::OnceLock<guard_capture::GuardCapture>,
     convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
     depthwise_vjp: std::sync::OnceLock<convolution::vjp::DepthwiseVjpKernels>,
@@ -244,7 +258,9 @@ impl TensorDevice {
             concatenate: std::sync::OnceLock::new(),
             embedding: std::sync::OnceLock::new(),
             causal_wave: std::sync::OnceLock::new(),
+            mixture: std::sync::OnceLock::new(),
             poincare: std::sync::OnceLock::new(),
+            fisher_chart: std::sync::OnceLock::new(),
             guard_capture: std::sync::OnceLock::new(),
             convolution: std::sync::OnceLock::new(),
             depthwise_vjp: std::sync::OnceLock::new(),

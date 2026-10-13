@@ -524,16 +524,27 @@ pub fn compare_fisher_rao(
         _ => None,
     };
     let mut coefficient = 0.0;
+    let mut root_chord = 0.0;
     for (&left_value, &right_value) in left.values.iter().zip(&right.values) {
+        let left_root = left_value.sqrt();
+        let right_root = right_value.sqrt();
         coefficient = checked_add(
             "bhattacharyya_coefficient",
             coefficient,
-            require_derived_finite("bhattacharyya_term", (left_value * right_value).sqrt())?,
+            require_derived_finite("bhattacharyya_term", left_root * right_root)?,
         )?;
+        root_chord += (left_root - right_root).powi(2);
     }
     coefficient = coefficient.clamp(0.0, 1.0);
-    let fisher_rao_distance =
-        require_derived_finite("fisher_rao_distance", 2.0 * coefficient.acos())?;
+    // Same radius-two geometry as trainable attention, avoiding acos(1) loss
+    // of nearby distances and underflow in sqrt(p*q) at the boundary.
+    let (squared, _) =
+        st_kernel_contracts::fisher_rao::squared_distance_from_root_chord(root_chord.min(2.0))
+            .map_err(|_| ConceptDiffusionError::NonFiniteDerived {
+                field: "fisher_rao_root_chord",
+                value: root_chord,
+            })?;
+    let fisher_rao_distance = require_derived_finite("fisher_rao_distance", squared.sqrt())?;
     Ok(FisherRaoComparison {
         forward_kl,
         reverse_kl,
@@ -1097,6 +1108,28 @@ mod tests {
         assert_eq!(tiny.forward_kl, Some(0.0));
         assert_eq!(tiny.reverse_kl, Some(0.0));
         assert_eq!(tiny.symmetric_kl, Some(0.0));
+    }
+
+    #[test]
+    fn fisher_rao_preserves_nearby_distances_and_tiny_affinity() {
+        let left = [0.5, 0.5];
+        let right = [0.5 + 1e-10, 0.5 - 1e-10];
+        let distance = compare_fisher_rao(&left, &right)
+            .unwrap()
+            .fisher_rao_distance;
+        assert!(distance > 0.);
+        assert!((distance / 2e-10 - 1.).abs() < 1e-6);
+        for point in [&left[..], &right[..], &[0.1, 0.2, 0.7][..]] {
+            assert_eq!(
+                compare_fisher_rao(point, point)
+                    .unwrap()
+                    .fisher_rao_distance,
+                0.
+            );
+        }
+        let tiny = compare_fisher_rao(&[1., 1e-300, 0.], &[0., 1e-300, 1.]).unwrap();
+        assert!(tiny.bhattacharyya_coefficient > 0.);
+        assert!((tiny.bhattacharyya_coefficient / 1e-300 - 1.).abs() < 1e-14);
     }
 
     #[test]

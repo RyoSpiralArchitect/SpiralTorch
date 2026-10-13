@@ -11,7 +11,7 @@ def values(tensor):
     return tensor.detach().reshape(-1).tolist()
 
 
-def block_forward(x, p, heads, z, pair, topos):
+def block_forward(x, p, heads, z, pair, topos, *, module_residual=False):
     batch, steps, width = x.shape
     y = F.layer_norm(x, (width,), p[0], p[1], eps=1e-5)
     qkv = (y @ p[2] + p[3]).reshape(batch, steps, 3, heads, width // heads)
@@ -25,7 +25,10 @@ def block_forward(x, p, heads, z, pair, topos):
     mask = torch.ones(steps, steps, dtype=torch.bool, device="cpu").triu(1)
     scores = scores.masked_fill(mask, -float("inf"))
     attention = (scores.softmax(-1) @ v).transpose(1, 2).reshape(batch, steps, width)
-    residual = x + attention @ p[4] + p[5]
+    # Keep the frozen legacy association by default. The opt-in diagnostic
+    # matches x + Linear(attention), including the projection's bias boundary.
+    projected = attention @ p[4]
+    residual = x + (projected + p[5]) if module_residual else (x + projected) + p[5]
     y = F.layer_norm(residual, (width,), p[6], p[7], eps=1e-5)
     y = F.gelu(y @ p[8] + p[9], approximate="tanh")
     if topos:

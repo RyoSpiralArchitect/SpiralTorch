@@ -1,0 +1,207 @@
+{
+  "schema": "spiraltorch.resident_byte_geometry_headwise.torch_fixture.v1",
+  "artifact_scope": "Scalar projection; not a complete comparator input",
+  "torch_version": "2.12.1",
+  "device": "cpu",
+  "dtype": "float32",
+  "threads": 1,
+  "cases": [
+    {
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "config": {
+        "width": 4,
+        "heads": 4,
+        "hidden": 6,
+        "steps": 4,
+        "batch": 2,
+        "position_capacity": 6,
+        "blocks": [
+          {
+            "topos": false
+          }
+        ],
+        "causal_geometry": {
+          "cols": 4,
+          "curvature": -0.75,
+          "metric_only_scores": true,
+          "head_pair_metrics": [
+            [
+              "poincare_squared.v1",
+              "poincare_squared.v1",
+              "categorical_fisher_rao_squared.v1",
+              "poincare_squared.v1"
+            ]
+          ]
+        }
+      },
+      "parameter_tensors": 23,
+      "learning": [
+        {
+          "revision": 1,
+          "loss": 5.551153182983398
+        },
+        {
+          "revision": 2,
+          "loss": 5.462045192718506
+        },
+        {
+          "revision": 3,
+          "loss": 5.373714923858643
+        },
+        {
+          "revision": 4,
+          "loss": 5.285264492034912
+        },
+        {
+          "revision": 5,
+          "loss": 5.195930480957031
+        },
+        {
+          "revision": 6,
+          "loss": 5.10508918762207
+        },
+        {
+          "revision": 7,
+          "loss": 5.012112140655518
+        },
+        {
+          "revision": 8,
+          "loss": 4.916260242462158
+        },
+        {
+          "revision": 9,
+          "loss": 4.816690444946289
+        },
+        {
+          "revision": 10,
+          "loss": 4.712516784667969
+        },
+        {
+          "revision": 11,
+          "loss": 4.602845668792725
+        },
+        {
+          "revision": 12,
+          "loss": 4.48679256439209
+        },
+        {
+          "revision": 13,
+          "loss": 4.363499164581299
+        },
+        {
+          "revision": 14,
+          "loss": 4.232159614562988
+        },
+        {
+          "revision": 15,
+          "loss": 4.092046737670898
+        },
+        {
+          "revision": 16,
+          "loss": 3.9425573348999023
+        }
+      ]
+    },
+    {
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "config": {
+        "width": 4,
+        "heads": 2,
+        "hidden": 6,
+        "steps": 4,
+        "batch": 2,
+        "position_capacity": 6,
+        "blocks": [
+          {
+            "topos": false
+          },
+          {
+            "topos": true
+          }
+        ],
+        "causal_geometry": {
+          "cols": 4,
+          "curvature": -0.75,
+          "metric_only_scores": false,
+          "head_pair_metrics": [
+            [
+              "categorical_fisher_rao_squared.v1",
+              "euclidean_chord_squared.v1"
+            ],
+            [
+              "euclidean_chord_squared.v1",
+              "poincare_squared.v1"
+            ]
+          ]
+        }
+      },
+      "parameter_tensors": 37,
+      "learning": [
+        {
+          "revision": 1,
+          "loss": 5.52385139465332
+        },
+        {
+          "revision": 2,
+          "loss": 5.410465717315674
+        },
+        {
+          "revision": 3,
+          "loss": 5.319972515106201
+        },
+        {
+          "revision": 4,
+          "loss": 5.228806495666504
+        },
+        {
+          "revision": 5,
+          "loss": 5.138954162597656
+        },
+        {
+          "revision": 6,
+          "loss": 5.054005146026611
+        },
+        {
+          "revision": 7,
+          "loss": 5.011470794677734
+        },
+        {
+          "revision": 8,
+          "loss": 4.947106838226318
+        },
+        {
+          "revision": 9,
+          "loss": 4.939280986785889
+        },
+        {
+          "revision": 10,
+          "loss": 4.870790958404541
+        },
+        {
+          "revision": 11,
+          "loss": 4.623176574707031
+        },
+        {
+          "revision": 12,
+          "loss": 4.482729911804199
+        },
+        {
+          "revision": 13,
+          "loss": 4.352554798126221
+        },
+        {
+          "revision": 14,
+          "loss": 4.215279579162598
+        },
+        {
+          "revision": 15,
+          "loss": 4.069551467895508
+        },
+        {
+          "revision": 16,
+          "loss": 3.917036294937134
+        }
+      ]
+    }
+  ]
+}

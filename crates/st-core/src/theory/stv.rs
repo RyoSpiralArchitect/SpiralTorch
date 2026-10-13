@@ -114,6 +114,24 @@ impl PauliSpinor {
         self.components
     }
 
+    /// Phase-invariant squared chord between normalized projectors. For CP1
+    /// this is one quarter of the squared Euclidean Bloch-vector distance,
+    /// not a Fubini-Study geodesic distance. Uses the same contract as the
+    /// resident causal LM bias; invalid spinor components are rejected.
+    pub fn projective_chord_squared(
+        &self,
+        other: &Self,
+    ) -> Result<f64, st_kernel_contracts::projective::ProjectiveError> {
+        let flatten = |s: &Self| {
+            let [a, b] = s.components;
+            [a.re, a.im, b.re, b.im]
+        };
+        st_kernel_contracts::projective::complex_projective_chord_squared(
+            &flatten(self),
+            &flatten(other),
+        )
+    }
+
     /// Applies a global phase rotation, preserving the Bloch current.
     pub fn phase_shift(&self, phase: f64) -> Self {
         let factor = Complex::from_polar(1.0, phase);
@@ -1207,6 +1225,32 @@ mod tests {
     use num_complex::Complex;
     use std::f64::consts::{FRAC_PI_3, FRAC_PI_4, TAU};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn projective_chord_matches_bloch_and_ignores_global_phase() {
+        let x = PauliSpinor::from_bloch_angles(0.7, -0.3).unwrap();
+        let y = PauliSpinor::from_bloch_angles(1.2, 1.1).unwrap();
+        let d = x.projective_chord_squared(&y).unwrap();
+        let b: f64 = x
+            .bloch_vector()
+            .iter()
+            .zip(y.bloch_vector())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum();
+        assert_abs_diff_eq!(d, b / 4., epsilon = 1e-14);
+        assert_abs_diff_eq!(
+            d,
+            x.phase_shift(1.8)
+                .projective_chord_squared(&y.phase_shift(-0.7))
+                .unwrap(),
+            epsilon = 1e-14
+        );
+        assert!(x.projective_chord_squared(&x).unwrap() < 1e-30);
+        assert!(x
+            .phase_shift(f64::NAN)
+            .projective_chord_squared(&y)
+            .is_err());
+    }
 
     fn minkowski_norm_sq(v: &Vec4) -> f64 {
         v[0] * v[0] - v[1] * v[1] - v[2] * v[2] - v[3] * v[3]

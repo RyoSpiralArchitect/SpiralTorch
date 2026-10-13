@@ -1,0 +1,120 @@
+{
+  "schema": "spiraltorch.byte_corpus.native_resume_evidence.v8",
+  "source_commit": "386966e747013b7c40c45c83f76746e94793ec02",
+  "request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+  "uses_guard_batching_candidate": false,
+  "stages": [
+    {
+      "stage": "native-first-step",
+      "start": "2026-10-12T21:50:05.134Z",
+      "finish": "2026-10-12T21:50:37.680Z",
+      "status": 0,
+      "signal": null
+    },
+    {
+      "stage": "native-partial-37",
+      "start": "2026-10-12T21:50:37.682Z",
+      "finish": "2026-10-12T21:58:03.383Z",
+      "status": 0,
+      "signal": null
+    },
+    {
+      "stage": "native-resumed",
+      "start": "2026-10-12T21:58:03.384Z",
+      "finish": "2026-10-12T22:15:22.733Z",
+      "status": 0,
+      "signal": null
+    },
+    {
+      "stage": "native-noop",
+      "start": "2026-10-12T22:15:22.735Z",
+      "finish": "2026-10-12T22:15:27.316Z",
+      "status": 0,
+      "signal": null
+    }
+  ],
+  "cases": 75,
+  "pause": 37,
+  "updates": 128,
+  "resumed_reports_byte_exact": true,
+  "noop_checkpoint_bytes_exact": true,
+  "browser_resume": "not_yet_verified",
+  "artifacts": [
+    {
+      "path": "native.json",
+      "bytes": 17891994,
+      "sha256": "76076ec1d7e9743d0ad4f8f33ae61565bd2ec6ba36217f8484c2a7e5f98dc2f0"
+    },
+    {
+      "path": "native-first-step.json",
+      "bytes": 17467462,
+      "sha256": "f23fbf2be71a3821ff0b34dd902bac9067563277798910aaad1b6e383ec26d13"
+    },
+    {
+      "path": "native-partial-37.json",
+      "bytes": 17524660,
+      "sha256": "7aac5b99001e6a067ea38e430edd9b8a8d613baa106e602105c6fc23fb3705be"
+    },
+    {
+      "path": "native-resumed.json",
+      "bytes": 17891994,
+      "sha256": "76076ec1d7e9743d0ad4f8f33ae61565bd2ec6ba36217f8484c2a7e5f98dc2f0"
+    },
+    {
+      "path": "native-noop.json",
+      "bytes": 17891994,
+      "sha256": "76076ec1d7e9743d0ad4f8f33ae61565bd2ec6ba36217f8484c2a7e5f98dc2f0"
+    },
+    {
+      "path": "native-checkpoint-1.json",
+      "bytes": 10218658,
+      "sha256": "e5fee988842699ee9632670ba4ea102179bfbaa5f2d40446bf3e8b82b60590ae"
+    },
+    {
+      "path": "native-checkpoint-37.json",
+      "bytes": 10256656,
+      "sha256": "6737f565a9cfdc82c83ebfaff67b5c65f9dea752192ce75f42ec60795f8ae166"
+    },
+    {
+      "path": "native-checkpoint-128.json",
+      "bytes": 10506367,
+      "sha256": "5ca2153464554fd7b75bf216ae027e061576bf2b7892a4582bec44ab70ad08c1"
+    },
+    {
+      "path": "native-noop-checkpoint.json",
+      "bytes": 10506367,
+      "sha256": "5ca2153464554fd7b75bf216ae027e061576bf2b7892a4582bec44ab70ad08c1"
+    },
+    {
+      "path": "native-resume-verification.json",
+      "bytes": 44466,
+      "sha256": "44e00ee7f621b51233ad2171cb3dbb59195d712e365f5d88cb4c9c3a2b5d6997"
+    },
+    {
+      "path": "native-noop-verification.json",
+      "bytes": 44541,
+      "sha256": "92499ee49f359d189d8e4f641ff3f5361f424de9b278b8ed4e14d9b879f5205c"
+    },
+    {
+      "path": "native-control-stages.jsonl",
+      "bytes": 495,
+      "sha256": "547e02ef4ab2f83fade94784fb5cd811feaff26c3a281d6f3bde2c64ec0b6b19"
+    },
+    {
+      "path": "run_native_controls.cjs",
+      "bytes": 1429,
+      "sha256": "876a90b6a31c541c10feb896ee77a80233fe5eb0bc62b071bb3bc74baa8d3cdd"
+    },
+    {
+      "path": "resident_byte_learning",
+      "bytes": 7514592,
+      "sha256": "7a339a349eee9ad055c079b77cb72b2514a14bae8e6af6391bfba75d0573ef6d"
+    },
+    {
+      "path": "publish_native_resume.py",
+      "bytes": 2228,
+      "sha256": "97f68ca03545a610d2880c94b8b32b6bb0dba5e5a888757d82cc289579044d23"
+    }
+  ],
+  "scope": "Original v8 baseline executable; native live continuation and no-op only. Browser checks are separate. No quality, speed or execution-attestation claim."
+}

@@ -1,0 +1,43 @@
+{
+  "schema": "spiraltorch.resident_byte_geometry_flat.comparison.v1",
+  "passed": true,
+  "cases": [
+    {
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "metric": "euclidean_chord_squared.v1",
+      "parameter_tensors": 23,
+      "parameter_scalars": 2516,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 8.816236099313685e-06,
+      "logit_max_abs_error": 8.940696716308594e-08,
+      "loss_max_abs_error": 4.76837158203125e-07,
+      "parameter_max_abs_error": 8.940696716308594e-08,
+      "initial_vjp_max_abs_error": 1.1920928955078125e-07,
+      "geometry_relative_l2": 1.714826372296537e-05,
+      "embedding_gradient_max_abs_error": 1.564621925354004e-07,
+      "bias_gradient_max_abs_error": 0.0
+    },
+    {
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "metric": "euclidean_chord_squared.v1",
+      "parameter_tensors": 37,
+      "parameter_scalars": 2678,
+      "steps": 16,
+      "resume_exact_steps": 16,
+      "minimum_reference_geometry_gradient_l2": 1.906569118502164e-05,
+      "logit_max_abs_error": 5.960464477539063e-08,
+      "loss_max_abs_error": 3.814697265625e-06,
+      "parameter_max_abs_error": 1.2069940567016602e-06,
+      "initial_vjp_max_abs_error": 3.5762786865234375e-07,
+      "geometry_relative_l2": 0.0004141182266021058,
+      "embedding_gradient_max_abs_error": 6.616115570068359e-06,
+      "bias_gradient_max_abs_error": 3.725290298461914e-09
+    }
+  ],
+  "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation",
+  "input_sha256": {
+    "reference": "4dba919c3a5b59cbfa9a9646e1ba76b3e1029580460b2e086833d0360808d36a",
+    "report": "f089fa4f3ae97a36c04d6526d7c532a340c3cbe7744c2218fcfde30aa2a1ec67"
+  }
+}

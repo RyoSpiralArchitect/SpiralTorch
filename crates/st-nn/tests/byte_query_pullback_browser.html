@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paired query pullback</title>
+<style>body{font:16px Georgia,serif;background:#f6f1e8;color:#202c28;margin:32px;max-width:1100px}h1{font-weight:400}pre{font:13px monospace;white-space:pre-wrap}button,a{font:inherit;padding:12px}table{border-collapse:collapse;width:100%}td,th{padding:12px;border-bottom:1px solid #bfc7bb;text-align:left}</style>
+<h1>Paired query pullback</h1>
+<p>Four-way geometry routing: Full minus StopCoordinates on the same WebGPU forward. The previous six-case qualification stays separate, including its failures. No quality or speed claim.</p>
+<button id="run">Run original and paired controls</button>
+<a id="download" hidden>Download local raw result</a>
+<pre id="status">Ready. Both controls use Rust, the same frozen fixture and this WebGPU runtime.</pre>
+<table><thead><tr><th>Case</th><th>Paired relative error</th><th>Paired gate</th><th>Old mixed-runtime gate</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+const run = document.querySelector('#run'), status = document.querySelector('#status');
+run.onclick = async () => {
+  run.disabled = true;
+  try {
+    status.textContent = 'Loading frozen fixture and Rust WASM, then running original six cases...';
+    const {default:init, run_resident_byte_projective, run_resident_byte_query_pullback} = await import('/target/resident-byte-query-pullback-web/resident_byte_decoder_browser.js');
+    const response = await fetch('/target/resident-byte-query-pullback-web/reference.json');
+    if (!response.ok) throw Error('Missing local fixture');
+    const fixture = await response.text();
+    const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(fixture)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+    await init();
+    const legacy = JSON.parse(await run_resident_byte_projective(fixture));
+    if (legacy.schema !== 'spiraltorch.resident_byte_geometry_projective.validation.v1' || legacy.checks.length !== 6) throw Error('Incomplete original qualification');
+    status.textContent = 'Original qualification retained. Running paired query pullbacks...';
+    const paired = JSON.parse(await run_resident_byte_query_pullback(fixture));
+    if (paired.schema !== 'spiraltorch.resident_byte_query_pullback.validation.v1' || paired.checks.length !== 2) throw Error('Incomplete paired control');
+    for (const c of paired.checks) {
+      const tr = document.createElement('tr');
+      for (const value of [c.name,c.paired_relative_l2 ?? c.paired_error,c.passed ? 'PASS' : 'FAIL',c.legacy_mixed_runtime_passed ? 'PASS' : 'FAIL (retained)']) {
+        const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
+      }
+      document.querySelector('#rows').append(tr);
+    }
+    const report = {schema:'spiraltorch.query_pullback_bundle.browser.v1',fixture_sha256:sha,paired,legacy};
+    const link = document.querySelector('#download');
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(report)+'\n'],{type:'application/json'}));
+    link.download = 'resident-byte-query-pullback.json'; link.hidden = false;
+    status.textContent = 'Paired control: '+(paired.passed ? 'PASS' : 'FAIL')+'. Original qualification: '+(legacy.passed ? 'PASS' : 'FAIL (not superseded)')+'. Fixture SHA-256: '+sha;
+  } catch(error) { status.textContent = String(error); }
+};
+</script>
+</html>

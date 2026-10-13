@@ -1,0 +1,35 @@
+{
+  "schema": "spiraltorch.resident_byte_parameter_rates.comparison.v1",
+  "passed": true,
+  "cases": [
+    {
+      "name": "causal_geometry_blocks1_metric_onlyTrue",
+      "parameter_tensors": 23,
+      "steps": 16,
+      "frozen_geometry_tensors": 5,
+      "frozen_parameter_bits": true,
+      "minimum_reference_geometry_gradient_l2": 9.799572860708144e-06,
+      "loss_max_abs_error": 4.76837158203125e-07,
+      "parameter_max_abs_error": 1.1920928955078125e-07,
+      "geometry_gradient_relative_l2": 8.581208833169353e-06,
+      "embedding_gradient_max_abs_error": 1.5273690223693848e-07
+    },
+    {
+      "name": "causal_geometry_blocks2_metric_onlyFalse",
+      "parameter_tensors": 37,
+      "steps": 16,
+      "frozen_geometry_tensors": 6,
+      "frozen_parameter_bits": true,
+      "minimum_reference_geometry_gradient_l2": 3.8366657008035865e-05,
+      "loss_max_abs_error": 1.9073486328125e-06,
+      "parameter_max_abs_error": 6.034970283508301e-07,
+      "geometry_gradient_relative_l2": 0.00011958028992853661,
+      "embedding_gradient_max_abs_error": 3.4570693969726562e-06
+    }
+  ],
+  "scope": "Synthetic numerical learner parity, not performance, quality, or runtime attestation",
+  "input_sha256": {
+    "reference": "410fbf4a377a05f7d7b9218e768708deecec117445ea94946af53127a8dffe61",
+    "report": "625bd5c34e987bc146c0eb402e63b27f03f6a9e349b9bbfb43b36adf2b0f1365"
+  }
+}

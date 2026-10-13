@@ -1,5 +1,7 @@
 use super::*;
 
+mod query_budget;
+
 pub(super) fn plan(
     mask: AttentionMask,
     block_count: usize,
@@ -117,6 +119,168 @@ pub(super) fn geometry_for(plan: &ByteDecoderPlan) -> ByteDecoderGeometryPlan {
     .unwrap()
 }
 
+pub(super) fn query_geometry_for(plan: &ByteDecoderPlan) -> ByteDecoderGeometryPlan {
+    use ByteDecoderPairMetric::*;
+    let geometry = geometry_for(plan)
+        .with_mixture(
+            &[
+                PoincareSquared,
+                EuclideanChordSquared,
+                CategoricalFisherRaoSquared,
+            ],
+            &vec![vec![0.; 6]; plan.block_count()],
+            &vec![vec![1., 0.8, 24., 1., 1.2, 48.]; plan.block_count()],
+        )
+        .unwrap();
+    let query = InferencePlan::from_operations(
+        geometry.projection().output_layout().clone(),
+        vec![InferenceOp::Linear {
+            weight: Tensor::from_vec(4, 6, vec![0.01; 24]).unwrap(),
+            bias: Tensor::from_vec(1, 6, vec![0.; 6]).unwrap(),
+        }],
+    )
+    .unwrap();
+    geometry
+        .with_query_projections(&vec![query; plan.block_count()])
+        .unwrap()
+}
+
+#[test]
+fn query_router_parameters_join_the_same_model_owner_and_reset_with_routes() {
+    let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = query_geometry_for(&p);
+    let model = p.clone().with_causal_geometry(g.clone()).unwrap();
+    let layout = model.parameter_layout();
+    let slots = layout.geometry().unwrap();
+    assert_eq!(slots.mixture_logits(), Some(8..10));
+    assert_eq!(slots.query_projections(), &[10..12, 12..14]);
+    assert_eq!(slots.all(), 2..14);
+    assert_eq!(layout.blocks(), &[14..18, 18..22]);
+    assert_eq!(layout.head(), 22..24);
+    let reset = g
+        .clone()
+        .with_mixture(
+            &[
+                ByteDecoderPairMetric::PoincareSquared,
+                ByteDecoderPairMetric::EuclideanChordSquared,
+            ],
+            &vec![vec![0.; 4]; 2],
+            &vec![vec![1.; 4]; 2],
+        )
+        .unwrap();
+    assert!(reset.mixture().unwrap().query_projections().is_empty());
+    assert!(g
+        .with_pair_metric(ByteDecoderPairMetric::PoincareSquared)
+        .mixture()
+        .is_none());
+    #[cfg(feature = "wgpu")]
+    assert_eq!(
+        model
+            .causal_geometry()
+            .unwrap()
+            .parameter_values()
+            .unwrap()
+            .len(),
+        slots.all().len()
+    );
+}
+
+#[test]
+fn query_router_rejects_missing_mixture_wrong_counts_shapes_and_parameterless_graphs() {
+    let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = query_geometry_for(&p);
+    let queries = g.mixture().unwrap().query_projections().to_vec();
+    assert!(geometry_for(&p).with_query_projections(&queries).is_err());
+    assert!(g.clone().with_query_projections(&[]).is_err());
+    assert!(g.clone().with_query_projections(&queries[..1]).is_err());
+    for (shape, out) in [
+        ([1, 3, 4], 6),
+        ([2, 2, 4], 6),
+        ([2, 3, 2], 6),
+        ([2, 3, 4], 5),
+    ] {
+        let query = InferencePlan::from_operations(
+            NdLayout::contiguous(&shape).unwrap(),
+            vec![InferenceOp::Linear {
+                weight: Tensor::from_vec(shape[2], out, vec![0.; shape[2] * out]).unwrap(),
+                bias: Tensor::from_vec(1, out, vec![0.; out]).unwrap(),
+            }],
+        )
+        .unwrap();
+        assert!(g
+            .clone()
+            .with_query_projections(&[query.clone(), query])
+            .is_err());
+    }
+    let g = g
+        .with_mixture(
+            &[
+                ByteDecoderPairMetric::PoincareSquared,
+                ByteDecoderPairMetric::EuclideanChordSquared,
+            ],
+            &vec![vec![0.; 4]; 2],
+            &vec![vec![1.; 4]; 2],
+        )
+        .unwrap();
+    let plain = InferencePlan::from_operations(
+        g.projection().output_layout().clone(),
+        vec![InferenceOp::Relu],
+    )
+    .unwrap();
+    assert!(g.with_query_projections(&[plain.clone(), plain]).is_err());
+}
+
+#[test]
+fn headwise_geometry_is_frozen_shape_checked_and_can_be_reset_to_uniform() {
+    use ByteDecoderPairMetric::*;
+    let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = geometry_for(&p);
+    let mut routing = vec![
+        vec![PoincareSquared, CategoricalFisherRaoSquared],
+        vec![EuclideanChordSquared, PoincareSquared],
+    ];
+    let routed = g.clone().with_head_pair_metrics(&routing).unwrap();
+    assert_eq!(routed.pair_metric(), None);
+    assert_eq!(routed.head_pair_metrics().unwrap(), routing);
+    routing[0][0] = EuclideanChordSquared;
+    assert_eq!(routed.head_pair_metrics().unwrap()[0][0], PoincareSquared);
+    assert_eq!(routed.raw_gains(), g.raw_gains());
+    assert_eq!(routed.raw_decay(), g.raw_decay());
+    assert_eq!(routed.raw_phase(), g.raw_phase());
+    for bad in [
+        vec![],
+        vec![vec![PoincareSquared; 2]],
+        vec![vec![]; 2],
+        vec![vec![PoincareSquared], vec![PoincareSquared; 2]],
+        vec![vec![PoincareSquared; 2], vec![PoincareSquared; 3]],
+    ] {
+        assert!(g.clone().with_head_pair_metrics(&bad).is_err());
+    }
+    for metric in [
+        PoincareSquared,
+        EuclideanChordSquared,
+        CategoricalFisherRaoSquared,
+    ] {
+        let uniform = routed.clone().with_pair_metric(metric);
+        assert_eq!(uniform.pair_metric(), Some(metric));
+        assert_eq!(
+            uniform.head_pair_metrics().unwrap(),
+            vec![vec![metric; 2]; 2]
+        );
+        let by_grid = g
+            .clone()
+            .with_head_pair_metrics(&vec![vec![metric; 2]; 2])
+            .unwrap();
+        let a = p.clone().with_causal_geometry(uniform).unwrap();
+        let b = p.clone().with_causal_geometry(by_grid).unwrap();
+        assert_eq!(a.parameter_layout(), b.parameter_layout());
+        assert_eq!(
+            a.initial_checkpoint().to_json().unwrap(),
+            b.initial_checkpoint().to_json().unwrap()
+        );
+    }
+}
+
 #[test]
 fn causal_geometry_parameters_are_frozen_and_share_explicit_model_slots() {
     let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
@@ -137,6 +301,100 @@ fn causal_geometry_parameters_are_frozen_and_share_explicit_model_slots() {
     assert_eq!(p.parameter_layout().blocks(), [8..12, 12..16]);
     assert_eq!(p.parameter_layout().head(), 16..18);
     assert!(p.with_causal_geometry(g).is_err());
+}
+
+#[test]
+fn mixture_has_one_router_owner_and_no_phantom_fixed_route() {
+    use ByteDecoderPairMetric::*;
+    let p = plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = geometry_for(&p);
+    let metrics = [
+        PoincareSquared,
+        EuclideanChordSquared,
+        CategoricalFisherRaoSquared,
+    ];
+    let mut logits = vec![vec![-0.4, 0.2, 0.6, 0.7, -0.1, 0.3]; 2];
+    let scales = vec![vec![1., 0.8, 32., 1., 1.2, 48.]; 2];
+    let mixed = g.clone().with_mixture(&metrics, &logits, &scales).unwrap();
+    logits[0][0] = 9.;
+    assert_eq!(mixed.mixture().unwrap().raw_logits()[0][0], -0.4);
+    assert!(mixed.pair_metric().is_none());
+    assert!(mixed.head_pair_metrics().is_none());
+    let model = p.clone().with_causal_geometry(mixed.clone()).unwrap();
+    let slots = model.parameter_layout().geometry().unwrap();
+    assert_eq!(slots.raw_gains(), 6..8);
+    assert_eq!(slots.mixture_logits(), Some(8..10));
+    assert_eq!(slots.all(), 2..10);
+    assert_eq!(model.parameter_layout().blocks(), [10..14, 14..18]);
+    assert_eq!(model.parameter_layout().head(), 18..20);
+    let fixed = mixed.clone().with_pair_metric(PoincareSquared);
+    assert!(fixed.mixture().is_none());
+    assert!(fixed.head_pair_metrics().is_some());
+    let fixed = mixed
+        .with_head_pair_metrics(&vec![vec![PoincareSquared, EuclideanChordSquared]; 2])
+        .unwrap();
+    assert!(fixed.mixture().is_none());
+    assert_eq!(
+        p.with_causal_geometry(fixed)
+            .unwrap()
+            .parameter_layout()
+            .len(),
+        18
+    );
+    for (metrics, logits, scales) in [
+        (
+            vec![PoincareSquared],
+            vec![vec![0.; 2]; 2],
+            vec![vec![1.; 2]; 2],
+        ),
+        (
+            vec![PoincareSquared, PoincareSquared],
+            vec![vec![0.; 4]; 2],
+            vec![vec![1.; 4]; 2],
+        ),
+        (metrics.to_vec(), vec![vec![0.; 6]], scales.clone()),
+        (metrics.to_vec(), vec![vec![0.; 5]; 2], scales.clone()),
+        (metrics.to_vec(), vec![vec![f32::NAN; 6]; 2], scales.clone()),
+        (metrics.to_vec(), vec![vec![0.; 6]; 2], vec![vec![0.; 6]; 2]),
+        (
+            metrics.to_vec(),
+            vec![vec![0.; 6]; 2],
+            vec![vec![-1.; 6]; 2],
+        ),
+        (
+            metrics.to_vec(),
+            vec![vec![0.; 6]; 2],
+            vec![vec![f32::INFINITY; 6]; 2],
+        ),
+    ] {
+        assert!(g.clone().with_mixture(&metrics, &logits, &scales).is_err());
+    }
+}
+
+#[test]
+fn mixture_packed_component_volume_is_rejected_before_gpu_allocation() {
+    use ByteDecoderPairMetric::*;
+    let projection = InferencePlan::from_operations(
+        NdLayout::contiguous(&[1, 30000, 4]).unwrap(),
+        vec![InferenceOp::Linear {
+            weight: Tensor::from_vec(4, 4, vec![0.1; 16]).unwrap(),
+            bias: Tensor::from_vec(1, 4, vec![0.; 4]).unwrap(),
+        }],
+    )
+    .unwrap();
+    let g = ByteDecoderGeometryPlan::new(&projection, &[0.; 2], &[0.; 2], &[vec![0.; 2]], -0.75)
+        .unwrap();
+    assert!(g
+        .with_mixture(
+            &[
+                PoincareSquared,
+                EuclideanChordSquared,
+                CategoricalFisherRaoSquared
+            ],
+            &[vec![0.; 6]],
+            &[vec![1.; 6]]
+        )
+        .is_err());
 }
 
 #[test]

@@ -1,0 +1,78 @@
+{
+  "schema": "spiraltorch.exact_router_reduction.validation.v1",
+  "source_commit": "6212acb9ba812d7f5aee96d6d6ac818dc876a70c",
+  "source_sha256": {
+    "crates/st-kernel-contracts/src/mixture.rs": "8b608559f1e7458329dfde40ff1390fc191c66ef9375f8e03269ea21d5200c73",
+    "crates/st-kernel-contracts/src/mixture/exact.rs": "e0b7b8e7bce26e67b38b01ccbbc601008b1dc7373d1405534bc8df1d031bacc6",
+    "crates/st-kernel-contracts/src/mixture/querywise.rs": "e012487511c0acf820914d706b88ea9210c421cd63f4df1a2304aa9c34ba6059",
+    "crates/st-kernel-contracts/src/indexing.rs": "7ba2993ee26cf43428162f61179d5ae620cb46f7cf8d1a5659cf81693c13c370",
+    "crates/st-backend-wgpu/src/resident_tensor/mixture.rs": "05fa1addb966763c49f641ac8c3965404b01c30180bd4851e909f4b4ce1bb8a5",
+    "crates/st-backend-wgpu/src/resident_tensor/mixture/tests.rs": "2517d8ec8bd709f7462108630c781e91932977e673550c7bc7214eb59907265a",
+    "crates/st-backend-wgpu/src/resident_tensor/mixture/tests/exact.rs": "a8aff097ba6c8ef2e37b73c847c5948ec4f2e7403c7bcdaaa03e1d7c2b7995a5",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/mixture_backward.wgsl": "287f0c7d48b32e68db2580d695595711121718ab9a8538360629af707e70992a",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/mixture_exact.wgsl": "3ef89f2108af3f44099762eb4310157cbfef55f169d8abe73c2fcac0b1627cb2"
+  },
+  "scope": "Exact polynomial of stored finite f32 operands and internally normalized weights; not exact transcendental softmax, model quality, or speed.",
+  "expected_and_observed_router_gradient": [
+    -0.015625,
+    0.015625
+  ],
+  "position_permutations_per_shared_and_querywise_route": 120,
+  "native_gpu_primitive_boundary_cases": 33,
+  "tests": {
+    "kernel_passed": 112,
+    "wgpu_passed": 331,
+    "wgpu_ignored": 1,
+    "ignored": "explicit frozen-fixture GPU timestamp experiment",
+    "native_clippy": true,
+    "wasm_clippy": true,
+    "strict_kernel_rustdoc": true
+  },
+  "learning": {
+    "native_cases": 6,
+    "native_updates": 96,
+    "native_geometry_step_vjps": 720,
+    "maximum_geometry_relative_l2": 0.0018354366643319622,
+    "frozen_relative_gate": 0.002,
+    "thresholds_changed": false,
+    "fixture_sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7"
+  },
+  "review": {
+    "kind": "independent read-only source review",
+    "findings": 0,
+    "scope": "primitive product bounds/decomposition, signed limbs, final rounding, input contract",
+    "runtime_checks_by": "parent",
+    "performance_reviewed": false
+  },
+  "release": {
+    "version": "0.4.30 candidate",
+    "ready": false,
+    "published": false,
+    "tag_created": false,
+    "reason": "Nearby Fisher/Wide numerical boundary work remains deferred. Candidate wheel and previous three-runtime evidence are not promoted by this fix.",
+    "new_wheel_built": false,
+    "new_browser_run": false
+  },
+  "retained_failed_attempts": [
+    "First GPU accumulator version retained a loop-local value between router coordinates; explicit zero construction fixed it.",
+    "The first primitive-probe compile required an explicit f32 type for the sign table.",
+    "Strict kernel rustdoc found pre-existing bare shape brackets; formatting was corrected."
+  ],
+  "raw_sha256": {
+    "nested-before.log": "028bb61ffc6256f8d25ebbfd7f009d12f7734aebcf9d4141b7ede5d57cd02fb5",
+    "nested-cpu-before.log": "47716330d0acd0d91ecbd270c80c810bf4f3fc62ccc3eaa1b9158db9f116ab7a",
+    "exact-mixture-first.log": "781e2c0c88807adcf93e562c125face996e4ea368250dfc30d8ea49f0ea7d12a",
+    "exact-mixture-second.log": "c23581206b152ba1ed4368adeb3c3af023e0044366a66abc8b2f060a7c484c57",
+    "exact-mixture-adversarial.log": "f1acab2b8bd7c13476221102de2484a562f5f96d377cd953738e3c97b704c769",
+    "exact-mixture-boundaries.log": "17806ee0683eafe0f955e23d1a13205a9497a66799e1376f9a79850d187e714a",
+    "exact-mixture-isolated-native.log": "44aced8b0ab24ded5c7fd7da862c79f56c1375b7de6b403bab1de613b7722d44",
+    "exact-mixture-native-clippy.log": "aa99117995a052b530ce2f50d36e64f24bf8889a5e4a482d147a18406b5387cf",
+    "exact-mixture-wasm-clippy.log": "94b3fbf5e8adcd360ba8223c6f0e6de5c7033913da2575057b973914032aab91",
+    "exact-mixture-rustdoc.log": "b7437ab45cb8c4b68b439d75c00724037076573c65f362d5feb9ea363c5726ec",
+    "exact-mixture-rustdoc-after.log": "9b85bfb2455fd8418edc20df30277b942ffee47d072ef1f91eb9594997a1078a",
+    "exact-mixture-lm-build.log": "cfc41a60b93a7977246cf78211c039df8a5f47fa9ca3d23739feeb87c677e02d",
+    "exact-mixture-native-lm.json": "1336de3859e040e505504d59c5579515ee7df232a1a71631b340f1916c1c341f",
+    "exact-mixture-native-lm.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-mixture-native-scalars-v2.json": "bb57703758f7a67818727761dcb140802945881c3573b39ea9c8e80925ed2531"
+  }
+}

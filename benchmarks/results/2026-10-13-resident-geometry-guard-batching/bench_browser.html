@@ -1,0 +1,133 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geometry batching: fixed artifact comparison</title>
+<style>body{font:16px Georgia,serif;background:#f6f1e8;color:#202c28;margin:32px;max-width:1100px}h1{font-weight:400}pre{font:13px monospace;white-space:pre-wrap}button,a{font:inherit;padding:12px}table{border-collapse:collapse;width:100%}td,th{padding:12px;border-bottom:1px solid #bfc7bb;text-align:left}</style>
+<h1>Geometry batching: fixed artifact comparison</h1>
+<p>One fresh-page block: warm A/B, then measure A/B/B/A. Full four-case qualification every time. No general speed or quality claim.</p>
+<button id="run">Run this fixed block</button>
+<a id="download" hidden>Download local timing and reports</a>
+<pre id="status">Ready. Select block 1, 2 or 3 with ?block=N.</pre>
+<table><thead><tr><th>Stage</th><th>Arm</th><th>Seconds</th><th>Report</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+const button = document.querySelector('#run'), status = document.querySelector('#status');
+const sha = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
+const bytes = async path => {
+  const response = await fetch(path, {cache:'no-store'});
+  if (!response.ok) throw Error('Missing input: '+path);
+  return response.arrayBuffer();
+};
+const require = (condition,message) => { if (!condition) throw Error(message); };
+const openRecords = () => new Promise((resolve,reject) => {
+  const request = indexedDB.open('spiraltorch-geometry-guard-timing-v1',1);
+  request.onupgradeneeded = () => request.result.createObjectStore('records',{keyPath:'key'});
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+const previous = (db,key) => new Promise((resolve,reject) => {
+  const request = db.transaction('records').objectStore('records').get(key);
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+const persist = (db,record,first=false) => new Promise((resolve,reject) => {
+  const transaction = db.transaction('records','readwrite',{durability:'strict'});
+  transaction.oncomplete = () => resolve();
+  transaction.onabort = transaction.onerror = () => reject(transaction.error || Error('Checkpoint persistence failed'));
+  const store = transaction.objectStore('records');
+  if (first) store.add(record); else store.put(record);
+});
+const download = record => {
+  const link = document.querySelector('#download');
+  if (link.dataset.blob) URL.revokeObjectURL(link.dataset.blob);
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(record)+'\n'],{type:'application/json'}));
+  link.dataset.blob = link.href;
+  link.download = `geometry-guard-batching-block-${record.block ?? 'invalid'}.json`;
+  link.hidden = false;
+};
+button.onclick = async () => {
+  button.disabled = true;
+  let db, recovered = false, ownsRecord = false;
+  let record = {schema:'spiraltorch.geometry_guard_batching.timing.v1', engine:'browser',
+    timer:'awaited_rust_export_including_gpu_runtime_and_rust_json', completed:false, samples:[]};
+  try {
+    const block = Number(new URLSearchParams(location.search).get('block'));
+    require(Number.isInteger(block) && block >= 1 && block <= 3,'Explicit block 1..3 required');
+    record.block = block;
+    const protocolBytes = await bytes('/performance-protocol.json');
+    const protocol = JSON.parse(new TextDecoder().decode(protocolBytes));
+    require(protocol.schema === 'spiraltorch.geometry_guard_batching.performance_protocol.v1'
+      && protocol.blocks === 3 && JSON.stringify(protocol.warmup_order) === '["A","B"]'
+      && JSON.stringify(protocol.measurement_order) === '["A","B","B","A"]','Frozen schedule');
+    record.protocol_sha256 = await sha(protocolBytes);
+    record.key = record.protocol_sha256+':'+block;
+    db = await openRecords();
+    const existing = await previous(db,record.key);
+    if (existing) {
+      record = existing;
+      recovered = true;
+      status.textContent = `Recovered stored block ${block}. No invocation was repeated; download its completed or interrupted evidence.`;
+      return;
+    }
+    await persist(db,record,true);
+    ownsRecord = true;
+    const fixtureBytes = await bytes('/reference.json');
+    record.fixture_sha256 = await sha(fixtureBytes);
+    require(record.fixture_sha256 === protocol.fixture_sha256,'Fixture identity');
+    const fixture = new TextDecoder().decode(fixtureBytes), modules = {};
+    for (const arm of ['A','B']) {
+      const base = '/'+arm+'/resident_byte_decoder_browser';
+      const source = await bytes(base+'.js');
+      require(await sha(source) === protocol.javascript_sha256,'JS identity');
+      const wasm = await bytes(base+'_bg.wasm');
+      require(await sha(wasm) === protocol.wasm_sha256[arm],'WASM identity');
+      const sourceUrl = URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
+      try {
+        modules[arm] = await import(sourceUrl);
+        await modules[arm].default({module_or_path:wasm});
+      } finally { URL.revokeObjectURL(sourceUrl); }
+    }
+    for (const [stage,order] of [['warmup',protocol.warmup_order],['measure',protocol.measurement_order]]) {
+      for (const [index,arm] of order.entries()) {
+        status.textContent = `Block ${block}: ${stage} ${index+1}, arm ${arm}. No overlapping GPU work.`;
+        const row = {block,stage,index,arm,status:'started_or_interrupted',seconds:null};
+        record.samples.push(row);
+        await persist(db,record);
+        let start;
+        try {
+          start = performance.now();
+          try { row.raw_rust_report = await modules[arm].run_resident_byte_query_mixture(fixture); }
+          finally { row.seconds = (performance.now()-start)/1000; }
+          const result = JSON.parse(row.raw_rust_report);
+          result.fixture_sha256 = record.fixture_sha256;
+          row.report_json = JSON.stringify(result)+'\n';
+          row.report_sha256 = await sha(new TextEncoder().encode(row.report_json));
+          require(row.report_sha256 === protocol.report_sha256.browser,'Report changed; preserve this run without replacing it');
+          row.status = 'completed';
+        } catch (error) {
+          row.status = 'failed'; row.error = String(error); throw error;
+        } finally { await persist(db,record); download(record); }
+        const tr = document.createElement('tr');
+        for (const value of [stage,arm,row.seconds.toFixed(6),'exact; original qualification failure retained']) {
+          const td = document.createElement('td'); td.textContent = value; tr.append(td);
+        }
+        document.querySelector('#rows').append(tr);
+      }
+    }
+    record.completed = true;
+    status.textContent = `Block ${block} completed. All six reports match. Independent aggregation of all three blocks is still required.`;
+  } catch (error) {
+    record.error = String(error);
+    status.textContent = 'Stopped without replacement trials: '+String(error);
+  } finally {
+    if (db && ownsRecord && !recovered) {
+      try { await persist(db,record); }
+      catch (error) {
+        record.completed = false; record.persistence_error = String(error);
+        status.textContent = 'Persistence failed; this block is incomplete. Download the available evidence.';
+      }
+    }
+    download(record);
+    db?.close();
+  }
+};
+</script>

@@ -1,0 +1,148 @@
+{
+  "schema": "spiraltorch.resident_byte_bias_scale.comparison.v1",
+  "passed": true,
+  "calibration": [
+    {
+      "name": "calibrated_flat_causal_geometry_blocks1_metric_onlyTrue",
+      "valid_pairs_per_head": 40,
+      "reference_rms": [
+        [
+          0.06398209853377218,
+          0.12494845358413899
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.05944896680742112,
+          0.11609585130712649
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.06398209452543137,
+          0.12494844932494968
+        ]
+      ],
+      "requested_scales": [
+        [
+          1.0762524896527752,
+          1.0762525290726654
+        ]
+      ],
+      "maximum_realized_relative_error": 6.26478484644366e-8,
+      "raw_gain_relative_sensitivity_ratio": [
+        0.9846967765313115,
+        0.9725630408151688
+      ],
+      "score_max_abs_error_vs_torch": 1.1920928955078125e-7,
+      "raw_gain_max_abs_error_vs_torch": 5.960464477539063e-8,
+      "checkpoint_gain_only_exact": true,
+      "no_updates_consumed": true,
+      "ordinary_and_out_of_range_absent": true,
+      "learner_initial_checkpoint_exact": true,
+      "targets_and_external_bias_excluded": true
+    },
+    {
+      "name": "calibrated_flat_causal_geometry_blocks2_metric_onlyFalse",
+      "valid_pairs_per_head": 40,
+      "reference_rms": [
+        [
+          0.13484177083231363,
+          0.26332788059973555
+        ],
+        [
+          0.1708624109291939,
+          0.15812064824969857
+        ]
+      ],
+      "candidate_rms": [
+        [
+          0.12163446236871116,
+          0.23753578135887507
+        ],
+        [
+          0.1541269934307281,
+          0.142633249646768
+        ]
+      ],
+      "fitted_rms": [
+        [
+          0.13484175476444138,
+          0.2633278690820286
+        ],
+        [
+          0.17086239604428852,
+          0.15812064412796537
+        ]
+      ],
+      "requested_scales": [
+        [
+          1.1085819611186105,
+          1.1085819538147523
+        ],
+        [
+          1.1085820019319814,
+          1.1085819655745432
+        ]
+      ],
+      "maximum_realized_relative_error": 1.1916094067032645e-7,
+      "raw_gain_relative_sensitivity_ratio": [
+        0.9783065208439593,
+        0.961257351310499,
+        0.9731846492073402,
+        0.97496512594853
+      ],
+      "score_max_abs_error_vs_torch": 2.384185791015625e-7,
+      "raw_gain_max_abs_error_vs_torch": 2.980232238769531e-7,
+      "checkpoint_gain_only_exact": true,
+      "no_updates_consumed": true,
+      "ordinary_and_out_of_range_absent": true,
+      "learner_initial_checkpoint_exact": true,
+      "targets_and_external_bias_excluded": true
+    }
+  ],
+  "learning": {
+    "schema": "spiraltorch.resident_byte_geometry_flat.comparison.v1",
+    "passed": true,
+    "cases": [
+      {
+        "name": "calibrated_flat_causal_geometry_blocks1_metric_onlyTrue",
+        "metric": "euclidean_chord_squared.v1",
+        "parameter_tensors": 23,
+        "parameter_scalars": 2516,
+        "steps": 16,
+        "resume_exact_steps": 16,
+        "minimum_reference_geometry_gradient_l2": 0.000009257709975182575,
+        "logit_max_abs_error": 5.960464477539063e-8,
+        "loss_max_abs_error": 9.5367431640625e-7,
+        "parameter_max_abs_error": 6.635673344135284e-8,
+        "initial_vjp_max_abs_error": 1.4901161193847656e-7,
+        "geometry_relative_l2": 0.00001906060710389131,
+        "embedding_gradient_max_abs_error": 2.039596438407898e-7,
+        "bias_gradient_max_abs_error": 0
+      },
+      {
+        "name": "calibrated_flat_causal_geometry_blocks2_metric_onlyFalse",
+        "metric": "euclidean_chord_squared.v1",
+        "parameter_tensors": 37,
+        "parameter_scalars": 2678,
+        "steps": 16,
+        "resume_exact_steps": 16,
+        "minimum_reference_geometry_gradient_l2": 0.00003064166725251491,
+        "logit_max_abs_error": 5.960464477539063e-8,
+        "loss_max_abs_error": 0.000001430511474609375,
+        "parameter_max_abs_error": 5.066394805908203e-7,
+        "initial_vjp_max_abs_error": 2.384185791015625e-7,
+        "geometry_relative_l2": 0.00012946800220085765,
+        "embedding_gradient_max_abs_error": 0.0000028014183044433594,
+        "bias_gradient_max_abs_error": 2.7939677238464355e-9
+      }
+    ],
+    "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation"
+  },
+  "scope": "Independent engine-local initialization fits; full synthetic VJP/16-step parity at fixed gates, same-runtime exact resume. Not bit-identical cross-engine initialization, equal distributions, equal learning dynamics, corpus quality, speed, or runtime attestation.",
+  "input_sha256": {
+    "reference": "3eb8e538371d0aa968abfd1f9d3758b7f83464ce6b36e06fb0fe9c91f2e9a00b",
+    "report": "0a6e1f241f850326079da5fe59b6dd1b3bdaa952583c7a57e82ba2060965fd5f"
+  }
+}

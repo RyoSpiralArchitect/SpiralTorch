@@ -9,18 +9,25 @@
 //! allocation, or foreign-function interfaces.
 
 pub mod attention;
+pub mod causal_bias;
 pub mod causal_wave;
 pub mod classification;
 pub mod compaction;
+mod compensated;
 pub mod elementwise;
+pub mod euclidean;
+pub mod fisher_rao;
 pub mod gradient_clip;
 pub mod graph;
 pub mod indexing;
 pub mod layout;
+pub mod mixture;
 pub mod momentum;
 pub mod normalization;
+mod pair_bias;
 pub mod poincare;
 pub mod pointwise;
+pub mod projective;
 pub mod rank;
 pub mod sgd;
 pub mod topos_resonator;

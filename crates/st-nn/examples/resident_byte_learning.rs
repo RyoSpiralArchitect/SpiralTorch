@@ -1,5 +1,8 @@
 #[cfg(not(target_arch = "wasm32"))]
-use st_nn::resident::{ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES};
+use st_nn::resident::{
+    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusMixtureControls,
+    ByteCorpusQueryMixtureControls, ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_request(path: &std::path::Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -33,6 +36,11 @@ struct Args {
     resume: Option<std::path::PathBuf>,
     output: Option<std::path::PathBuf>,
     stop: Option<usize>,
+    calibrate: Option<Vec<usize>>,
+    fisher: bool,
+    headwise: bool,
+    mixtures: bool,
+    query_mixtures: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -43,9 +51,30 @@ impl Args {
         let mut args = args.into_iter();
         let mut result = Self {
             request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json]")?.into(),
-            resume: None, output: None, stop: None,
+            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false, mixtures: false, query_mixtures: false,
         };
         while let Some(flag) = args.next() {
+            if flag == "--prepare-query-mixtures" {
+                if result.query_mixtures {
+                    return Err("duplicate contextual preparation flag".into());
+                }
+                result.query_mixtures = true;
+                continue;
+            }
+            if flag == "--prepare-mixtures" {
+                if result.mixtures {
+                    return Err("duplicate mixture preparation flag".into());
+                }
+                result.mixtures = true;
+                continue;
+            }
+            if flag == "--prepare-headwise" {
+                if result.headwise {
+                    return Err("duplicate headwise preparation flag".into());
+                }
+                result.headwise = true;
+                continue;
+            }
             let value = args.next().ok_or("missing flag value")?;
             match flag.to_str() {
                 Some("--resume") if result.resume.is_none() => result.resume = Some(value.into()),
@@ -55,8 +84,37 @@ impl Args {
                 Some("--stop-after") if result.stop.is_none() => {
                     result.stop = Some(value.to_str().ok_or("invalid stop cursor")?.parse()?);
                 }
+                Some("--calibrate-flat" | "--calibrate-fisher") if result.calibrate.is_none() => {
+                    result.fisher = flag == "--calibrate-fisher";
+                    result.calibrate = Some(
+                        value
+                            .to_str()
+                            .ok_or("invalid calibration indices")?
+                            .split(',')
+                            .map(str::parse)
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
+                }
                 _ => return Err("unknown or duplicate flag".into()),
             }
+        }
+        if usize::from(result.headwise)
+            + usize::from(result.mixtures)
+            + usize::from(result.query_mixtures)
+            + usize::from(result.calibrate.is_some())
+            > 1
+        {
+            return Err("choose one preparation mode".into());
+        }
+        if (result.calibrate.is_some()
+            || result.headwise
+            || result.mixtures
+            || result.query_mixtures)
+            && (result.stop.is_some() || result.resume.is_some() || result.output.is_some())
+        {
+            return Err(
+                "calibration prepares a new request; it cannot run or resume learning".into(),
+            );
         }
         if (result.stop.is_some() || result.resume.is_some()) && result.output.is_none() {
             return Err("stop/resume requires --checkpoint-out with a new file path".into());
@@ -95,6 +153,54 @@ fn save_checkpoint(path: &std::path::Path, json: &str) -> Result<(), Box<dyn std
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(std::env::args_os().skip(1))?;
     let input = read_request(&args.request)?;
+    if args.query_mixtures {
+        let prepared = ByteCorpusQueryMixtureControls::from_json(&input)?.prepare();
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
+    if args.mixtures {
+        let preparation = ByteCorpusMixtureControls::from_json(&input)?;
+        let (runtime, _) =
+            st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.mixture")?;
+        let prepared = pollster::block_on(preparation.prepare(runtime))?;
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
+    if args.headwise {
+        let preparation = ByteCorpusHeadwiseControls::from_json(&input)?;
+        let (runtime, _) =
+            st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.headwise")?;
+        let prepared = pollster::block_on(preparation.prepare(runtime))?;
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
+    if let Some(indices) = args.calibrate {
+        let mut preparation = ByteCorpusBiasCalibration::from_json(&input, &indices)?;
+        if args.fisher {
+            preparation = preparation.with_fisher_rao_control()?;
+        }
+        let (runtime, _) =
+            st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.calibration")?;
+        let prepared = pollster::block_on(preparation.prepare(runtime))?;
+        println!(
+            "{}",
+            serde_json::json!({"schema":"spiraltorch.byte_corpus.prepared.v1",
+            "request_json":prepared.request_json,"report_json":prepared.report.to_string()})
+        );
+        return Ok(());
+    }
     let study = ByteCorpusStudy::from_json(&input)?;
     let resume = args
         .resume
@@ -142,9 +248,84 @@ mod tests {
             vec!["request", "--stop-after", "1", "--stop-after", "2"],
             vec!["request", "--typo", "1"],
             vec!["request", "--resume"],
+            vec!["request", "--calibrate-flat", "0,1", "--stop-after", "1"],
+            vec!["request", "--calibrate-flat", "0,1", "--resume", "old.json"],
+            vec![
+                "request",
+                "--calibrate-flat",
+                "0,1",
+                "--checkpoint-out",
+                "new.json",
+            ],
+            vec![
+                "request",
+                "--calibrate-flat",
+                "0,1",
+                "--calibrate-flat",
+                "2",
+            ],
+            vec!["request", "--calibrate-flat", "0,,1"],
+            vec!["request", "--calibrate-flat", "-1"],
+            vec![
+                "request",
+                "--calibrate-fisher",
+                "0",
+                "--calibrate-flat",
+                "1",
+            ],
+            vec!["request", "--calibrate-fisher", "0", "--resume", "old.json"],
+            vec!["request", "--prepare-headwise", "--prepare-headwise"],
+            vec!["request", "--prepare-headwise", "--calibrate-fisher", "0"],
+            vec!["request", "--calibrate-flat", "0", "--prepare-headwise"],
+            vec!["request", "--prepare-headwise", "--stop-after", "1"],
+            vec!["request", "--prepare-headwise", "--resume", "old.json"],
+            vec!["request", "--prepare-mixtures", "--prepare-mixtures"],
+            vec!["request", "--prepare-mixtures", "--prepare-headwise"],
+            vec!["request", "--prepare-mixtures", "--calibrate-fisher", "0"],
+            vec!["request", "--prepare-mixtures", "--stop-after", "1"],
+            vec!["request", "--prepare-mixtures", "--resume", "old.json"],
+            vec![
+                "request",
+                "--prepare-mixtures",
+                "--checkpoint-out",
+                "new.json",
+            ],
+            vec![
+                "request",
+                "--prepare-headwise",
+                "--checkpoint-out",
+                "new.json",
+            ],
         ] {
             assert!(super::Args::parse(args.into_iter().map(std::ffi::OsString::from)).is_err());
         }
+        assert_eq!(
+            super::Args::parse(
+                ["request", "--calibrate-flat", "0,1,2,3"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+            )
+            .unwrap()
+            .calibrate,
+            Some(vec![0, 1, 2, 3])
+        );
+        let fisher = super::Args::parse(
+            ["request", "--calibrate-fisher", "0,1"]
+                .into_iter()
+                .map(std::ffi::OsString::from),
+        )
+        .unwrap();
+        assert!(fisher.fisher);
+        assert_eq!(fisher.calibrate, Some(vec![0, 1]));
+        assert!(
+            super::Args::parse(
+                ["request", "--prepare-headwise"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+            )
+            .unwrap()
+            .headwise
+        );
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("new.json");
         let args = [

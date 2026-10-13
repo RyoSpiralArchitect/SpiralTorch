@@ -9,8 +9,8 @@ use st_kernel_contracts::classification::{ClassReduction, CrossEntropySpec};
 use st_nn::{
     resident::{
         AttentionInferencePlan, AttentionMask, ByteDecoderBias, ByteDecoderGeometryPlan,
-        ByteDecoderPlan, ByteLmBatch, InferenceError, InferenceOp, InferencePlan,
-        ResidualAttentionPlan, ToposResonatorKernel,
+        ByteDecoderPairMetric, ByteDecoderPlan, ByteLmBatch, InferenceError, InferenceOp,
+        InferencePlan, ResidualAttentionPlan, ToposResonatorKernel,
     },
     Tensor,
 };
@@ -19,15 +19,45 @@ use st_tensor::NdLayout;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type OwnedBias = (Option<ResidentTensor>, Option<ResidentTensor>);
 
+#[path = "byte_decoder/bias_scale_controls.rs"]
+mod bias_scale_controls;
 #[path = "byte_decoder/checkpoint_controls.rs"]
 mod checkpoint_controls;
+#[path = "byte_decoder/fisher_controls.rs"]
+mod fisher_controls;
 #[path = "byte_decoder/geometry_controls.rs"]
 mod geometry_controls;
+#[path = "byte_decoder/headwise_controls.rs"]
+mod headwise_controls;
+#[path = "byte_decoder/mixture_controls.rs"]
+mod mixture_controls;
 #[path = "byte_decoder/parameter_rate_controls.rs"]
 mod parameter_rate_controls;
+#[path = "byte_decoder/projective_controls.rs"]
+mod projective_controls;
+#[path = "byte_decoder/query_controls.rs"]
+mod query_controls;
+#[path = "byte_decoder/query_pullback_controls.rs"]
+mod query_pullback_controls;
+
+pub async fn run_query_pullback(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    query_pullback_controls::run(runtime, fixture).await
+}
+
+pub async fn run_projective(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    projective_controls::run(runtime, fixture).await
+}
+
+pub async fn run_module_projective(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    projective_controls::run_module(runtime, fixture).await
+}
 
 pub async fn run_parameter_rates(runtime: WgpuRuntime) -> Result<Value> {
     parameter_rate_controls::run(runtime).await
+}
+
+pub async fn run_bias_scale(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    bias_scale_controls::run(runtime, fixture).await
 }
 
 fn data(v: &Value) -> Vec<f32> {
@@ -78,7 +108,23 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
             }],
         )?;
         offset = 6 + c["blocks"].as_array().unwrap().len();
-        Some(ByteDecoderGeometryPlan::new(
+        let metric = match c["causal_geometry"].get("pair_metric") {
+            None => ByteDecoderPairMetric::PoincareSquared,
+            Some(Value::String(s)) if s == "poincare_squared.v1" => {
+                ByteDecoderPairMetric::PoincareSquared
+            }
+            Some(Value::String(s)) if s == "euclidean_chord_squared.v1" => {
+                ByteDecoderPairMetric::EuclideanChordSquared
+            }
+            Some(Value::String(s)) if s == "categorical_fisher_rao_squared.v1" => {
+                ByteDecoderPairMetric::CategoricalFisherRaoSquared
+            }
+            Some(Value::String(s)) if s == "complex_projective_chord_squared.v1" => {
+                ByteDecoderPairMetric::ComplexProjectiveChordSquared
+            }
+            _ => return Err("unknown geometry pair metric".into()),
+        };
+        let geometry = ByteDecoderGeometryPlan::new(
             &projection,
             &data(&parameters[4]["values"]),
             &data(&parameters[5]["values"]),
@@ -87,7 +133,58 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
                 .map(|p| data(&p["values"]))
                 .collect::<Vec<_>>(),
             c["causal_geometry"]["curvature"].as_f64().unwrap() as f32,
-        )?)
+        )?;
+        Some(if let Some(mixture) = c["causal_geometry"].get("mixture") {
+            if c["causal_geometry"].get("pair_metric").is_some()
+                || c["causal_geometry"].get("head_pair_metrics").is_some()
+            {
+                return Err("mixture conflicts with fixed routes".into());
+            }
+            let count = c["blocks"].as_array().unwrap().len();
+            let logits = parameters[offset..offset + count]
+                .iter()
+                .map(|p| data(&p["values"]))
+                .collect::<Vec<_>>();
+            offset += count;
+            let geometry = geometry.with_mixture(
+                &serde_json::from_value::<Vec<ByteDecoderPairMetric>>(mixture["metrics"].clone())?,
+                &logits,
+                &serde_json::from_value::<Vec<Vec<f32>>>(mixture["scales"].clone())?,
+            )?;
+            if let Some(query) = mixture.get("query_projection") {
+                if query != "linear.v1" {
+                    return Err("unknown query projection".into());
+                }
+                let queries = (0..count)
+                    .map(|block| {
+                        let p = &parameters[offset + 2 * block..offset + 2 * block + 2];
+                        Ok(InferencePlan::from_operations(
+                            geometry.projection().output_layout().clone(),
+                            vec![InferenceOp::Linear {
+                                weight: tensor(&p[0])?,
+                                bias: tensor(&p[1])?,
+                            }],
+                        )?)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                offset += 2 * count;
+                geometry.with_query_projections(&queries)?
+            } else {
+                geometry
+            }
+        } else {
+            match c["causal_geometry"].get("head_pair_metrics") {
+                Some(grid) => {
+                    if c["causal_geometry"].get("pair_metric").is_some() {
+                        return Err("conflicting geometry routes".into());
+                    }
+                    geometry.with_head_pair_metrics(&serde_json::from_value::<
+                        Vec<Vec<ByteDecoderPairMetric>>,
+                    >(grid.clone())?)?
+                }
+                None => geometry.with_pair_metric(metric),
+            }
+        })
     } else {
         None
     };
@@ -263,7 +360,30 @@ fn same_bits(a: &[f32], b: &[f32]) -> bool {
             .eq(b.iter().map(|v| v.to_bits()))
 }
 
-async fn causal_checks(runtime: &WgpuRuntime, case: &Value) -> Result<Value> {
+fn require_mixture_count(expected: usize, actual: usize) -> Result<()> {
+    if actual != expected {
+        return Err("missing or unexpected block mixture snapshot".into());
+    }
+    Ok(())
+}
+
+fn mixture_snapshots(
+    plan: &ByteDecoderPlan,
+    forward: &st_nn::resident::ResidentByteDecoderForward,
+) -> Result<Vec<ResidentTensor>> {
+    let expected = if plan.causal_geometry().and_then(|g| g.mixture()).is_some() {
+        plan.block_count()
+    } else {
+        0
+    };
+    let values = (0..plan.block_count())
+        .filter_map(|block| forward.geometry_mixture_weights(block).cloned())
+        .collect::<Vec<_>>();
+    require_mixture_count(expected, values.len())?;
+    Ok(values)
+}
+
+async fn causal_checks(runtime: &WgpuRuntime, case: &Value, record_values: bool) -> Result<Value> {
     let steps = 4;
     let windows = vec![vec![1, 2, 3, 4, 5], vec![10, 11, 12, 13, 14]];
     let p = plan(case, steps)?;
@@ -332,10 +452,17 @@ async fn causal_checks(runtime: &WgpuRuntime, case: &Value) -> Result<Value> {
             return Err("future embedding output has a prefix cotangent".into());
         }
     }
-    Ok(
-        json!({"prefix_max_abs_error": prefix_error, "other_document_max_abs_error": row_error,
-        "extension_max_abs_error": extension_error, "suffix_gradient_zero": true, "sensitivity_control": true}),
-    )
+    let mut report = json!({"prefix_max_abs_error": prefix_error, "other_document_max_abs_error": row_error,
+        "extension_max_abs_error": extension_error, "suffix_gradient_zero": true, "sensitivity_control": true});
+    if record_values {
+        // Local raw witnesses permit independent tolerance checks; the public
+        // publisher emits only scalar errors, not these activation arrays.
+        report["numeric_witnesses"] = json!({
+            "prefix":{"actual":&after[..2*256],"expected":&baseline[..2*256]},
+            "other_document":{"actual":&after[steps*256..],"expected":&baseline[steps*256..]},
+            "extension":{"actual":prefix,"expected":expected}});
+    }
+    Ok(report)
 }
 
 async fn tape_checks(runtime: &WgpuRuntime, case: &Value) -> Result<Value> {
@@ -492,16 +619,251 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     {
         return Err("incomplete causal geometry oracle".into());
     }
-    let mut checks = Vec::new();
-    for (case_index, case) in fixture["cases"]
+    let cases: Vec<_> = fixture["cases"]
         .as_array()
         .unwrap()
         .iter()
         .chain(geometry_fixture["cases"].as_array().unwrap())
-        .enumerate()
+        .cloned()
+        .collect();
+    run_cases(runtime, &cases, &[18, 31, 23, 37], false, false).await
+}
+
+/// A local, independent Torch fixture; raw observations are returned only for
+/// the new metric control, never added to previously published v3 reports.
+pub async fn run_flat_metric(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    run_metric(runtime, fixture_json, "flat", "euclidean_chord_squared.v1").await
+}
+
+pub async fn run_fisher_rao(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    let boundary = fisher_controls::run(runtime.clone()).await?;
+    let mut result = run_metric(
+        runtime,
+        fixture_json,
+        "fisher_rao",
+        "categorical_fisher_rao_squared.v1",
+    )
+    .await?;
+    result["wide_pullback_control"] = boundary;
+    Ok(result)
+}
+
+pub async fn run_headwise(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    use ByteDecoderPairMetric::*;
+    let fixture: Value = serde_json::from_str(fixture_json)?;
+    let routes = json!([
+        [[
+            PoincareSquared,
+            PoincareSquared,
+            CategoricalFisherRaoSquared,
+            PoincareSquared
+        ]],
+        [
+            [CategoricalFisherRaoSquared, EuclideanChordSquared],
+            [EuclideanChordSquared, PoincareSquared]
+        ]
+    ]);
+    let cases = fixture["cases"]
+        .as_array()
+        .ok_or("missing headwise cases")?;
+    if fixture["schema"] != "spiraltorch.resident_byte_geometry_headwise.torch_fixture.v1"
+        || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
+        || cases.len() != 2
+        || cases.iter().enumerate().any(|(i, c)| {
+            c["config"]["causal_geometry"]["head_pair_metrics"] != routes[i]
+                || c["config"]["causal_geometry"].get("pair_metric").is_some()
+                || c["config"]["heads"] != [4, 2][i]
+        })
     {
+        return Err("incomplete or mislabeled headwise reference".into());
+    }
+    let guard = headwise_controls::run(&runtime, &cases[0]).await?;
+    let mut report = run_cases(runtime, cases, &[23, 37], true, false).await?;
+    report["head_group_guard"] = guard;
+    report["schema"] = json!("spiraltorch.resident_byte_geometry_headwise.validation.v1");
+    Ok(report)
+}
+
+pub async fn run_mixture(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    let fixture: Value = serde_json::from_str(fixture_json)?;
+    let cases = fixture["cases"].as_array().ok_or("missing mixture cases")?;
+    if fixture["schema"] != "spiraltorch.resident_byte_geometry_mixture.torch_fixture.v1"
+        || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
+        || cases.len() != 2
+        || cases.iter().any(|c| {
+            c["config"]["heads"] != 2
+                || c["config"]["causal_geometry"]["mixture"]["metrics"]
+                    != json!([
+                        "poincare_squared.v1",
+                        "euclidean_chord_squared.v1",
+                        "categorical_fisher_rao_squared.v1"
+                    ])
+                || c["config"]["causal_geometry"]
+                    .get("head_pair_metrics")
+                    .is_some()
+                || c["config"]["causal_geometry"].get("pair_metric").is_some()
+        })
+    {
+        return Err("incomplete or mislabeled mixture reference".into());
+    }
+    let guard = mixture_controls::run(&runtime, &cases[0]).await?;
+    let boundary = mixture_controls::wide_pullback(runtime.clone()).await?;
+    let mut report = run_cases(runtime, cases, &[24, 39], true, false).await?;
+    report["schema"] = json!("spiraltorch.resident_byte_geometry_mixture.validation.v1");
+    report["mixture_guard"] = guard;
+    report["wide_pullback_control"] = boundary;
+    Ok(report)
+}
+
+pub async fn run_query_mixture(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    let fixture: Value = serde_json::from_str(fixture_json)?;
+    let cases = fixture["cases"]
+        .as_array()
+        .ok_or("missing contextual cases")?;
+    if fixture["schema"] != "spiraltorch.resident_byte_geometry_query_mixture.torch_fixture.v1"
+        || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
+        || cases.len() != 4
+        || cases.iter().enumerate().any(|(i, c)| {
+            c["config"]["heads"] != 2
+                || c["query_controls"]["zero_init"] != (i < 2)
+                || c["config"]["causal_geometry"]["mixture"]["query_projection"] != "linear.v1"
+                || c["config"]["causal_geometry"]["mixture"]["metrics"]
+                    != json!([
+                        "poincare_squared.v1",
+                        "euclidean_chord_squared.v1",
+                        "categorical_fisher_rao_squared.v1"
+                    ])
+        })
+    {
+        return Err("incomplete contextual mixture reference".into());
+    }
+    let guard = query_controls::guard(&runtime, &cases[3]).await?;
+    let mut report = run_cases(runtime, cases, &[26, 43, 26, 43], true, false).await?;
+    let mut passed = true;
+    for (case, check) in cases
+        .iter()
+        .zip(report["checks"].as_array_mut().ok_or("missing checks")?)
+    {
+        match query_controls::check(case, check) {
+            Ok(controls) => check["query_controls"] = controls,
+            Err(error) => {
+                passed = false;
+                check["query_controls_error"] = json!(error.to_string());
+            }
+        }
+    }
+    report["passed"] = json!(passed);
+    report["schema"] = json!("spiraltorch.resident_byte_geometry_query_mixture.validation.v1");
+    report["query_guard"] = guard;
+    Ok(report)
+}
+
+async fn run_metric(
+    runtime: WgpuRuntime,
+    fixture_json: &str,
+    kind: &str,
+    metric: &str,
+) -> Result<Value> {
+    let fixture: Value = serde_json::from_str(fixture_json)?;
+    if fixture["schema"] != format!("spiraltorch.resident_byte_geometry_{kind}.torch_fixture.v1")
+        || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
+    {
+        return Err("invalid flat metric reference contract".into());
+    }
+    let cases = fixture["cases"]
+        .as_array()
+        .ok_or("missing flat metric cases")?;
+    if cases.len() != 2
+        || cases
+            .iter()
+            .any(|case| case["config"]["causal_geometry"]["pair_metric"] != metric)
+    {
+        return Err("incomplete or mislabeled flat metric cases".into());
+    }
+    let mut result = run_cases(runtime, cases, &[23, 37], true, false).await?;
+    result["schema"] = json!(format!(
+        "spiraltorch.resident_byte_geometry_{kind}.validation.v1"
+    ));
+    Ok(result)
+}
+
+async fn run_cases(
+    runtime: WgpuRuntime,
+    cases: &[Value],
+    counts: &[usize],
+    raw: bool,
+    capture_initial: bool,
+) -> Result<Value> {
+    run_cases_observed(runtime, cases, counts, raw, capture_initial, false, false).await
+}
+
+fn observed_close(
+    actual: &[f32],
+    expected: &[f32],
+    label: &str,
+    step: usize,
+    retain: bool,
+    failures: &mut Vec<Value>,
+) -> Result<f64> {
+    match close(actual, expected, label) {
+        Ok(maximum) => Ok(maximum),
+        Err(error)
+            if retain
+                && actual.len() == expected.len()
+                && actual.iter().chain(expected).all(|v| v.is_finite()) =>
+        {
+            let maximum = actual
+                .iter()
+                .zip(expected)
+                .map(|(&a, &b)| (f64::from(a) - f64::from(b)).abs())
+                .fold(0., f64::max);
+            failures.push(json!({"step":step, "gate":"numeric_absolute_relative",
+                "label":label, "atol":3e-6, "rtol":5e-5, "error":error.to_string(),
+                "maximum_absolute_error":maximum}));
+            Ok(maximum)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[test]
+fn observed_learning_failures_remain_failures_and_malformed_data_still_aborts() {
+    let mut failures = Vec::new();
+    assert!(observed_close(&[1.], &[0.], "strict", 1, false, &mut failures).is_err());
+    assert!(failures.is_empty());
+    assert_eq!(
+        observed_close(&[1.], &[0.], "observed", 1, true, &mut failures).unwrap(),
+        1.
+    );
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0]["gate"], "numeric_absolute_relative");
+    for (a, b) in [
+        (vec![f32::NAN], vec![0.]),
+        (vec![0.], vec![f32::INFINITY]),
+        (vec![], vec![0.]),
+    ] {
+        assert!(observed_close(&a, &b, "invalid", 2, true, &mut failures).is_err());
+    }
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        observed_close(&[0.], &[0.], "good", 3, true, &mut failures).unwrap(),
+        0.
+    );
+    assert_eq!(failures.len(), 1);
+}
+
+async fn run_cases_observed(
+    runtime: WgpuRuntime,
+    cases: &[Value],
+    counts: &[usize],
+    raw: bool,
+    capture_initial: bool,
+    retain_learning_failures: bool,
+    record_causal_values: bool,
+) -> Result<Value> {
+    let mut checks = Vec::new();
+    for (case, &expected_count) in cases.iter().zip(counts) {
         let p = plan(case, 4)?;
-        let expected_count = [18, 31, 23, 37][case_index];
         if p.parameter_layout().len() != expected_count
             || case["parameter_gradients"].as_array().map(Vec::len) != Some(expected_count)
         {
@@ -535,9 +897,35 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             return Err("byte target alignment changed".into());
         }
         let mut model = p.compile_training_wgpu(runtime.clone())?;
+        let initial_checkpoint = if capture_initial {
+            let captured = checkpoint_controls::checkpoint(&model).await?.to_json()?;
+            if captured != p.initial_checkpoint().to_json()? {
+                return Err("learner initial device checkpoint differs from fitted plan".into());
+            }
+            Some(captured)
+        } else {
+            None
+        };
         let resident = model.prepare_batch(&host)?;
         let geometry = biases(model.tensor_device(), case, 4)?;
         let forward = model.forward_with_external_biases(&resident, &borrowed(&geometry))?;
+        let mixture_weights = mixture_snapshots(&p, &forward)?;
+        let initial_mixture_weights = if mixture_weights.is_empty() {
+            None
+        } else {
+            Some(read_many(model.tensor_device(), &mixture_weights).await?)
+        };
+        if let Some(actual) = &initial_mixture_weights {
+            let expected = case["mixture_weights"]
+                .as_array()
+                .ok_or("missing mixture oracle")?;
+            if actual.len() != expected.len() {
+                return Err("truncated mixture weights".into());
+            }
+            for (a, e) in actual.iter().zip(expected) {
+                close(a, &data(e), "initial mixture weights")?;
+            }
+        }
         let output_values = read(forward.prediction()).await?;
         let output_error = close(
             &output_values,
@@ -603,6 +991,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             return Err("incomplete block bias gradients".into());
         }
         let mut bias_errors = Vec::new();
+        let mut bias_values = Vec::new();
         let batch_size = case["config"]["batch"].as_u64().unwrap() as usize;
         let heads = case["config"]["heads"].as_u64().unwrap() as usize;
         for (block, bias) in gradient.bias_gradients().iter().enumerate() {
@@ -617,17 +1006,19 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 if g.layout().shape() != shape {
                     return Err("external bias gradient shape drift".into());
                 }
+                let value = read(g).await?;
                 bias_errors.push(close(
-                    &read(g).await?,
+                    &value,
                     &data(&case["bias_gradients"][bias_errors.len()]),
                     "external bias gradient",
                 )?);
+                bias_values.push(value);
             }
         }
         if bias_errors.len() != case["bias_gradients"].as_array().unwrap().len() {
             return Err("missing geometry VJP".into());
         }
-        let causal = causal_checks(&runtime, case).await?;
+        let causal = causal_checks(&runtime, case, record_causal_values).await?;
         let tapes = tape_checks(&runtime, case).await?;
         let metric_controls = if p.parameter_layout().geometry().is_some() {
             Some(geometry_controls::run(&runtime, case, &output_values, &input_values).await?)
@@ -644,17 +1035,26 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             let loss =
                 forward.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
             let gradient = model.backward(&forward, loss.prediction_gradient())?;
+            let mixture_weights = mixture_snapshots(&p, &forward)?;
             let update = model.sgd(&gradient, learning["rate"].as_f64().unwrap() as f32)?;
             let geometry_gradients = p
                 .parameter_layout()
                 .geometry()
                 .map(|g| gradient.parameter_gradients()[g.all()].to_vec())
                 .unwrap_or_default();
-            pending.push((loss, update, model.parameter_snapshot(), geometry_gradients));
+            pending.push((
+                loss,
+                update,
+                model.parameter_snapshot(),
+                geometry_gradients,
+                raw.then(|| gradient.embedding_output_gradient().clone()),
+                mixture_weights,
+            ));
         }
         // No activation/gradient/receipt read until every update is queued.
         let mut trace = Vec::new();
-        for (step, (loss, update, parameters, geometry_gradients)) in
+        let mut qualification_failures = Vec::new();
+        for (step, (loss, update, parameters, geometry_gradients, embedded, mixture_weights)) in
             pending.into_iter().enumerate()
         {
             let receipt = update.snapshot()?;
@@ -666,10 +1066,13 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 return Err("decoder revision mismatch".into());
             }
             let loss_values = read(loss.value()).await?;
-            close(
+            observed_close(
                 &loss_values,
                 &[learning["trace"][step]["loss"].as_f64().unwrap() as f32],
                 "byte CE",
+                step + 1,
+                retain_learning_failures,
+                &mut qualification_failures,
             )?;
             let actual = read_many(model.tensor_device(), parameters.values()).await?;
             let expected = learning["trace"][step]["parameters"].as_array().unwrap();
@@ -678,32 +1081,126 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             }
             let mut maximum = 0f64;
             for (i, (a, e)) in actual.iter().zip(expected).enumerate() {
-                maximum = maximum.max(close(a, &data(e), &format!("step {step} parameter {i}"))?);
+                maximum = maximum.max(observed_close(
+                    a,
+                    &data(e),
+                    &format!("step {} parameter {i}", step + 1),
+                    step + 1,
+                    retain_learning_failures,
+                    &mut qualification_failures,
+                )?);
             }
             let mut geometry_relative = Vec::new();
+            let geometry_values = if geometry_gradients.is_empty() {
+                Vec::new()
+            } else {
+                read_many(model.tensor_device(), &geometry_gradients).await?
+            };
             if !geometry_gradients.is_empty() {
-                let actual = read_many(model.tensor_device(), &geometry_gradients).await?;
                 let expected = learning["trace"][step]["geometry_gradients"]
                     .as_array()
                     .ok_or("missing geometry CE derivatives")?;
-                if actual.len() != expected.len() {
+                if geometry_values.len() != expected.len() {
                     return Err("truncated geometry CE derivatives".into());
                 }
-                for (a, e) in actual.iter().zip(expected) {
-                    close(a, &data(e), "geometry CE derivative")?;
-                    geometry_relative.push(geometry_controls::relative_gradient(a, &data(e))?);
+                for (slot, (a, e)) in geometry_values.iter().zip(expected).enumerate() {
+                    observed_close(
+                        a,
+                        &data(e),
+                        &format!("geometry CE derivative {slot}"),
+                        step + 1,
+                        retain_learning_failures,
+                        &mut qualification_failures,
+                    )?;
+                    match geometry_controls::relative_gradient(a, &data(e)) {
+                        Ok(relative) => geometry_relative.push(json!(relative)),
+                        Err(error) if retain_learning_failures => {
+                            // Preserve the failed gate and finish collecting the fixed
+                            // trajectory. This is a FAIL, never a relaxed tolerance.
+                            qualification_failures.push(json!({
+                                "step":step+1, "geometry_slot":slot,
+                                "gate":"geometry_relative_l2", "threshold":0.002,
+                                "error":error.to_string()
+                            }));
+                            geometry_relative.push(Value::Null);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
             trace.push(json!({"revision": revision, "loss": loss_values[0], "parameter_max_abs_error": maximum,
                 "geometry_gradient_relative_l2": geometry_relative}));
+            if let Some(embedded) = embedded {
+                let row = trace.last_mut().unwrap();
+                row["parameters"] = json!(actual);
+                row["geometry_gradients"] = json!(geometry_values);
+                row["embedding_output_gradient"] = json!(read(&embedded).await?);
+            }
+            if !mixture_weights.is_empty() {
+                let actual = read_many(model.tensor_device(), &mixture_weights).await?;
+                let expected = learning["trace"][step]["mixture_weights"]
+                    .as_array()
+                    .ok_or("missing mixture weights")?;
+                if actual.len() != expected.len() {
+                    return Err("truncated mixture trajectory".into());
+                }
+                for (a, e) in actual.iter().zip(expected) {
+                    observed_close(
+                        a,
+                        &data(e),
+                        "learned mixture weights",
+                        step + 1,
+                        retain_learning_failures,
+                        &mut qualification_failures,
+                    )?;
+                }
+                trace.last_mut().unwrap()["mixture_weights"] = json!(actual);
+            }
         }
         let checkpoint = checkpoint_controls::run(&runtime, case).await?;
         checks.push(json!({"name": case["name"], "checkpoint":checkpoint, "parameter_count": expected_count, "output_max_abs_error": output_error,
             "embedding_output_max_abs_error": input_error, "parameter_errors": errors, "bias_errors": bias_errors, "gradient_layouts": true,
             "causality": causal, "tapes": tapes, "metric_controls": metric_controls, "learning": {"steps":16, "trace":trace}}));
+        if retain_learning_failures {
+            checks.last_mut().unwrap()["qualification_failures"] = json!(qualification_failures);
+        }
+        if let Some(initial) = initial_checkpoint {
+            checks.last_mut().unwrap()["initial_checkpoint_json"] = json!(initial);
+        }
+        if raw {
+            let check = checks.last_mut().unwrap();
+            if let Some(weights) = initial_mixture_weights {
+                check["mixture"] = case["config"]["causal_geometry"]["mixture"].clone();
+                check["mixture_weights"] = json!(weights);
+            } else if let Some(grid) = case["config"]["causal_geometry"].get("head_pair_metrics") {
+                check["head_pair_metrics"] = grid.clone();
+            } else {
+                check["metric"] = case["config"]["causal_geometry"]["pair_metric"].clone();
+            }
+            check["parameter_names"] =
+                json!(parameters.iter().map(|p| &p["name"]).collect::<Vec<_>>());
+            check["parameter_shapes"] =
+                json!(parameters.iter().map(|p| &p["shape"]).collect::<Vec<_>>());
+            check["output"] = json!(output_values);
+            check["parameter_gradients"] = json!(values);
+            check["embedding_output_gradient"] = json!(input_values);
+            check["bias_gradients"] = json!(bias_values);
+            check["resume_trajectory"] = checkpoint_controls::resume_trajectory(
+                &runtime,
+                case,
+                check["learning"]["trace"].as_array().unwrap(),
+            )
+            .await?;
+        }
     }
+    let passed = checks.iter().all(|c| {
+        c.get("qualification_failures")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    });
     Ok(
-        json!({"schema":"spiraltorch.resident_byte_decoder.validation.v3", "passed":true,
+        json!({"schema":if raw { "spiraltorch.resident_byte_geometry_flat.validation.v1" }
+            else { "spiraltorch.resident_byte_decoder.validation.v3" }, "passed":passed,
         "adapter":format!("{:?}",runtime.adapter_info()), "checks":checks,
         "scope":"complete 256-way byte decoder correctness and synthetic training, not language quality or speed"}),
     )

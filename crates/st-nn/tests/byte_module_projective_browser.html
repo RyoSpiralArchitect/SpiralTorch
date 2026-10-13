@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Module-grouped geometric QKV learning</title>
+<style>body{font:16px Georgia,serif;background:#f6f1e8;color:#202c28;margin:32px;max-width:1100px}h1{font-weight:400}pre{font:13px monospace;white-space:pre-wrap}button,a{font:inherit;padding:12px}table{border-collapse:collapse;width:100%}td,th{padding:12px;border-bottom:1px solid #bfc7bb;text-align:left}</style>
+<h1>Module-grouped geometric QKV learning</h1>
+<p>Six fixed cases, 16 updates each. Projection bias precedes the residual add; query pullbacks use Full minus Stop from the same runtime. This v2 contract does not rewrite the original v1 result. No language-quality or speed claim.</p>
+<button id="run">Run all six v2 cases</button>
+<a id="download" hidden>Download local raw result</a>
+<pre id="status">Ready. Rust runs all learning, gradient, causality and checkpoint controls on WebGPU.</pre>
+<table><thead><tr><th>Case</th><th>CE first / last</th><th>Geometry max relative error</th><th>Query control</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+const run = document.querySelector('#run'), status = document.querySelector('#status');
+run.onclick = async () => {
+  run.disabled = true;
+  try {
+    const base = '/target/resident-byte-module-projective-web/';
+    status.textContent = 'Loading versioned fixture and Rust WASM...';
+    const response = await fetch(base+'reference.json');
+    const identityResponse = await fetch(base+'fixture-identity.json');
+    if (!response.ok || !identityResponse.ok) throw Error('Missing local fixture or identity');
+    const fixture = await response.text(), identity = await identityResponse.json();
+    const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(fixture)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+    if (sha !== identity.fixture_sha256) throw Error('Fixture identity mismatch');
+    const {default:init, run_resident_byte_module_projective} = await import(base+'resident_byte_decoder_browser.js');
+    await init();
+    status.textContent = 'Running all six learning cases, exact resume and paired query controls...';
+    const report = JSON.parse(await run_resident_byte_module_projective(fixture));
+    const reference = JSON.parse(fixture);
+    if (report.schema !== 'spiraltorch.resident_byte_geometry_projective.validation.v2'
+        || report.execution_contract?.residual !== 'projection_bias_before_residual.v1'
+        || report.execution_contract?.router_coordinate_vjp !== 'same_runtime_full_minus_stop.v1'
+        || report.checks.length !== 6 || report.paired_query?.checks?.length !== 2
+        || typeof report.passed !== 'boolean') throw Error('Incomplete v2 qualification');
+    for (let i=0;i<6;i++) {
+      const c=report.checks[i], trace=c.learning?.trace;
+      if (c.name !== reference.cases[i].name || trace?.length !== 16
+          || trace.some((s,j)=>s.revision!==j+1)) throw Error('Missing or reordered learning case');
+      const values=trace.flatMap(s=>s.geometry_gradient_relative_l2);
+      const error=values.some(v=>v===null) ? 'FAIL (retained)' : Math.max(...values).toPrecision(6);
+      const query=i<4 ? 'not contextual' : (c.query_controls_error ? 'FAIL (retained)' : c.query_controls.router_coordinate_vjp_relative_l2.toPrecision(6));
+      const tr=document.createElement('tr');
+      for (const value of [c.name,trace[0].loss.toFixed(6)+' / '+trace[15].loss.toFixed(6),error,query]) {
+        const td=document.createElement('td');td.textContent=String(value);tr.append(td);
+      }
+      document.querySelector('#rows').append(tr);
+    }
+    const bundle={schema:'spiraltorch.module_projective_bundle.browser.v2',fixture_sha256:sha,report};
+    const link=document.querySelector('#download');
+    link.href=URL.createObjectURL(new Blob([JSON.stringify(bundle)+'\n'],{type:'application/json'}));
+    link.download='resident-byte-module-projective.json';link.hidden=false;
+    status.textContent='V2 qualification: '+(report.passed?'PASS':'FAIL (retained)')+'. Six cases, 96 updates, paired query controls: '+(report.paired_query.passed?'PASS':'FAIL')+'. Original v1 unchanged. Fixture SHA-256: '+sha;
+  } catch(error) { status.textContent=String(error); }
+};
+</script>
+</html>

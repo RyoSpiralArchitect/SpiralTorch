@@ -1,0 +1,19 @@
+{
+  "schema": "spiraltorch.byte_headwise.measurement_plan.v1",
+  "base_commit": "160674cc2b88f3c5486d930b61b9128e51e807cc",
+  "scope": "Synthetic full-model numerical and resume qualification; not corpus quality or speed",
+  "cases": [
+    {"seed": 1761, "blocks": 1, "heads": 4, "qk_zero": true, "external_biases": false, "topos": false,
+     "head_pair_metrics": [["poincare_squared.v1", "poincare_squared.v1", "categorical_fisher_rao_squared.v1", "poincare_squared.v1"]]},
+    {"seed": 1863, "blocks": 2, "heads": 2, "qk_zero": false, "external_biases": true, "topos_in_second_block": true,
+     "head_pair_metrics": [["categorical_fisher_rao_squared.v1", "euclidean_chord_squared.v1"], ["euclidean_chord_squared.v1", "poincare_squared.v1"]]}
+  ],
+  "batch": 2, "positions": 4, "width": 4, "hidden": 6, "geometry_cols": 4, "curvature": -0.75,
+  "steps": 16, "sgd_rate": 0.125, "resume_revision": 7,
+  "tolerance": {"atol": 0.000003, "rtol": 0.00005, "geometry_relative_l2": 0.002},
+  "minimum_reference_geometry_gradient_l2_exclusive": 0.00000001,
+  "exact_same_runtime_resume": true,
+  "runtimes": ["native_wgpu", "actual_browser_webgpu", "independent_torch_cpu_f32_one_thread"],
+  "raw_artifacts": "local_only",
+  "limits": ["Shared coordinate encoder, not separate projections per head", "Fixed routing, no learned mixture weights", "No large corpus or mixed-geometry efficacy claim"]
+}

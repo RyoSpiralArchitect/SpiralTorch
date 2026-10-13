@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.geometry_guard_batching.performance_protocol.v1",
+  "candidate_source": "0f09558b9aa70b893ebfbfa0b4765634db24d24b",
+  "fixture_sha256": "164062e811489f97779d5b23f17389ff3a7dbd20ac536ae32bf33b5fbf19ee4a",
+  "native_binary_sha256": {
+    "A": "20f83a0bc1126c8f6ea77880986385397f6b5181f4a68e9f2537f550ab0b7520",
+    "B": "a0cca141af409e5ea30f15e70ad4f1cf4cabd2954bc43b109a47f6ebbac4dd75"
+  },
+  "wasm_sha256": {
+    "A": "3a813171fa40fc57906a8fcd23e220ef625ceed06c126c1756f836a4f6159b50",
+    "B": "b90568f256067faa9e2be800f3a1b6dac13eb7573837eac094bb08b6cc316cd4"
+  },
+  "javascript_sha256": "11a53debe6ad892771487db9fcff94bcafd4c5bde7f60e31dbac3ab255f2386e",
+  "report_sha256": {
+    "native": "3faf4ea13bf690bc06a748589abb2c75959ed9b6a9243961bbb6d77679a55ce0",
+    "browser": "1820587ac513406d482f012efee6b86984bfbe64510b7ca253e5e01516dabfb3"
+  },
+  "blocks": 3,
+  "warmup_order": ["A", "B"],
+  "measurement_order": ["A", "B", "B", "A"],
+  "maximum_block_ratio": 1.0,
+  "maximum_geomean_ratio": 0.95
+}

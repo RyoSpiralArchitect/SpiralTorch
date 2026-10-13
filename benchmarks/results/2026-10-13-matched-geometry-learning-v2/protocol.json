@@ -1,0 +1,36 @@
+{
+  "schema": "spiraltorch.matched_geometry_learning.protocol.v2",
+  "baseline_commit": "e198459189eb412275cc7ed9a42c1ca84d74e5d9",
+  "scope": "Fresh native/WASM qualification of the same six small QKV learning cases under an explicitly versioned graph and paired-query contract; not an overwrite of projective-v1.",
+  "previous_result": "Original native/browser 4/6 qualification and raw receipts remain unchanged.",
+  "changes_from_v1": {
+    "residual": "Torch reference evaluates x+(attention@W+bias), matching the existing Rust module boundary; no production arithmetic change.",
+    "router_coordinate_vjp": "Compare (Full-StopCoordinates) from one GPU runtime with (Full-StopCoordinates) from one CPU reference; do not mix GPU Full with CPU Stop in the qualification contrast. Retain mixed-runtime formula as diagnostic only.",
+    "stopped_parameter_vjps": "Independently compare every stopped parameter VJP to CPU; preserve unchanged routes, repeated Full, forward and parameter immutability checks."
+  },
+  "fixed_design": {
+    "modes": ["projective", "four_way_shared", "four_way_query"],
+    "seeds": [1761, 1863],
+    "blocks": [1, 2],
+    "external_bias_and_topos": "unchanged from original six cases",
+    "steps": 16,
+    "rate": 0.125,
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_relative_l2": 0.002,
+    "runtimes": ["native Metal", "browser WASM/WebGPU"]
+  },
+  "required_checks": [
+    "Version/schema mismatch rejects before executing the model; legacy default fixture regeneration remains byte-identical.",
+    "Initial logits, every parameter VJP, external bias VJPs, embedding gradient, all geometry relative checks, and active Topos gradient.",
+    "Every loss, every parameter tensor, every geometry VJP, and every mixture snapshot across all 16 updates; preserve and report finite failures.",
+    "Causality, tapes, geometry-off/detach controls, exact checkpoint continuation, projective boundary and atomic query guard.",
+    "Both contextual cases: active shared-forward contrast, paired coordinate pullback, active router updates, frozen-update and zero/sign-reversed pullback rejection, independent stopped VJPs."
+  ],
+  "boundaries": [
+    "Any failed required check prevents full v2 qualification; do not tune seeds, steps, scales or thresholds after observing it.",
+    "All six conditions and both runtimes must be recorded, not a selected passing subset.",
+    "Only source, scalar results, hashes and reproducibility instructions are public. Raw model vectors, checkpoints and binaries remain local.",
+    "No language-quality, throughput, large-combination, CUDA, release, PR, CI or merge claim."
+  ]
+}
