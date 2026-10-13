@@ -1,4 +1,5 @@
 import copy
+import math
 import unittest
 
 import byte_corpus_study as study
@@ -29,6 +30,11 @@ def fixture():
                       seed=11, valid_pairs_per_head=6, raw_gains=[[.25]], reference_rms=[[2.]],
                       candidate_rms=[[1.]], fitted_rms=[[2.]], realized_relative_errors=[[0.]],
                       before_checkpoint_json=checkpoints[0], fitted_checkpoint_json=checkpoints[1], no_updates_consumed=True)])
+    old_gain = request["cases"][3]["parameters"][6]["values"][0]
+    new_gain = request["cases"][5]["parameters"][6]["values"][0]
+    report["cases"][0]["candidate_rms"] = [[
+        2. * math.log1p(math.exp(old_gain)) / math.log1p(math.exp(new_gain))
+    ]]
     packet = dict(schema="spiraltorch.byte_corpus.prepared.v1", request_json=raw.decode(), report_json=study.encoded(report).decode())
     return source_raw, packet
 
@@ -45,6 +51,15 @@ class Preparation(unittest.TestCase):
         self.assertTrue(verify.verify(source, packet)["passed"])
         with self.assertRaises(ValueError):
             verify.verify(source + b"\n", packet)
+
+    def test_positive_candidate_rms_must_match_the_gain_transformation(self):
+        source, packet = fixture()
+        self.assertTrue(verify.verify(source, packet)["passed"])
+        report = study.decode_json(packet["report_json"])
+        report["cases"][0]["candidate_rms"][0][0] *= 2
+        packet["report_json"] = study.encoded(report).decode()
+        with self.assertRaisesRegex(ValueError, "gain transformation"):
+            verify.verify(source, packet)
 
     def test_request_mutations_reject_even_when_packet_hash_is_rebound(self):
         for mutation in ("source", "case", "data", "nongain", "gain", "gain_pair"):

@@ -91,6 +91,7 @@ def verify(source_raw, packet):
         for field, case in [("before_checkpoint_json", initial), ("fitted_checkpoint_json", fitted)]:
             stored = stored_parameters(study.decode_json(record[field]), 0, metric)
             require(same_parameters(stored, case["parameters"]), "prepared checkpoint is not the actual request initialization")
+        old_gains = [p["values"] for p in initial["parameters"] if p["name"].startswith("geometry.raw_gain.")]
         gains = [p["values"] for p in fitted["parameters"] if p["name"].startswith("geometry.raw_gain.")]
         require(len(gains) == len(record["raw_gains"]) and all(bits(a) == bits(b) for a, b in zip(gains, record["raw_gains"])), "fitted gain binding")
         cfg = source["config"]
@@ -105,6 +106,16 @@ def verify(source_raw, packet):
                         for row in value for x in row), "nonfinite or zero calibration statistic")
         require(record["reference_rms"] == targets.setdefault(seed, record["reference_rms"]),
                 "metrics must share one Poincare RMS target per seed")
+        require(len(old_gains) == len(gains) == len(cfg["blocks"])
+                and all(len(row) == cfg["heads"] for row in old_gains + gains), "gain block/head coverage")
+        for before, after, reference, candidate in zip(
+                old_gains, gains, record["reference_rms"], record["candidate_rms"]):
+            for old_gain, new_gain, target, original in zip(before, after, reference, candidate):
+                old, new = (softplus(study.f32(value)) for value in (old_gain, new_gain))
+                ratio = target / original
+                require(math.isfinite(ratio) and ratio > 0. and old > 0.
+                        and abs((new / old) / ratio - 1.) <= 1e-5,
+                        "gain transformation differs from RMS scale")
         for a, b, stated in zip(record["reference_rms"], record["fitted_rms"], record["realized_relative_errors"]):
             for target, actual, reported_error in zip(a, b, stated):
                 error = abs(actual / target - 1)
@@ -127,7 +138,11 @@ def verify(source_raw, packet):
                 source_request_sha256=study.digest(source_raw), request_sha256=study.digest(request_raw),
                 source_arms_unchanged=n, gain_only_transformation=True, initial_checkpoint_bits_bound=True,
                 bias_calibration=spec, cases=summaries,
-                scope="Artifact binding and reported RMS arithmetic; actual-device qualification remains the Rust run, not independent attestation")
+                scope="Artifact binding and reported RMS/gain arithmetic; actual-device qualification remains the Rust run, not independent attestation")
+
+
+def softplus(value):
+    return max(value, 0.) + math.log1p(math.exp(-abs(value)))
 
 
 def main():

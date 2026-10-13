@@ -1,5 +1,6 @@
 """Fabricated protocol/verifier counterexamples, never model-quality evidence."""
 import copy
+import math
 import unittest
 
 import byte_corpus_study as study
@@ -50,6 +51,11 @@ def packet():
         if name == "fitted_checkpoint_json":
             checkpoint["model"]["geometry"]["raw_gains"] = [[4.5]]
         fisher[name] = study.encoded(checkpoint).decode()
+    before = study.decode_json(fisher["before_checkpoint_json"])
+    old_gain = before["model"]["geometry"]["raw_gains"][0][0]
+    fisher["candidate_rms"] = [[
+        fisher["reference_rms"][0][0] * math.log1p(math.exp(old_gain)) / math.log1p(math.exp(4.5))
+    ]]
     report["cases"].append(fisher)
     result.update(request_json=request.decode(), report_json=study.encoded(report).decode())
     return source, result
@@ -80,6 +86,17 @@ def resume_fixture():
 
 
 class FisherStudy(unittest.TestCase):
+    def test_preparation_binds_candidate_rms_to_each_metric_gain(self):
+        source, prepared = packet()
+        self.assertTrue(preparation.verify(source, prepared)["passed"])
+        for index in range(2):
+            changed = copy.deepcopy(prepared)
+            report = study.decode_json(changed["report_json"])
+            report["cases"][index]["candidate_rms"][0][0] *= 2
+            changed["report_json"] = study.encoded(report).decode()
+            with self.subTest(metric=index), self.assertRaisesRegex(ValueError, "gain transformation"):
+                preparation.verify(source, changed)
+
     def test_metric_qualification_cannot_redefine_the_shared_reference(self):
         raw, reference, actual = fixture()
         record = reference["calibration_verification"]["cases"][1]
