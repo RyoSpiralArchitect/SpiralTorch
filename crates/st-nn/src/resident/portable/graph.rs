@@ -91,7 +91,6 @@ impl Record {
         self.input_shape.len()
     }
 
-    #[cfg(feature = "wgpu")]
     pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut Vec<f32>> {
         self.parameters.iter_mut().map(|p| &mut p.values)
     }

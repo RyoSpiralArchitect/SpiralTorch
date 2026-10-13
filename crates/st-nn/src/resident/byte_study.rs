@@ -1,20 +1,24 @@
 //! Bounded matched corpus studies with request-bound, all-case resume.
 //! Native and browser clients share model math, data order and acceptance gates.
+#[cfg(feature = "wgpu")]
+use crate::resident::ResidentByteDecoder;
 use crate::{
     resident::{
         AttentionInferencePlan, AttentionMask, ByteDecoderCheckpoint, ByteDecoderGeometryPlan,
         ByteDecoderPairMetric, ByteDecoderPlan, ByteLmBatch, InferenceOp, InferencePlan,
-        ResidentByteDecoder, ResidualAttentionPlan, ToposResonatorKernel,
+        ResidualAttentionPlan, ToposResonatorKernel,
     },
     Tensor,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+#[cfg(feature = "wgpu")]
 use st_backend_wgpu::{
     resident_tensor::ResidentTensor, resident_training::parameters::ResidentParameterUpdate,
     runtime::WgpuRuntime,
 };
+#[cfg(feature = "wgpu")]
 use st_kernel_contracts::classification::{ClassReduction, CrossEntropySpec};
 use st_tensor::NdLayout;
 use std::collections::BTreeSet;
@@ -93,6 +97,7 @@ struct EvaluationPoint {
     batch_losses: Vec<f32>,
 }
 
+#[cfg(feature = "wgpu")]
 impl EvaluationPoint {
     fn report(&self, r: &Request) -> Value {
         // Recompute f64 summaries from the original f32 readbacks on both paths.
@@ -465,6 +470,7 @@ fn plan(c: &Config, case: &Case) -> Result<ByteDecoderPlan> {
     })
 }
 
+#[cfg(feature = "wgpu")]
 async fn read_many(
     model: &ResidentByteDecoder,
     tensors: &[ResidentTensor],
@@ -479,6 +485,7 @@ async fn read_many(
     Ok(values)
 }
 
+#[cfg(feature = "wgpu")]
 async fn evaluate(model: &mut ResidentByteDecoder, r: &Request) -> Result<EvaluationPoint> {
     let docs: Vec<_> = r.validation_documents.iter().map(Vec::as_slice).collect();
     let mut losses = Vec::new();
@@ -648,6 +655,7 @@ impl ByteCorpusStudy {
     }
 
     /// Original uninterrupted study path; does not capture a model checkpoint.
+    #[cfg(feature = "wgpu")]
     pub async fn run(&self, runtime: WgpuRuntime) -> Result<Value> {
         Ok(self
             .execute(runtime, None, self.total_updates(), false)
@@ -659,6 +667,7 @@ impl ByteCorpusStudy {
     /// accepted before a new checkpoint is returned. Failure/cancellation drops
     /// these local models, leaving the caller's last checkpoint unchanged.
     /// Pausing does not add evaluations to the request's original schedule.
+    #[cfg(feature = "wgpu")]
     pub async fn advance(
         &self,
         runtime: WgpuRuntime,
@@ -672,6 +681,7 @@ impl ByteCorpusStudy {
         })
     }
 
+    #[cfg(feature = "wgpu")]
     async fn execute(
         &self,
         runtime: WgpuRuntime,

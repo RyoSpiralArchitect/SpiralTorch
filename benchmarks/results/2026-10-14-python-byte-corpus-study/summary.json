@@ -1,0 +1,122 @@
+{
+  "schema": "spiraltorch.python_byte_corpus_qualification.v1",
+  "scope": "Python client numerical replay and checkpoint transport; not a new quality or speed study",
+  "publication": "Unreleased source APIs; private candidate wheels are not replacement PyPI 0.4.30 artifacts",
+  "source_base_commit": "918ec64f2da10b96839298e9bf48a4acf34ceba2",
+  "source_files_sha256": {
+    ".github/workflows/ci.yml": "e59b5381536b501cabc6c451bae011a1c6e208c85cbcd2e5a5619e96f7539d09",
+    "Cargo.lock": "494a77fe5b5bd463c097f845b408ed2713b6995fe91ef626cdba918ca0487816",
+    "benchmarks/results/2026-10-14-python-byte-corpus-study/replay.py": "419349bdccea9658007c33024aa6a2a9008b86f81ee7879440c9f0c409e1b51e",
+    "bindings/st-py/CHANGELOG.md": "95d82a7a38785e2e9f3da9ed8bc200335211a317ec3cf71a7b1b5f2ee556c9ef",
+    "bindings/st-py/Cargo.toml": "bfbfd4c9b47c599ce0a2eda6a6b9e115434e3d36bfd31338ee5ffbd6609ff7bb",
+    "bindings/st-py/spiraltorch/__init__.pyi": "15bbee0077262aa75f36373b3ec3b73dfa53cbc9ec79cb687276c5932d0879af",
+    "bindings/st-py/src/nn.rs": "3c3787542b0b06f90d068ea553df5a6a64798ddb41d7d924e1df39b135eaa8a6",
+    "bindings/st-py/src/nn_resident.rs": "fde87cdc3c248107daee85076d984eca3365edaa30874159cac8ca3e3fbf915c",
+    "bindings/st-py/src/nn_resident/byte_study.rs": "91c5544531ae1088b004bd155ebf68074bc675d124bacc38a5f279396558b1af",
+    "bindings/st-py/src/nn_resident/byte_study/preparation.rs": "1f73bd83c476736c26a84ce20aeabc60d390dc9fa96db1d7eb0343dee6c14cda",
+    "bindings/st-py/tests/test_nn_byte_study.py": "84062699fccf9ee615ea59054f7681b0e437f60e7d89665508f691b060725d60",
+    "crates/st-nn/src/resident.rs": "75aa64e69aff8d78f37b3de2fdd1ea6003fd840e0238f53360c2e3ca414ba288",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint.rs": "18457cb941c12aed54d6693495b8a423b2243d757a09a8ac96b72e22af7560f1",
+    "crates/st-nn/src/resident/byte_decoder/geometry.rs": "942853d0409d44d2d1928396c65309292a44de72e1e5e4a7b2cdf6ddbac26d09",
+    "crates/st-nn/src/resident/byte_study.rs": "c018422782475fbea01bc5f163e167e97d965e6ba355af79e28955c78b423df3",
+    "crates/st-nn/src/resident/byte_study/calibration.rs": "7cacda84751a556306d17f3d3f4c2b78e27ed34044f2e07c975dcf60d9246dd6",
+    "crates/st-nn/src/resident/byte_study/headwise.rs": "95bce844f103fdd060127cac908df7455c7a482cd49d832f111b0aac49fb7198",
+    "crates/st-nn/src/resident/byte_study/mixture.rs": "a5fc2680b3c7e15fee70db6ee954054efa335b5f2a44e3f0af86f32fcba8db9e",
+    "crates/st-nn/src/resident/byte_study/policy.rs": "2e0feaf8ff6a93aa0888d8ef7274d3987e34dae0af795ff29fbc069469355a81",
+    "crates/st-nn/src/resident/portable/graph.rs": "da0ba5b87b68d24ffc3c5bd8b53eaf66a0fdf220a1f8d1038b0c4c043a3e57c4",
+    "docs/byte_corpus_learning.md": "5bfb2789e9ddb047c9e1fb4f15cd47fdc2e01f4c912ad9b08375de130ca815a0",
+    "docs/python/byte-corpus-studies.md": "57cc1d8e9ede16daf7c279392a6060d7ffd574b07521d0e8e98a2f24d6401f82",
+    "docs/python/byte-language-models.md": "84bc0089a2a39fe3b8b7b21a90ccb6ef5805d6e543643f765105a4e0067d7ce3"
+  },
+  "candidate_wheels": {
+    "cpu": {
+      "wheel": "spiraltorch-0.4.30-cp38-abi3-macosx_14_0_arm64.whl",
+      "wheel_sha256": "2b98a4a4b6c284210c6b434ef9d0ddf3c9ebc039d7a62d198b5b33c799cea5ad",
+      "native_sha256": "68bfeef18a3227872e92e12e35f5d5a8073149e743568f750474b2a5996a6066",
+      "entry": "spiraltorch/spiraltorch.abi3.so",
+      "isolated_install": true,
+      "wgpu": false
+    },
+    "wgpu": {
+      "wheel": "spiraltorch-0.4.30-cp38-abi3-macosx_14_0_arm64.whl",
+      "wheel_sha256": "4c9eb202a2557325be3abca527f2fc3ca0cd8558c46ed6e6dbf675e295021f1b",
+      "native_sha256": "90e3c1b1d2a152a5059b60edb9e90616bdab4d4ed46dee05fcdcb38e0f0a0bb3",
+      "entry": "spiraltorch/spiraltorch.abi3.so",
+      "isolated_install": true,
+      "wgpu": true
+    }
+  },
+  "validation": {
+    "cpu_python_study": {
+      "run": 10,
+      "skipped": 3,
+      "passed": 7,
+      "log_sha256": "aee89778a19b51e5af26647e73e5bfdee28ebffa44dea906d88da90d3f3acf59"
+    },
+    "wgpu_python_study": {
+      "run": 10,
+      "skipped": 1,
+      "passed": 9,
+      "log_sha256": "b6bf484f960a994be047b5fe6675105cff69efc33f129f5df5a797139be4ad1d"
+    },
+    "cpu_model_regression": {
+      "run": 9,
+      "skipped": 3,
+      "passed": 6,
+      "log_sha256": "f26dc36fe534b01062b952ba1fb20ff3bea096c4dd0890c9e30f2fb4ea33db16"
+    },
+    "protocol": {
+      "run": 65,
+      "skipped": 6,
+      "passed": 59,
+      "log_sha256": "65a916f991c4e72f5a271dae9244750d4a0836625f8dbe4dcbae1bcfd108b721"
+    },
+    "checkpoint_protocol": {
+      "run": 22,
+      "skipped": 0,
+      "passed": 22,
+      "log_sha256": "80b4dede9c74da422d9b9ee0e37e5483b50b9db13a69278ba754a3b7917770c8"
+    },
+    "rust_cpu_resident_passed": 101,
+    "wasm_example_check_passed": true,
+    "independent_review": "One export-list finding fixed and rechecked; no remaining findings"
+  },
+  "v1": {
+    "request_sha256": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3",
+    "cases": 6,
+    "updates_per_case": 128,
+    "numerical_checks_passed": true,
+    "split_resume_exact": true,
+    "historical_native_cases_exact": true
+  },
+  "v8_completed_handoffs": [
+    {
+      "source_client": "native",
+      "request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+      "completed_updates": 128,
+      "cases": 75,
+      "checkpoint_round_trip_exact": true,
+      "historical_client_cases_exact": true,
+      "numerical_checks_passed": true,
+      "new_updates": 0
+    },
+    {
+      "source_client": "browser",
+      "request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+      "completed_updates": 128,
+      "cases": 75,
+      "checkpoint_round_trip_exact": true,
+      "historical_client_cases_exact": true,
+      "numerical_checks_passed": true,
+      "new_updates": 0
+    }
+  ],
+  "strict_case_equality": {
+    "signed_zero_and_types_checked": true,
+    "case_equality": {
+      "v1-full.json": true,
+      "v8-native-handoff.json": true,
+      "v8-browser-handoff.json": true
+    }
+  }
+}

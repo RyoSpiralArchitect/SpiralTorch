@@ -1,5 +1,6 @@
 //! Frozen component units, train-only strength calibration and router-only controls.
 use super::*;
+#[cfg(feature = "wgpu")]
 use st_kernel_contracts::causal_bias::CausalBiasScaleMatch;
 use std::collections::BTreeMap;
 
@@ -284,6 +285,7 @@ impl ByteCorpusMixtureControls {
     /// Fit only a shared initial gain per head to the original Poincare RMS on
     /// predeclared training windows. Fixed component units and uniform routers
     /// never fit held-out text. Learning/resume verifies but never refits.
+    #[cfg(feature = "wgpu")]
     pub async fn prepare(&self, runtime: WgpuRuntime) -> Result<ByteCorpusPreparedBiasStudy> {
         if format!("{:?}", runtime.adapter_info().device_type) == "Cpu" {
             return Err("mixture preparation requires a GPU".into());

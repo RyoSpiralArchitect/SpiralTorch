@@ -15,7 +15,6 @@ use thiserror::Error;
 
 mod attention;
 mod byte_decoder;
-#[cfg(feature = "wgpu")]
 mod byte_study;
 pub use attention::AttentionInferencePlan;
 #[cfg(feature = "wgpu")]
@@ -36,7 +35,6 @@ pub use byte_decoder::{
     BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
     BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
 };
-#[cfg(feature = "wgpu")]
 pub use byte_study::{
     ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusMixtureControls,
     ByteCorpusPreparedBiasStudy, ByteCorpusQueryMixtureControls, ByteCorpusStudy,

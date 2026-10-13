@@ -1,6 +1,9 @@
 //! Prepare explicit initial weights once; verify, never refit, during learning.
 use super::*;
-use st_kernel_contracts::causal_bias::{CausalBiasMoments, CausalBiasScaleMatch};
+#[cfg(any(feature = "wgpu", test))]
+use st_kernel_contracts::causal_bias::CausalBiasMoments;
+#[cfg(feature = "wgpu")]
+use st_kernel_contracts::causal_bias::CausalBiasScaleMatch;
 use std::collections::BTreeMap;
 
 const TOLERANCE: f64 = 1e-5;
@@ -52,6 +55,7 @@ pub(super) fn validate_spec(r: &Request) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(feature = "wgpu", test))]
 fn case_for(r: &Request, seed: u64, metric: ByteDecoderPairMetric, matched: bool) -> Result<&Case> {
     r.cases
         .iter()
@@ -65,6 +69,7 @@ fn case_for(r: &Request, seed: u64, metric: ByteDecoderPairMetric, matched: bool
         .ok_or_else(|| "missing calibration control case".into())
 }
 
+#[cfg(any(feature = "wgpu", test))]
 fn candidate_plan(
     r: &Request,
     seed: u64,
@@ -75,6 +80,7 @@ fn candidate_plan(
     plan(&r.config, &case)
 }
 
+#[cfg(feature = "wgpu")]
 pub(super) async fn measure(
     r: &Request,
     plan: &ByteDecoderPlan,
@@ -121,6 +127,7 @@ pub(super) async fn measure(
     Ok(moments)
 }
 
+#[cfg(any(feature = "wgpu", test))]
 pub(super) fn checked_errors(
     reference: &[CausalBiasMoments],
     candidate: &[CausalBiasMoments],
@@ -144,6 +151,7 @@ pub(super) fn checked_errors(
 
 /// Verify the frozen initial models even when resuming on a different device.
 /// This allocates temporary revision-zero models; it never touches resumed weights.
+#[cfg(feature = "wgpu")]
 pub(super) async fn verify_initial(r: &Request, runtime: &WgpuRuntime) -> Result<()> {
     let Some(spec) = &r.bias_calibration else {
         return Ok(());
@@ -291,6 +299,7 @@ impl ByteCorpusBiasCalibration {
         Ok(text)
     }
 
+    #[cfg(feature = "wgpu")]
     pub async fn prepare(&self, runtime: WgpuRuntime) -> Result<ByteCorpusPreparedBiasStudy> {
         if format!("{:?}", runtime.adapter_info().device_type) == "Cpu" {
             return Err("real GPU required for resident calibration".into());

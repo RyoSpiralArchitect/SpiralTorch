@@ -186,6 +186,7 @@ impl ByteCorpusHeadwiseControls {
 
     /// Verify every initial routed bias against the unchanged Poincare target.
     /// These temporary revision-zero models consume no learning updates.
+    #[cfg(feature = "wgpu")]
     pub async fn prepare(&self, runtime: WgpuRuntime) -> Result<ByteCorpusPreparedBiasStudy> {
         if format!("{:?}", runtime.adapter_info().device_type) == "Cpu" {
             return Err("headwise preparation requires a GPU adapter".into());

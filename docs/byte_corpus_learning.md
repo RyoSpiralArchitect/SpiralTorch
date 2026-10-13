@@ -5,8 +5,11 @@ windows, not only frozen synthetic examples. `resident_byte_learning` and
 `resident_byte_learning_browser` use the **same Rust runner and model**.
 Python prepares explicit data/initial weights and provides an independent
 CPU-f32 PyTorch comparison; it never implements SpiralTorch's execution route.
-The runner is the public Rust `st_nn::resident::ByteCorpusStudy` API (feature
-`wgpu`). It is a bounded paired-study protocol, not a general training scheduler
+The runner is the public Rust `st_nn::resident::ByteCorpusStudy` API. Request,
+checkpoint and segment validation are available without WGPU; execution and
+measured calibration require feature `wgpu`. The unreleased
+[Python study client](python/byte-corpus-studies.md) calls this same runner.
+It is a bounded paired-study protocol, not a general training scheduler
 or a tokenizer API. Its request-bound checkpoints include complete model values,
 the common data cursor and scalar histories for all cases.
 

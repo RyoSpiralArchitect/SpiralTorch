@@ -354,7 +354,6 @@ impl ModelRecord {
         }
     }
 
-    #[cfg(feature = "wgpu")]
     fn values_mut(&mut self) -> impl Iterator<Item = &mut Vec<f32>> {
         [&mut self.token.values, &mut self.position.values]
             .into_iter()
@@ -394,7 +393,6 @@ impl ByteDecoderPlan {
 }
 
 impl ByteDecoderCheckpoint {
-    #[cfg(feature = "wgpu")]
     pub(crate) fn geometry_parameters_match(&self, other: &Self) -> Result<bool, InferenceError> {
         match (&self.plan.geometry, &other.plan.geometry) {
             (None, None) => Ok(true),
@@ -414,7 +412,6 @@ impl ByteDecoderCheckpoint {
         }
     }
 
-    #[cfg(feature = "wgpu")]
     pub(crate) fn escaped_json_size_bound(&self) -> Result<usize, InferenceError> {
         let mut model = ModelRecord::from_plan(&self.plan)?;
         let mut count = 0usize;
@@ -440,7 +437,6 @@ impl ByteDecoderCheckpoint {
             .ok_or(InferenceError::PortableAddressSpace)
     }
 
-    #[cfg(feature = "wgpu")]
     pub(crate) fn topology_json(&self) -> Result<String, InferenceError> {
         let mut record = ModelRecord::from_plan(&self.plan)?;
         for values in record.values_mut() {
