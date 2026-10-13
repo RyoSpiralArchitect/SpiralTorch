@@ -81,6 +81,8 @@ struct Params {
 
 fn source() -> String {
     include_str!("shaders/poincare.wgsl")
+        .replace("FISHER_MATH", include_str!("shaders/fisher_math.wgsl"))
+        .replace("FISHER_PAIR", include_str!("shaders/fisher_pair.wgsl"))
         .replace("ROUNDED_ADD", include_str!("../shaders/rounded_add.wgsl"))
         .replace(
             "WIDE_ARITHMETIC",
@@ -173,10 +175,10 @@ fn sizes(spec: impl Into<PairSpec>, limits: &wgpu::Limits) -> Result<(usize, usi
         .ok_or(PoincareError::Overflow)?;
     if matches!(spec, PairSpec::FisherRao(_)) {
         // A finite final logit VJP can have unrepresentable f32 root cotangents.
-        // Keep their Wide records in this backward's private packed tail.
+        // Keep far-root and already projected close-logit records separately.
         gradients = spec
             .coordinates_len()
-            .checked_mul(4)
+            .checked_mul(8)
             .and_then(|n| gradients.checked_add(n))
             .ok_or(PoincareError::Overflow)?;
     }

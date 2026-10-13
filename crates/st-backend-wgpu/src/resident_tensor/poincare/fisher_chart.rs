@@ -13,6 +13,7 @@ struct ChartParams {
 
 pub(super) fn source() -> String {
     include_str!("../shaders/fisher_chart.wgsl")
+        .replace("FISHER_MATH", include_str!("../shaders/fisher_math.wgsl"))
         .replace(
             "ROUNDED_ADD",
             include_str!("../../shaders/rounded_add.wgsl"),
@@ -96,7 +97,8 @@ pub(super) fn roots(input: &ResidentTensor) -> Result<ResidentTensor, TensorErro
     let packed_len = input
         .layout
         .len()
-        .checked_mul(4)
+        // Private Wide root plus the original logit's bits for close-pair charts.
+        .checked_mul(5)
         .ok_or(FisherRaoError::Overflow)?;
     storage_limit(packed_len, &limits)?;
     let mut encoder = context.device().create_command_encoder(&Default::default());

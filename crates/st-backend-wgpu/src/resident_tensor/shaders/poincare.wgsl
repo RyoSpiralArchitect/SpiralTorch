@@ -1,12 +1,13 @@
 ROUNDED_ADD
 WIDE_ARITHMETIC
+FISHER_MATH
 struct Params {
     batch:u32, steps:u32, cols:u32, heads:u32,
     coordinates:u32, pairs:u32, scores:u32, groups_x:u32,
     groups:u32, coordinates_offset:u32, gain_offset:u32, seed_offset:u32,
     curvature_magnitude:f32, distance_scale:f32, metric_kind:u32, root_gradient_offset:u32,
 };
-// Ordinary f32 coordinates, or private packed Wide simplex roots.
+// Ordinary f32 coordinates, or private Wide simplex roots plus logit bits.
 @group(0) @binding(0) var<storage,read> coordinates:array<u32>;
 @group(0) @binding(1) var<storage,read> raw_gain:array<f32>;
 // Four extended values per pair: squared distance, base and two radial factors.
@@ -30,12 +31,13 @@ fn invocation(w:vec3<u32>,lane:u32)->u32 {
 }
 fn coordinate(row:u32,col:u32)->Wide {
     if (p.metric_kind==2u) {
-        let offset=p.coordinates_offset+4u*(row*p.cols+col);
+        let offset=p.coordinates_offset+5u*(row*p.cols+col);
         return Wide(bitcast<f32>(coordinates[offset]),bitcast<f32>(coordinates[offset+1u]),
             bitcast<i32>(coordinates[offset+2u]),bitcast<f32>(coordinates[offset+3u]));
     }
     return parts(checked(bitcast<f32>(coordinates[p.coordinates_offset+row*p.cols+col])));
 }
+FISHER_PAIR
 struct ComplexWide { re:Wide, im:Wide };
 fn complex_coordinate(row:u32,col:u32)->ComplexWide {
     return ComplexWide(coordinate(row,col),coordinate(row,col+1u));
@@ -123,6 +125,7 @@ fn prepare_pairs(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_in
     let id=invocation(w,lane);if (id>=p.pairs) { return; }
     let k=id%p.steps;let q=(id/p.steps)%p.steps;let b=id/(p.steps*p.steps);
     if (k>q) { for(var j=0u;j<4u;j++) { cache[4u*id+j]=parts(0.0); }return; }
+    if (p.metric_kind==2u) {fisher_prepare(b*p.steps+q,b*p.steps+k,id);return;}
     var nx=parts(0.0);var ny=parts(0.0);var square=parts(0.0);
     for(var i=0u;i<p.cols;i++) {
         let x=coordinate(b*p.steps+q,i);let y=coordinate(b*p.steps+k,i);
@@ -145,24 +148,6 @@ fn prepare_pairs(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_in
         let inverse=wide_div(parts(1.0),wide_mul(a,d));
         cache[4u*id]=wide_mul(square,inverse);cache[4u*id+1u]=inverse;
         cache[4u*id+2u]=wide_div(parts(1.0),a);cache[4u*id+3u]=wide_div(parts(1.0),d);
-        return;
-    }
-    if (p.metric_kind==2u) {
-        // Roots already lie on the nonnegative unit sphere. Use the root chord
-        // instead of 1-dot, preserving exact identity and nearby distances.
-        let t=min(wide_float(square),2.0);let z=0.25*t;
-        var distance=parts(0.0);var slope=parts(4.0);
-        if(z<0.0001) {
-            let ratio=1.0+z*(1.0/3.0+z*(8.0/45.0+z*(4.0/35.0+z*128.0/1575.0)));
-            distance=wide_mul(parts(4.0*ratio),square);
-            slope=parts(4.0*(1.0+z*(2.0/3.0+z*(8.0/15.0+z*(16.0/35.0+z*128.0/315.0)))));
-        } else {
-            let root=sqrt(z);let angle=asin(root);
-            distance=parts(16.0*angle*angle);
-            slope=parts(4.0*angle/(root*sqrt(1.0-z)));
-        }
-        cache[4u*id]=distance;cache[4u*id+1u]=wide_mul(parts(2.0),slope);
-        cache[4u*id+2u]=parts(0.0);cache[4u*id+3u]=parts(0.0);
         return;
     }
     if (p.metric_kind==1u) {
@@ -253,7 +238,7 @@ fn projective_derivative(row:u32,other:u32,i:u32,offset:u32,radial:u32)->Wide {
 fn coordinates_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
     let id=invocation(w,lane);if(id>=p.coordinates) { return; }
     let i=id%p.cols;let t=(id/p.cols)%p.steps;let b=id/(p.steps*p.cols);
-    let x=coordinate(b*p.steps+t,i);var gradient=parts(0.0);
+    let x=coordinate(b*p.steps+t,i);var gradient=parts(0.0);var close_gradient=wide_sum_zero();
     for(var k=0u;k<p.steps;k++) {
         let q=max(t,k);let key=min(t,k);let offset=4u*((b*p.steps+q)*p.steps+key);
         let y=coordinate(b*p.steps+k,i);
@@ -261,6 +246,14 @@ fn coordinates_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_
         var derivative=parts(0.0);
         if(p.metric_kind==3u) {
             derivative=projective_derivative(b*p.steps+t,b*p.steps+k,i,offset,radial);
+        } else if(p.metric_kind==2u) {
+            if(cache[offset+2u].hi!=0.0) {
+                let projected=fisher_close_pullbacks(b*p.steps+q,b*p.steps+key,i);
+                var value=projected.query;
+                if(k>t) {value=projected.key;}
+                let slope=wide_mul(parts(0.5),cache[offset+1u]);
+                close_gradient=wide_sum_add(close_gradient,wide_mul(pair_scale(offset/4u),wide_mul(slope,value)));
+            } else {derivative=wide_mul(cache[offset+1u],wide_sub(x,y));}
         } else {
             derivative=wide_add(wide_mul(cache[offset+1u],wide_sub(x,y)),wide_mul(cache[offset+radial],x));
         }
@@ -270,6 +263,9 @@ fn coordinates_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_
         let offset=p.root_gradient_offset+4u*id;
         output[offset]=bitcast<u32>(gradient.hi);output[offset+1u]=bitcast<u32>(gradient.lo);
         output[offset+2u]=bitcast<u32>(gradient.exponent);output[offset+3u]=bitcast<u32>(gradient.tail);
+        let close_offset=offset+4u*p.coordinates;let projected=wide_sum_value(close_gradient);
+        output[close_offset]=bitcast<u32>(projected.hi);output[close_offset+1u]=bitcast<u32>(projected.lo);
+        output[close_offset+2u]=bitcast<u32>(projected.exponent);output[close_offset+3u]=bitcast<u32>(projected.tail);
     } else { output[id]=bitcast<u32>(checked(wide_float(gradient))); }
 }
 fn root_gradient(id:u32)->Wide {
@@ -295,7 +291,10 @@ fn fisher_logits_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocatio
         let r=coordinate(row,i);let g=root_gradient(row*p.cols+i);
         let residual=wide_div(wide_difference_of_products(g,rp,gp,r),rp);
         let dz=wide_mul(parts(0.5),wide_mul(r,wide_sub(residual,wide_mul(r,wide_sum_value(dot)))));
-        output[row*p.cols+i]=bitcast<u32>(checked(wide_float(dz)));
+        let offset=p.root_gradient_offset+4u*p.coordinates+4u*(row*p.cols+i);
+        let projected=Wide(bitcast<f32>(output[offset]),bitcast<f32>(output[offset+1u]),
+            bitcast<i32>(output[offset+2u]),bitcast<f32>(output[offset+3u]));
+        output[row*p.cols+i]=bitcast<u32>(checked(wide_float(wide_add(dz,projected))));
     }
 }
 @compute @workgroup_size(256)

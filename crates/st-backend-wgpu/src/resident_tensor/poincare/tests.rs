@@ -5,6 +5,178 @@ use st_kernel_contracts::poincare::PoincareBiasForward;
 use st_kernel_contracts::projective::{ProjectiveBiasForward, ProjectiveBiasSpec};
 
 #[test]
+fn swapped_nearby_fisher_retains_second_order_pivot_gradients() {
+    let Some(d) = device() else { return };
+    let e = f32::from_bits(1);
+    let gain = 2f32.powi(127);
+    let f = d
+        .upload(&[1, 2, 3], &[0., e, -e, 0., 0., 0.])
+        .unwrap()
+        .causal_fisher_rao_bias(&d.upload(&[1], &[gain]).unwrap())
+        .unwrap();
+    let gradient = read(
+        f.backward(&d.upload(&[1, 1, 2, 2], &[0., 0., gain, 0.]).unwrap())
+            .unwrap()
+            .coordinates(),
+    );
+    let scale = (f64::from(gain).powi(2) * f64::from(e).powi(2)) as f32;
+    for (index, expected) in [(0, scale / 3.), (3, -scale / 9.)] {
+        assert!(
+            (gradient[index] / expected - 1.).abs() < 2e-5,
+            "{index}: {} != {expected}",
+            gradient[index]
+        );
+    }
+}
+
+#[test]
+fn fisher_mixed_close_and_far_gradients_share_only_the_final_sum() {
+    let Some(d) = device() else { return };
+    let x = [0., 0., 0., 0., 0.125, -0.125, 1., -2., 0.5];
+    let seed = [0., 0., 0., 0.3, 0., 0., -0.4, 0.7, 0.];
+    let f = d
+        .upload(&[1, 3, 3], &x)
+        .unwrap()
+        .causal_fisher_rao_bias(&d.upload(&[1], &[0.2]).unwrap())
+        .unwrap();
+    let backward = |s: &[f32]| f.backward(&d.upload(&[1, 1, 3, 3], s).unwrap()).unwrap();
+    let all = backward(&seed);
+    let close_only = backward(&[0., 0., 0., 0.3, 0., 0., 0., 0., 0.]);
+    let far_only = backward(&[0., 0., 0., 0., 0., 0., -0.4, 0.7, 0.]);
+    let sum: Vec<_> = read(close_only.coordinates())
+        .into_iter()
+        .zip(read(far_only.coordinates()))
+        .map(|(a, b)| a + b)
+        .collect();
+    close(&read(all.coordinates()), &sum);
+    let oracle =
+        FisherRaoBiasForward::new(FisherRaoBiasSpec::new([1, 3, 3], 1).unwrap(), &x, &[0.2])
+            .unwrap()
+            .backward(&seed)
+            .unwrap();
+    close(&read(all.coordinates()), &oracle.coordinates);
+    close(&read(all.raw_gain()), &oracle.raw_gain);
+}
+
+#[test]
+fn nearby_fisher_retains_second_order_pivot_gradients() {
+    let Some(d) = device() else { return };
+    let e = f32::from_bits(1);
+    let gain = 2f32.powi(127);
+    let f = d
+        .upload(&[1, 2, 3], &[0., 0., 0., 0., e, -e])
+        .unwrap()
+        .causal_fisher_rao_bias(&d.upload(&[1], &[gain]).unwrap())
+        .unwrap();
+    let g = f
+        .backward(&d.upload(&[1, 1, 2, 2], &[0., 0., gain, 0.]).unwrap())
+        .unwrap();
+    let gradient = read(g.coordinates());
+    let scale = (f64::from(gain).powi(2) * f64::from(e).powi(2)) as f32;
+    for (index, expected) in [(0, -scale / 9.), (3, scale / 3.)] {
+        assert!(
+            (gradient[index] / expected - 1.).abs() < 2e-5,
+            "index={index}: {} != {expected}",
+            gradient[index]
+        );
+    }
+}
+
+#[test]
+fn fisher_close_chart_transition_and_retained_backward_match_cpu() {
+    let Some(d) = device() else { return };
+    let spec = FisherRaoBiasSpec::new([1, 2, 3], 1).unwrap();
+    let seed = d.upload(&[1, 1, 2, 2], &[0., 0., 1., 0.]).unwrap();
+    for perturbation in [0.001, 0.2499, 0.25, 0.2501, 0.5] {
+        let x = [0., -0.3, -0.6, 0., -0.3, -0.6 + perturbation];
+        let cpu = FisherRaoBiasForward::new(spec, &x, &[0.2]).unwrap();
+        let expected = cpu.backward(&[0., 0., 1., 0.]).unwrap();
+        let f = strided(&d, &[1, 2, 3], &x)
+            .causal_fisher_rao_bias(&d.upload(&[1], &[0.2]).unwrap())
+            .unwrap();
+        close(&read(f.scores()), cpu.scores());
+        let g = f.backward(&seed).unwrap();
+        close(&read(g.coordinates()), &expected.coordinates);
+        close(&read(g.raw_gain()), &expected.raw_gain);
+        assert_eq!(
+            read(g.coordinates()),
+            read(f.backward(&seed).unwrap().coordinates())
+        );
+    }
+}
+
+#[test]
+fn nearby_fisher_rows_preserve_rescaled_subnormal_logit_signals() {
+    let Some(d) = device() else { return };
+    let gain = 2f32.powi(120);
+    for exponent in [30, 60, 90, 120, 149] {
+        let e = 2f64.powi(-exponent) as f32;
+        let seed = 2f32.powi(exponent - 120);
+        for common in [0., 2f32.powi(100)] {
+            let f = d
+                .upload(&[1, 2, 2], &[common, common, e, -e])
+                .unwrap()
+                .causal_fisher_rao_bias(&d.upload(&[1], &[gain]).unwrap())
+                .unwrap();
+            let score = read(f.scores())[2];
+            let expected = (-f64::from(gain) * f64::from(e).powi(2)) as f32;
+            assert!(
+                (score - expected).abs() <= 2e-5 * expected.abs(),
+                "e=2^-{exponent}, common={common}: {score} != {expected}"
+            );
+            let g = f
+                .backward(&d.upload(&[1, 1, 2, 2], &[0., 0., seed, 0.]).unwrap())
+                .unwrap();
+            for (actual, expected) in read(g.coordinates()).into_iter().zip([1., -1., -1., 1.]) {
+                assert!(
+                    (actual - expected).abs() < 2e-5,
+                    "e=2^-{exponent}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+    let f = d
+        .upload(&[1, 2, 2], &[1., 0., 1., f32::from_bits(1)])
+        .unwrap()
+        .causal_fisher_rao_bias(&d.upload(&[1], &[gain]).unwrap())
+        .unwrap();
+    let g = f
+        .backward(
+            &d.upload(&[1, 1, 2, 2], &[0., 0., 2f32.powi(29), 0.])
+                .unwrap(),
+        )
+        .unwrap();
+    let p = 1. / (1. + 1f64.exp());
+    let expected = (2. * p * (1. - p)) as f32;
+    for (actual, sign) in read(g.coordinates()).into_iter().zip([-1., 1., 1., -1.]) {
+        assert!(
+            (actual - sign * expected).abs() < 2e-5,
+            "{actual} != {}",
+            sign * expected
+        );
+    }
+}
+
+#[test]
+fn nearby_simplex_rows_retain_a_recoverable_fisher_distance() {
+    let Some(d) = device() else { return };
+    let e = 2f32.powi(-30);
+    let f = d
+        .upload(&[1, 2, 2], &[0., 0., e, -e])
+        .unwrap()
+        .causal_fisher_rao_bias(&d.upload(&[1], &[2f32.powi(60)]).unwrap())
+        .unwrap();
+    let score = read(f.scores())[2];
+    assert!((score + 1.).abs() < 2e-5, "{score} != -1");
+    let g = f
+        .backward(&d.upload(&[1, 1, 2, 2], &[0., 0., e, 0.]).unwrap())
+        .unwrap();
+    for (actual, expected) in read(g.coordinates()).into_iter().zip([1., -1., -1., 1.]) {
+        assert!((actual - expected).abs() < 2e-5, "{actual} != {expected}");
+    }
+}
+
+#[test]
 fn dynamic_range_projective_wedge_retains_primitive_product_residual() {
     let Some(d) = device() else { return };
     for power in [30, 62] {
@@ -412,7 +584,7 @@ fn fisher_chart_shader_validates_without_optional_capabilities() {
     .validate(&module)
     .unwrap();
     let s = FisherRaoBiasSpec::new([2, 7, 3], 2).unwrap();
-    assert_eq!(sizes(s, &wgpu::Limits::default()).unwrap(), (1568, 604));
+    assert_eq!(sizes(s, &wgpu::Limits::default()).unwrap(), (1568, 772));
     let wide = FisherRaoBiasSpec::new([1, 2, 120], 2).unwrap();
     assert!(sizes(
         wide,

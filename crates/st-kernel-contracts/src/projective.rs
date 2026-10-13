@@ -144,7 +144,7 @@ fn chart_pair(x: &[f64], y: &[f64]) -> (f64, f64, f64) {
 }
 
 fn chart_derivative(x: &[f64], y: &[f64], a: f64, b: f64, out: &mut [f64], seed: f64) {
-    let mut dot = [Sum::default(); 2];
+    let mut dot = [Sum::default(), Sum::default()];
     for j in (0..x.len()).step_by(2) {
         // Each product of two f32 chart components is exact in f64; do not
         // round their complex sum before compensation can retain its low term.
@@ -161,7 +161,7 @@ fn chart_derivative(x: &[f64], y: &[f64], a: f64, b: f64, out: &mut [f64], seed:
         // Factor the quotient derivative as conj(C) * (C*x - A*y).
         // The wedge expansion avoids subtracting two almost-unit terms when
         // the distance saturates, retaining small but recoverable derivatives.
-        let mut terms = [Sum::default(); 2];
+        let mut terms = [Sum::default(), Sum::default()];
         for j in (0..x.len()).step_by(2) {
             if i == j {
                 continue;
