@@ -1,6 +1,87 @@
 use super::*;
 use st_kernel_contracts::causal_wave::CausalWaveForward;
 
+mod reduction;
+
+#[test]
+fn nested_batch_cancellation_keeps_the_last_parameter_signal() {
+    let Some(d) = device() else { return };
+    let raw = d.upload(&[1], &[0.]).unwrap();
+    let f = d
+        .upload(&[5, 1, 2], &[0.; 10])
+        .unwrap()
+        .causal_zspace_wave(
+            &raw,
+            &raw,
+            &d.upload(&[5, 2], &[1., 0., 1., 0., 1., 0., 1., 0., 1., 0.])
+                .unwrap(),
+            -1.,
+        )
+        .unwrap();
+    let seed = d.upload(&[5, 1, 2], &[0.; 10]).unwrap();
+    let small = 2f64.powi(-128) as f32;
+    for channel in 0..2 {
+        let mut terminal = [0.; 10];
+        for (b, value) in [2f32.powi(124), 0.25, small, -0.25, -2f32.powi(124)]
+            .into_iter()
+            .enumerate()
+        {
+            terminal[2 * b + channel] = value;
+        }
+        let g = f
+            .backward(&seed, &d.upload(&[5, 2], &terminal).unwrap())
+            .unwrap();
+        let rho = st_kernel_contracts::causal_wave::MAX_DECAY;
+        let coefficient = if channel == 0 {
+            f64::from(rho * 0.25)
+        } else {
+            f64::from(rho * 0.5) * f64::from(std::f32::consts::PI)
+        };
+        let expected = (coefficient * f64::from(small)) as f32;
+        let actual = read(if channel == 0 {
+            g.raw_decay()
+        } else {
+            g.raw_phase()
+        })[0];
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "channel={channel}: {actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn time_partials_survive_later_batch_cancellation() {
+    let Some(d) = device() else { return };
+    let large = 2f32.powi(124);
+    let raw = d.upload(&[1], &[0.]).unwrap();
+    let f = d
+        .upload(&[2, 2, 2], &[large, 0., 0., 0., large, 0., 0., 0.])
+        .unwrap()
+        .causal_zspace_wave(
+            &raw,
+            &raw,
+            &d.upload(&[2, 2], &[1., 0., 0., 0.]).unwrap(),
+            -1.,
+        )
+        .unwrap();
+    let g = f
+        .backward(
+            &d.upload(&[2, 2, 2], &[0.; 8]).unwrap(),
+            &d.upload(&[2, 2], &[0., 1., 0., -1.]).unwrap(),
+        )
+        .unwrap();
+    let rho = f64::from(st_kernel_contracts::causal_wave::MAX_DECAY * 0.5);
+    let expected = (rho * rho * f64::from(std::f32::consts::PI)) as f32;
+    let actual = read(g.raw_phase())[0];
+    assert_eq!(
+        actual.to_bits(),
+        expected.to_bits(),
+        "{actual} != {expected}"
+    );
+}
+
 #[test]
 fn dynamic_range_batch_cancellation_preserves_small_parameter_gradients() {
     let Some(device) = device() else { return };
@@ -156,8 +237,8 @@ fn storage_uniform_and_grid_limits_are_checked_before_execution() {
     assert!(preflight_sizes(
         short,
         &wgpu::Limits {
-            max_storage_buffer_binding_size: 2048,
-            max_buffer_size: 2048,
+            max_storage_buffer_binding_size: 2592,
+            max_buffer_size: 2592,
             ..Default::default()
         }
     )
