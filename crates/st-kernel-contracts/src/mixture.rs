@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Headwise convex mixtures. The router is shared over batch/positions, not
 //! conditioned on a future token. Gradients are sums, never implicit means.
-use crate::compensated::Sum;
 use thiserror::Error;
 
+mod exact;
 mod querywise;
 pub use querywise::{QuerywiseMixtureForward, QuerywiseMixtureSpec, QuerywiseMixtureVjp};
 
@@ -85,7 +85,7 @@ pub struct HeadwiseMixtureVjp {
 }
 
 impl HeadwiseMixtureForward {
-    /// output[b,h,p] = sum_k softmax(logits[h,:])[k] * input[b,h,p,k].
+    /// `output[b,h,p] = sum_k softmax(logits[h,:])[k] * input[b,h,p,k]`.
     pub fn new(
         spec: HeadwiseMixtureSpec,
         input: &[f32],
@@ -136,6 +136,9 @@ impl HeadwiseMixtureForward {
     pub fn weights(&self) -> &[f32] {
         &self.weights
     }
+    /// Router pullbacks sum primitive products of stored f32 operands exactly,
+    /// rounding once to f32 after all component, position and batch cancellation.
+    /// This does not make the softmax weights themselves exact real numbers.
     pub fn backward(&self, seed: &[f32]) -> Result<HeadwiseMixtureVjp, MixtureError> {
         if seed.len() != self.spec.output_len() {
             return Err(MixtureError::Length);
@@ -145,26 +148,28 @@ impl HeadwiseMixtureForward {
         }
         let [_, heads, positions, components] = self.spec.shape;
         let mut input = vec![0.; self.spec.len];
-        let mut reduced = vec![Sum::default(); self.spec.router_len()];
+        let mut reduced = vec![exact::RouterSum::default(); self.spec.router_len()];
         for (i, &s) in seed.iter().enumerate() {
             let h = i / positions % heads;
             let row = &self.input[i * components..(i + 1) * components];
             let weights = &self.weights[h * components..(h + 1) * components];
             for k in 0..components {
                 input[i * components + k] = finite(s * weights[k])?;
-                // Center each position before reduction so a large common
-                // component cannot erase a later position's learning signal.
-                let mut centered = Sum::default();
-                for (&x, &w) in row.iter().zip(weights) {
-                    centered.add(f64::from(w) * (f64::from(row[k]) - f64::from(x)));
+                // Retain primitive products across both component and position
+                // cancellation, including the final router weight before rounding.
+                for (j, (&x, &w)) in row.iter().zip(weights).enumerate() {
+                    if j == k {
+                        continue;
+                    }
+                    let total = &mut reduced[h * components + k];
+                    total.product([s, weights[k], w, row[k]], false);
+                    total.product([s, weights[k], w, x], true);
                 }
-                reduced[h * components + k].product(f64::from(s), centered.total());
             }
         }
         let logits = reduced
             .iter()
-            .zip(&self.weights)
-            .map(|(&g, &w)| finite((f64::from(w) * g.total()) as f32))
+            .map(|g| finite(g.total()))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(HeadwiseMixtureVjp { input, logits })
     }
@@ -173,6 +178,21 @@ impl HeadwiseMixtureForward {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_cancellation_retains_a_finite_router_gradient() {
+        let large = 2f32.powi(124);
+        let small = 2f64.powi(-124) as f32;
+        let x = [0., 2f32.powi(120)].repeat(5);
+        let seed = [large, 1., small, -1., -large];
+        let f = HeadwiseMixtureForward::new(
+            HeadwiseMixtureSpec::new([1, 1, 5, 2]).unwrap(),
+            &x,
+            &[0., 0.],
+        )
+        .unwrap();
+        assert_eq!(f.backward(&seed).unwrap().logits, [-0.015625, 0.015625]);
+    }
 
     #[test]
     fn dynamic_range_router_reduction_keeps_cancelled_residual() {

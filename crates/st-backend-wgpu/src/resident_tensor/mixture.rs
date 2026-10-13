@@ -54,10 +54,7 @@ fn source(template: &str) -> String {
     template
         .replace("COMMON", include_str!("shaders/mixture_common.wgsl"))
         .replace("ROUNDED_ADD", include_str!("../shaders/rounded_add.wgsl"))
-        .replace(
-            "WIDE_ARITHMETIC",
-            include_str!("shaders/layer_norm_wide.wgsl"),
-        )
+        .replace("EXACT_ROUTER", include_str!("shaders/mixture_exact.wgsl"))
         .replace("INVALID_TENSOR_FLAG", &format!("{INVALID_TENSOR_FLAG}u"))
 }
 

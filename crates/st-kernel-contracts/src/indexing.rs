@@ -54,7 +54,7 @@ pub fn grouped_rows(
     Ok((offsets, positions))
 }
 
-/// Logical sample axes survive lookup: table [V,C], IDs [B,T] -> [B,T,C].
+/// Logical sample axes survive lookup: table `[V,C]`, IDs `[B,T]` -> `[B,T,C]`.
 /// No padding ID, frequency scaling, averaging, or derivative of IDs is implicit.
 pub fn embedding_layout(
     table: &[usize],
