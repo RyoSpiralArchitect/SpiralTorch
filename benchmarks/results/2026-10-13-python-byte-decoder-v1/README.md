@@ -5,6 +5,11 @@ native/WASM qualification. This record covers an **installed local macOS arm64
 candidate wheel**, not a published release. No production geometry equations,
 thresholds, optimizer semantics or kernel choices were changed in this increment.
 
+This is the initial candidate snapshot, preserved at
+`14680f2d7ca8abbc25b13bd34caa21591f8999e9`, not a manifest of current `HEAD`.
+The [final integration qualification](../2026-10-13-release-final-review-v1/README.md)
+records the subsequently reviewed source and rebuilt CPU/WGPU wheels.
+
 ## Result
 
 - All six matched-graph cases pass against the frozen v2 CPU reference and
@@ -31,8 +36,11 @@ does not select a winning geometry or imply portability to untested hardware.
 adapter identity, candidate/native hashes, and exact continuation status.
 [Validation](validation.json) retains log/source hashes, test counts, skipped
 coverage, the packaged example's scalar losses and all failed attempts.
-[Source checksums](source-files.sha256) are relative to the repository root;
-[artifact checksums](SHA256SUMS) are relative to this directory.
+[Source checksums](source-files.sha256) identify the 22 listed files at the
+snapshot commit above; the paths are relative to its repository root.
+Do not refresh them to match later edits: that would bind this historical
+measurement to source it did not measure. [Artifact checksums](SHA256SUMS)
+are relative to this directory.
 
 ## Review And Failed Attempts
 
@@ -55,6 +63,27 @@ results are public. No credential was read to prepare or validate this candidate
 
 ## Reproduce
 
+Verify the source hashes directly from Git objects, without changing the current
+checkout or restoring intentionally deleted working-tree files:
+
+```sh
+(
+  set -eu
+  snapshot=14680f2d7ca8abbc25b13bd34caa21591f8999e9
+  manifest=benchmarks/results/2026-10-13-python-byte-decoder-v1/source-files.sha256
+  while read -r expected source_file; do
+    git cat-file -e "$snapshot:$source_file"
+    actual=$(git show "$snapshot:$source_file" | shasum -a 256)
+    test "${actual%% *}" = "$expected"
+    printf '%s: OK\n' "$source_file"
+  done < "$manifest"
+)
+```
+
+All 22 source hashes match that snapshot. Running `shasum -c` directly against
+a later checkout is not this historical verification: the release-smoke test
+and byte-language-model guide were deliberately updated after the measurement.
+
 Use the exact v2 bundle from the
 [matched-graph qualification](../2026-10-13-matched-geometry-learning-v2/README.md#reproduce):
 `reference.json`, `fixture-identity.json`, `native.json` and `browser.json`.
@@ -62,7 +91,7 @@ The Python verifier independently validates both retained runtime reports before
 using them. A newly generated reference must match the frozen hash; this is not
 permission to replace an inconvenient oracle.
 
-Build a wheel from the reviewed source, install it in an isolated Python 3.12
+Build a wheel from the pinned snapshot source, install it in an isolated Python 3.12
 environment, and keep GPU tests sequential. `WHEEL` is the exact wheel installed
 in that environment, `FIXTURE_DIR` is the private validated bundle, and `OUT`
 must not already exist.
