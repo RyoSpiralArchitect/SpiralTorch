@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Categorical Fisher-Rao squared distance on rowwise softmax coordinates.
 //! Scores are causal negative distances with learned positive softplus gains.
-use crate::pair_bias::softplus_gain;
+use crate::{compensated::Sum, pair_bias::softplus_gain};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -204,8 +204,27 @@ impl FisherRaoBiasForward {
         }
         let mut dx = Vec::with_capacity(s.coordinates);
         for (roots, gradient) in self.roots.chunks_exact(cols).zip(dr.chunks_exact(cols)) {
-            let dot = roots.iter().zip(gradient).map(|(r, g)| r * g).sum::<f64>();
-            for (&r, &g) in roots.iter().zip(gradient) {
+            let pivot = (0..cols)
+                .max_by(|&a, &b| roots[a].total_cmp(&roots[b]))
+                .unwrap();
+            // Remove a parallel component before the tangent projection. This
+            // retains the high-probability logit's gradient near simplex edges.
+            let residual: Vec<_> = roots
+                .iter()
+                .zip(gradient)
+                .map(|(&r, &g)| {
+                    let mut value = Sum::default();
+                    value.product(g, roots[pivot]);
+                    value.product(-gradient[pivot], r);
+                    value.total() / roots[pivot]
+                })
+                .collect();
+            let mut dot = Sum::default();
+            for (&r, &g) in roots.iter().zip(&residual) {
+                dot.product(r, g);
+            }
+            let dot = dot.total();
+            for (&r, &g) in roots.iter().zip(&residual) {
                 dx.push(narrow(0.5 * r * (g - r * dot))?);
             }
         }

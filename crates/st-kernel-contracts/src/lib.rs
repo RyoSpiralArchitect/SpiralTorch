@@ -13,6 +13,7 @@ pub mod causal_bias;
 pub mod causal_wave;
 pub mod classification;
 pub mod compaction;
+mod compensated;
 pub mod elementwise;
 pub mod euclidean;
 pub mod fisher_rao;

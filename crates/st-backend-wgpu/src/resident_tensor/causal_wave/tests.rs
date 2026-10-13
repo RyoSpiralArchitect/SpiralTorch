@@ -2,7 +2,7 @@ use super::*;
 use st_kernel_contracts::causal_wave::CausalWaveForward;
 
 #[test]
-fn batch_cancellation_preserves_small_parameter_gradients() {
+fn dynamic_range_batch_cancellation_preserves_small_parameter_gradients() {
     let Some(device) = device() else { return };
     let raw = device.upload(&[1], &[0.]).unwrap();
     let drive = device.upload(&[3, 1, 2], &[0.; 6]).unwrap();
@@ -17,7 +17,7 @@ fn batch_cancellation_preserves_small_parameter_gradients() {
         [2, 0, 1],
         [2, 1, 0],
     ];
-    for large in [2f32.powi(24), 2f32.powi(48), 2f32.powi(96)] {
+    for large in [2f32.powi(24), 2f32.powi(48), 2f32.powi(96), 2f32.powi(124)] {
         for order in permutations {
             for channel in 0..2 {
                 let values = [large, 1., -large];

@@ -60,7 +60,7 @@ impl ByteDecoderGeometryParameterLayout {
     }
 }
 
-/// Ordered components and fixed positive scales, with a trainable [head,component]
+/// Ordered components and fixed positive scales, with a trainable `[head,component]`
 /// logit table for each block. Scales calibrate units; they are not optimizer slots.
 #[derive(Clone, Debug)]
 pub struct ByteDecoderGeometryMixture {
@@ -178,7 +178,7 @@ impl ByteDecoderGeometryPlan {
         self.mixture.as_ref()
     }
     /// Replace fixed routing with a learned convex mixture of distinct metrics.
-    /// Each block supplies flattened [heads,components] logits and fixed scales.
+    /// Each block supplies flattened `[heads,components]` logits and fixed scales.
     /// The shared gain remains independent of the normalized mixture weights.
     pub fn with_mixture(
         mut self,
@@ -232,7 +232,7 @@ impl ByteDecoderGeometryPlan {
         Ok(self)
     }
     /// Learn position-dependent mixtures from the causal wave coordinates.
-    /// Each graph must preserve batch/time and emit flattened [heads,components]
+    /// Each graph must preserve batch/time and emit flattened `[heads,components]`
     /// logits. Zero output recovers the shared mixture's initial function.
     pub fn with_query_projections(
         mut self,

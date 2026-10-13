@@ -78,11 +78,12 @@ fn pullback(@builtin(workgroup_id) wid:vec3<u32>, @builtin(local_invocation_inde
 @compute @workgroup_size(256)
 fn reduce_parameters(@builtin(workgroup_id) wid:vec3<u32>, @builtin(local_invocation_index) lane:u32) {
     let p=invocation(wid,lane);if (p>=params.pairs) { return; }
-    var gd=parts(0.0);var gp=parts(0.0);
+    var gd=wide_sum_zero();var gp=wide_sum_zero();
     for (var b=0u;b<params.batch;b++) {
         let i=params.values+2u*(b*params.pairs+p);
-        gd=wide_add(gd,state_gradient[i]);gp=wide_add(gp,state_gradient[i+1u]);
+        gd=wide_sum_add(gd,state_gradient[i]);gp=wide_sum_add(gp,state_gradient[i+1u]);
     }
     let base=params.values+params.state_values;
-    gradient[base+p]=checked(wide_float(gd));gradient[base+params.pairs+p]=checked(wide_float(gp));
+    gradient[base+p]=checked(wide_float(wide_sum_value(gd)));
+    gradient[base+params.pairs+p]=checked(wide_float(wide_sum_value(gp)));
 }
