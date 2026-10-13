@@ -96,6 +96,14 @@ errors and all three seedwise contrasts. See [validation.json](validation.json)
 for source hashes, review repairs, regression and resume verification scope.
 Earlier pilot artifacts are not rewritten.
 
+An [independent re-review on October 12](review-fix-2026-10-12.json) found and
+repaired a comparator weakness: a within-tolerance perturbation of reported
+BPB could reverse these small contrasts without changing batch losses. The
+comparator now derives BPB directly from checked batch losses and validates
+reported summaries separately. The old counterexample and 160 boundary probes
+were checked; retained native/browser full and resumed comparisons are unchanged.
+This was an offline validation repair, not a new GPU or Torch learning run.
+
 The new native binary also reran the original v1 request: its full raw output
 is byte-identical to the retained v1 baseline and passes the original Torch
 comparison. In v2, all six pre-existing case reports remain strictly equal to
