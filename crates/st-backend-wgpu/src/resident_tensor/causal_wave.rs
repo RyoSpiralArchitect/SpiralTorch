@@ -70,6 +70,10 @@ pub(super) struct CausalWaveKernels {
 fn source(template: &str) -> String {
     template
         .replace("COMMON", include_str!("shaders/causal_wave_common.wgsl"))
+        .replace(
+            "PARAMETER_REDUCTION",
+            include_str!("shaders/causal_wave_reduce.wgsl"),
+        )
         .replace("ROUNDED_ADD", include_str!("../shaders/rounded_add.wgsl"))
         .replace(
             "WIDE_ARITHMETIC",
@@ -179,9 +183,7 @@ fn preflight_sizes(
         spec.state_len(),
     )?;
     let backward = add(add(spec.len(), spec.state_len())?, spec.shape()[2])?;
-    let adjoints = add(spec.len(), spec.state_len())?
-        .checked_mul(4)
-        .ok_or(CausalWaveError::Overflow)?;
+    let adjoints = adjoint_len(spec)?;
     for len in [forward, backward, adjoints] {
         storage_limit(len, limits)?;
     }
@@ -193,6 +195,19 @@ fn preflight_sizes(
         grid(work, limits)?;
     }
     Ok((forward, backward))
+}
+
+fn adjoint_len(spec: CausalWaveSpec) -> Result<usize, CausalWaveError> {
+    // Four words per chart adjoint, six per time/parameter contraction,
+    // plus two scaled-scalar slots per parameter for final rounding.
+    spec.len()
+        .checked_mul(10)
+        .and_then(|n| {
+            spec.pairs()
+                .checked_mul(8)
+                .and_then(|extra| n.checked_add(extra))
+        })
+        .ok_or(CausalWaveError::Overflow)
 }
 
 fn params(spec: CausalWaveSpec) -> Params {
@@ -397,7 +412,7 @@ impl ResidentCausalWaveForward {
         let terminal = joined[2].contiguous_into(&mut encoder)?;
         let flags = guard(device, &joined[0], &mut encoder)?;
         let state_grad = device.allocate_output_with_guard(
-            &NdLayout::contiguous(&[(spec.len() + spec.state_len()) * 4])?,
+            &NdLayout::contiguous(&[adjoint_len(spec)?])?,
             Some(flags.clone()),
         )?;
         let packed =

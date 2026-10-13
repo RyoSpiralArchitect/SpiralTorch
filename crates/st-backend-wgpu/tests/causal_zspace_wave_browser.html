@@ -39,6 +39,19 @@ try {
   await init();
   const report = JSON.parse(await run_causal_zspace_wave_checks());
   validateBatchReduction(report.batch_reduction);
+  const tails = report.tail_reduction;
+  const rho = Math.fround(Math.fround(.99) * .5);
+  const expectedTails = [Math.fround(Math.fround(Math.fround(.99) * .25) * 2 ** -128),
+    Math.fround(rho * Math.fround(Math.PI) * 2 ** -128), Math.fround(rho * rho * Math.fround(Math.PI))];
+  const tailNames = ["nested_decay", "nested_phase", "time_then_batch"];
+  const bits = value => new Uint32Array(new Float32Array([value]).buffer)[0];
+  if (tails?.analytic_reference !== true || tails.sequence_bound !== true || tails.max_steps !== 1048576
+      || tails.checks?.length !== 3 || tails.checks.some((c, i) => c.name !== tailNames[i]
+        || c.expected !== expectedTails[i] || c.cpu !== expectedTails[i] || c.gpu !== expectedTails[i]
+        || c.expected_bits !== bits(expectedTails[i]) || c.cpu_bits !== c.expected_bits
+        || c.gpu_bits !== c.expected_bits || c.finite_family !== true)) {
+    throw Error("Missing or inaccurate time/batch tail controls");
+  }
   const finite = value => Number.isFinite(value) && value >= 0;
   const errors = ["features", "final_state", "drive_vjp", "raw_decay_vjp", "raw_phase_vjp", "initial_state_vjp"];
   const g = report.guards;
@@ -70,7 +83,7 @@ try {
   }
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
-  document.querySelector("#summary").textContent = "Passed: 10 PyTorch cases, 9 chart controls, 36 exact batch-cancellation cases, recoverable/invalid overflow controls, all four VJPs, chunked BPTT and 16 updates. Primitive correctness, not language quality or speed.";
+  document.querySelector("#summary").textContent = "Passed: 10 PyTorch cases, 9 chart controls, 36 batch-cancellation cases, 3 time/batch tail cases, exponent-range and overflow controls, all four VJPs, chunked BPTT and 16 updates. Primitive correctness, not language quality or speed.";
   const download = document.querySelector("#download");
   download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
   download.download = "causal-zspace-wave.json";

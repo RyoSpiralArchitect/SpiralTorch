@@ -3,10 +3,16 @@
 //! The chart is not an exponential map or a Riemannian optimizer. Raw decay and
 //! phase are ordinary differentiable parameters; state is explicit, not global.
 
+use crate::compensated::Sum;
 use thiserror::Error;
 
 pub const MAX_DECAY: f32 = 0.99;
 pub const INTERIOR_RATIO: f32 = 0.95;
+
+/// Portable reverse-scan limit; longer documents require explicit stateful chunks.
+/// A conservative 512 exponent bits per transition plus fixed chart headroom
+/// stays well inside i32, including exponent differences in Wide arithmetic.
+pub const MAX_STEPS: usize = 1 << 20;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum CausalWaveError {
@@ -16,6 +22,8 @@ pub enum CausalWaveError {
     Curvature,
     #[error("causal wave dimensions exceed portable addressing")]
     Overflow,
+    #[error("causal wave time axis exceeds the portable reverse-scan limit; use explicit chunks")]
+    SequenceLength,
     #[error("causal wave input, state, parameters or cotangent shape mismatch")]
     Length,
     #[error("causal wave input, intermediate or derivative is non-finite")]
@@ -40,6 +48,9 @@ impl CausalWaveSpec {
             .try_fold(1usize, |n, &s| n.checked_mul(s))
             .ok_or(CausalWaveError::Overflow)?;
         u32::try_from(len).map_err(|_| CausalWaveError::Overflow)?;
+        if shape[1] > MAX_STEPS {
+            return Err(CausalWaveError::SequenceLength);
+        }
         let radius = INTERIOR_RATIO / (-curvature).sqrt();
         if !curvature.is_finite() || curvature >= 0. || !radius.is_finite() || radius <= 0. {
             return Err(CausalWaveError::Curvature);
@@ -92,30 +103,6 @@ impl CausalWaveSpec {
 
 fn finite(v: f32) -> Result<f32, CausalWaveError> {
     v.is_finite().then_some(v).ok_or(CausalWaveError::NonFinite)
-}
-
-// Batch partials may cancel after exceeding f32, or differ by many exponents.
-// Neumaier compensation keeps the small residual until the final public store.
-#[derive(Clone, Copy, Default)]
-struct ParameterSum {
-    sum: f64,
-    correction: f64,
-}
-
-impl ParameterSum {
-    fn add(&mut self, value: f64) {
-        let sum = self.sum + value;
-        self.correction += if self.sum.abs() >= value.abs() {
-            (self.sum - sum) + value
-        } else {
-            (value - sum) + self.sum
-        };
-        self.sum = sum;
-    }
-
-    fn finish(self) -> Result<f32, CausalWaveError> {
-        finite((self.sum + self.correction) as f32)
-    }
 }
 
 fn coefficients(decay: f32, phase: f32) -> Result<[f32; 5], CausalWaveError> {
@@ -300,14 +287,12 @@ impl CausalWaveForward {
             raw_phase: vec![0.; spec.pairs()],
             initial_state: vec![0.; spec.state_len()],
         };
-        let mut decay = vec![ParameterSum::default(); spec.pairs()];
-        let mut phase = vec![ParameterSum::default(); spec.pairs()];
+        let mut decay = vec![Sum::default(); spec.pairs()];
+        let mut phase = vec![Sum::default(); spec.pairs()];
         for b in 0..batch {
             for (p, &[rho, cos, sin, dr, dt]) in self.coefficients.iter().enumerate() {
                 let mut gx = f64::from(terminal[b * cols + 2 * p]);
                 let mut gy = f64::from(terminal[b * cols + 2 * p + 1]);
-                let mut gd = 0.;
-                let mut gp = 0.;
                 for t in (0..steps).rev() {
                     let i = (b * steps + t) * cols + 2 * p;
                     gx += state_grad[i];
@@ -324,9 +309,9 @@ impl CausalWaveForward {
                     let ry = finite(finite(sin * x)? + finite(cos * y)?)?;
                     let decay_x = gx * (f64::from(rx) - f64::from(self.drive[i]));
                     let decay_y = gy * (f64::from(ry) - f64::from(self.drive[i + 1]));
-                    gd += (decay_x + decay_y) * f64::from(dr);
+                    decay[p].add((decay_x + decay_y) * f64::from(dr));
                     let rotation = gy * f64::from(rx) - gx * f64::from(ry);
-                    gp += f64::from(rho) * rotation * f64::from(dt);
+                    phase[p].add(f64::from(rho) * rotation * f64::from(dt));
                     let next_x = f64::from(rho) * (f64::from(cos) * gx + f64::from(sin) * gy);
                     let next_y = f64::from(rho) * (f64::from(cos) * gy - f64::from(sin) * gx);
                     gx = next_x;
@@ -334,13 +319,11 @@ impl CausalWaveForward {
                 }
                 result.initial_state[b * cols + 2 * p] = finite(gx as f32)?;
                 result.initial_state[b * cols + 2 * p + 1] = finite(gy as f32)?;
-                decay[p].add(gd);
-                phase[p].add(gp);
             }
         }
-        for p in 0..spec.pairs() {
-            result.raw_decay[p] = decay[p].finish()?;
-            result.raw_phase[p] = phase[p].finish()?;
+        for (p, (decay, phase)) in decay.into_iter().zip(phase).enumerate() {
+            result.raw_decay[p] = finite(decay.into_f32())?;
+            result.raw_phase[p] = finite(phase.into_f32())?;
         }
         Ok(result)
     }
