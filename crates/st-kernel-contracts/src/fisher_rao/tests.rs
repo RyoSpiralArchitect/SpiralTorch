@@ -1,6 +1,154 @@
 use super::*;
 
 #[test]
+fn swapped_nearby_fisher_retains_second_order_pivot_gradients() {
+    let e = f32::from_bits(1);
+    let gain = 2f32.powi(127);
+    let f = FisherRaoBiasForward::new(
+        FisherRaoBiasSpec::new([1, 2, 3], 1).unwrap(),
+        &[0., e, -e, 0., 0., 0.],
+        &[gain],
+    )
+    .unwrap();
+    let gradient = f.backward(&[0., 0., gain, 0.]).unwrap().coordinates;
+    let scale = (f64::from(gain).powi(2) * f64::from(e).powi(2)) as f32;
+    for (index, expected) in [(0, scale / 3.), (3, -scale / 9.)] {
+        assert!(
+            (gradient[index] / expected - 1.).abs() < 2e-5,
+            "{index}: {} != {expected}",
+            gradient[index]
+        );
+    }
+}
+
+#[test]
+fn mixed_close_and_far_pairs_match_a_joint_finite_difference() {
+    let spec = FisherRaoBiasSpec::new([1, 3, 3], 1).unwrap();
+    let x = [0., 0., 0., 0., 0.125, -0.125, 1., -2., 0.5];
+    let seed = [0., 0., 0., 0.3, 0., 0., -0.4, 0.7, 0.];
+    let f = FisherRaoBiasForward::new(spec, &x, &[0.2]).unwrap();
+    let gradient = f.backward(&seed).unwrap().coordinates;
+    let loss = |values: &[f32]| {
+        FisherRaoBiasForward::new(spec, values, &[0.2])
+            .unwrap()
+            .scores()
+            .iter()
+            .zip(seed)
+            .map(|(&a, b)| f64::from(a) * f64::from(b))
+            .sum::<f64>()
+    };
+    for (i, analytic) in gradient.into_iter().enumerate() {
+        let mut hi = x;
+        let mut lo = x;
+        hi[i] += 0.002;
+        lo[i] -= 0.002;
+        let numeric = (loss(&hi) - loss(&lo)) / (f64::from(hi[i]) - f64::from(lo[i]));
+        assert!(
+            (numeric - f64::from(analytic)).abs() < 3e-4,
+            "{i}: {analytic} != {numeric}"
+        );
+    }
+}
+
+#[test]
+fn nearby_fisher_retains_second_order_pivot_gradients() {
+    let e = f32::from_bits(1);
+    let gain = 2f32.powi(127);
+    let f = FisherRaoBiasForward::new(
+        FisherRaoBiasSpec::new([1, 2, 3], 1).unwrap(),
+        &[0., 0., 0., 0., e, -e],
+        &[gain],
+    )
+    .unwrap();
+    let gradient = f.backward(&[0., 0., gain, 0.]).unwrap().coordinates;
+    let scale = (f64::from(gain).powi(2) * f64::from(e).powi(2)) as f32;
+    for (index, expected) in [(0, -scale / 9.), (3, scale / 3.)] {
+        assert!(
+            (gradient[index] / expected - 1.).abs() < 2e-5,
+            "index={index}: {} != {expected}",
+            gradient[index]
+        );
+    }
+}
+
+#[test]
+fn close_chart_transition_preserves_the_metric_and_both_endpoint_vjps() {
+    let spec = FisherRaoBiasSpec::new([1, 2, 3], 1).unwrap();
+    for perturbation in [0.001, 0.2499, 0.25, 0.2501, 0.5] {
+        let x = [0., -0.3, -0.6, 0., -0.3, -0.6 + perturbation];
+        let f = FisherRaoBiasForward::new(spec, &x, &[0.2]).unwrap();
+        let chord = (0..3).map(|i| (f.roots[i] - f.roots[i + 3]).powi(2)).sum();
+        let direct = -f.gains[0].0 * squared_distance_from_root_chord(chord).unwrap().0;
+        assert!((f64::from(f.scores()[2]) - direct).abs() < 1e-7);
+        let g = f.backward(&[0., 0., 1., 0.]).unwrap();
+        for (i, analytic) in g.coordinates.into_iter().enumerate() {
+            let mut hi = x;
+            let mut lo = x;
+            hi[i] += 0.0005;
+            lo[i] -= 0.0005;
+            let a = FisherRaoBiasForward::new(spec, &hi, &[0.2])
+                .unwrap()
+                .scores()[2];
+            let b = FisherRaoBiasForward::new(spec, &lo, &[0.2])
+                .unwrap()
+                .scores()[2];
+            let numeric = (a - b) / (hi[i] - lo[i]);
+            assert!(
+                (analytic - numeric).abs() < 2e-4,
+                "perturbation={perturbation}, i={i}: {analytic} != {numeric}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nearby_rows_preserve_rescaled_signals_down_to_subnormal_logits() {
+    let spec = FisherRaoBiasSpec::new([1, 2, 2], 1).unwrap();
+    let gain = 2f32.powi(120);
+    for exponent in [30, 60, 90, 120, 149] {
+        let e = 2f64.powi(-exponent) as f32;
+        let seed = 2f32.powi(exponent - 120);
+        for common in [0., 2f32.powi(100)] {
+            let f = FisherRaoBiasForward::new(spec, &[common, common, e, -e], &[gain]).unwrap();
+            let expected = (-f64::from(gain) * f64::from(e).powi(2)) as f32;
+            assert!(
+                (f.scores()[2] - expected).abs() <= 2e-5 * expected.abs(),
+                "e=2^-{exponent}, common={common}: {} != {expected}",
+                f.scores()[2]
+            );
+            let g = f.backward(&[0., 0., seed, 0.]).unwrap();
+            for (actual, expected) in g.coordinates.into_iter().zip([1., -1., -1., 1.]) {
+                assert!(
+                    (actual - expected).abs() < 2e-5,
+                    "e=2^-{exponent}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tiny_logit_changes_are_not_erased_by_a_shared_large_pivot() {
+    let e = f32::from_bits(1);
+    let f = FisherRaoBiasForward::new(
+        FisherRaoBiasSpec::new([1, 2, 2], 1).unwrap(),
+        &[1., 0., 1., e],
+        &[2f32.powi(120)],
+    )
+    .unwrap();
+    let g = f.backward(&[0., 0., 2f32.powi(29), 0.]).unwrap();
+    let p = 1. / (1. + 1f64.exp());
+    let expected = (2. * p * (1. - p)) as f32;
+    for (actual, sign) in g.coordinates.into_iter().zip([-1., 1., 1., -1.]) {
+        assert!(
+            (actual - sign * expected).abs() < 2e-5,
+            "{actual} != {}",
+            sign * expected
+        );
+    }
+}
+
+#[test]
 fn dynamic_range_simplex_edge_keeps_both_logit_gradients() {
     let spec = FisherRaoBiasSpec::new([1, 2, 2], 1).unwrap();
     for gap in [180f32, 240., 400.] {

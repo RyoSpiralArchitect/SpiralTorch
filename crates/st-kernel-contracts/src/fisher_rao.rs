@@ -3,6 +3,8 @@
 //! Scores are causal negative distances with learned positive softplus gains.
 use crate::{compensated::Sum, pair_bias::softplus_gain};
 use thiserror::Error;
+mod close_chart;
+use close_chart::CloseChart;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum FisherRaoError {
@@ -97,6 +99,8 @@ fn narrow(v: f64) -> Result<f32, FisherRaoError> {
 pub struct FisherRaoBiasForward {
     spec: FisherRaoBiasSpec,
     roots: Vec<f64>,
+    logits: Vec<f32>,
+    close_pairs: Vec<bool>,
     gains: Vec<(f64, f64)>,
     distances: Vec<(f64, f64)>,
     scores: Vec<f32>,
@@ -137,13 +141,24 @@ impl FisherRaoBiasForward {
         }
         let gains: Vec<_> = raw_gain.iter().map(|&r| softplus_gain(r)).collect();
         let mut distances = vec![(0., 0.); spec.pairs];
+        let mut close_pairs = vec![false; spec.pairs];
         let mut scores = vec![0.; spec.scores];
         for b in 0..batch {
             for q in 0..time {
                 for k in 0..=q {
+                    let qi = (b * time + q) * cols;
+                    let ki = (b * time + k) * cols;
+                    let x = &logits[qi..qi + cols];
+                    let y = &logits[ki..ki + cols];
+                    let chart = CloseChart::new(x, y, &roots[ki..ki + cols]);
+                    close_pairs[(b * time + q) * time + k] = chart.is_some();
                     let chord = (0..cols)
                         .map(|i| {
-                            (roots[(b * time + q) * cols + i] - roots[(b * time + k) * cols + i])
+                            chart
+                                .map_or_else(
+                                    || roots[qi + i] - roots[ki + i],
+                                    |chart| chart.delta(x, y, roots[ki + i], i),
+                                )
                                 .powi(2)
                         })
                         .sum::<f64>();
@@ -159,6 +174,8 @@ impl FisherRaoBiasForward {
         Ok(Self {
             spec,
             roots,
+            logits: logits.to_vec(),
+            close_pairs,
             gains,
             distances,
             scores,
@@ -181,6 +198,7 @@ impl FisherRaoBiasForward {
         }
         let [batch, time, cols] = s.shape;
         let mut dr = vec![0.; s.coordinates];
+        let mut close_dx = vec![Sum::default(); s.coordinates];
         let mut dg = vec![0.; s.heads];
         for b in 0..batch {
             for q in 0..time {
@@ -195,7 +213,18 @@ impl FisherRaoBiasForward {
                     for i in 0..cols {
                         let qi = (b * time + q) * cols + i;
                         let ki = (b * time + k) * cols + i;
-                        let d = scale * 2. * slope * (self.roots[qi] - self.roots[ki]);
+                        if self.close_pairs[(b * time + q) * time + k] {
+                            let (dx, dy) = CloseChart::pullbacks(
+                                &self.logits[qi - i..qi - i + cols],
+                                &self.logits[ki - i..ki - i + cols],
+                                i,
+                            );
+                            close_dx[qi].product(scale * slope, dx);
+                            close_dx[ki].product(scale * slope, dy);
+                            continue;
+                        }
+                        let delta = self.roots[qi] - self.roots[ki];
+                        let d = scale * 2. * slope * delta;
                         dr[qi] += d;
                         dr[ki] -= d;
                     }
@@ -225,7 +254,9 @@ impl FisherRaoBiasForward {
             }
             let dot = dot.total();
             for (&r, &g) in roots.iter().zip(&residual) {
-                dx.push(narrow(0.5 * r * (g - r * dot))?);
+                let mut value = close_dx[dx.len()].clone();
+                value.add(0.5 * r * (g - r * dot));
+                dx.push(narrow(value.total())?);
             }
         }
         Ok(FisherRaoBiasVjp {
