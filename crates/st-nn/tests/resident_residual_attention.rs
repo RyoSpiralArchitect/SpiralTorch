@@ -22,5 +22,16 @@ fn full_residual_attention_vjp_and_updates_match_torch() {
         .unwrap()
         .values()
         .all(|v| v == true));
+    assert_eq!(
+        report["residual_association"]["contract"],
+        "projection_bias_before_residual.v1"
+    );
+    assert_eq!(
+        report["residual_association"]["cases"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
     eprintln!("{report}");
 }

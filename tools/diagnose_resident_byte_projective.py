@@ -16,7 +16,7 @@ torch.set_num_threads(1)
 torch.use_deterministic_algorithms(True)
 
 
-def evaluate(case, values, dtype, objective="seed", detached_router=False, detach_geometry=False):
+def evaluate(case, values, dtype, objective="seed", detached_router=False, detach_geometry=False, module_residual=False):
     config = case["config"]
     batch, steps, width, heads = (config[n] for n in ("batch", "steps", "width", "heads"))
     g = config["causal_geometry"]
@@ -60,7 +60,7 @@ def evaluate(case, values, dtype, objective="seed", detached_router=False, detac
         if external["pair"] is not None:
             bias = bias + torch.tensor(external["pair"], device="cpu", dtype=dtype).reshape(batch, heads, steps, steps)
         count = 13 if block["topos"] else 12
-        x = geometry.base.block_forward(x, p[offset:offset+count], heads, z, bias, block["topos"])
+        x = geometry.base.block_forward(x, p[offset:offset+count], heads, z, bias, block["topos"], module_residual=module_residual)
         offset += count
     h = p[offset:]
     logits = F.layer_norm(x, (width,), h[0], h[1], eps=1e-5) @ h[2] + h[3]

@@ -15,6 +15,9 @@ use st_tensor::NdLayout;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[path = "residual_association.rs"]
+mod residual_association;
+
 fn data(value: &Value) -> Vec<f32> {
     value
         .as_array()
@@ -610,10 +613,12 @@ pub async fn run() -> Result<Value> {
     for (name, value) in terminal_guard_checks(&device).await?.as_object().unwrap() {
         guards[name] = value.clone();
     }
+    let association = residual_association::run(&device).await?;
     Ok(json!({
         "schema": "spiraltorch.residual_attention_check.v1", "passed": true,
         "adapter": {"name": runtime.adapter_info().name, "backend": format!("{:?}", runtime.adapter_info().backend),
                     "device_type": format!("{:?}", runtime.adapter_info().device_type)},
         "tolerance": {"atol": 3e-6, "rtol": 5e-5}, "checks": checks, "training": training, "guards": guards,
+        "residual_association": association,
     }))
 }
