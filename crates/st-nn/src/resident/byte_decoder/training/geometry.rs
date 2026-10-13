@@ -103,6 +103,7 @@ impl BlockMetricTape {
         &self,
         seed: &ResidentTensor,
         query: Option<&mut ResidentGraphAutograd>,
+        query_pullback: ByteDecoderQueryPullback,
     ) -> Result<MetricVjp, InferenceError> {
         if let Some((mixture, scales)) = &self.mixture {
             let shape = seed.layout().shape();
@@ -134,7 +135,8 @@ impl BlockMetricTape {
                         g.components()
                             .reshape(&[shape[0], shape[1], shape[2] * shape[3], k])?,
                         bias.reshape(&[shape[1], k])?,
-                        Some(gq.input_gradient().clone()),
+                        (query_pullback == ByteDecoderQueryPullback::Full)
+                            .then(|| gq.input_gradient().clone()),
                         projection.to_vec(),
                     )
                 }
@@ -469,6 +471,7 @@ impl GeometryAutograd {
         &mut self,
         tape: &GeometryTape,
         biases: &[ByteDecoderBiasGradient],
+        query_pullback: ByteDecoderQueryPullback,
     ) -> Result<GeometryVjp, InferenceError> {
         if biases.len() != tape.metrics.len() {
             return Err(TrainingError::ParameterLayout.into());
@@ -480,7 +483,7 @@ impl GeometryAutograd {
         for (block, (metric, bias)) in tape.metrics.iter().zip(biases).enumerate() {
             let seed = bias.pair_bias().ok_or(TrainingError::ParameterLayout)?;
             let query = self.mixture.as_mut().and_then(|m| m.queries.get_mut(block));
-            let gradient = metric.backward(seed, query)?;
+            let gradient = metric.backward(seed, query, query_pullback)?;
             let coordinate = gradient.coordinates;
             coordinates = Some(match coordinates {
                 Some(sum) => sum.add(&coordinate)?,

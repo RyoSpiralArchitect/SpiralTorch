@@ -1,5 +1,7 @@
 use super::*;
 
+mod query_pullback;
+
 fn read(t: &ResidentTensor) -> Result<Vec<f32>, GpuTensorError> {
     t.snapshot()?.read()
 }

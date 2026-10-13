@@ -62,6 +62,11 @@ position-dependent. Both metric endpoints, head gains, shared/router parameters,
 wave recurrence and embeddings receive gradients through the same model owner.
 The router still reads shared wave coordinates, not each block's hidden states.
 
+An explicit [query-coordinate pullback control](query_coordinate_pullback.md)
+can stop only the router's input gradient for paired experiments or selective
+training. Ordinary backward remains fully coupled; this control does not
+supersede the failed projective learning qualification.
+
 The serialized metric identity is `complex_projective_chord_squared.v1`.
 Existing checkpoint encodings remain v2 (uniform), v3 (headwise), v4 (shared
 mixture) and v5 (query mixture). The explicit metric identity binds topology;

@@ -25,8 +25,9 @@ pub use attention::{
 };
 #[cfg(feature = "wgpu")]
 pub use byte_decoder::{
-    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderCheckpointReadback, ResidentByteBatch,
-    ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
+    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderCheckpointReadback,
+    ByteDecoderQueryPullback, ResidentByteBatch, ResidentByteDecoder, ResidentByteDecoderForward,
+    ResidentByteDecoderVjp,
 };
 pub use byte_decoder::{
     ByteDecoderCheckpoint, ByteDecoderGeometryMixture, ByteDecoderGeometryParameterLayout,

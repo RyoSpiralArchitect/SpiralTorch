@@ -20,8 +20,8 @@ pub use checkpoint::{
 mod training;
 #[cfg(feature = "wgpu")]
 pub use training::{
-    ByteDecoderBias, ByteDecoderBiasGradient, ResidentByteBatch, ResidentByteDecoder,
-    ResidentByteDecoderForward, ResidentByteDecoderVjp,
+    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderQueryPullback, ResidentByteBatch,
+    ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
 
 pub const BYTE_LM_VOCAB: usize = 256;

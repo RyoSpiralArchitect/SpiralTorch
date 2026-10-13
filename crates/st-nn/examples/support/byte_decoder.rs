@@ -37,6 +37,12 @@ mod parameter_rate_controls;
 mod projective_controls;
 #[path = "byte_decoder/query_controls.rs"]
 mod query_controls;
+#[path = "byte_decoder/query_pullback_controls.rs"]
+mod query_pullback_controls;
+
+pub async fn run_query_pullback(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    query_pullback_controls::run(runtime, fixture).await
+}
 
 pub async fn run_projective(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
     projective_controls::run(runtime, fixture).await

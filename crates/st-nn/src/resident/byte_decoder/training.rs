@@ -22,6 +22,17 @@ use st_kernel_contracts::classification::CrossEntropySpec;
 mod geometry;
 use geometry::{GeometryAutograd, GeometryTape};
 
+/// An explicit stop-gradient control, not a different forward or a freeze of
+/// router parameters. The caller must reapply its choice after checkpoint load.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ByteDecoderQueryPullback {
+    #[default]
+    Full,
+    /// Keep query-graph parameter VJPs and every metric VJP, but stop the query
+    /// graph's input VJP at the shared causal coordinates.
+    StopCoordinates,
+}
+
 #[derive(Clone)]
 pub struct ResidentByteBatch {
     indices: ResidentEmbeddingIndices,
@@ -104,9 +115,14 @@ pub struct ResidentByteDecoderVjp {
     bound: ResidentParameterGradients,
     embedding_output: ResidentTensor,
     biases: Vec<ByteDecoderBiasGradient>,
+    query_pullback: ByteDecoderQueryPullback,
 }
 
 impl ResidentByteDecoderVjp {
+    pub fn query_pullback(&self) -> ByteDecoderQueryPullback {
+        self.query_pullback
+    }
+
     pub fn parameter_gradients(&self) -> &[ResidentTensor] {
         &self.parameters
     }
@@ -365,11 +381,34 @@ impl ResidentByteDecoder {
         forward: &ResidentByteDecoderForward,
         cotangent: &ResidentTensor,
     ) -> Result<ResidentByteDecoderVjp, InferenceError> {
+        self.backward_with_query_pullback(forward, cotangent, ByteDecoderQueryPullback::Full)
+    }
+
+    /// Apply an intentional query-coordinate stop-gradient for training or
+    /// paired ablation. This does not change the captured forward or weights.
+    /// StopCoordinates requires an actual contextual router. The ordinary
+    /// backward path always uses Full; checkpoint schemas are unchanged.
+    pub fn backward_with_query_pullback(
+        &mut self,
+        forward: &ResidentByteDecoderForward,
+        cotangent: &ResidentTensor,
+        query_pullback: ByteDecoderQueryPullback,
+    ) -> Result<ResidentByteDecoderVjp, InferenceError> {
         require_uncommitted_route()?;
         if self.latest != Some(forward.submission)
             || !self.parameters.is_current(&forward.parameters)
         {
             return Err(TrainingError::StaleForward.into());
+        }
+        if query_pullback == ByteDecoderQueryPullback::StopCoordinates
+            && !self
+                .parameter_layout
+                .geometry()
+                .is_some_and(|g| !g.query_projections().is_empty())
+        {
+            return Err(InferenceError::ByteDecoder(
+                "query stop-gradient requires contextual routing",
+            ));
         }
         let guarded = self
             .tensor_device()
@@ -392,7 +431,7 @@ impl ResidentByteDecoder {
         let mut parameters = Vec::new();
         match (&mut self.geometry, &forward.geometry) {
             (Some(geometry), Some(tape)) => {
-                let gradient = geometry.backward(tape, &biases)?;
+                let gradient = geometry.backward(tape, &biases, query_pullback)?;
                 input = input.add(&gradient.input)?;
                 parameters.extend(gradient.parameters);
             }
@@ -406,7 +445,9 @@ impl ResidentByteDecoder {
         }
         parameters.extend(block_parameters.into_iter().flatten());
         parameters.extend(head.parameter_gradients().iter().cloned());
-        self.bind_vjp(forward, input, parameters, biases)
+        let mut vjp = self.bind_vjp(forward, input, parameters, biases)?;
+        vjp.query_pullback = query_pullback;
+        Ok(vjp)
     }
 
     fn bind_vjp(
@@ -449,6 +490,7 @@ impl ResidentByteDecoder {
         }
         let bound = forward.parameters.bind_gradients(parameters.clone())?;
         Ok(ResidentByteDecoderVjp {
+            query_pullback: ByteDecoderQueryPullback::Full,
             parameters,
             bound,
             embedding_output,

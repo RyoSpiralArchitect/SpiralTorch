@@ -76,7 +76,7 @@ fn malformed_or_nonfinite_query_controls_abort_instead_of_becoming_failures() {
     assert!(query_control_data(&valid, Some(&observed)).is_err());
 }
 
-pub(super) async fn run(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+pub(super) fn cases(fixture_json: &str) -> Result<Vec<Value>> {
     let fixture: Value = serde_json::from_str(fixture_json)?;
     let cases = fixture["cases"]
         .as_array()
@@ -115,10 +115,22 @@ pub(super) async fn run(runtime: WgpuRuntime, fixture_json: &str) -> Result<Valu
     for case in &cases[4..] {
         query_control_data(case, None)?;
     }
+    Ok(cases.clone())
+}
+
+pub(super) async fn run(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    let cases = cases(fixture_json)?;
     let boundary = boundary(runtime.clone()).await?;
     let guard = query_controls::guard(&runtime, &cases[5]).await?;
-    let mut report =
-        run_cases_observed(runtime, cases, &[23, 37, 24, 39, 26, 43], true, false, true).await?;
+    let mut report = run_cases_observed(
+        runtime,
+        &cases,
+        &[23, 37, 24, 39, 26, 43],
+        true,
+        false,
+        true,
+    )
+    .await?;
     for (case, check) in cases
         .iter()
         .zip(report["checks"].as_array_mut().ok_or("missing checks")?)
