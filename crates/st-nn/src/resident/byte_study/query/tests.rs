@@ -36,13 +36,11 @@ fn contextual_controls_preserve_source_and_use_one_shared_intercept() {
         assert!(!c.parameter_frozen("geometry.mixture_logits.0"));
         assert!(!c.parameter_frozen("geometry.raw_gain.0"));
         let p = plan(&r.config, c).unwrap();
-        assert_eq!(
-            p.initial_checkpoint()
-                .to_json()
-                .unwrap()
-                .contains("checkpoint.v5"),
-            true
-        );
+        assert!(p
+            .initial_checkpoint()
+            .to_json()
+            .unwrap()
+            .contains("checkpoint.v5"));
     }
 }
 

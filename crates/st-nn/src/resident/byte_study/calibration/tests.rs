@@ -394,8 +394,8 @@ fn realized_rms_gate_rejects_zero_mismatches_and_incomplete_coverage() {
     let b = CausalBiasMoments::from_scores([1, 1, 2, 2], &[0., 0., -2., 0.]).unwrap();
     let zero = CausalBiasMoments::from_scores([1, 1, 2, 2], &[0.; 4]).unwrap();
     assert!(checked_errors(std::slice::from_ref(&a), std::slice::from_ref(&a)).is_ok());
-    assert!(checked_errors(&[a.clone()], &[b]).is_err());
-    assert!(checked_errors(&[zero.clone()], &[zero]).is_err());
+    assert!(checked_errors(std::slice::from_ref(&a), &[b]).is_err());
+    assert!(checked_errors(std::slice::from_ref(&zero), std::slice::from_ref(&zero)).is_err());
     assert!(checked_errors(&[a], &[]).is_err());
     let two_heads =
         CausalBiasMoments::from_scores([1, 2, 2, 2], &[0., 0., -1., 0., 0., 0., -2., 0.]).unwrap();

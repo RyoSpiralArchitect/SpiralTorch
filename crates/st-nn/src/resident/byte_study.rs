@@ -206,10 +206,10 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(2..=128).contains(&c.width)
         || !(2..=256).contains(&c.hidden)
         || c.heads == 0
-        || c.width % c.heads != 0
+        || !c.width.is_multiple_of(c.heads)
         || !(1..=4).contains(&c.blocks.len())
         || !(2..=32).contains(&c.geometry_cols)
-        || c.geometry_cols % 2 != 0
+        || !c.geometry_cols.is_multiple_of(2)
         || !c.curvature.is_finite()
         || c.curvature >= 0.
         || r.rate <= 0.
@@ -231,7 +231,7 @@ fn parse(input: &[u8]) -> Result<Request> {
             16
         })
             .contains(&r.cases.len())
-        || r.cases.len() % r.arms_per_seed() != 0
+        || !r.cases.len().is_multiple_of(r.arms_per_seed())
     {
         return Err("invalid study configuration".into());
     }
@@ -567,7 +567,7 @@ impl ByteCorpusStudy {
     }
 
     fn evaluation_boundary(&self, revision: usize) -> bool {
-        revision % self.request.checkpoint_every == 0 || revision == self.total_updates()
+        revision.is_multiple_of(self.request.checkpoint_every) || revision == self.total_updates()
     }
 
     fn checked_models(

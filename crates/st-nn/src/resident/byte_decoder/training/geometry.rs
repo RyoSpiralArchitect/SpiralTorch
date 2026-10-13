@@ -76,7 +76,7 @@ struct BlockMetricTape {
 
 enum MixtureTape {
     Shared(ResidentHeadwiseMixture),
-    Query(ResidentQuerywiseMixture, GraphForward),
+    Query(Box<ResidentQuerywiseMixture>, GraphForward),
 }
 impl MixtureTape {
     fn weights(&self) -> &ResidentTensor {
@@ -384,7 +384,7 @@ impl GeometryAutograd {
                             .reshape(&[shape[0], shape[1], shape[2], shape[3], k])?
                             .querywise_mixture(&logits)?;
                         let scores = forward.output().clone();
-                        (MixtureTape::Query(forward, projection), scores)
+                        (MixtureTape::Query(Box::new(forward), projection), scores)
                     } else {
                         let forward = components.headwise_mixture(router)?;
                         let scores = forward.output().reshape(shape)?;
