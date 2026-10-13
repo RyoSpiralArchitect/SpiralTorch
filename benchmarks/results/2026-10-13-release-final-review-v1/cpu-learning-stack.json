@@ -1,0 +1,22 @@
+{
+  "byte_decoder": {
+    "checkpoint_roundtrip": "exact",
+    "gpu_execution": "not attempted",
+    "modes": 8
+  },
+  "elliptic": "orientation VJP checked; capture survives recipe change",
+  "fractional_history": "causal input/order/gain VJPs checked; f32 buffer transport owned",
+  "resident_plan": {
+    "gpu_execution": "not attempted",
+    "schema": "spiraltorch.nn.inference_plan.v5"
+  },
+  "scope": "installed native mechanics; no GPU, pretrained FT, quality, or speed claim",
+  "sequential": "actual dropout mask retained; untracked capture rejected",
+  "topos": {
+    "final_loss": 0.0015976778231561184,
+    "handoff": "weights only; exact prediction, not optimizer resume",
+    "initial_loss": 0.0478462278842926,
+    "updates": 24
+  },
+  "wave_gate": "input/gate/bias VJPs checked; captured values owned"
+}

@@ -6,7 +6,7 @@ use crate::wgpu_tensor::PyWgpuTensor;
 #[pyclass(name = "ResidentLoss", module = "spiraltorch.nn")]
 pub(crate) struct PyResidentLoss {
     #[cfg(feature = "wgpu")]
-    inner: st_backend_wgpu::resident_tensor::loss::ResidentLoss,
+    pub(super) inner: st_backend_wgpu::resident_tensor::loss::ResidentLoss,
 }
 
 #[cfg(feature = "wgpu")]

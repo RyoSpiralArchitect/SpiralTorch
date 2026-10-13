@@ -74,7 +74,9 @@ not a claim about LLM fine-tuning quality.
 Sequential forward capture, a 24-update shared-Topos learning loop and exact
 weight-only prediction handoff, WaveGate/Elliptic/fractional-history VJPs against
 finite differences, and owned typed-buffer transport. It round-trips the
-resident Linear/GELU/LayerNorm/Topos plan but does not dispatch a GPU; passing
+resident Linear/GELU/LayerNorm/Topos plan and eight byte-decoder geometry
+routes, including heterogeneous heads and checkpoint schemas v1-v5. It does
+not dispatch a GPU; passing
 this portable release smoke is not evidence of real-GPU execution. The same
 smoke runs for manual wheel artifacts and PR CI. Its isolated regression also
 blocks Torch, NumPy, Transformers, and pytest to check the dependency-light
@@ -172,7 +174,7 @@ final publication rechecks the known release ID.
 ## Common Variables
 
 ```bash
-VERSION=0.4.29
+VERSION=0.4.30
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 ```
@@ -190,7 +192,7 @@ python scripts/release_status.py \
   --no-clipboard
 ```
 
-Expected pre-publish shape for `0.4.29`, after the official wheel build and
+Expected pre-publish shape for `0.4.30`, after the official wheel build and
 verified GitHub Release have completed, is:
 
 ```text
@@ -204,8 +206,8 @@ Current helpers also print concrete resume commands:
 
 ```text
 token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
-publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.29 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
-publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.29 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.30 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.30 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
 trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
 next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.4.30
+
+Release candidate preparation; not confirmation of PyPI publication.
+
+- Expose the Rust-owned complete byte decoder through `spiraltorch.nn`:
+  immutable byte batches, model/geometry plans, owning resident forward/VJP
+  handles, explicit next-byte loss, atomic SGD and per-parameter rates.
+  Transfers and acceptance reads remain explicit; there is no implicit CPU
+  fallback for this resident training API.
+- Connect Poincare, Euclidean chord, categorical Fisher-Rao and complex
+  projective chord metrics, headwise routing, shared mixtures and causal
+  query-position-conditioned mixtures. Wave decay/phase, geometric projection,
+  gains and routers train under the same full-model owner as QKV and Topos.
+  The contextual router uses geometry coordinates, not the projected Q tensor.
+- Expose the existing Rust/WASM checkpoint schemas through bounded JSON,
+  immutable captures and fresh-owner restore. Preserve attempted revisions;
+  data cursors, external biases, kernel choices and rate/stop-gradient policies
+  remain explicit caller state. Checkpoints do not claim Adam/optimizer resume.
+- Add portable construction/type-discovery checks, opt-in real-GPU learning
+  and resume tests, an installed-wheel smoke and a dependency-light example.
+  These tiny mechanics checks do not establish language-quality improvements,
+  a pretrained HF integration, streaming KV caches, or a PyTorch speedup.
+
 ## 0.4.29
 
 - Carry forward the learning, geometry, resident execution, Python compatibility,

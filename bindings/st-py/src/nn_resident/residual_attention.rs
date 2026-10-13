@@ -14,7 +14,7 @@ use st_nn::resident::{
 
 #[pyclass(name = "ResidualAttentionPlan", module = "spiraltorch.nn", frozen)]
 pub(super) struct PyResidualAttentionPlan {
-    inner: ResidualAttentionPlan,
+    pub(super) inner: ResidualAttentionPlan,
 }
 
 #[pymethods]

@@ -317,7 +317,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Public Python attention handles on a real GPU
+      - name: Public Python attention and byte-LM handles on a real GPU
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
@@ -328,6 +328,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_wgpu_attention.py -v
           python -I -B bindings/st-py/tests/test_nn_attention_training.py -v
           python -I -B bindings/st-py/tests/test_nn_residual_attention_training.py -v
+          python -I -B bindings/st-py/tests/test_nn_byte_decoder.py -v
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)

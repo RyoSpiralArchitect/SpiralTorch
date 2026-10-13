@@ -13,6 +13,7 @@ use st_tensor::NdLayout;
 
 mod attention;
 mod autograd;
+mod byte_decoder;
 mod forward;
 mod graph;
 mod learner;
@@ -526,6 +527,7 @@ impl PyInferenceSnapshot {
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     attention::register(module)?;
     residual_attention::register(module)?;
+    byte_decoder::register(module)?;
     parameters::register(module)?;
     module.add_class::<PyInferencePlan>()?;
     module.add_class::<PyResidentInference>()?;

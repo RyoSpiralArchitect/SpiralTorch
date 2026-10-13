@@ -1,0 +1,165 @@
+{
+  "schema": "spiraltorch.release_integration_review.v1",
+  "core": "1463627f443f59fed42d46a763ae93d583ab23fa",
+  "client": "cc2f349b420dd53c77aef41581a8edb200b55d25",
+  "reviewed_original": {
+    "core": "84343e2d52c073b3672befdde56f09860f20792b",
+    "client": "68f9782dd674da8ae4cfba48cff0a3831bd85b19"
+  },
+  "review": {
+    "mode": "ordinary read-only independent source review, not disk-blinded",
+    "scopes": [
+      "Python API boundary",
+      "model and checkpoint ownership",
+      "corpus and calibration"
+    ],
+    "findings_reproduced_and_closed": [
+      "augmented query graph budget",
+      "candidate RMS to actual gain binding"
+    ],
+    "runtime_checks_by_parent": true
+  },
+  "tests": {
+    "cpu_byte_decoder": 26,
+    "wgpu_byte_model_and_study": 79,
+    "corpus": {
+      "passed": 81,
+      "optional_torch_skipped": 6
+    },
+    "python_gpu": {
+      "passed": 8,
+      "cpu_artifact_skipped": 1
+    },
+    "python_cpu": {
+      "passed": 6,
+      "gpu_skipped": 3
+    },
+    "release_smoke": 7,
+    "parity_validator": 6
+  },
+  "lints": {
+    "native": {
+      "completed": true,
+      "byte_scope_warnings": 0,
+      "strict_whole_crate": false
+    },
+    "wasm": {
+      "completed": true,
+      "byte_scope_warnings": 0,
+      "strict_whole_crate": false
+    }
+  },
+  "legacy_native_st_nn_warning_count": 40,
+  "cpu_wheel": {
+    "cpu_only": true,
+    "harness_sha256": "a3e97e7d8f88a0b2bfb78302a82c9bddeccfc761332c952d2dfba307e1ec2a2c",
+    "installed_files": {
+      "spiraltorch/__init__.py": "dc6f4fe51a16f0e268cd44d5d573b28128ae6d896f86d23e4feb4a9c5a0cd702",
+      "spiraltorch/spiraltorch.abi3.so": "80bffee2d29cfe574848de57f450665645baa04bffd9756854348f95171d3dee"
+    },
+    "python": "3.12.6",
+    "version": "0.4.30",
+    "wheel": "spiraltorch-0.4.30-cp38-abi3-macosx_14_0_arm64.whl",
+    "wheel_sha256": "24cbcdc254fd04c1a692e42c93af89cb9a5c940f3b68098f8550f950dfe86c57"
+  },
+  "gpu_wheel": {
+    "version": "0.4.30",
+    "wheel": "spiraltorch-0.4.30-cp38-abi3-macosx_14_0_arm64.whl",
+    "wheel_sha256": "4fe761aec5a057062f60de05a259c028af0a2a4f380319faaffb8aa415502181",
+    "installed_files": {
+      "spiraltorch/__init__.py": "dc6f4fe51a16f0e268cd44d5d573b28128ae6d896f86d23e4feb4a9c5a0cd702",
+      "spiraltorch/spiraltorch.abi3.so": "8d4f36ea390c8e76f8035c423c091910c823816b22158eb43e87d07805ba8512"
+    },
+    "python": "3.12.6",
+    "harness_sha256": "a3e97e7d8f88a0b2bfb78302a82c9bddeccfc761332c952d2dfba307e1ec2a2c"
+  },
+  "learning": {
+    "cases": 6,
+    "updates": 96,
+    "exact_resumed_updates": 54,
+    "geometric_step_vjps": 720,
+    "relative_gate": 0.002
+  },
+  "official_platform_release_verified": false,
+  "pypi_published": false,
+  "scope": "Local macOS arm64 CPU/WGPU qualification. Native/browser reference receipts retained from Wave source; no fresh browser execution after portable guard/refactor. No language-quality or speed claim.",
+  "retained_failures": [
+    "query-budget-before.log",
+    "preparation-before.log",
+    "corpus-after.log",
+    "python-validator-tests.log",
+    "clippy-native.log",
+    "clippy-wasm.log",
+    "clippy-native-final.jsonl"
+  ],
+  "raw_sha256": {
+    "byte-decoder-cpu-after.log": "8779d0e9da8909b533d4260ac1f8b228068a76f8895c577e8d3d303a001bd289",
+    "byte-decoder-wgpu-after.log": "1d20b7699603252fa40c8f503d6c03d16683c0d644169e6559a52624b67fa865",
+    "byte-wgpu-final.log": "99dc88d6d457504ef553325ca3e823423e529fb7419f8b4d541e12f38fc28e3a",
+    "byte-wgpu-qualified.log": "4555de20a686edfc7075d3ac4cff44ead7885212055a9c6ee60db59befb1150e",
+    "clippy-native-final.jsonl": "26dca10f1ed43f0caeee7a609cd2ee4303c6a6ead416bf81a95ee8bd4bcc735f",
+    "clippy-native-final.stderr.log": "f6893371d7a02837e55555006f4b82f90ca1ed45e828d2beb0f3aaff621f73de",
+    "clippy-native-qualified.jsonl": "8f20b6937f829ee15ff9dcd809cfa2088f02e5e11482a12dca23caa20eb75b3c",
+    "clippy-native-qualified.stderr.log": "defeb423b0f7a1d45eda7dfd5524d47a65a6a43d577222d53e42e3551952156b",
+    "clippy-native.log": "b005566d1d1edf6067307494af7325f19bb1c4cfdc4ef805e113e79cdf5a44d1",
+    "clippy-wasm-qualified.jsonl": "d8e98f98cd58a35d03a6dc0d31e825bc9746a4f0ee096a9f486ca3cfbc570e35",
+    "clippy-wasm-qualified.stderr.log": "c0afe066f6ec060309a49cb47fbb51c34bee896c2c658dad4fbbed8978b9cb71",
+    "clippy-wasm.log": "95b3a429f7162620a7615847b088a7327ec582a276e133b597cde684c0aee467",
+    "collect-review.cjs": "c618100427584d7b619af6069db20809e4144c58573efb9ea9596ad8f96b738e",
+    "corpus-after.log": "325f08c6410326ce2c29ec5bb36d7fd644e74a08e08463fb0417c2a608800295",
+    "corpus-ci-after.log": "37ca2a967597f7af111dd2b56edfb59a762bff44a14540650b83c012fd33c93f",
+    "corpus-verifiers-after.log": "0e983e640fdd188df8deb0545ef160dc0f6bb8b489e5d6819632c4eacca59833",
+    "cpu-api-qualified.log": "612966c9560db97542dac493538b91f4e1dba67e3aeab7ea08e59383da7f2e0b",
+    "cpu-api-tests.log": "4f7779b6b4e077eb0dbc1547f04c3797c68af8ff91eaae12eb6958e0543f2c0a",
+    "cpu-install.log": "085702c452da4012765ca1f5f84754e2bc216aecf1cfc88dfb2bd7ce87d9c2c4",
+    "cpu-learning-stack-qualified.json": "5cf595bc842a25afd1d0998915b359eeba2eb5e8a65eb00ca523426f114e89e1",
+    "cpu-learning-stack-qualified.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cpu-learning-stack.json": "5cf595bc842a25afd1d0998915b359eeba2eb5e8a65eb00ca523426f114e89e1",
+    "cpu-learning-stack.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cpu-wheel-build.log": "3279c645d497e45accc09b0e27e3eeba6f6b8b2211e3d3654e8e88431f3736e1",
+    "cpu-wheel-final-build.log": "a12f52ef84634e571a82914f4fb40c761caa7b1a897d4d34a8a75fb649d9b8dd",
+    "cpu-wheel-identity-before.json": "6eff8fe5852044b07d129cc2d29fa947795ed15724c6c9bda4d0bf8240134d77",
+    "cpu-wheel-identity-before.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cpu-wheel-identity-qualified.json": "fb472611ef74e051a1ba633d986f5271913202103c47587c847565ca5243ba8c",
+    "cpu-wheel-identity-qualified.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cpu-wheel-qualified-install.log": "a00d00152935dd259dc42e9b5ac287f14b240286a556f77467b49235b19e3ac1",
+    "format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "license-preflight.log": "7e3bafca86ae060ba136f6496ea7995b3451956c05c2ea87f379e4e97d7e2ab1",
+    "packaged-example-qualified.json": "a80363dcca067ae9edc65ea9fffda2207cbb2e94ae663b969fbb64bad38a4306",
+    "packaged-example-qualified.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr2260-reviewed.md": "40ec5f08961112d03aeef45c2a8a7cb21306ebb2d8a29e49b94bf0cbf1680a8f",
+    "preparation-before.log": "7219a9e410ba17b83000c7b9a0d459845f6a9d57a87b0085e61dea5ed3638c69",
+    "python-api-final.log": "35c449de13e7479e01be4282805f63ac7f48ed3d14ccb36aa8800a8e7c088289",
+    "python-api-qualified.log": "065cded81be2f74943ddf0405dce60dbb0856ad3b2737c7ac68e84f5c83519c7",
+    "python-parity-qualified.json": "8d54d64c1982b047a124cbc630a94fd72f2ade07aab34dabd2db85041986874a",
+    "python-parity-qualified.log": "ecdac8d887ebd3d2636d1b58fab8e5ebb448ed3ba8415372d2075d088b074de0",
+    "python-validator-installed-tests.log": "dcaa2fec9a7d0149bbc01cb97f6c3bdf20f89111acf3b44540b972b62875c5a4",
+    "python-validator-tests.log": "b92483034f8efe4613eb2ea7feb477e432037d2290996805449c27eb250ce019",
+    "query-budget-before.log": "df1a7087d604279bf4fbbf866d8a0f06bbdf7f4166e8aeabd13cc687a1877568",
+    "readiness-before.json": "072094e0e3d621b0c03cba9a62d667803c7496315b40cfd256f33efe5843096c",
+    "readiness-before.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "readiness-candidate.json": "f92fae8d0513ca8b8a5f5e2d6b6b4dc812a1b22bacfc7058e426620994afbb6e",
+    "readiness-candidate.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "release-smoke-tests.log": "9e3362f400ad18c4c75a1baaca7dd6a9f44e2d1ce70d7ecf96dbe901c5d9506c",
+    "revalidated-v4-browser.log": "bcfa87ddd829008534094582d3df4ee11761c48b4725349d7bf1f2ab626a2554",
+    "revalidated-v4-browser/preparation.json": "7d3934c28973b39ae32276fc8c1465b6c724cb661e7a9181a8d2cba080ff5a84",
+    "revalidated-v4-browser/request.json": "9f9b56ada4589f5bb309b05baba910ca71a4d30b52d2bfb327ea5692dcb27d49",
+    "revalidated-v4-browser/verification.json": "bcfa87ddd829008534094582d3df4ee11761c48b4725349d7bf1f2ab626a2554",
+    "revalidated-v4-native.log": "e365d30af4ef5ae8b08826abc5063c8ed787dcf2a473c641e22bd891b01bf837",
+    "revalidated-v4-native/preparation.json": "c1269c16c96e187cef8fc21d2f2d98fc62d773b8293d257f3f46a40a1fd23dcc",
+    "revalidated-v4-native/request.json": "276a2245277cc36995eef024a99614811fe12c5be1a0efd897eda2d27b11afff",
+    "revalidated-v4-native/verification.json": "e365d30af4ef5ae8b08826abc5063c8ed787dcf2a473c641e22bd891b01bf837",
+    "revalidated-v5-browser.log": "1f0c1b56f56a8cbe5df94f5cf3ab8dd322f38ab0620fba2feb28571eab52b403",
+    "revalidated-v5-browser/preparation.json": "6a1846a28d614f6954a3c978b4d37fa9dbe057fe76772da4688ec4dcb5be4c66",
+    "revalidated-v5-browser/request.json": "439259281daf4a2370a52145971883a0c2a284c435c9a980f7411d264b90ada6",
+    "revalidated-v5-browser/verification.json": "1f0c1b56f56a8cbe5df94f5cf3ab8dd322f38ab0620fba2feb28571eab52b403",
+    "revalidated-v5-native.log": "130ac99319ad4314f04aa263a2d6fa3e23006f5d5f63bc8ae0bd42fdfd9dd40e",
+    "revalidated-v5-native/preparation.json": "d89612b4a443749806192ed59559962000a7a20c6f43b94aeb7c8ca89d6c35c1",
+    "revalidated-v5-native/request.json": "95ef8c21c6c9c8221d7aced6adcda9d80ce4c0dccf6ec3819e40475c52c1db38",
+    "revalidated-v5-native/verification.json": "130ac99319ad4314f04aa263a2d6fa3e23006f5d5f63bc8ae0bd42fdfd9dd40e",
+    "wgpu-wheel-final-build.log": "c2238f7a4ea52b9984efcada8091e83136885e281dd38ed3a046d49fda5d8817",
+    "wgpu-wheel-final-install.log": "d11c0176b8a922226b2f774c51152964f12459c4916a12d3077dee41aff280e6",
+    "release-smoke-qualified-tests.log": "2f6476585e290a8c1421b6c092f71fa66ff9219ba497a156204cabab3e47a345",
+    "python-validator-qualified-tests.log": "8ac9ac0a1a385f7c57c02cf9ddaddc1e2270d5c9776f47e136cf7aab363dcd30"
+  }
+}

@@ -163,6 +163,61 @@ def resident_plan():
     return {"schema": payload["schema"], "gpu_execution": "not attempted"}
 
 
+def byte_decoder_portable():
+    """Exercise the installed native API without acquiring a GPU."""
+    def check(condition, message):
+        if not condition:
+            raise AssertionError(message)
+
+    shape = [1, 2, 2]
+    def linear(cols, inner=2):
+        return st.nn.InferencePlan.from_json(json.dumps({
+            "schema": "spiraltorch.nn.inference_plan.v1",
+            "input_shape": shape[:2] + [inner],
+            "stages": [{"inner": inner, "cols": cols, "weight": [0.1] * (inner * cols),
+                        "bias": [0.] * cols, "gelu": False}],
+        }))
+    one = linear(2)
+    attention = st.nn.AttentionInferencePlan.from_projection_plans(
+        one, one, one, one, heads=2, causal_offset=0)
+    block = st.nn.ResidualAttentionPlan.from_plans(one, attention, one)
+    plain = st.nn.ByteDecoderPlan.from_plans(
+        st.Tensor(256, 2, [0.1] * 512), st.Tensor(2, 2, [0., 0.1] * 2), [block], linear(256))
+    metrics = ["poincare_squared.v1", "euclidean_chord_squared.v1",
+               "categorical_fisher_rao_squared.v1", "complex_projective_chord_squared.v1"]
+    geometry = st.nn.ByteDecoderGeometryPlan(linear(2), [0.1], [0.2], [[0.3, -0.2]], -1.0)
+    mixture = geometry.with_mixture(metrics, [[0.] * 8], [[1.] * 8])
+    head_metrics = [[metrics[0], metrics[2]]]
+    variants = [None] + [geometry.with_pair_metric(m) for m in metrics] + [
+        geometry.with_head_pair_metrics(head_metrics), mixture,
+        mixture.with_query_projections([linear(8, inner=2)])]
+    for variant, version in zip(variants, [1, 1, 2, 2, 2, 3, 4, 5]):
+        plan = plain if variant is None else plain.with_causal_geometry(variant)
+        checkpoint = plan.initial_checkpoint()
+        record = json.loads(checkpoint.to_json())
+        check(record["schema"] == "spiraltorch.nn.byte_decoder_checkpoint.v" + str(version),
+              "unexpected byte checkpoint schema")
+        restored = st.nn.ByteDecoderCheckpoint.from_json(checkpoint.to_json())
+        check(restored.to_json() == checkpoint.to_json(), "byte checkpoint changed")
+        check(restored.attempted_revision == 0, "initial revision mismatch")
+        check(restored.plan().parameter_layout() == plan.parameter_layout(), "byte layout changed")
+        if version == 3:
+            check(record["model"]["geometry"]["head_pair_metrics"] == head_metrics,
+                  "heterogeneous routing was lost")
+            check(restored.plan().causal_geometry.head_pair_metrics == head_metrics,
+                  "restored heterogeneous routing was lost")
+    data = st.nn.ByteLmBatch.from_documents([b"abc", b"xyz"], [(1, 0)], 2)
+    check(data.shape == (1, 2) and data.input_bytes == b"xy" and data.target_bytes == b"yz",
+          "byte selection/shift mismatch")
+    try:
+        st.nn.ByteLmBatch.from_documents([b"abc"], [(0, 1)], 2)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("cross-document window was accepted")
+    return {"modes": len(variants), "checkpoint_roundtrip": "exact", "gpu_execution": "not attempted"}
+
+
 def main():
     native = importlib.import_module("spiraltorch.spiraltorch")
     assert any(str(native.__file__).endswith(suffix) for suffix in importlib.machinery.EXTENSION_SUFFIXES)
@@ -176,6 +231,7 @@ def main():
         "elliptic": elliptic(),
         "fractional_history": fractional_history(),
         "resident_plan": resident_plan(),
+        "byte_decoder": byte_decoder_portable(),
     }
     print(json.dumps(report, sort_keys=True, allow_nan=False))
     return report
