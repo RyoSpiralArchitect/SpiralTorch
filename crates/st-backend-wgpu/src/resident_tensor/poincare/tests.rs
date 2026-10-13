@@ -2,6 +2,239 @@ use super::*;
 use st_kernel_contracts::euclidean::{EuclideanBiasForward, EuclideanBiasSpec};
 use st_kernel_contracts::fisher_rao::{FisherRaoBiasForward, FisherRaoBiasSpec};
 use st_kernel_contracts::poincare::PoincareBiasForward;
+use st_kernel_contracts::projective::{ProjectiveBiasForward, ProjectiveBiasSpec};
+
+#[test]
+fn projective_base_subtraction_preserves_recoverable_low_endpoint() {
+    let Some(device) = device() else { return };
+    let e = 2f32.powi(-121);
+    let l = 2f32.powi(122);
+    let f = device
+        .upload(&[1, 2, 4], &[e, 0., 1., 0., 1., 0., l, 0.])
+        .unwrap()
+        .causal_projective_bias(&device.upload(&[1], &[2f32.powi(60)]).unwrap())
+        .unwrap();
+    let g = f
+        .backward(
+            &device
+                .upload(&[1, 1, 2, 2], &[0., 0., 2f32.powi(63), 0.])
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(read(g.coordinates()), [-e, 0., l, 0., e, 0., -e, 0.]);
+}
+
+#[test]
+fn projective_cancelled_overlap_matches_analytic_not_cpu_only() {
+    let Some(device) = device() else { return };
+    let l = 2f32.powi(70);
+    let gain = 2f32.powi(120);
+    let d = 2f32.powi(29);
+    let e = 2f32.powi(-100);
+    for (cols, x, expected) in [
+        (
+            4,
+            vec![1., 0., e, 0., -1., 0., e, 0.],
+            vec![
+                -2f32.powi(39),
+                0.,
+                2f32.powi(-61),
+                0.,
+                2f32.powi(39),
+                0.,
+                2f32.powi(-61),
+                0.,
+            ],
+        ),
+        (
+            4,
+            vec![l, 32., l, 0., l, 32., -l, 0.],
+            vec![
+                1025. * d,
+                1025. * 2f32.powi(-36),
+                -1025. * d,
+                0.,
+                1025. * d,
+                1025. * 2f32.powi(-36),
+                1025. * d,
+                0.,
+            ],
+        ),
+        (
+            4,
+            vec![l, 0., l, 0., l, 0., -l, 0.],
+            vec![d, 0., -d, 0., d, 0., d, 0.],
+        ),
+        (
+            6,
+            vec![l, 0., 32., 0., l, 0., l, 0., 32., 0., -l, 0.],
+            vec![
+                1025. * d,
+                0.,
+                1025. * 2f32.powi(-36),
+                0.,
+                -1025. * d,
+                0.,
+                1025. * d,
+                0.,
+                1025. * 2f32.powi(-36),
+                0.,
+                1025. * d,
+                0.,
+            ],
+        ),
+    ] {
+        let f = device
+            .upload(&[1, 2, cols], &x)
+            .unwrap()
+            .causal_projective_bias(&device.upload(&[1], &[gain]).unwrap())
+            .unwrap();
+        let g = f
+            .backward(&device.upload(&[1, 1, 2, 2], &[0., 0., gain, 0.]).unwrap())
+            .unwrap();
+        for (a, b) in read(g.coordinates()).iter().zip(expected) {
+            if b == 0. {
+                assert_eq!(*a, 0.);
+            } else {
+                assert!(
+                    (f64::from(*a) / f64::from(b) - 1.).abs() < 8e-5,
+                    "{a} != {b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn projective_strided_complex_scores_both_endpoints_and_gains_match_cpu() {
+    let Some(d) = device() else { return };
+    for shape in [[1, 1, 2], [2, 3, 4], [2, 7, 6], [1, 17, 2]] {
+        let s = ProjectiveBiasSpec::new(shape, 3).unwrap();
+        let x: Vec<_> = (0..s.coordinates_len())
+            .map(|i| ((i * 7 % 29) as f32 - 14.) * 0.125)
+            .collect();
+        let gains = [-7., 0.2, 4.];
+        let seed: Vec<_> = (0..s.scores_len())
+            .map(|i| ((i * 11 % 23) as f32 - 11.) * 0.07)
+            .collect();
+        let cpu = ProjectiveBiasForward::new(s, &x, &gains).unwrap();
+        let want = cpu.backward(&seed).unwrap();
+        let f = strided(&d, &shape, &x)
+            .causal_projective_bias(&strided(&d, &[3], &gains))
+            .unwrap();
+        let g = f.backward(&strided(&d, &s.score_shape(), &seed)).unwrap();
+        assert_eq!(f.spec(), s);
+        close(&read(f.scores()), cpu.scores());
+        close(&read(g.coordinates()), &want.coordinates);
+        close(&read(g.raw_gain()), &want.raw_gain);
+    }
+}
+
+#[test]
+fn projective_tiny_and_saturated_chart_retain_recoverable_gradients() {
+    let Some(d) = device() else { return };
+    for (value, gain, cotangent) in [(1e-30, 1e30, 1.), (1e20, 0., 1e30), (1e-25, 0., 1e30)] {
+        let s = ProjectiveBiasSpec::new([1, 2, 2], 1).unwrap();
+        let x = [0., 0., value, 0.];
+        let seed = [0., 0., cotangent, 0.];
+        let cpu = ProjectiveBiasForward::new(s, &x, &[gain])
+            .unwrap()
+            .backward(&seed)
+            .unwrap();
+        let f = d
+            .upload(&s.shape(), &x)
+            .unwrap()
+            .causal_projective_bias(&d.upload(&[1], &[gain]).unwrap())
+            .unwrap();
+        let g = f
+            .backward(&d.upload(&s.score_shape(), &seed).unwrap())
+            .unwrap();
+        for (i, (a, b)) in read(g.coordinates())
+            .iter()
+            .zip(cpu.coordinates)
+            .enumerate()
+        {
+            if i % 2 == 0 {
+                assert!(
+                    *a != 0. && (f64::from(*a) / f64::from(b) - 1.).abs() < 8e-5,
+                    "{a} != {b}"
+                );
+            } else {
+                assert_eq!(*a, 0.);
+            }
+        }
+    }
+}
+
+#[test]
+fn projective_identity_extremes_guards_and_retained_tapes() {
+    let Some(d) = device() else { return };
+    let gain = d.upload(&[1], &[0.]).unwrap();
+    let seed = d.upload(&[1, 1, 2, 2], &[1.; 4]).unwrap();
+    for x in [
+        [0.; 8],
+        [0.1; 8],
+        [f32::MAX, 0., 0., 0., 0., 0., f32::MAX, 0.],
+    ] {
+        let cpu =
+            ProjectiveBiasForward::new(ProjectiveBiasSpec::new([1, 2, 4], 1).unwrap(), &x, &[0.])
+                .unwrap();
+        let f = d
+            .upload(&[1, 2, 4], &x)
+            .unwrap()
+            .causal_projective_bias(&gain)
+            .unwrap();
+        close(&read(f.scores()), cpu.scores());
+        close(
+            &read(f.backward(&seed).unwrap().coordinates()),
+            &cpu.backward(&[1.; 4]).unwrap().coordinates,
+        );
+    }
+    assert!(d
+        .upload(&[1, 2, 3], &[0.; 6])
+        .unwrap()
+        .causal_projective_bias(&gain)
+        .is_err());
+    let x = d.upload(&[1, 2, 2], &[0.2, -0.4, 0.7, 0.1]).unwrap();
+    let f = x.causal_projective_bias(&gain).unwrap();
+    let g = f.backward(&seed).unwrap();
+    let saved = read(g.coordinates());
+    let overflow = d
+        .upload(&[1, 1, 2, 2], &[0., f32::MAX, 0., 0.])
+        .unwrap()
+        .mul(&d.upload(&[1, 1, 2, 2], &[2.; 4]).unwrap())
+        .unwrap();
+    let bad = f.backward(&overflow).unwrap();
+    for value in [bad.coordinates(), bad.raw_gain()] {
+        assert!(matches!(
+            value.snapshot().unwrap().read(),
+            Err(TensorError::NonFinite)
+        ));
+    }
+    let bad_x = d.guard_together(&[&x, &overflow]).unwrap().remove(0);
+    assert!(matches!(
+        bad_x
+            .causal_projective_bias(&gain)
+            .unwrap()
+            .scores()
+            .snapshot()
+            .unwrap()
+            .read(),
+        Err(TensorError::NonFinite)
+    ));
+    assert_eq!(read(f.backward(&seed).unwrap().coordinates()), saved);
+    assert_eq!(read(g.coordinates()), saved);
+    let s = ProjectiveBiasSpec::new([2, 7, 4], 2).unwrap();
+    assert_eq!(sizes(s, &wgpu::Limits::default()).unwrap(), (1568, 450));
+    assert!(sizes(
+        s,
+        &wgpu::Limits {
+            max_storage_buffer_binding_size: 64,
+            ..Default::default()
+        }
+    )
+    .is_err());
+}
 
 #[test]
 fn fisher_strided_logits_both_endpoints_and_gains_match_cpu() {

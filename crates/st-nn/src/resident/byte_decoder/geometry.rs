@@ -13,6 +13,9 @@ pub enum ByteDecoderPairMetric {
     /// Rowwise softmax of the same chart, then radius-two categorical distance.
     #[serde(rename = "categorical_fisher_rao_squared.v1")]
     CategoricalFisherRaoSquared,
+    /// Complex chart (1,z), then 1-|u^H v|^2; not geodesic distance.
+    #[serde(rename = "complex_projective_chord_squared.v1")]
+    ComplexProjectiveChordSquared,
 }
 
 /// Projection parameters, two wave vectors and one head-gain vector per block.
@@ -183,7 +186,7 @@ impl ByteDecoderGeometryPlan {
         raw_logits: &[Vec<f32>],
         scales: &[Vec<f32>],
     ) -> Result<Self, InferenceError> {
-        if !(2..=3).contains(&metrics.len())
+        if !(2..=4).contains(&metrics.len())
             || metrics
                 .iter()
                 .enumerate()

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Complex projective byte learner</title>
+<style>body{font:16px Georgia,serif;background:#f6f1e8;color:#202c28;margin:32px;max-width:1100px}h1{font-weight:400}pre{font:13px monospace;white-space:pre-wrap}button,a{font:inherit;padding:12px}table{border-collapse:collapse;width:100%}td,th{padding:12px;border-bottom:1px solid #bfc7bb;text-align:left}</style>
+<h1>Complex projective byte learner</h1>
+<p>Projective-only, four-way shared and query routing. Full QKV learning and same-runtime resume; no quality or speed claim.</p>
+<button id="run">Run six fixed cases</button>
+<a id="download" hidden>Download local raw result</a>
+<pre id="status">Ready. Runs the same Rust qualification as native WGPU.</pre>
+<table><thead><tr><th>Case</th><th>Logit error</th><th>Router update relative error</th><th>Resume</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+const run = document.querySelector('#run'), status = document.querySelector('#status');
+run.onclick = async () => {
+  run.disabled = true;
+  try {
+    status.textContent = 'Loading frozen fixture and Rust WASM; then executing all six cases...';
+    const {default:init, run_resident_byte_projective} = await import('/target/resident-byte-projective-web/resident_byte_decoder_browser.js');
+    const response = await fetch('/target/resident-byte-projective-web/reference.json');
+    if (!response.ok) throw Error('Missing local fixture');
+    const fixture = await response.text();
+    const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(fixture)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+    await init();
+    const report = JSON.parse(await run_resident_byte_projective(fixture));
+    if (report.schema !== 'spiraltorch.resident_byte_geometry_projective.validation.v1' || report.checks.length !== 6) throw Error('Incomplete qualification');
+    report.fixture_sha256 = sha;
+    for (const c of report.checks) {
+      const tr = document.createElement('tr');
+      for (const value of [c.name,c.output_max_abs_error,c.query_controls?.router_update_relative_l2 ?? c.query_controls_error ?? 'not contextual',c.resume_trajectory.exact_parameters ? 'exact' : 'FAILED']) {
+        const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
+      }
+      document.querySelector('#rows').append(tr);
+    }
+    const link = document.querySelector('#download');
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(report)+'\n'],{type:'application/json'}));
+    link.download = 'resident-byte-projective.json'; link.hidden = false;
+    status.textContent = (report.passed ? 'PASS' : 'FAIL')+': six full-model cases, 16 updates each, same-runtime resume checked. Fixture SHA-256: '+sha;
+  } catch(error) { status.textContent = String(error); }
+};
+</script>
+</html>

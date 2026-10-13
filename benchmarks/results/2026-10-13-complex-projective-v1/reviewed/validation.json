@@ -1,0 +1,255 @@
+{
+  "schema": "spiraltorch.complex_projective_validation.v1",
+  "base_commit": "6f66a4f102702b3e4aedd4e52a278f0a1492b64e",
+  "builds_and_commands": [
+    {
+      "stage": "spinor",
+      "exit_code": 0,
+      "started": "2026-10-13T03:46:44.959Z",
+      "finished": "2026-10-13T03:47:06.559Z"
+    },
+    {
+      "stage": "nn-final",
+      "exit_code": 0,
+      "started": "2026-10-13T03:47:06.580Z",
+      "finished": "2026-10-13T03:47:55.066Z"
+    },
+    {
+      "stage": "build-final",
+      "exit_code": 0,
+      "started": "2026-10-13T03:47:55.072Z",
+      "finished": "2026-10-13T03:49:07.556Z"
+    },
+    {
+      "stage": "native-observed",
+      "exit_code": 1,
+      "started": "2026-10-13T03:49:07.562Z",
+      "finished": "2026-10-13T03:49:23.770Z"
+    },
+    {
+      "stage": "wasm-build",
+      "exit_code": 0,
+      "started": "2026-10-13T03:49:23.783Z",
+      "finished": "2026-10-13T03:50:09.196Z"
+    },
+    {
+      "stage": "bindgen",
+      "exit_code": 0,
+      "started": "2026-10-13T03:50:09.202Z",
+      "finished": "2026-10-13T03:50:09.408Z"
+    }
+  ],
+  "local_tests": {
+    "core-tests.log": 9,
+    "gpu-tests.log": 16,
+    "observed-harness-tests.log": 4,
+    "spinor.log": 1,
+    "nn-final.log": 28,
+    "torch-reference-tests.log": 3
+  },
+  "fixture_sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358",
+  "projection_self_checks": {
+    "passed": true,
+    "negative_controls": [
+      "flipped_verdict",
+      "erased_failure",
+      "changed_resume",
+      "changed_checkpoint",
+      "missing_gradient",
+      "missing_boundary_case"
+    ],
+    "finite_failure_retained": true
+  },
+  "raw_manifest": [
+    {
+      "name": "protocol.json",
+      "bytes": 3217,
+      "sha256": "ae4302602b4000800b3d45503c2f7065d0ecdbd32595eb962dbbb2e8556c4395"
+    },
+    {
+      "name": "evidence-protocol.json",
+      "bytes": 3343,
+      "sha256": "cfba951bd0bd4cb3309b293e0f0aff791557d7948e42d3615f7e2d0c15adee3d"
+    },
+    {
+      "name": "reference.json",
+      "bytes": 7466211,
+      "sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358"
+    },
+    {
+      "name": "native-observed.json",
+      "bytes": 11798095,
+      "sha256": "41e19a6599b73464938e7e016be74e1696b1ad37fb06bbe57c6639d48f0c860c"
+    },
+    {
+      "name": "native-observed.log",
+      "bytes": 76,
+      "sha256": "f7b69b9a75e3956d54f78aed74a74035117bda6b4a3b57594a561e18e5154b5b"
+    },
+    {
+      "name": "browser.json",
+      "bytes": 11790984,
+      "sha256": "9f18443a5cb37c784b449c4172d7a547c2421eaf16ce829033817488320a16a6"
+    },
+    {
+      "name": "browser-result.png",
+      "bytes": 97036,
+      "sha256": "3c9db06ad04f14a36a752503581c7cbfae59ed705451dcf17f42f06a3d343507"
+    },
+    {
+      "name": "core-tests.log",
+      "bytes": 1289,
+      "sha256": "72cdb945da6d484d3030707b952a876276a219a2f2f10b4173ae967986e726eb"
+    },
+    {
+      "name": "gpu-tests.log",
+      "bytes": 116249,
+      "sha256": "b80e468dc51177c511b69df41b3c1705b25aee5a2ff5409e0119ed64e963a1a8"
+    },
+    {
+      "name": "observed-harness-tests.log",
+      "bytes": 116686,
+      "sha256": "a3c5aeb9b389dfec24d189cd27d8d37621408f24a794b4baae7faaefab3b9060"
+    },
+    {
+      "name": "spinor.log",
+      "bytes": 700,
+      "sha256": "9f8f09b8f1e28259cc083ca0f38d05aa5f2a5b2e26ed01bc2c0eebc08186ee34"
+    },
+    {
+      "name": "nn-final.log",
+      "bytes": 118256,
+      "sha256": "00735256f9ccb9a5218bce151818ec52fe616f31ce12c55a25b259254eb9aef5"
+    },
+    {
+      "name": "torch-reference-tests.log",
+      "bytes": 494,
+      "sha256": "256af59bddbd0cf3bf59ced60d3cf5fdd973600a536acb982e11541666a738b8"
+    },
+    {
+      "name": "validation-stages.jsonl",
+      "bytes": 2258,
+      "sha256": "b51ad0aee56db7eca257248ea0d25ab9b5ab3c628e560221e67fc639dc057f69"
+    },
+    {
+      "name": "build-final.log",
+      "bytes": 115942,
+      "sha256": "0a0a15fc78f8b74b34b410471e9e7cd60503bdc8a594c944e075ed5e50d270fe"
+    },
+    {
+      "name": "wasm-build.log",
+      "bytes": 111954,
+      "sha256": "a752fe02868b300e5412d20fb3bb6cbb3e352113e20cd962d6f4e7e9c0c311b2"
+    },
+    {
+      "name": "bindgen.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "same-state-diagnostic.json",
+      "bytes": 680,
+      "sha256": "6c6b62d045167073977d11a91848b2e735f4942ad764725393362a15056e93f6"
+    },
+    {
+      "name": "same-state-diagnostic.log",
+      "bytes": 166,
+      "sha256": "33783f3a3b71ec43c52f1de621534fe6a65eeb1baad2ed74a7d2f0a990764bc9"
+    },
+    {
+      "name": "resident-byte-qualified",
+      "bytes": 7393728,
+      "sha256": "24273f2356e3e03442298ca383ea3b93ac86e7dd89488e17bbc4aebd3a997223"
+    },
+    {
+      "name": "base-regression-before.log",
+      "bytes": 1319,
+      "sha256": "736ea0cfe4f73189c4a89c869ade802e5f76e6bf46bc431c7c9e48e4bb38bd82"
+    },
+    {
+      "name": "projection-self-checks.json",
+      "bytes": 231,
+      "sha256": "ab109fe48a910b49be4b97e13213931732ff24a971c31a86086fb677f90bdadf"
+    },
+    {
+      "name": "projection-self-checks.log",
+      "bytes": 185,
+      "sha256": "9f90f51a1642e40015169a8ae46adbace444a54368feb56d27ee209b3deff50b"
+    },
+    {
+      "name": "projection-self-checks-before.log",
+      "bytes": 2722,
+      "sha256": "776ec739e9ef5eb7a38b17616b2f6cba648018200bfaf26248fa0d5b637c44e6"
+    },
+    {
+      "name": "native-binary.sha256",
+      "bytes": 65,
+      "sha256": "76be57dc77bd78bea0cda5f38763c604c944743f25237fe474c837eae135dc76"
+    },
+    {
+      "name": "web/resident_byte_decoder_browser.js",
+      "bytes": 50109,
+      "sha256": "d746a2a1181791da9f9abfbc3f7b9920357bdf48566c1e9031ab7031123dd503"
+    },
+    {
+      "name": "web/resident_byte_decoder_browser_bg.wasm",
+      "bytes": 11616168,
+      "sha256": "16e2717f90e4ef31feef1e9330651cfc400b7ebc4813f6ced7ed4ce38b8ae2ff"
+    }
+  ],
+  "local_validation_scripts": [
+    {
+      "name": "validate.cjs",
+      "bytes": 3077,
+      "sha256": "9db115e660e450a4b6b21fc623c3efe6a38e21f78e8bdc08d9dea3c63a7896e5"
+    },
+    {
+      "name": "diagnose_same_state.py",
+      "bytes": 4964,
+      "sha256": "c7f88b05bf974d9768e611bf1c615a09383a58d7e90e00375330b3cd0a208df5"
+    },
+    {
+      "name": "publish-reviewed.cjs",
+      "bytes": 15325,
+      "sha256": "569a061764910907edaaff3612a186e61c2f95eca0b9a032e8fe88aaef300e65"
+    },
+    {
+      "name": "test-projection.cjs",
+      "bytes": 2244,
+      "sha256": "20fc20ad08f51e39674cad5a10d7564c87994e25e9eccbdbb6e9a8ee8ed3a318"
+    },
+    {
+      "name": "serve.py",
+      "bytes": 1284,
+      "sha256": "3ad189d8b041cfa889923ca71ec13e43f538307369a36d574efd0bf8bb689011"
+    }
+  ],
+  "source_hashes": {
+    "crates/st-kernel-contracts/src/projective.rs": "8f77595c357928e3b033d0cbef9923159639180b0223a075688025d9d38ad174",
+    "crates/st-kernel-contracts/src/projective/tests.rs": "fb2a6bc4c4f3b6046bdbc76b0374bec74426ee0ba609d363b69a905227a85be3",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "e22a8e881c1e07511b7cf2396b2fdc89f989b3cb2927b5ab3d3cd4e98ce31e46",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "ad1936df651495c68f3c9420e7ee676eb099144acf31acbefb041426a532facd",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/pair_spec.rs": "86857c1b11500e23f66c6e115be266c05989ab0ae0cf2d88f3da9ae2940604d0",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": "5eb0d9d9a3fc9ef4cabf0e84837156430cbbf99c26ae9285750afd04cfbf67df",
+    "crates/st-backend-wgpu/src/resident_tensor/projective.rs": "aa64e101ee06dcc8a918b4b8a00c8c68cb96b45b2c56a15f8c0fdbe9942cb7c6",
+    "crates/st-core/src/theory/stv.rs": "b39beaf4e9f06f7c2275a0c8acf6636cd1240086b1916361ac43be71ef8dfcad",
+    "crates/st-kernel-contracts/src/lib.rs": "50f92bfe1f8fc7fe739a5da5daf2f0c17c31cfece83d098e8cf3083f99ed6976",
+    "crates/st-nn/src/resident/byte_decoder/geometry.rs": "47f4b36f2830c2284564cb5d76f5a7117b88ea5c0c93e7471eca381d6b7a399a",
+    "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "0dd0aedd90e754837a8a33146ad8683cf1bd1b6e39af84c20171eb83d7d5cbb0",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs": "11ee438e078d4d7febf4464b910155581235c606d0e1f9261854ae6c8dcfa644",
+    "crates/st-nn/examples/resident_byte_flat_metric.rs": "ba08b2333854e8a8e2eb58f4868f49e19c27a3efeff78b6b136572a2c5934dec",
+    "crates/st-nn/examples/resident_byte_decoder_browser.rs": "0fe73970ab8c60b74403f9e7e2f001fbf5eded0af40ec46984028f20773d0b62",
+    "crates/st-nn/examples/support/byte_decoder.rs": "7cb70f16c95fabc47714a338f6f5794e97b3c15dc532c9e9501d63ebcaf5f384",
+    "crates/st-nn/examples/support/byte_decoder/projective_controls.rs": "d89fd828dbb621e14c059c23c0b201a84001460d415d88966db79fdda8458757",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": "1a13ca95a17f3ec0fc01e4eb91c702e36394ee97a2a7bd04a755be4f08270e3b",
+    "tools/projective_reference.py": "20db137e458d52c5d427b9f63f27a50c6847f3367c9713a92f7e858e17999f26",
+    "tools/generate_resident_byte_projective_torch_fixture.py": "4688377ddee6137a0cfb225e7c3a13d553aa028ea2637340b3db00d94b6b193b",
+    "tools/generate_resident_byte_geometry_torch_fixture.py": "ca11ae5742e3347afb3b34610c15b34edc82c839f34566ccfdf733ad3580c81f"
+  },
+  "additional_source_hashes": {
+    "tools/test_projective_reference.py": "91bfc69174bb9ab77ea6f9001043fff1ec7c96f39524b8e3e7c262cc160efadc",
+    "crates/st-nn/tests/byte_projective_browser.html": "dab6fd07b4d13bec01ca55d5eaf8a79ac28e13e659cc4c72e8f15cc552206fe1"
+  },
+  "scope": "Raw tensors/checkpoints/binaries remain local. Scalar projection independently recomputes numerical gates, router gates, checkpoint values and exact-resume comparisons. Other controls are reported harness witnesses.",
+  "independent_review": "See ../review.md. No formal PR, CI, or merge in this increment."
+}

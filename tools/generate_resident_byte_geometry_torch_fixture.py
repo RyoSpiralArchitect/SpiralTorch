@@ -21,7 +21,11 @@ metric = load("generate_poincare_bias_torch_fixture").metric
 flat = base.values
 
 
-def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False, calibrate_flat=False, fisher_rao=False, headwise=False, mixture=False, query_mixture=False, zero_query=False):
+def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False, calibrate_flat=False, fisher_rao=False, headwise=False, mixture=False, query_mixture=False, zero_query=False, projective=False, projective_mixture=False):
+    if projective_mixture:
+        mixture = True
+    if projective and any((freeze_geometry, flat_metric, calibrate_flat, fisher_rao, headwise, mixture, query_mixture)):
+        raise ValueError("projective-only is a separate correctness experiment")
     if query_mixture:
         mixture = True
     if mixture and any((freeze_geometry, flat_metric, calibrate_flat, fisher_rao, headwise)):
@@ -43,6 +47,11 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
         metrics = ["poincare_squared.v1", "euclidean_chord_squared.v1", "categorical_fisher_rao_squared.v1"]
         config["causal_geometry"]["mixture"] = {"metrics": metrics,
             "scales": [[1., .8, 24., 1., 1.2, 48.], [.7, 1.5, 36., 1.3, .6, 40.]][:block_count]}
+        if projective_mixture:
+            metrics.append("complex_projective_chord_squared.v1")
+            config["causal_geometry"]["mixture"]["scales"] = [
+                [1., .8, 24., 4., 1., 1.2, 48., 6.],
+                [.7, 1.5, 36., 5., 1.3, .6, 40., 3.]][:block_count]
         if query_mixture:
             config["causal_geometry"]["mixture"]["query_projection"] = "linear.v1"
     if headwise:
@@ -54,6 +63,10 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
         config["causal_geometry"]["pair_metric"] = "euclidean_chord_squared.v1"
     if fisher_rao:
         config["causal_geometry"]["pair_metric"] = "categorical_fisher_rao_squared.v1"
+    if projective:
+        config["causal_geometry"]["pair_metric"] = "complex_projective_chord_squared.v1"
+    component_count = 4 if projective_mixture else 3
+    projective_metric = load("projective_reference").metric if projective or projective_mixture else None
     fisher_metric = load("fisher_rao_reference").metric if fisher_rao or headwise or mixture else None
     rng = torch.Generator(device="cpu").manual_seed(seed + 1047)
     projection = (torch.rand((width, cols), generator=rng, device="cpu") - .5) * 1.6
@@ -68,16 +81,20 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
         extra.append((f"raw_gain.{i}", torch.tensor(gains, device="cpu")))
     if mixture:
         for i in range(block_count):
-            extra.append((f"mixture_logits.{i}", torch.tensor([
+            logits = [
                 [-.4 + .2 * i, .2 - .3 * i, .6 + .1 * i],
-                [.7 - .1 * i, -.1 + .4 * i, .3 - .2 * i]], device="cpu")))
+                [.7 - .1 * i, -.1 + .4 * i, .3 - .2 * i]]
+            if projective_mixture:
+                logits[0].append(-.2 + .3 * i)
+                logits[1].append(.5 - .1 * i)
+            extra.append((f"mixture_logits.{i}", torch.tensor(logits, device="cpu")))
     if query_mixture:
         for i in range(block_count):
-            weight = (torch.rand((cols, config["heads"] * 3), generator=rng, device="cpu") - .5) * 1.4
+            weight = (torch.rand((cols, config["heads"] * component_count), generator=rng, device="cpu") - .5) * 1.4
             if zero_query:
                 weight.zero_()
             extra.extend([(f"query_projection.{i}.weight", weight),
-                          (f"query_projection.{i}.bias", torch.zeros(config["heads"] * 3, device="cpu"))])
+                          (f"query_projection.{i}.bias", torch.zeros(config["heads"] * component_count, device="cpu"))])
     extra = [{"name": "geometry." + n, "shape": list(t.shape), "values": flat(t)} for n, t in extra]
     descriptors = original["parameters"][:2] + extra + original["parameters"][2:]
     p = [torch.tensor(d["values"], device="cpu", dtype=torch.float32).reshape(d["shape"]).requires_grad_() for d in descriptors]
@@ -115,9 +132,9 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
             offset = 6 + 2 * block_count + 2 * i
             source = coordinates.detach() if detach_router else coordinates
             projected = source @ p[offset] + p[offset + 1]
-            logits = projected.reshape(batch, steps, config["heads"], 3).permute(0, 2, 1, 3) + logits[None, :, None, :]
+            logits = projected.reshape(batch, steps, config["heads"], component_count).permute(0, 2, 1, 3) + logits[None, :, None, :]
             return torch.softmax(logits, -1)
-        return torch.softmax(logits, -1).reshape(1, config["heads"], 1, 3)
+        return torch.softmax(logits, -1).reshape(1, config["heads"], 1, component_count)
 
     def mixture_weights():
         _, coordinates = encode()
@@ -132,9 +149,12 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
                     distance = 4 * (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
                     causal = torch.ones((steps, steps), device="cpu", dtype=torch.bool).tril()
                     euclidean = (-F.softplus(p[6 + i])[None, :, None, None] * distance[:, None]).masked_fill(~causal, 0.)
-                    components = torch.stack([metric(coordinates, p[6 + i], curvature), euclidean,
-                                               fisher_metric(coordinates, p[6 + i])], dim=-1)
-                    scales = torch.tensor(config["causal_geometry"]["mixture"]["scales"][i], device="cpu").reshape(1, config["heads"], 1, 1, 3)
+                    components = [metric(coordinates, p[6 + i], curvature), euclidean,
+                                  fisher_metric(coordinates, p[6 + i])]
+                    if projective_mixture:
+                        components.append(projective_metric(coordinates, p[6 + i]))
+                    components = torch.stack(components, dim=-1)
+                    scales = torch.tensor(config["causal_geometry"]["mixture"]["scales"][i], device="cpu").reshape(1, config["heads"], 1, 1, component_count)
                     weights = router_weights(i, coordinates, detach_router, shared).unsqueeze(-2)
                     geometric = (components * scales * weights).sum(-1)
                 elif headwise:
@@ -151,6 +171,8 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
                             bias = (-F.softplus(gain)[None, :, None, None] * distance[:, None]).masked_fill(~causal, 0.)
                         heads.append(bias)
                     geometric = torch.cat(heads, dim=1)
+                elif projective:
+                    geometric = projective_metric(coordinates, p[6 + i])
                 elif fisher_rao:
                     geometric = fisher_metric(coordinates, p[6 + i])
                 elif flat_metric:
@@ -200,7 +222,7 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
     for _ in range(16):
         logits, embedded, _ = forward()
         loss = F.cross_entropy(logits.reshape(-1, 256), target.reshape(-1))
-        gradient = torch.autograd.grad(loss, [*p, embedded] if freeze_geometry or flat_metric or fisher_rao or headwise or mixture else p)
+        gradient = torch.autograd.grad(loss, [*p, embedded] if freeze_geometry or flat_metric or fisher_rao or headwise or mixture or projective else p)
         weights = mixture_weights() if mixture else None
         with torch.no_grad():
             for value, g, rate in zip(p, gradient, rates):
@@ -208,7 +230,7 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
                     value -= rate * g
         trace.append({"loss": loss.item(), "parameters": [flat(t) for t in p],
                       "geometry_gradients": [flat(g) for g in gradient[2:end]]})
-        if freeze_geometry or flat_metric or fisher_rao or headwise or mixture:
+        if freeze_geometry or flat_metric or fisher_rao or headwise or mixture or projective:
             trace[-1]["embedding_output_gradient"] = flat(gradient[-1])
         if mixture:
             trace[-1]["mixture_weights"] = weights

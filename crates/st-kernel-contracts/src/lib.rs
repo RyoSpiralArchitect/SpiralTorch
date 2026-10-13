@@ -26,6 +26,7 @@ pub mod normalization;
 mod pair_bias;
 pub mod poincare;
 pub mod pointwise;
+pub mod projective;
 pub mod rank;
 pub mod sgd;
 pub mod topos_resonator;

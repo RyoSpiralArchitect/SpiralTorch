@@ -25,6 +25,7 @@ pub mod normalization;
 pub mod poincare;
 pub mod pointwise;
 pub mod profile;
+pub mod projective;
 mod validity;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
@@ -40,6 +41,8 @@ pub enum TensorError {
     Euclidean(#[from] st_kernel_contracts::euclidean::EuclideanBiasError),
     #[error(transparent)]
     FisherRao(#[from] st_kernel_contracts::fisher_rao::FisherRaoError),
+    #[error(transparent)]
+    Projective(#[from] st_kernel_contracts::projective::ProjectiveError),
     #[error(transparent)]
     CausalWave(#[from] st_kernel_contracts::causal_wave::CausalWaveError),
     #[error(transparent)]

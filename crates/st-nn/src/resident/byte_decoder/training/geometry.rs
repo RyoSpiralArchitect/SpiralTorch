@@ -5,6 +5,7 @@ use st_backend_wgpu::resident_tensor::{
     fisher_rao::ResidentFisherRaoBiasForward,
     mixture::{ResidentHeadwiseMixture, ResidentQuerywiseMixture},
     poincare::ResidentPoincareBiasForward,
+    projective::ResidentProjectiveBiasForward,
 };
 use st_kernel_contracts::{
     elementwise::ElementwiseOp,
@@ -16,6 +17,7 @@ enum MetricTape {
     Poincare(ResidentPoincareBiasForward),
     Euclidean(ResidentEuclideanBiasForward),
     FisherRao(ResidentFisherRaoBiasForward),
+    Projective(ResidentProjectiveBiasForward),
 }
 impl MetricTape {
     fn forward(
@@ -34,6 +36,9 @@ impl MetricTape {
             ByteDecoderPairMetric::CategoricalFisherRaoSquared => coordinates
                 .causal_fisher_rao_bias(gain)
                 .map(Self::FisherRao),
+            ByteDecoderPairMetric::ComplexProjectiveChordSquared => coordinates
+                .causal_projective_bias(gain)
+                .map(Self::Projective),
         }
     }
     fn scores(&self) -> &ResidentTensor {
@@ -41,6 +46,7 @@ impl MetricTape {
             Self::Poincare(f) => f.scores(),
             Self::Euclidean(f) => f.scores(),
             Self::FisherRao(f) => f.scores(),
+            Self::Projective(f) => f.scores(),
         }
     }
     fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, GpuTensorError> {
@@ -48,6 +54,7 @@ impl MetricTape {
             Self::Poincare(f) => f.backward(seed),
             Self::Euclidean(f) => f.backward(seed),
             Self::FisherRao(f) => f.backward(seed),
+            Self::Projective(f) => f.backward(seed),
         }
     }
 }

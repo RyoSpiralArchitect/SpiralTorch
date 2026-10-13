@@ -3,6 +3,7 @@ use super::*;
 use st_kernel_contracts::euclidean::{EuclideanBiasError, EuclideanBiasSpec};
 use st_kernel_contracts::fisher_rao::{FisherRaoBiasSpec, FisherRaoError};
 use st_kernel_contracts::poincare::{PoincareBiasSpec, PoincareError};
+use st_kernel_contracts::projective::{ProjectiveBiasSpec, ProjectiveError};
 pub(super) mod fisher_chart;
 mod pair_spec;
 use pair_spec::PairSpec;
@@ -22,6 +23,12 @@ pub struct ResidentEuclideanBiasForward {
 #[derive(Clone, Debug)]
 pub struct ResidentFisherRaoBiasForward {
     spec: FisherRaoBiasSpec,
+    tape: PairForward,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResidentProjectiveBiasForward {
+    spec: ProjectiveBiasSpec,
     tape: PairForward,
 }
 
@@ -214,16 +221,17 @@ fn params(spec: PairSpec) -> Params {
         seed_offset: 0,
         curvature_magnitude: match spec {
             PairSpec::Poincare(s) => -s.curvature(),
-            PairSpec::Euclidean(_) | PairSpec::FisherRao(_) => 0.,
+            PairSpec::Euclidean(_) | PairSpec::FisherRao(_) | PairSpec::Projective(_) => 0.,
         },
         distance_scale: match spec {
-            PairSpec::Poincare(_) | PairSpec::FisherRao(_) => 0.,
+            PairSpec::Poincare(_) | PairSpec::FisherRao(_) | PairSpec::Projective(_) => 0.,
             PairSpec::Euclidean(s) => s.scale(),
         },
         metric_kind: match spec {
             PairSpec::Poincare(_) => 0,
             PairSpec::Euclidean(_) => 1,
             PairSpec::FisherRao(_) => 2,
+            PairSpec::Projective(_) => 3,
         },
         root_gradient_offset: if matches!(spec, PairSpec::FisherRao(_)) {
             (spec.coordinates_len() + spec.heads() + 4 * spec.pairs_len()) as u32
@@ -287,6 +295,26 @@ fn dispatch(
 }
 
 impl ResidentTensor {
+    /// Interleaved complex chart `[B,T,2*C]` -> anchored projective chord bias.
+    /// Uses `u=(1,z)/sqrt(1+|z|^2)`, not a geodesic distance. The zero chart is
+    /// regular; both endpoint VJPs stay resident. Future scores are zero, so
+    /// the consumer must still apply a structural causal attention mask.
+    pub fn causal_projective_bias(
+        &self,
+        raw_gain: &Self,
+    ) -> Result<ResidentProjectiveBiasForward, TensorError> {
+        let shape =
+            <[usize; 3]>::try_from(self.layout.shape()).map_err(|_| ProjectiveError::Shape)?;
+        if raw_gain.layout.shape().len() != 1 {
+            return Err(ProjectiveError::Shape.into());
+        }
+        let spec = ProjectiveBiasSpec::new(shape, raw_gain.layout.shape()[0])?;
+        Ok(ResidentProjectiveBiasForward {
+            spec,
+            tape: self.causal_pair_bias(raw_gain, spec.into())?,
+        })
+    }
+
     /// Rowwise logits -> sqrt(softmax) -> squared categorical Fisher-Rao bias.
     /// Both endpoint and simplex-map derivatives remain resident. Future scores
     /// are zero; the consumer must still apply a structural causal mask.
@@ -442,6 +470,18 @@ impl ResidentFisherRaoBiasForward {
     }
 }
 
+impl ResidentProjectiveBiasForward {
+    pub fn scores(&self) -> &ResidentTensor {
+        &self.tape.scores
+    }
+    pub fn spec(&self) -> ProjectiveBiasSpec {
+        self.spec
+    }
+    pub fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
+        self.tape.backward(seed)
+    }
+}
+
 impl PairForward {
     fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
         let s = self.spec;
@@ -450,6 +490,7 @@ impl PairForward {
                 PairSpec::Poincare(_) => PoincareError::Length.into(),
                 PairSpec::Euclidean(_) => EuclideanBiasError::Length.into(),
                 PairSpec::FisherRao(_) => FisherRaoError::Length.into(),
+                PairSpec::Projective(_) => ProjectiveError::Length.into(),
             });
         }
         let (_, len) = preflight(s, &[&self.scores, seed])?;

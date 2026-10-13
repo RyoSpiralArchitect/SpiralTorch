@@ -1,6 +1,69 @@
 use super::*;
 
 #[test]
+fn projective_single_headwise_shared_and_query_topologies_roundtrip() {
+    use ByteDecoderPairMetric::*;
+    let p = super::super::tests::plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
+    let g = super::super::tests::geometry_for(&p);
+    let mixture = g
+        .clone()
+        .with_mixture(
+            &[
+                PoincareSquared,
+                EuclideanChordSquared,
+                CategoricalFisherRaoSquared,
+                ComplexProjectiveChordSquared,
+            ],
+            &vec![vec![0.; 8]; 2],
+            &vec![vec![1.; 8]; 2],
+        )
+        .unwrap();
+    let query = InferencePlan::from_operations(
+        g.projection().output_layout().clone(),
+        vec![InferenceOp::Linear {
+            weight: Tensor::from_vec(4, 8, vec![0.02; 32]).unwrap(),
+            bias: Tensor::from_vec(1, 8, vec![0.; 8]).unwrap(),
+        }],
+    )
+    .unwrap();
+    let headwise = g
+        .clone()
+        .with_head_pair_metrics(&[
+            vec![ComplexProjectiveChordSquared, PoincareSquared],
+            vec![EuclideanChordSquared, ComplexProjectiveChordSquared],
+        ])
+        .unwrap();
+    for (geometry, schema) in [
+        (
+            g.with_pair_metric(ComplexProjectiveChordSquared),
+            BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA,
+        ),
+        (headwise, BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA),
+        (mixture.clone(), BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA),
+        (
+            mixture
+                .with_query_projections(&[query.clone(), query])
+                .unwrap(),
+            BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA,
+        ),
+    ] {
+        let plan = p.clone().with_causal_geometry(geometry).unwrap();
+        let text = plan.initial_checkpoint().to_json().unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["schema"], schema);
+        assert!(text.contains("complex_projective_chord_squared.v1"));
+        let restored = ByteDecoderCheckpoint::from_json(&text).unwrap();
+        assert_eq!(restored.to_json().unwrap(), text);
+        assert_eq!(restored.plan().parameter_layout(), plan.parameter_layout());
+        assert!(ByteDecoderCheckpoint::from_json(&text.replace(
+            "complex_projective_chord_squared.v1",
+            "complex_projective_chord_squared.v2"
+        ))
+        .is_err());
+    }
+}
+
+#[test]
 fn contextual_checkpoint_preserves_router_graphs_and_refuses_schema_downgrades() {
     let p = super::super::tests::plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
     let g = super::super::tests::query_geometry_for(&p);
@@ -130,6 +193,7 @@ fn initial_gain_replacement_preserves_every_other_checkpoint_field() {
         ByteDecoderPairMetric::PoincareSquared,
         ByteDecoderPairMetric::EuclideanChordSquared,
         ByteDecoderPairMetric::CategoricalFisherRaoSquared,
+        ByteDecoderPairMetric::ComplexProjectiveChordSquared,
     ] {
         let mut plan = checkpoint().plan;
         plan.geometry = plan.geometry.take().map(|g| g.with_pair_metric(metric));

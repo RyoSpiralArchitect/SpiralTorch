@@ -43,9 +43,11 @@ redundant constant directions. This qualification does not claim parameter-
 budget or shared-intercept-update equivalence. A corpus comparison must declare
 its parameter counts and any frozen-slot policy rather than hiding this effect.
 
-The qualification combines three existing metrics, not new geometric families.
+The original qualification combines three existing metrics, not new geometric families.
 It checks the complete byte-LM learning path and resume, not language quality.
 Large-corpus comparisons and Python exposure remain separate work.
+The separate [complex projective extension](complex_projective_geometry.md)
+adds a fourth family without changing that original three-metric fixture.
 
 ## Reproduce
 

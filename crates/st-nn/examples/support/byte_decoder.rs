@@ -33,8 +33,14 @@ mod headwise_controls;
 mod mixture_controls;
 #[path = "byte_decoder/parameter_rate_controls.rs"]
 mod parameter_rate_controls;
+#[path = "byte_decoder/projective_controls.rs"]
+mod projective_controls;
 #[path = "byte_decoder/query_controls.rs"]
 mod query_controls;
+
+pub async fn run_projective(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    projective_controls::run(runtime, fixture).await
+}
 
 pub async fn run_parameter_rates(runtime: WgpuRuntime) -> Result<Value> {
     parameter_rate_controls::run(runtime).await
@@ -102,6 +108,9 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
             }
             Some(Value::String(s)) if s == "categorical_fisher_rao_squared.v1" => {
                 ByteDecoderPairMetric::CategoricalFisherRaoSquared
+            }
+            Some(Value::String(s)) if s == "complex_projective_chord_squared.v1" => {
+                ByteDecoderPairMetric::ComplexProjectiveChordSquared
             }
             _ => return Err("unknown geometry pair metric".into()),
         };
@@ -768,6 +777,72 @@ async fn run_cases(
     raw: bool,
     capture_initial: bool,
 ) -> Result<Value> {
+    run_cases_observed(runtime, cases, counts, raw, capture_initial, false).await
+}
+
+fn observed_close(
+    actual: &[f32],
+    expected: &[f32],
+    label: &str,
+    step: usize,
+    retain: bool,
+    failures: &mut Vec<Value>,
+) -> Result<f64> {
+    match close(actual, expected, label) {
+        Ok(maximum) => Ok(maximum),
+        Err(error)
+            if retain
+                && actual.len() == expected.len()
+                && actual.iter().chain(expected).all(|v| v.is_finite()) =>
+        {
+            let maximum = actual
+                .iter()
+                .zip(expected)
+                .map(|(&a, &b)| (f64::from(a) - f64::from(b)).abs())
+                .fold(0., f64::max);
+            failures.push(json!({"step":step, "gate":"numeric_absolute_relative",
+                "label":label, "atol":3e-6, "rtol":5e-5, "error":error.to_string(),
+                "maximum_absolute_error":maximum}));
+            Ok(maximum)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[test]
+fn observed_learning_failures_remain_failures_and_malformed_data_still_aborts() {
+    let mut failures = Vec::new();
+    assert!(observed_close(&[1.], &[0.], "strict", 1, false, &mut failures).is_err());
+    assert!(failures.is_empty());
+    assert_eq!(
+        observed_close(&[1.], &[0.], "observed", 1, true, &mut failures).unwrap(),
+        1.
+    );
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0]["gate"], "numeric_absolute_relative");
+    for (a, b) in [
+        (vec![f32::NAN], vec![0.]),
+        (vec![0.], vec![f32::INFINITY]),
+        (vec![], vec![0.]),
+    ] {
+        assert!(observed_close(&a, &b, "invalid", 2, true, &mut failures).is_err());
+    }
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        observed_close(&[0.], &[0.], "good", 3, true, &mut failures).unwrap(),
+        0.
+    );
+    assert_eq!(failures.len(), 1);
+}
+
+async fn run_cases_observed(
+    runtime: WgpuRuntime,
+    cases: &[Value],
+    counts: &[usize],
+    raw: bool,
+    capture_initial: bool,
+    retain_learning_failures: bool,
+) -> Result<Value> {
     let mut checks = Vec::new();
     for (case, &expected_count) in cases.iter().zip(counts) {
         let p = plan(case, 4)?;
@@ -960,6 +1035,7 @@ async fn run_cases(
         }
         // No activation/gradient/receipt read until every update is queued.
         let mut trace = Vec::new();
+        let mut qualification_failures = Vec::new();
         for (step, (loss, update, parameters, geometry_gradients, embedded, mixture_weights)) in
             pending.into_iter().enumerate()
         {
@@ -972,10 +1048,13 @@ async fn run_cases(
                 return Err("decoder revision mismatch".into());
             }
             let loss_values = read(loss.value()).await?;
-            close(
+            observed_close(
                 &loss_values,
                 &[learning["trace"][step]["loss"].as_f64().unwrap() as f32],
                 "byte CE",
+                step + 1,
+                retain_learning_failures,
+                &mut qualification_failures,
             )?;
             let actual = read_many(model.tensor_device(), parameters.values()).await?;
             let expected = learning["trace"][step]["parameters"].as_array().unwrap();
@@ -984,7 +1063,14 @@ async fn run_cases(
             }
             let mut maximum = 0f64;
             for (i, (a, e)) in actual.iter().zip(expected).enumerate() {
-                maximum = maximum.max(close(a, &data(e), &format!("step {step} parameter {i}"))?);
+                maximum = maximum.max(observed_close(
+                    a,
+                    &data(e),
+                    &format!("step {} parameter {i}", step + 1),
+                    step + 1,
+                    retain_learning_failures,
+                    &mut qualification_failures,
+                )?);
             }
             let mut geometry_relative = Vec::new();
             let geometry_values = if geometry_gradients.is_empty() {
@@ -999,9 +1085,29 @@ async fn run_cases(
                 if geometry_values.len() != expected.len() {
                     return Err("truncated geometry CE derivatives".into());
                 }
-                for (a, e) in geometry_values.iter().zip(expected) {
-                    close(a, &data(e), "geometry CE derivative")?;
-                    geometry_relative.push(geometry_controls::relative_gradient(a, &data(e))?);
+                for (slot, (a, e)) in geometry_values.iter().zip(expected).enumerate() {
+                    observed_close(
+                        a,
+                        &data(e),
+                        &format!("geometry CE derivative {slot}"),
+                        step + 1,
+                        retain_learning_failures,
+                        &mut qualification_failures,
+                    )?;
+                    match geometry_controls::relative_gradient(a, &data(e)) {
+                        Ok(relative) => geometry_relative.push(json!(relative)),
+                        Err(error) if retain_learning_failures => {
+                            // Preserve the failed gate and finish collecting the fixed
+                            // trajectory. This is a FAIL, never a relaxed tolerance.
+                            qualification_failures.push(json!({
+                                "step":step+1, "geometry_slot":slot,
+                                "gate":"geometry_relative_l2", "threshold":0.002,
+                                "error":error.to_string()
+                            }));
+                            geometry_relative.push(Value::Null);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
             trace.push(json!({"revision": revision, "loss": loss_values[0], "parameter_max_abs_error": maximum,
@@ -1021,7 +1127,14 @@ async fn run_cases(
                     return Err("truncated mixture trajectory".into());
                 }
                 for (a, e) in actual.iter().zip(expected) {
-                    close(a, &data(e), "learned mixture weights")?;
+                    observed_close(
+                        a,
+                        &data(e),
+                        "learned mixture weights",
+                        step + 1,
+                        retain_learning_failures,
+                        &mut qualification_failures,
+                    )?;
                 }
                 trace.last_mut().unwrap()["mixture_weights"] = json!(actual);
             }
@@ -1030,6 +1143,9 @@ async fn run_cases(
         checks.push(json!({"name": case["name"], "checkpoint":checkpoint, "parameter_count": expected_count, "output_max_abs_error": output_error,
             "embedding_output_max_abs_error": input_error, "parameter_errors": errors, "bias_errors": bias_errors, "gradient_layouts": true,
             "causality": causal, "tapes": tapes, "metric_controls": metric_controls, "learning": {"steps":16, "trace":trace}}));
+        if retain_learning_failures {
+            checks.last_mut().unwrap()["qualification_failures"] = json!(qualification_failures);
+        }
         if let Some(initial) = initial_checkpoint {
             checks.last_mut().unwrap()["initial_checkpoint_json"] = json!(initial);
         }
@@ -1059,9 +1175,14 @@ async fn run_cases(
             .await?;
         }
     }
+    let passed = checks.iter().all(|c| {
+        c.get("qualification_failures")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    });
     Ok(
         json!({"schema":if raw { "spiraltorch.resident_byte_geometry_flat.validation.v1" }
-            else { "spiraltorch.resident_byte_decoder.validation.v3" }, "passed":true,
+            else { "spiraltorch.resident_byte_decoder.validation.v3" }, "passed":passed,
         "adapter":format!("{:?}",runtime.adapter_info()), "checks":checks,
         "scope":"complete 256-way byte decoder correctness and synthetic training, not language quality or speed"}),
     )
