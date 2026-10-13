@@ -1,0 +1,151 @@
+{
+  "schema": "spiraltorch.byte_release_integration.validation.v1",
+  "source": {
+    "merged_main": "ddab65468ab1e6c0436ae6e32d2f6acaa475bbf9",
+    "core": "7fb47f267e21497bdecd4e01e7423be12192da53",
+    "python_candidate": "8b102c58f352beb6da2183bd7cbd97bc9e0fc9fd",
+    "policy": "Core and candidate identify the completed three-runtime qualification. Later local review work is not in these binaries."
+  },
+  "release": {
+    "version": "0.4.30",
+    "ready": false,
+    "tag_created": false,
+    "published": false,
+    "official_signed_three_platform_wheels_built": false
+  },
+  "installation": {
+    "version": "0.4.30",
+    "wheel": "spiraltorch-0.4.30-cp38-abi3-macosx_14_0_arm64.whl",
+    "wheel_sha256": "e60a26822601d333d53ddc117243bb480349e37e13229ac303eebda0d8fe3107",
+    "installed_files": {
+      "spiraltorch/__init__.py": "dc6f4fe51a16f0e268cd44d5d573b28128ae6d896f86d23e4feb4a9c5a0cd702",
+      "spiraltorch/spiraltorch.abi3.so": "733b890322ccf96f65b668396b60aaa3176c461b1ece6ededf76e0a579331c67"
+    },
+    "python": "3.12.6",
+    "harness_sha256": "a3e97e7d8f88a0b2bfb78302a82c9bddeccfc761332c952d2dfba307e1ec2a2c"
+  },
+  "tests": {
+    "kernel": {
+      "passed": 107,
+      "failed": 0
+    },
+    "wgpu": {
+      "passed": 328,
+      "failed": 0,
+      "ignored": 1,
+      "ignored_scope": "explicit frozen-fixture GPU timestamp experiment"
+    },
+    "python_byte": {
+      "passed": 8,
+      "skipped": 1,
+      "skip_reason": "CPU-only execution gate on WGPU wheel"
+    },
+    "corpus_with_torch": {
+      "passed": 64,
+      "skipped": 0
+    },
+    "corpus_verifier": {
+      "passed": 21
+    },
+    "native_clippy": true,
+    "wasm_clippy": true,
+    "strict_st_nn_rustdoc": true
+  },
+  "matched": {
+    "native_cases": 6,
+    "browser_cases": 6,
+    "python_cases": 6,
+    "updates_per_runtime": 96,
+    "geometry_step_vjps_per_runtime": 720,
+    "python_exact_resumed_updates": 54,
+    "fixture_sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7",
+    "thresholds_changed": false,
+    "scope": "tiny repeated synthetic windows; no quality or speed claim"
+  },
+  "example": {
+    "mode": "query_mixture",
+    "losses": [
+      5.574339866638184,
+      5.552905082702637,
+      5.531613349914551,
+      5.510336875915527,
+      5.489012718200684,
+      5.4676055908203125,
+      5.446127891540527,
+      5.424587249755859,
+      5.402918815612793,
+      5.381095886230469,
+      5.358952522277832,
+      5.336662292480469,
+      5.313996315002441,
+      5.2909393310546875,
+      5.267437934875488,
+      5.243394374847412
+    ],
+    "attempted_revision": 16,
+    "resume_prediction_exact": true,
+    "scope": "tiny repeated-window mechanics, not language quality"
+  },
+  "review": {
+    "initial_kernel_findings": 4,
+    "addressed_in_core": 4,
+    "followup_findings": 2,
+    "candidate_still_has_followup_findings": true,
+    "nested_cancellation": {
+      "expected_router_gradient": [
+        -0.015625,
+        0.015625
+      ],
+      "cpu_observed": [
+        0,
+        0
+      ],
+      "gpu_observed": [
+        0,
+        0
+      ],
+      "local_cpu_expansion_tests_passed": 108,
+      "gpu_reduction_fix_complete": false
+    },
+    "nearby_fisher": {
+      "expected_score": -1,
+      "gpu_observed_score": 0,
+      "local_series_fix_fisher_tests_passed": 6,
+      "local_fix_reviewed": false,
+      "remaining_limit": "Wide exponent alignment beyond gap 120 remains a smaller-deviation limitation."
+    },
+    "scopes": "Independent source review; runtime tests were performed by the parent. No universal finite-input exactness claim."
+  },
+  "retained_attempt_notes": [
+    "First GPU projective test used an underflowing f32 power in its expected value; corrected to f64 before narrowing.",
+    "First Fisher test stopped at the additional CPU projection failure before reaching its GPU comparison.",
+    "Later nested and nearby-Fisher regressions fail on the candidate; local partial fixes do not promote the candidate."
+  ],
+  "raw_sha256": {
+    "merge-corpus-tests-with-torch.log": "31b1f066916d543b133eea26dd226950cb827eddfa7cb80be0486ad622a22a93",
+    "merge-corpus-verifier-tests.log": "630639a7709b9798dab9f2425fa2f0a140886f9dd3abb66a1c423f2b9a1c4e86",
+    "numerics-cpu-before.log": "cf405029d628195a5a66ab58253dc230a8b5dc05215e465d9e056abdafb3cb14",
+    "numerics-gpu-before.log": "c0d603e5bb7d2f0250b3c8eff3b70c5fd76318e7ed99685e79c973cf0a9a8a3f",
+    "numerics-full-native.log": "551c14c9011b91ae964217de135c82cf00192297190f3ccac475289c90c546af",
+    "numerics-native-clippy.log": "783038423d6273b80f1369505b05749de501712e26dc604ba1d53563886dce9a",
+    "numerics-wasm-clippy.log": "28cee5e13e2d0992a186dc6184c4f102b1fdd3100616d9ef0ee537d4286bcf77",
+    "strict-rustdoc-after.log": "d5f92c9137b2f0a6e0d48ae2bde98afec6eddb920f04db6447c63f5718e5143a",
+    "numerics-lm-build.log": "621c687fff10ddf9722cdf70a6f2131e6ec9e15dd2cb9b3be17b207fc9927911",
+    "numerics-native-lm.json": "1336de3859e040e505504d59c5579515ee7df232a1a71631b340f1916c1c341f",
+    "numerics-wasm-lm-build.log": "0cfa6548c63ecb8ea8988c5bd45184bddd432c8e649c6dfd16418c212b45817c",
+    "browser.json": "710fc07bd26c78ac9f9f9525e7fe6ca51aa838d5992216741c1aa230e8754a3b",
+    "browser-after-numerics.png": "a1079a11e235659e55d5e393374c5a2adcc8f633b7231d2d5f2dacd045040a5c",
+    "wheel-after-numerics.log": "7d0beb7624a9642c73aae2e8d94e47250f8500eae2c8da3f39e576d9bc3ecb37",
+    "wheel-install-after-numerics.log": "c770ea8b34e8c58b336ea54dec24350fb89a597ffb0b04e93cfc18b12d8e04a4",
+    "python-byte-after-numerics.log": "7586ae22bd44a61e309a57c691aa942ea5bb82d8c0e573ec4bc345f46d20d39d",
+    "python-parity-after-numerics.json": "18616c2eb6d47135ac7577730a4d87d336746eac10df70c9348b8f6e8cb6fe47",
+    "packaged-example-after-numerics.json": "a80363dcca067ae9edc65ea9fffda2207cbb2e94ae663b969fbb64bad38a4306",
+    "nested-cpu-before.log": "47716330d0acd0d91ecbd270c80c810bf4f3fc62ccc3eaa1b9158db9f116ab7a",
+    "nested-before.log": "028bb61ffc6256f8d25ebbfd7f009d12f7734aebcf9d4141b7ede5d57cd02fb5",
+    "nearby-fisher-before.log": "53d2d284e48167bb829513e8973dfe1ad986dbe5de8d51ca008a3e1cf2553be1",
+    "nested-cpu-after.log": "800694e2bda9ac1c572abbb808308cbee0da635d40cc7b9d4b26ea0305ab7305",
+    "nearby-fisher-after.log": "d48031a151e44a349336c953fb9597960761cb9e0dc33c04c5d2746ad93d7281",
+    "second-review-clippy.log": "a344139eddcd33f9a7484befce6256344165dbee6f70968009cd8f1272e78708",
+    "second-review-work-in-progress.patch": "e73369dc1e74ec2c0950d6b87175ad261884ecedebae1631711a26f65e3c6a02"
+  }
+}
