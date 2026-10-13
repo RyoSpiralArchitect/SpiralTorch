@@ -2,6 +2,97 @@ use super::*;
 use st_kernel_contracts::mixture::HeadwiseMixtureForward;
 use st_kernel_contracts::mixture::{QuerywiseMixtureForward, QuerywiseMixtureSpec};
 
+mod exact;
+
+#[test]
+fn nested_cancellation_retains_a_finite_router_gradient() {
+    let Some(d) = device() else { return };
+    let large = 2f32.powi(124);
+    let small = 2f64.powi(-124) as f32;
+    let f = d
+        .upload(&[1, 1, 5, 2], &[0., 2f32.powi(120)].repeat(5))
+        .unwrap()
+        .headwise_mixture(&d.upload(&[1, 2], &[0., 0.]).unwrap())
+        .unwrap();
+    let g = f
+        .backward(
+            &d.upload(&[1, 1, 5], &[large, 1., small, -1., -large])
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(read(g.logits()), [-0.015625, 0.015625]);
+}
+
+#[test]
+fn nested_router_cancellation_is_invariant_to_all_position_permutations() {
+    let Some(d) = device() else { return };
+    let mut orders = Vec::new();
+    for a in 0..5 {
+        for b in 0..5 {
+            for c in 0..5 {
+                for e in 0..5 {
+                    for f in 0..5 {
+                        let order = [a, b, c, e, f];
+                        if (0..5).all(|i| order.iter().filter(|&&j| j == i).count() == 1) {
+                            orders.push(order);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(orders.len(), 120);
+    let terms = [
+        2f32.powi(124),
+        1.,
+        2f64.powi(-124) as f32,
+        -1.,
+        -2f32.powi(124),
+    ];
+    let seed: Vec<_> = orders
+        .iter()
+        .flat_map(|order| order.map(|i| terms[i]))
+        .collect();
+    let input = [0., 2f32.powi(120)].repeat(5 * orders.len());
+    let logits = [0.; 2].repeat(orders.len());
+    let expected = [-0.015625, 0.015625].repeat(orders.len());
+    let shared = d
+        .upload(&[1, orders.len(), 5, 2], &input)
+        .unwrap()
+        .headwise_mixture(&d.upload(&[orders.len(), 2], &logits).unwrap())
+        .unwrap();
+    assert_eq!(
+        read(
+            shared
+                .backward(&d.upload(&[1, orders.len(), 5], &seed).unwrap())
+                .unwrap()
+                .logits()
+        ),
+        expected
+    );
+    let query = d
+        .upload(&[1, 1, orders.len(), 5, 2], &input)
+        .unwrap()
+        .querywise_mixture(&d.upload(&[1, 1, orders.len(), 2], &logits).unwrap())
+        .unwrap();
+    assert_eq!(
+        read(
+            query
+                .backward(&d.upload(&[1, 1, orders.len(), 5], &seed).unwrap())
+                .unwrap()
+                .logits()
+        ),
+        expected
+    );
+    let cpu = HeadwiseMixtureForward::new(
+        HeadwiseMixtureSpec::new([1, orders.len(), 5, 2]).unwrap(),
+        &input,
+        &logits,
+    )
+    .unwrap();
+    assert_eq!(cpu.backward(&seed).unwrap().logits, expected);
+}
+
 #[test]
 fn querywise_strides_and_local_pullbacks_preserve_all_axes() {
     let Some(d) = device() else { return };

@@ -9,7 +9,7 @@ pub struct QuerywiseMixtureSpec {
 }
 
 impl QuerywiseMixtureSpec {
-    /// Components [batch,heads,queries,keys,components]; logits [B,H,Q,K].
+    /// Components `[batch,heads,queries,keys,components]`; logits `[B,H,Q,K]`.
     /// This operation does not impose a causal mask or validate the provenance
     /// of the logits. The attention mask and causal router remain caller-owned.
     pub fn new(shape: [usize; 5]) -> Result<Self, MixtureError> {
@@ -28,7 +28,7 @@ impl QuerywiseMixtureSpec {
     pub fn shape(self) -> [usize; 5] {
         self.shape
     }
-    /// Equivalent contiguous [1,B*H*Q,S,K] contract; no numerical reinterpretation.
+    /// Equivalent contiguous `[1,B*H*Q,S,K]` contract; no numerical reinterpretation.
     pub fn grouped_spec(self) -> HeadwiseMixtureSpec {
         self.grouped
     }
@@ -76,7 +76,7 @@ impl QuerywiseMixtureForward {
     pub fn weights(&self) -> &[f32] {
         self.inner.weights()
     }
-    /// Component pullback [B,H,Q,S,K] and local-logit pullback [B,H,Q,K].
+    /// Component pullback `[B,H,Q,S,K]` and local-logit pullback `[B,H,Q,K]`.
     /// Reduction is over keys only, never other queries, heads or batches.
     pub fn backward(&self, seed: &[f32]) -> Result<QuerywiseMixtureVjp, MixtureError> {
         let g = self.inner.backward(seed)?;
