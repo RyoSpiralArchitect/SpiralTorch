@@ -2,6 +2,89 @@ use super::*;
 use st_kernel_contracts::causal_wave::CausalWaveForward;
 
 #[test]
+fn batch_cancellation_preserves_small_parameter_gradients() {
+    let Some(device) = device() else { return };
+    let raw = device.upload(&[1], &[0.]).unwrap();
+    let drive = device.upload(&[3, 1, 2], &[0.; 6]).unwrap();
+    let initial = device.upload(&[3, 2], &[1., 0., 1., 0., 1., 0.]).unwrap();
+    let seed = device.upload(&[3, 1, 2], &[0.; 6]).unwrap();
+    let forward = drive.causal_zspace_wave(&raw, &raw, &initial, -1.).unwrap();
+    let permutations = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+    for large in [2f32.powi(24), 2f32.powi(48), 2f32.powi(96)] {
+        for order in permutations {
+            for channel in 0..2 {
+                let values = [large, 1., -large];
+                let mut terminal = [0.; 6];
+                for (b, i) in order.iter().enumerate() {
+                    terminal[2 * b + channel] = values[*i];
+                }
+                let g = forward
+                    .backward(&seed, &device.upload(&[3, 2], &terminal).unwrap())
+                    .unwrap();
+                let expected = if channel == 0 {
+                    st_kernel_contracts::causal_wave::MAX_DECAY * 0.25
+                } else {
+                    (f64::from(st_kernel_contracts::causal_wave::MAX_DECAY * 0.5)
+                        * f64::from(std::f32::consts::PI)) as f32
+                };
+                let actual = read(if channel == 0 {
+                    g.raw_decay()
+                } else {
+                    g.raw_phase()
+                })[0];
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "large={large}, order={order:?}, channel={channel}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn finite_batch_cancellation_can_recover_overflowed_parameter_partials() {
+    let Some(device) = device() else { return };
+    let raw = device.upload(&[1], &[0.]).unwrap();
+    let drive = device.upload(&[2, 1, 2], &[0.; 4]).unwrap();
+    let seed = device.upload(&[2, 1, 2], &[0.; 4]).unwrap();
+    for channel in 0..2 {
+        let x = if channel == 0 { 8. } else { 1. };
+        let initial = device.upload(&[2, 2], &[x, 0., x, 0.]).unwrap();
+        let forward = drive.causal_zspace_wave(&raw, &raw, &initial, -1.).unwrap();
+        let mut terminal = [0.; 4];
+        terminal[channel] = f32::MAX;
+        terminal[2 + channel] = -f32::MAX;
+        let g = forward
+            .backward(&seed, &device.upload(&[2, 2], &terminal).unwrap())
+            .unwrap();
+        assert_eq!(read(g.raw_decay()), vec![0.]);
+        assert_eq!(read(g.raw_phase()), vec![0.]);
+        assert!(read(g.drive())
+            .iter()
+            .chain(&read(g.initial_state()))
+            .all(|v| v.is_finite()));
+        terminal[2 + channel] = f32::MAX;
+        let g = forward
+            .backward(&seed, &device.upload(&[2, 2], &terminal).unwrap())
+            .unwrap();
+        for t in [g.drive(), g.raw_decay(), g.raw_phase(), g.initial_state()] {
+            assert!(matches!(
+                t.snapshot().unwrap().read(),
+                Err(TensorError::NonFinite)
+            ));
+        }
+    }
+}
+
+#[test]
 fn shaders_validate_without_a_device() {
     for template in [
         include_str!("../shaders/causal_wave.wgsl"),
@@ -24,7 +107,7 @@ fn storage_uniform_and_grid_limits_are_checked_before_execution() {
     let spec = CausalWaveSpec::new([2, 7, 4], -1.).unwrap();
     assert_eq!(
         preflight_sizes(spec, &wgpu::Limits::default()).unwrap(),
-        (74, 76)
+        (74, 68)
     );
     for limits in [
         wgpu::Limits {
@@ -66,6 +149,19 @@ fn storage_uniform_and_grid_limits_are_checked_before_execution() {
         &small_binding
     )
     .is_err());
+    // A one-step, larger batch used to fit. Its extended parameter partials
+    // must be included in the same scratch binding preflight now.
+    let short = CausalWaveSpec::new([32, 1, 2], -1.).unwrap();
+    assert!(preflight_sizes(short, &small_binding).is_err());
+    assert!(preflight_sizes(
+        short,
+        &wgpu::Limits {
+            max_storage_buffer_binding_size: 2048,
+            max_buffer_size: 2048,
+            ..Default::default()
+        }
+    )
+    .is_ok());
 }
 
 fn device() -> Option<TensorDevice> {

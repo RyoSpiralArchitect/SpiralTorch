@@ -8,10 +8,37 @@
 <pre id="result" data-status="running">Checking the causal state and chart primitive...</pre>
 <script type="module">
 const result = document.querySelector("#result");
+function validateBatchReduction(controls) {
+  const permutations = ["012", "021", "102", "120", "201", "210"];
+  const expectedCases = new Set([24, 48, 96].flatMap(e => permutations.flatMap(p => [0, 1].map(c => `${e}/${p}/${c}`))));
+  if (controls?.analytic_reference !== true || controls.checks?.length !== 36 || controls.overflow?.length !== 2) {
+    throw Error("Missing batch-reduction controls");
+  }
+  for (const c of controls.checks) {
+    const expected = c.terminal_channel === 0 ? Math.fround(Math.fround(.99) * .25)
+      : Math.fround(Math.fround(Math.fround(.99) * .5) * Math.fround(Math.PI));
+    if (!Array.isArray(c.order) || c.order.length !== 3 || !c.order.every(Number.isInteger)
+        || !Number.isInteger(c.exponent) || !Number.isInteger(c.terminal_channel)
+        || !expectedCases.delete(`${c.exponent}/${c.order.join("")}/${c.terminal_channel}`)
+        || c.exact_f32 !== true || c.finite_family !== true
+        || c.expected !== expected || c.cpu !== expected || c.gpu !== expected) {
+      throw Error("Invalid, duplicate or inaccurate batch-reduction case");
+    }
+  }
+  const channels = new Set([0, 1]);
+  for (const c of controls.overflow) {
+    if (!channels.delete(c.terminal_channel) || c.opposite_partials_cancel !== true
+        || c.finite_family !== true || c.same_sign_whole_family_rejected !== true) {
+      throw Error("Invalid or duplicate batch-overflow control");
+    }
+  }
+  if (expectedCases.size || channels.size) throw Error("Incomplete batch coverage");
+}
 try {
   const {default: init, run_causal_zspace_wave_checks} = await import("/target/causal-zspace-wave-web/causal_zspace_wave_browser.js");
   await init();
   const report = JSON.parse(await run_causal_zspace_wave_checks());
+  validateBatchReduction(report.batch_reduction);
   const finite = value => Number.isFinite(value) && value >= 0;
   const errors = ["features", "final_state", "drive_vjp", "raw_decay_vjp", "raw_phase_vjp", "initial_state_vjp"];
   const g = report.guards;
@@ -43,7 +70,7 @@ try {
   }
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
-  document.querySelector("#summary").textContent = "Passed: 10 PyTorch cases, 9 large-state analytic controls, all four VJPs, chunked BPTT, failure isolation, and 16 resident updates. State/chart primitive only: not geometric Attention, full decoder streaming, language quality, or speed.";
+  document.querySelector("#summary").textContent = "Passed: 10 PyTorch cases, 9 chart controls, 36 exact batch-cancellation cases, recoverable/invalid overflow controls, all four VJPs, chunked BPTT and 16 updates. Primitive correctness, not language quality or speed.";
   const download = document.querySelector("#download");
   download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
   download.download = "causal-zspace-wave.json";

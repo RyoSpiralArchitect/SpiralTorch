@@ -5,9 +5,10 @@ WIDE_ARITHMETIC
 @group(0) @binding(2) var<storage,read> initial:array<f32>;
 @group(0) @binding(3) var<storage,read> cotangent:array<f32>;
 @group(0) @binding(4) var<storage,read> terminal:array<f32>;
-// Do not narrow chart components before their rotation contraction in BPTT.
+// Chart adjoints followed by per-batch decay/phase partials. Keep both extended
+// until the rotation contraction and final shared-parameter reduction.
 @group(0) @binding(5) var<storage,read_write> state_gradient:array<Wide>;
-// Drive VJP, initial-state VJP, per-batch parameter partials, final parameter VJPs.
+// Drive VJP, initial-state VJP, final parameter VJPs.
 @group(0) @binding(6) var<storage,read_write> gradient:array<f32>;
 @group(0) @binding(7) var<storage,read_write> flags:array<atomic<u32>>;
 @group(0) @binding(8) var<uniform> params:Params;
@@ -70,18 +71,18 @@ fn pullback(@builtin(workgroup_id) wid:vec3<u32>, @builtin(local_invocation_inde
     }
     let start=params.values+b*params.cols+2u*p;
     gradient[start]=checked(wide_float(gx));gradient[start+1u]=checked(wide_float(gy));
-    let partial=params.values+params.state_values+2u*id;
-    gradient[partial]=checked(wide_float(gd));gradient[partial+1u]=checked(wide_float(gp));
+    let partial=params.values+2u*id;
+    state_gradient[partial]=gd;state_gradient[partial+1u]=gp;
 }
 
 @compute @workgroup_size(256)
 fn reduce_parameters(@builtin(workgroup_id) wid:vec3<u32>, @builtin(local_invocation_index) lane:u32) {
     let p=invocation(wid,lane);if (p>=params.pairs) { return; }
-    var gd=0.0;var gp=0.0;
+    var gd=parts(0.0);var gp=parts(0.0);
     for (var b=0u;b<params.batch;b++) {
-        let i=params.values+params.state_values+2u*(b*params.pairs+p);
-        gd=sum(gd,gradient[i]);gp=sum(gp,gradient[i+1u]);
+        let i=params.values+2u*(b*params.pairs+p);
+        gd=wide_add(gd,state_gradient[i]);gp=wide_add(gp,state_gradient[i+1u]);
     }
-    let base=params.values+2u*params.state_values;
-    gradient[base+p]=gd;gradient[base+params.pairs+p]=gp;
+    let base=params.values+params.state_values;
+    gradient[base+p]=checked(wide_float(gd));gradient[base+params.pairs+p]=checked(wide_float(gp));
 }

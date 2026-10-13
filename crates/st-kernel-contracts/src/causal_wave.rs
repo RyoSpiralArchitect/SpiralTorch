@@ -94,6 +94,30 @@ fn finite(v: f32) -> Result<f32, CausalWaveError> {
     v.is_finite().then_some(v).ok_or(CausalWaveError::NonFinite)
 }
 
+// Batch partials may cancel after exceeding f32, or differ by many exponents.
+// Neumaier compensation keeps the small residual until the final public store.
+#[derive(Clone, Copy, Default)]
+struct ParameterSum {
+    sum: f64,
+    correction: f64,
+}
+
+impl ParameterSum {
+    fn add(&mut self, value: f64) {
+        let sum = self.sum + value;
+        self.correction += if self.sum.abs() >= value.abs() {
+            (self.sum - sum) + value
+        } else {
+            (value - sum) + self.sum
+        };
+        self.sum = sum;
+    }
+
+    fn finish(self) -> Result<f32, CausalWaveError> {
+        finite((self.sum + self.correction) as f32)
+    }
+}
+
 fn coefficients(decay: f32, phase: f32) -> Result<[f32; 5], CausalWaveError> {
     finite(decay)?;
     finite(phase)?;
@@ -276,6 +300,8 @@ impl CausalWaveForward {
             raw_phase: vec![0.; spec.pairs()],
             initial_state: vec![0.; spec.state_len()],
         };
+        let mut decay = vec![ParameterSum::default(); spec.pairs()];
+        let mut phase = vec![ParameterSum::default(); spec.pairs()];
         for b in 0..batch {
             for (p, &[rho, cos, sin, dr, dt]) in self.coefficients.iter().enumerate() {
                 let mut gx = f64::from(terminal[b * cols + 2 * p]);
@@ -308,9 +334,13 @@ impl CausalWaveForward {
                 }
                 result.initial_state[b * cols + 2 * p] = finite(gx as f32)?;
                 result.initial_state[b * cols + 2 * p + 1] = finite(gy as f32)?;
-                result.raw_decay[p] = finite(result.raw_decay[p] + finite(gd as f32)?)?;
-                result.raw_phase[p] = finite(result.raw_phase[p] + finite(gp as f32)?)?;
+                decay[p].add(gd);
+                phase[p].add(gp);
             }
+        }
+        for p in 0..spec.pairs() {
+            result.raw_decay[p] = decay[p].finish()?;
+            result.raw_phase[p] = phase[p].finish()?;
         }
         Ok(result)
     }

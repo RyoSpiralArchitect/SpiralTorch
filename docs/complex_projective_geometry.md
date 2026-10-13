@@ -62,6 +62,11 @@ position-dependent. Both metric endpoints, head gains, shared/router parameters,
 wave recurrence and embeddings receive gradients through the same model owner.
 The router still reads shared wave coordinates, not each block's hidden states.
 
+The shared wave's [batch-gradient reduction](causal_wave_batch_gradients.md)
+retains small decay/phase signals through batch cancellation. This fixes a
+specific gradient-aggregation error; it does not close the projective
+trajectory qualification failure.
+
 An explicit [query-coordinate pullback control](query_coordinate_pullback.md)
 can stop only the router's input gradient for paired experiments or selective
 training. Ordinary backward remains fully coupled; this control does not

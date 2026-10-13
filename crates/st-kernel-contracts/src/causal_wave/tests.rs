@@ -1,5 +1,83 @@
 use super::*;
 
+#[test]
+fn batch_cancellation_preserves_small_parameter_gradients() {
+    let permutations = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+    let f = CausalWaveForward::new(
+        CausalWaveSpec::new([3, 1, 2], -1.).unwrap(),
+        &[0.; 6],
+        &[0.],
+        &[0.],
+        &[1., 0., 1., 0., 1., 0.],
+    )
+    .unwrap();
+    for large in [2f32.powi(24), 2f32.powi(48), 2f32.powi(96)] {
+        for order in permutations {
+            for channel in 0..2 {
+                let values = [large, 1., -large];
+                let mut terminal = [0.; 6];
+                for (b, i) in order.iter().enumerate() {
+                    terminal[2 * b + channel] = values[*i];
+                }
+                let g = f.backward(&[0.; 6], &terminal).unwrap();
+                let expected = if channel == 0 {
+                    MAX_DECAY * 0.25
+                } else {
+                    (f64::from(MAX_DECAY * 0.5) * f64::from(std::f32::consts::PI)) as f32
+                };
+                let actual = if channel == 0 {
+                    g.raw_decay[0]
+                } else {
+                    g.raw_phase[0]
+                };
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "large={large}, order={order:?}, channel={channel}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn finite_batch_cancellation_can_recover_overflowed_parameter_partials() {
+    for channel in 0..2 {
+        let x = if channel == 0 { 8. } else { 1. };
+        let f = CausalWaveForward::new(
+            CausalWaveSpec::new([2, 1, 2], -1.).unwrap(),
+            &[0.; 4],
+            &[0.],
+            &[0.],
+            &[x, 0., x, 0.],
+        )
+        .unwrap();
+        let mut terminal = [0.; 4];
+        terminal[channel] = f32::MAX;
+        terminal[2 + channel] = -f32::MAX;
+        let g = f.backward(&[0.; 4], &terminal).unwrap();
+        assert_eq!(g.raw_decay, vec![0.]);
+        assert_eq!(g.raw_phase, vec![0.]);
+        assert!(g
+            .drive
+            .iter()
+            .chain(&g.initial_state)
+            .all(|v| v.is_finite()));
+        terminal[2 + channel] = f32::MAX;
+        assert!(matches!(
+            f.backward(&[0.; 4], &terminal),
+            Err(CausalWaveError::NonFinite)
+        ));
+    }
+}
+
 fn near(a: &[f32], b: &[f32], tolerance: f32) {
     assert_eq!(a.len(), b.len());
     for (&x, &y) in a.iter().zip(b) {

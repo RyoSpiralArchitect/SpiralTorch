@@ -178,16 +178,10 @@ fn preflight_sizes(
         )?,
         spec.state_len(),
     )?;
-    let backward = add(
-        add(
-            spec.len(),
-            spec.state_len()
-                .checked_mul(2)
-                .ok_or(CausalWaveError::Overflow)?,
-        )?,
-        spec.shape()[2],
-    )?;
-    let adjoints = spec.len().checked_mul(4).ok_or(CausalWaveError::Overflow)?;
+    let backward = add(add(spec.len(), spec.state_len())?, spec.shape()[2])?;
+    let adjoints = add(spec.len(), spec.state_len())?
+        .checked_mul(4)
+        .ok_or(CausalWaveError::Overflow)?;
     for len in [forward, backward, adjoints] {
         storage_limit(len, limits)?;
     }
@@ -403,7 +397,7 @@ impl ResidentCausalWaveForward {
         let terminal = joined[2].contiguous_into(&mut encoder)?;
         let flags = guard(device, &joined[0], &mut encoder)?;
         let state_grad = device.allocate_output_with_guard(
-            &NdLayout::contiguous(&[spec.len() * 4])?,
+            &NdLayout::contiguous(&[(spec.len() + spec.state_len()) * 4])?,
             Some(flags.clone()),
         )?;
         let packed =
@@ -458,7 +452,7 @@ impl ResidentCausalWaveForward {
         context.queue().submit(Some(encoder.finish()));
         let family = device.guard_together(&[&packed, &seed, &terminal])?;
         let packed = &family[0];
-        let parameter_offset = spec.len() + 2 * spec.state_len();
+        let parameter_offset = spec.len() + spec.state_len();
         Ok(ResidentCausalWaveVjp {
             drive: packed.narrow(0, 0, spec.len())?.reshape(&spec.shape())?,
             initial_state: packed

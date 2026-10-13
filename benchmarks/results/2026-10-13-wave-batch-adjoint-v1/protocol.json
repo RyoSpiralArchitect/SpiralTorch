@@ -1,0 +1,50 @@
+{
+  "schema": "spiraltorch.causal_wave_batch_adjoint.protocol.v1",
+  "frozen_utc": "2026-10-13 04:52 UTC",
+  "baseline": "830494be48041a3a5368718e86ac273b2a14f0e3",
+  "objective": "Keep causal-wave decay and phase batch partials extended until their final shared-parameter reduction. Shared CPU contract and resident WGPU/WASM; no primal or parameterization changes.",
+  "analytic": {
+    "shape": [
+      3,
+      1,
+      2
+    ],
+    "parameters": {
+      "raw_decay": 0,
+      "raw_phase": 0
+    },
+    "initial": [
+      1,
+      0
+    ],
+    "drive": [
+      0,
+      0
+    ],
+    "feature_seed": [
+      0,
+      0
+    ],
+    "terminal_components": "x for decay, y for phase",
+    "magnitudes": [
+      16777216,
+      281474976710656,
+      7.922816251426434e+28
+    ],
+    "permutations": "All six permutations of [A,1,-A]",
+    "expected": "raw_decay=.99f32*.25f32; raw_phase=(.99f32*.5f32)*pi_f32, evaluated f64 and narrowed once",
+    "criterion": "bit-exact final f32 to analytic result; 36 parameter/magnitude/permutation cases"
+  },
+  "overflow": {
+    "recoverable": "Two opposite finite terminal seeds f32::MAX; phase initial x=1; decay initial x=8. Per-batch parameter partial exceeds f32 but final sum is exactly zero. All four returned VJPs must be readable/finite.",
+    "unrecoverable": "Same-sign terminal seeds must still reject the entire VJP family; pre-existing upstream/reduction guards remain."
+  },
+  "other_gates": [
+    "existing pure and native causal-wave tests",
+    "10 frozen Torch primitive cases + 9 analytic chart controls + 16-update wave learning + streaming/failure controls on native and browser",
+    "same immutable six-case projective and two-case paired-query fixtures on native/browser: thresholds unchanged and no previously passing case becomes failing; inherited failures preserved and reported, not waived",
+    "memory addressing preflight including enlarged extended scratch; no shader-f64 optional capability"
+  ],
+  "scope": "Correctness and learning-signal retention, not speed or corpus/LLM quality. Does not assume this alone resolves the previous step-12 phase trajectory gate. No full-precision guarantee for arbitrary exponent spans or all batch sizes.",
+  "publication": "Scalar results, checks, hashes and replay recipe public; large raw model outputs/weights/checkpoints/binaries remain local."
+}

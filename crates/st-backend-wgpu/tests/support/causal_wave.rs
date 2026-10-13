@@ -7,6 +7,9 @@ use st_backend_wgpu::{
 };
 use st_kernel_contracts::causal_wave::{CausalWaveForward, CausalWaveSpec};
 
+#[path = "causal_wave/batch_reduction.rs"]
+mod batch_reduction;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 fn values(v: &Value) -> Vec<f32> {
     v.as_array()
@@ -572,6 +575,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     Ok(
         json!({"schema":"spiraltorch.causal_zspace_wave.validation.v1","passed":true,"adapter":format!("{:?}",runtime.adapter_info()),
         "checks":checks,"streaming":streaming(&device,&fixture["cases"][2]).await?,"guards":guards(&device).await?,"learning":train(&device,&fixture).await?,"radial":radial_controls(&device).await?,
+        "batch_reduction":batch_reduction::run(&device).await?,
         "scope":"causal state/chart primitive correctness and parameter learning; not full decoder streaming, geometric attention or language quality"}),
     )
 }
