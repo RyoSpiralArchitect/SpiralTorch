@@ -61,9 +61,11 @@ class LearningSmokeTests(unittest.TestCase):
         self.assertEqual(report["topos"]["updates"], 24)
         self.assertLess(report["topos"]["final_loss"], report["topos"]["initial_loss"])
         self.assertEqual(report["resident_plan"]["gpu_execution"], "not attempted")
+        self.assertEqual(report["byte_decoder"], {
+            "modes": 8, "checkpoint_roundtrip": "exact", "gpu_execution": "not attempted"})
         self.assertIn("not optimizer resume", report["topos"]["handoff"])
         self.assertEqual(set(report), {"scope", "sequential", "topos", "wave_gate",
-                                       "elliptic", "fractional_history", "resident_plan"})
+                                       "elliptic", "fractional_history", "resident_plan", "byte_decoder"})
 
     def test_all_wheel_paths_execute_smoke_before_artifact_upload(self):
         for workflow in ("wheels.yml", "release_wheels.yml"):
@@ -75,6 +77,23 @@ class LearningSmokeTests(unittest.TestCase):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("python -I tools/smoke_learning_stack.py", ci)
         self.assertIn("python -I tests/test_release_learning_smoke.py", ci)
+
+    def test_homogeneous_substitute_does_not_pass_headwise_smoke(self):
+        constructor = st.nn.ByteDecoderGeometryPlan
+
+        class HomogeneousSubstitute:
+            def __init__(self, *args):
+                self.inner = constructor(*args)
+
+            def __getattr__(self, name):
+                return getattr(self.inner, name)
+
+            def with_head_pair_metrics(self, grid):
+                return self.inner.with_head_pair_metrics([[row[0]] * len(row) for row in grid])
+
+        with mock.patch.object(st.nn, "ByteDecoderGeometryPlan", HomogeneousSubstitute), \
+                self.assertRaisesRegex(AssertionError, "checkpoint schema"):
+            SMOKE.byte_decoder_portable()
 
 
 if __name__ == "__main__":

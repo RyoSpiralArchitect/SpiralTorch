@@ -11,6 +11,7 @@ Run repository commands from the repository root.
 
 - [Install](#install)
 - [Resident NN Inference](#resident-nn-inference)
+- [Geometric byte language models](byte-language-models.md)
 - [Rust-owned protocol catalog](#rust-owned-protocol-catalog)
 - [Shared FFT numerics](#shared-fft-numerics)
 - [Stable LayerNorm statistics](#stable-layernorm-statistics)

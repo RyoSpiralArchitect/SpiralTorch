@@ -1,0 +1,290 @@
+{
+  "schema": "spiraltorch.python_byte_decoder_release_candidate.validation.v1",
+  "source_base": "229d34ee6ea7907795c8c087ad76997da5c72409",
+  "source_policy": "candidate built before commit from the listed source hashes; not an official clean release artifact",
+  "version": "0.4.30",
+  "platform": {
+    "python": "3.12.6",
+    "rust": "1.97.0",
+    "target": "aarch64-apple-darwin",
+    "gpu": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    }
+  },
+  "publication": {
+    "published": false,
+    "tag_created": false,
+    "official_all_platform_wheels_built": false,
+    "pypi_version_observed": "0.4.29",
+    "prerequisite_draft_pr": "https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2260",
+    "main_integration_conflicts": [
+      "tools/byte_corpus_study.py",
+      "tools/test_byte_corpus_study.py"
+    ]
+  },
+  "builds": {
+    "wgpu_release_wheel": {
+      "exit": 0,
+      "sha256": "bd2f118daa70e60372dabdf9fd3cc2543b2e7749519f82b86f5067f6ec287b57",
+      "log": "wheel-build-final.log"
+    },
+    "cpu_only_cargo_check": {
+      "exit": 0,
+      "features": "--no-default-features --features python-default,cpu",
+      "runtime_tested": false,
+      "log": "cargo-check-cpu.log"
+    },
+    "license_preflight": {
+      "exit": 0,
+      "log": "license-preflight-restored.log"
+    }
+  },
+  "tests": [
+    {
+      "name": "byte_api",
+      "tests": 9,
+      "passed": 8,
+      "skipped": 1,
+      "exit": 0,
+      "log": "byte-tests-committed.log"
+    },
+    {
+      "name": "attention",
+      "tests": 6,
+      "passed": 5,
+      "skipped": 1,
+      "exit": 0,
+      "fixture_forward_vjp_cases": 30,
+      "log": "attention-regression.log"
+    },
+    {
+      "name": "residual_attention",
+      "tests": 8,
+      "passed": 7,
+      "skipped": 1,
+      "exit": 0,
+      "fixture_forward_vjp_cases": 60,
+      "log": "residual-attention-regression.log"
+    },
+    {
+      "name": "release_smoke_regression",
+      "tests": 7,
+      "passed": 7,
+      "skipped": 0,
+      "exit": 0,
+      "log": "release-smoke-final-tests.log"
+    },
+    {
+      "name": "parity_helper",
+      "tests": 6,
+      "passed": 6,
+      "skipped": 0,
+      "exit": 0,
+      "log": "parity-helper-committed-tests.log"
+    },
+    {
+      "name": "resident_exports",
+      "tests": 3,
+      "passed": 3,
+      "skipped": 0,
+      "exit": 0,
+      "log": "export-final-tests.log"
+    },
+    {
+      "name": "source_compatibility",
+      "tests": 3,
+      "passed": 3,
+      "skipped": 0,
+      "exit": 0,
+      "log": "compatibility-final-tests.log",
+      "scope": "source alias simulation, not an actual Python 3.8/3.9 interpreter"
+    }
+  ],
+  "skip_reason": "Three CPU-only artifact runtime gates were skipped on the WGPU wheel. CPU-only compilation passed; runtime lane remains untested here.",
+  "parity": {
+    "exit": 0,
+    "cases": 6,
+    "learning_updates": 96,
+    "resumed_updates": 54,
+    "geometry_step_vjps": 720,
+    "maximum_geometry_relative_l2": 0.0018354366643319622,
+    "fixed_geometry_relative_gate": 0.002,
+    "native_wasm_scope": "retained v2 reference reports revalidated, not new native/WASM runs in this increment",
+    "log": "parity-committed-source.log"
+  },
+  "packaged_example": {
+    "exit": 0,
+    "identity": {
+      "packaged_example_sha256": "1ffc206b5ce4a77d18b44170c879b8e8ecaa5d5505ab6ba0a42fe20c0463e46a",
+      "wheel_sha256": "bd2f118daa70e60372dabdf9fd3cc2543b2e7749519f82b86f5067f6ec287b57"
+    },
+    "result": {
+      "mode": "query_mixture",
+      "losses": [
+        5.574339866638184,
+        5.552905082702637,
+        5.531613349914551,
+        5.510336875915527,
+        5.489012718200684,
+        5.4676055908203125,
+        5.446127891540527,
+        5.424587249755859,
+        5.402918815612793,
+        5.381095886230469,
+        5.358952522277832,
+        5.336662292480469,
+        5.313996315002441,
+        5.2909393310546875,
+        5.267437934875488,
+        5.243394374847412
+      ],
+      "attempted_revision": 16,
+      "resume_prediction_exact": true,
+      "scope": "tiny repeated-window mechanics, not language quality"
+    },
+    "source_comparison": {
+      "source_sha256": "76cecc8fe636f354f9dcc2e18ab36987d0f8e49084381c07cba11e4970f8701c",
+      "packaged_sha256": "1ffc206b5ce4a77d18b44170c879b8e8ecaa5d5505ab6ba0a42fe20c0463e46a",
+      "difference": "trailing newline normalization only",
+      "runtime_statements_identical": true
+    }
+  },
+  "portable_learning_smoke": {
+    "exit": 0,
+    "result": {
+      "byte_decoder": {
+        "checkpoint_roundtrip": "exact",
+        "gpu_execution": "not attempted",
+        "modes": 8
+      },
+      "elliptic": "orientation VJP checked; capture survives recipe change",
+      "fractional_history": "causal input/order/gain VJPs checked; f32 buffer transport owned",
+      "resident_plan": {
+        "gpu_execution": "not attempted",
+        "schema": "spiraltorch.nn.inference_plan.v5"
+      },
+      "scope": "installed native mechanics; no GPU, pretrained FT, quality, or speed claim",
+      "sequential": "actual dropout mask retained; untracked capture rejected",
+      "topos": {
+        "final_loss": 0.0015976778231561184,
+        "handoff": "weights only; exact prediction, not optimizer resume",
+        "initial_loss": 0.0478462278842926,
+        "updates": 24
+      },
+      "wave_gate": "input/gate/bias VJPs checked; captured values owned"
+    }
+  },
+  "retained_attempts": [
+    {
+      "logs": [
+        "byte-tests.log",
+        "learning-smoke.log"
+      ],
+      "exit": 1,
+      "reason": "example wave decay/phase length and smoke projection width were wrong; Rust shape guards correctly rejected them; example/smoke configuration fixed, Rust semantics unchanged"
+    },
+    {
+      "log": "license-preflight.log",
+      "exit": 1,
+      "reason": "storage-pruned historical manifests absent; six small tracked metadata files restored byte-identically, no broad restoration"
+    },
+    {
+      "log": "parity.log",
+      "exit": 1,
+      "cases_passed": 3,
+      "cases_total": 6,
+      "reason": "verifier treated flat bias VJPs as per-block dictionaries; public first-parity-attempt.json retains all six outcomes"
+    },
+    {
+      "log": "parity-r2.log",
+      "exit": 0,
+      "cases_passed": 6,
+      "cases_total": 6,
+      "reason": "corrected verifier plus split7 resume and wheel identity passed; final rerun additionally records adapter identity and candidate package name"
+    }
+  ],
+  "independent_review": {
+    "source_only": true,
+    "initial_findings": 4,
+    "addressed": 4,
+    "followup_actionable_findings": 0,
+    "scope": "Python binding increment only, not the entire preceding research stack"
+  },
+  "raw_sha256": {
+    "attention-regression.log": "1902bf36084a59499f80ef9152cd7219e86a94c1249b95722c57ef5b8f6e163a",
+    "branch.log": "d5533d4fe112d86a24ac231e5755f3efa77f4671fe2317d8825494f8ae61e737",
+    "byte-tests-committed.log": "12aca4acc684e5f14f4a7017c7d13ec70f0ca3cf20ecfc4118c28c524522db55",
+    "byte-tests-final.log": "d0fe0fc8eca8acfdfddfd4208e620d33440f70cf8acef1d6094c7d9dcc3cac74",
+    "byte-tests-r2.log": "79a447c7ce1b9cbe12e51ca7b4b8210c6dcda91ce580786cebdd4c43a959420a",
+    "byte-tests.log": "fe80112474dea394153edf5c5e4a6c98478e053573afb5595ab14f2502c2c252",
+    "cargo-check-cpu.log": "8885543433e0479b0fc3da56a8db900d6d50a8829690e1090d5486720845aa19",
+    "cargo-check.log": "fbbeb7d3b091f777cbd894e2dd5b1e29d28d27930c91e296e6e6cef3a4e7c6f3",
+    "compatibility-final-tests.log": "dea42379ed6275a8425a2cb764ad4461df29569c55ace4b945575f3f5306658d",
+    "compatibility-tests.log": "df1d3738c46cd5f42a3a7c0e2819178df97ca1691e18cd88a879065cbf270148",
+    "export-final-tests.log": "229397ab590b54b6e8226bf9ab1676527649b258eb3900c855adf835a102260e",
+    "export-tests.log": "2e7f0a994da64db1d404850cc5de84789f58db7ec1098f744b5cfcde0620b123",
+    "import.log": "9819303bd2319b3c7e9e60bf714a10d628c3b25e4374502b7d4946458a0ed3f5",
+    "install-final.log": "6b83bade7ee969bc982b983edf8d0da322b0ab75f28192bd96039623b3b1e2f0",
+    "install.log": "f281f0da0cc6840965c43e48e68f5bd676d8ef585600029a73fa815b9b1fa141",
+    "learning-smoke-final.log": "5cf595bc842a25afd1d0998915b359eeba2eb5e8a65eb00ca523426f114e89e1",
+    "learning-smoke-r2.log": "5cf595bc842a25afd1d0998915b359eeba2eb5e8a65eb00ca523426f114e89e1",
+    "learning-smoke.log": "8371c148551dd0bc98e0a174558124bc7872a734cc01c479621adee061ed12ec",
+    "license-preflight-restored.log": "7e3bafca86ae060ba136f6496ea7995b3451956c05c2ea87f379e4e97d7e2ab1",
+    "license-preflight.log": "2b15e0a32febf18f9f4b3609d8e30e9520176efb7593c3734bb269b61cfbfd78",
+    "packaged-example.log": "f602cba1bbc2e21ee3d6083e3800079a4471a044aaca09edee12328301bccaa6",
+    "packaged-source-equivalence.log": "72a079a25a02f7fd41958a8949037dbf772ee30780d99e3bc64e72181389c76e",
+    "parity-committed-source.json": "938f4f6be5936e566155bfdfeeefe6230af6588d44e68fd2f4f5810e6cefc71c",
+    "parity-committed-source.log": "ecdac8d887ebd3d2636d1b58fab8e5ebb448ed3ba8415372d2075d088b074de0",
+    "parity-error.log": "d5a39843687b7bb045666908d73c1bf3801210cf111665a3815a81b1e1d5f2be",
+    "parity-final.json": "3c00b4da98df4d1753199012a7f686ac155ba7193986d9a18076f3f90c145795",
+    "parity-final.log": "ecdac8d887ebd3d2636d1b58fab8e5ebb448ed3ba8415372d2075d088b074de0",
+    "parity-helper-committed-tests.log": "97af4ba1c9118480043d3c798ae54eb8743f942ff8552b33ab14e328feedc76a",
+    "parity-helper-final-tests.log": "dea2e8ebe9d7b9aca927a8e0eef8b6ee00e487b9e538b0bd875c370aae1f6de9",
+    "parity-helper-tests.log": "43bf095a5a67b2c3e58f5b4bf3ecd82cafa017974dd8ac0640e156ed075cd891",
+    "parity-r2.json": "87bdf13aa1930fad9b234439096338a04a6ba73ca1a3757abbdc7f606a4f24fd",
+    "parity-r2.log": "ecdac8d887ebd3d2636d1b58fab8e5ebb448ed3ba8415372d2075d088b074de0",
+    "parity.json": "596e2607d5ef8939fca58954308f60a0e2f094669c401c1270b92744ee4488ca",
+    "parity.log": "f2cde006b81e964e634b07ce0765fad9839ba220e9793e2baabd446b472402a2",
+    "release-readiness.log": "4478abd27fdcbc8aae47680b48d04ee3ff51203121b47c385358bcadbb49e2d4",
+    "release-smoke-final-tests.log": "a0bc90f51fad83b958fa2b0468639dd0b23f1daa1a3ed2c66e18c2146cb7f441",
+    "release-smoke-tests.log": "5b6dc05e37afd9b11e73f430ddf4909a60905fc2ea486b9db8f1d2048dc90e43",
+    "residual-attention-regression.log": "24279bc970c448c8dd9fb00df9d87d7c3681e0bedd2999757873008c716e0666",
+    "rustfmt.log": "f8f8b06436c15bebaaad76ddb3111e5ab085302f42707e693d55a3b269c05c77",
+    "wheel-build-final.log": "11beeeca3c9ca4f1a254e2e626be7b88e75e7c397bfa805dedf123135e759cfa",
+    "wheel-build.log": "8e201891765e0ea599ea1a88e4343cf718415c51a86ca93c5b01685cb8c1dbc9"
+  },
+  "source_sha256": {
+    "Cargo.lock": "77ac93aba2ebf606b1acd2de19def000702c3e561f8102972737eb2c2d17ad40",
+    "README.md": "a57fe856726abe132f718939094e25ad7634ee2b6f02794c9d9959d7002e4d8e",
+    "bindings/st-py/CHANGELOG.md": "3cb3878eef0fcee7e1e68ec2937ccdebeae31ab9a1bc830597a9b286522d6092",
+    "bindings/st-py/Cargo.toml": "e03e68b8a65215a8850dcb446c3679b908b61dfd2e4cc684601c04b7a2194b99",
+    "bindings/st-py/README.md": "262f5ec37a9ea0c62830c44739df4aae770f37cadd290648439dbbd5a2668526",
+    "bindings/st-py/pyproject.toml": "10fe68770f977b7331f0185d1f72a550e158936c7c0d9d6962593e542784bc7f",
+    "bindings/st-py/spiraltorch/__init__.pyi": "55225d3fc32841ca87804aba768d0861fd8af038b7e4b80193a31cb64a11865e",
+    "bindings/st-py/src/nn.rs": "3632dce15c670170e0a03c0c98dabd1e6ab06c44607bebc796700690815b19fb",
+    "bindings/st-py/src/nn_resident.rs": "befa5a7d5a3f40f2d378eee6f34ff19963608ae029bf2b081042810ed181ce56",
+    "bindings/st-py/src/nn_resident/loss.rs": "de7aed169788324972e6ad69f84880eacbaa58619477bd5d4d9e0b652b8f8321",
+    "bindings/st-py/src/nn_resident/residual_attention.rs": "9055ae6a17c82c0c05f2a4806fd09963d9a7c68293381a5483c09d53434c21a2",
+    "docs/ops/release.md": "2ea0a2af42771d27c4a674124f27ba332136fc5bd43a4b81652cd3edd6d5d39e",
+    "docs/python/capabilities.md": "7420b1e43e094ba8c428b2586678e5d24094306a8d50f11212153f44602cb110",
+    "tests/test_release_learning_smoke.py": "83ef98436069969f09bec1be93bceb2f03ddfef9a2784fd3ff7de07c30ea3522",
+    "tools/smoke_learning_stack.py": "ef83bce3090531d679deb9e69893ffb7132f4fa2614868b61735bdeaae8f57a9",
+    "bindings/st-py/examples/resident_byte_geometry_lm.py": "76cecc8fe636f354f9dcc2e18ab36987d0f8e49084381c07cba11e4970f8701c",
+    "bindings/st-py/src/nn_resident/byte_decoder.rs": "41ab8996a2893cce69edcd103d4db497bf6e94515f8a29e943e88212b055bb07",
+    "bindings/st-py/src/nn_resident/byte_decoder/training.rs": "8d4556ccf82acfe9162473f571d4149afba7c75e166a3a0a6d6857cbcbee0c93",
+    "bindings/st-py/tests/test_nn_byte_decoder.py": "2f2b947a1ec10f1419ac0fcc2d8aa1585bd8de861d6ff6c7feab66472b66f5b7",
+    "docs/python/byte-language-models.md": "7879571907795ed2c1f5c56a5cfc92ef18e5fa4adae4fa8a15a19d64c2d3b727",
+    "tests/test_python_byte_decoder_validation.py": "4076bbeb33689f13603d7413a9dd1ab24416fbb563dbf73d89af3481c3b09d1a",
+    "tools/validate_python_byte_decoder.py": "a3e97e7d8f88a0b2bfb78302a82c9bddeccfc761332c952d2dfba307e1ec2a2c"
+  },
+  "limits": [
+    "No CPU-only wheel execution",
+    "No Python 3.8/3.9 runtime execution",
+    "No fresh Linux/Windows/universal2 wheel qualification",
+    "No new native/WASM benchmark run",
+    "No held-out language quality or backend speed claim",
+    "Predecessor integration and current CI still required before release"
+  ]
+}
