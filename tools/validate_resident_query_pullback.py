@@ -53,8 +53,8 @@ def relative(a, b):
     return result
 
 
-def validate_runtime(report, fixture, stopped):
-    require(report["schema"] == "spiraltorch.resident_byte_query_pullback.validation.v1",
+def validate_runtime(report, fixture, stopped, *, schema="spiraltorch.resident_byte_query_pullback.validation.v1"):
+    require(report["schema"] == schema,
             "unexpected paired schema")
     require(len(report["checks"]) == 2 and len(stopped["cases"]) == 2,
             "missing paired cases")

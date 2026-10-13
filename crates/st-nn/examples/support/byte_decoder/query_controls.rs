@@ -45,6 +45,14 @@ fn update_relative(
 }
 
 pub(super) fn check(case: &Value, report: &Value) -> Result<Value> {
+    check_impl(case, report, None)
+}
+
+pub(super) fn check_paired(case: &Value, report: &Value, paired: &Value) -> Result<Value> {
+    check_impl(case, report, Some(paired))
+}
+
+fn check_impl(case: &Value, report: &Value, paired: Option<&Value>) -> Result<Value> {
     let zero = case["query_controls"]["zero_init"]
         .as_bool()
         .ok_or("missing initialization")?;
@@ -64,7 +72,24 @@ pub(super) fn check(case: &Value, report: &Value) -> Result<Value> {
         }
         let detached = data(&case["query_controls"]["router_detached_embedding_gradient"]);
         let reference = difference(&data(&case["embedding_output_gradient"]), &detached);
-        let delta = difference(&data(&report["embedding_output_gradient"]), &detached);
+        let delta = if let Some(paired) = paired {
+            if paired["name"] != case["name"]
+                || paired["passed"] != true
+                || paired["negative_controls_rejected"] != 2
+                || !same_bits(
+                    &data(&paired["full_embedding_gradient"]),
+                    &data(&report["embedding_output_gradient"]),
+                )
+            {
+                return Err("paired query does not describe the observed model forward".into());
+            }
+            difference(
+                &data(&paired["full_embedding_gradient"]),
+                &data(&paired["stopped_embedding_gradient"]),
+            )
+        } else {
+            difference(&data(&report["embedding_output_gradient"]), &detached)
+        };
         let relative = geometry_controls::relative_gradient(&delta, &reference)?;
         if geometry_controls::relative_gradient(&vec![0.; reference.len()], &reference).is_ok() {
             return Err("detached-router control was not rejected".into());

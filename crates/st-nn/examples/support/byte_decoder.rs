@@ -48,6 +48,10 @@ pub async fn run_projective(runtime: WgpuRuntime, fixture: &str) -> Result<Value
     projective_controls::run(runtime, fixture).await
 }
 
+pub async fn run_module_projective(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    projective_controls::run_module(runtime, fixture).await
+}
+
 pub async fn run_parameter_rates(runtime: WgpuRuntime) -> Result<Value> {
     parameter_rate_controls::run(runtime).await
 }
@@ -379,7 +383,7 @@ fn mixture_snapshots(
     Ok(values)
 }
 
-async fn causal_checks(runtime: &WgpuRuntime, case: &Value) -> Result<Value> {
+async fn causal_checks(runtime: &WgpuRuntime, case: &Value, record_values: bool) -> Result<Value> {
     let steps = 4;
     let windows = vec![vec![1, 2, 3, 4, 5], vec![10, 11, 12, 13, 14]];
     let p = plan(case, steps)?;
@@ -448,10 +452,17 @@ async fn causal_checks(runtime: &WgpuRuntime, case: &Value) -> Result<Value> {
             return Err("future embedding output has a prefix cotangent".into());
         }
     }
-    Ok(
-        json!({"prefix_max_abs_error": prefix_error, "other_document_max_abs_error": row_error,
-        "extension_max_abs_error": extension_error, "suffix_gradient_zero": true, "sensitivity_control": true}),
-    )
+    let mut report = json!({"prefix_max_abs_error": prefix_error, "other_document_max_abs_error": row_error,
+        "extension_max_abs_error": extension_error, "suffix_gradient_zero": true, "sensitivity_control": true});
+    if record_values {
+        // Local raw witnesses permit independent tolerance checks; the public
+        // publisher emits only scalar errors, not these activation arrays.
+        report["numeric_witnesses"] = json!({
+            "prefix":{"actual":&after[..2*256],"expected":&baseline[..2*256]},
+            "other_document":{"actual":&after[steps*256..],"expected":&baseline[steps*256..]},
+            "extension":{"actual":prefix,"expected":expected}});
+    }
+    Ok(report)
 }
 
 async fn tape_checks(runtime: &WgpuRuntime, case: &Value) -> Result<Value> {
@@ -783,7 +794,7 @@ async fn run_cases(
     raw: bool,
     capture_initial: bool,
 ) -> Result<Value> {
-    run_cases_observed(runtime, cases, counts, raw, capture_initial, false).await
+    run_cases_observed(runtime, cases, counts, raw, capture_initial, false, false).await
 }
 
 fn observed_close(
@@ -848,6 +859,7 @@ async fn run_cases_observed(
     raw: bool,
     capture_initial: bool,
     retain_learning_failures: bool,
+    record_causal_values: bool,
 ) -> Result<Value> {
     let mut checks = Vec::new();
     for (case, &expected_count) in cases.iter().zip(counts) {
@@ -1006,7 +1018,7 @@ async fn run_cases_observed(
         if bias_errors.len() != case["bias_gradients"].as_array().unwrap().len() {
             return Err("missing geometry VJP".into());
         }
-        let causal = causal_checks(&runtime, case).await?;
+        let causal = causal_checks(&runtime, case, record_causal_values).await?;
         let tapes = tape_checks(&runtime, case).await?;
         let metric_controls = if p.parameter_layout().geometry().is_some() {
             Some(geometry_controls::run(&runtime, case, &output_values, &input_values).await?)

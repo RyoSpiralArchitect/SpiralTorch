@@ -21,7 +21,7 @@ metric = load("generate_poincare_bias_torch_fixture").metric
 flat = base.values
 
 
-def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False, calibrate_flat=False, fisher_rao=False, headwise=False, mixture=False, query_mixture=False, zero_query=False, projective=False, projective_mixture=False):
+def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False, calibrate_flat=False, fisher_rao=False, headwise=False, mixture=False, query_mixture=False, zero_query=False, projective=False, projective_mixture=False, *, module_residual=False):
     if projective_mixture:
         mixture = True
     if projective and any((freeze_geometry, flat_metric, calibrate_flat, fisher_rao, headwise, mixture, query_mixture)):
@@ -186,7 +186,7 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
                 pair = geometric if pair is None else geometric + pair
             combined.append({"z": None if z is None else flat(z), "pair": None if pair is None else flat(pair)})
             count = 13 if block["topos"] else 12
-            x = base.block_forward(x, p[offset:offset + count], config["heads"], z, pair, block["topos"])
+            x = base.block_forward(x, p[offset:offset + count], config["heads"], z, pair, block["topos"], module_residual=module_residual)
             offset += count
         h = p[offset:]
         logits = F.layer_norm(x, (width,), h[0], h[1], eps=1e-5) @ h[2] + h[3]
@@ -206,12 +206,15 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
         result["mixture_weights"] = mixture_weights()
     if query_mixture:
         routed, routed_embedding, _ = forward(detach_router=True)
-        router_detached_gradient = torch.autograd.grad(routed, routed_embedding, seed_tensor)[0]
+        stopped = torch.autograd.grad(routed, [routed_embedding, *p] if module_residual else [routed_embedding], seed_tensor)
+        router_detached_gradient = stopped[0]
         shared_output, _, _ = forward(shared=True)
         result["name"] = ("zero_query_" if zero_query else "contextual_query_") + result["name"]
         result["query_controls"] = {"zero_init": zero_query,
             "router_detached_embedding_gradient": flat(router_detached_gradient),
             "shared_output": flat(shared_output)}
+        if module_residual:
+            result["query_controls"]["router_detached_parameter_gradients"] = [flat(g) for g in stopped[1:]]
     off, _, _ = forward(enabled=False)
     detached, detached_embedding, _ = forward(detach=True)
     detached_gradient = torch.autograd.grad(detached, detached_embedding, seed_tensor)[0]

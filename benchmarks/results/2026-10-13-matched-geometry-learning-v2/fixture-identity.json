@@ -1,0 +1,12 @@
+{
+  "schema": "spiraltorch.module_projective_fixture_identity.v2",
+  "fixture_sha256": "6416cac7c885ae75cd831c5cbed0701595d1ffeaf685e01f6be44a6de93391a7",
+  "legacy_fixture_sha256": "07b87441cd15ff7d2478cf87dd460c21d58b1118ee78509992ae231014795358",
+  "execution_contract": {
+    "residual": "projection_bias_before_residual.v1",
+    "router_coordinate_vjp": "same_runtime_full_minus_stop.v1"
+  },
+  "legacy_initial_state_exact": true,
+  "cases": 6,
+  "updates": 16
+}

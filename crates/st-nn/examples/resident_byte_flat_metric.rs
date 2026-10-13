@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
     let mut args = std::env::args_os().skip(1);
     let path = args.next().ok_or(
-        "usage: resident_byte_flat_metric <local-torch-fixture.json> [--calibrate|--fisher-rao|--headwise|--mixture|--query-mixture|--projective|--query-pullback]",
+        "usage: resident_byte_flat_metric <local-torch-fixture.json> [--calibrate|--fisher-rao|--headwise|--mixture|--query-mixture|--projective|--query-pullback|--module-projective]",
     )?;
     let mode = match args.next() {
         None => 0,
@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(flag) if flag == "--query-mixture" => 5,
         Some(flag) if flag == "--projective" => 6,
         Some(flag) if flag == "--query-pullback" => 7,
+        Some(flag) if flag == "--module-projective" => 8,
         _ => return Err("unknown mode".into()),
     };
     if args.next().is_some() {
@@ -51,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         5 => pollster::block_on(support::run_query_mixture(runtime, &input))?,
         6 => pollster::block_on(support::run_projective(runtime, &input))?,
         7 => pollster::block_on(support::run_query_pullback(runtime, &input))?,
+        8 => pollster::block_on(support::run_module_projective(runtime, &input))?,
         _ => pollster::block_on(support::run_flat_metric(runtime, &input))?,
     };
     println!("{report}");

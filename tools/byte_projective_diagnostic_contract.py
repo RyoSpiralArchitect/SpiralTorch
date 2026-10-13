@@ -29,8 +29,8 @@ def vectors(values, lengths, label):
         vector(value, length, f"{label}[{slot}]")
 
 
-def validate_report(fixture, report):
-    require(report.get("schema") == REPORT_SCHEMA, "unexpected runtime report schema")
+def validate_report(fixture, report, *, schema=REPORT_SCHEMA):
+    require(report.get("schema") == schema, "unexpected runtime report schema")
     cases, checks = fixture["cases"], report.get("checks")
     require(isinstance(checks, list) and len(checks) == len(cases), "wrong runtime case count")
     for case, actual in zip(cases, checks, strict=True):
