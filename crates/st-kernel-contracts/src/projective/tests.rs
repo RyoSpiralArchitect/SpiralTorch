@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn dynamic_range_wedge_retains_primitive_product_residual() {
+    let l = 2f32.powi(30);
+    let spec = ProjectiveBiasSpec::new([1, 2, 4], 1).unwrap();
+    let f =
+        ProjectiveBiasForward::new(spec, &[l, 1., l, 2., l, 2., l, 3.], &[2f32.powi(120)]).unwrap();
+    // Anchor differences contribute 2; the complex wedge contributes 1.
+    assert_eq!(f.scores()[2], -0.75);
+    assert_eq!(
+        f.backward(&[0., 0., 1., 0.]).unwrap().raw_gain[0],
+        -0.75 * 2f32.powi(-120)
+    );
+}
+
+#[test]
 fn base_difference_retains_low_endpoint_before_wedge_cancellation() {
     let e = 2f32.powi(-121);
     let l = 2f32.powi(122);

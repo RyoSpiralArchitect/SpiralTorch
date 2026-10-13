@@ -6,7 +6,8 @@ struct Params {
     groups:u32, coordinates_offset:u32, gain_offset:u32, seed_offset:u32,
     curvature_magnitude:f32, distance_scale:f32, metric_kind:u32, root_gradient_offset:u32,
 };
-@group(0) @binding(0) var<storage,read> coordinates:array<f32>;
+// Ordinary f32 coordinates, or private packed Wide simplex roots.
+@group(0) @binding(0) var<storage,read> coordinates:array<u32>;
 @group(0) @binding(1) var<storage,read> raw_gain:array<f32>;
 // Four extended values per pair: squared distance, base and two radial factors.
 @group(0) @binding(2) var<storage,read_write> cache:array<Wide>;
@@ -28,7 +29,12 @@ fn invocation(w:vec3<u32>,lane:u32)->u32 {
     return group*256u+lane;
 }
 fn coordinate(row:u32,col:u32)->Wide {
-    return parts(checked(coordinates[p.coordinates_offset+row*p.cols+col]));
+    if (p.metric_kind==2u) {
+        let offset=p.coordinates_offset+4u*(row*p.cols+col);
+        return Wide(bitcast<f32>(coordinates[offset]),bitcast<f32>(coordinates[offset+1u]),
+            bitcast<i32>(coordinates[offset+2u]),bitcast<f32>(coordinates[offset+3u]));
+    }
+    return parts(checked(bitcast<f32>(coordinates[p.coordinates_offset+row*p.cols+col])));
 }
 struct ComplexWide { re:Wide, im:Wide };
 fn complex_coordinate(row:u32,col:u32)->ComplexWide {
@@ -48,7 +54,12 @@ fn complex_mul(a:ComplexWide,b:ComplexWide)->ComplexWide {
         wide_add(wide_mul(a.re,b.im),wide_mul(a.im,b.re)));
 }
 fn complex_wedge(xi:ComplexWide,yj:ComplexWide,xj:ComplexWide,yi:ComplexWide)->ComplexWide {
-    return complex_sub(complex_mul(xi,yj),complex_mul(xj,yi));
+    var re=wide_sum_zero();var im=wide_sum_zero();
+    re=wide_sum_add(re,wide_mul(xi.re,yj.re));re=wide_sum_add(re,wide_neg(wide_mul(xi.im,yj.im)));
+    re=wide_sum_add(re,wide_neg(wide_mul(xj.re,yi.re)));re=wide_sum_add(re,wide_mul(xj.im,yi.im));
+    im=wide_sum_add(im,wide_mul(xi.re,yj.im));im=wide_sum_add(im,wide_mul(xi.im,yj.re));
+    im=wide_sum_add(im,wide_neg(wide_mul(xj.re,yi.im)));im=wide_sum_add(im,wide_neg(wide_mul(xj.im,yi.re)));
+    return ComplexWide(wide_sum_value(re),wide_sum_value(im));
 }
 struct ProjectiveSum { value:Wide, correction:Wide };
 struct ProjectiveComplexSum { re:ProjectiveSum, im:ProjectiveSum };
@@ -269,13 +280,21 @@ fn root_gradient(id:u32)->Wide {
 @compute @workgroup_size(256)
 fn fisher_logits_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
     let row=invocation(w,lane);if(row>=p.batch*p.steps) {return;}
-    var dot=parts(0.0);
+    var pivot=0u;
+    for(var i=1u;i<p.cols;i++) {
+        if(wide_sub(coordinate(row,i),coordinate(row,pivot)).hi>0.0) {pivot=i;}
+    }
+    let rp=coordinate(row,pivot);let gp=root_gradient(row*p.cols+pivot);
+    var dot=wide_sum_zero();
     for(var i=0u;i<p.cols;i++) {
-        dot=wide_add(dot,wide_mul(coordinate(row,i),root_gradient(row*p.cols+i)));
+        let r=coordinate(row,i);let g=root_gradient(row*p.cols+i);
+        let residual=wide_div(wide_difference_of_products(g,rp,gp,r),rp);
+        dot=wide_sum_add(dot,wide_mul(r,residual));
     }
     for(var i=0u;i<p.cols;i++) {
         let r=coordinate(row,i);let g=root_gradient(row*p.cols+i);
-        let dz=wide_mul(parts(0.5),wide_mul(r,wide_sub(g,wide_mul(r,dot))));
+        let residual=wide_div(wide_difference_of_products(g,rp,gp,r),rp);
+        let dz=wide_mul(parts(0.5),wide_mul(r,wide_sub(residual,wide_mul(r,wide_sum_value(dot)))));
         output[row*p.cols+i]=bitcast<u32>(checked(wide_float(dz)));
     }
 }

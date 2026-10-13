@@ -7,7 +7,7 @@
 //! homogeneous anchor makes the zero chart regular. Both endpoints and
 //! softplus head gains participate in the pullback.
 
-use crate::pair_bias::softplus_gain;
+use crate::{compensated::Sum, pair_bias::softplus_gain};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -28,9 +28,16 @@ fn mul(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]
 }
 fn wedge(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> [f64; 2] {
-    let ab = mul(a, b);
-    let cd = mul(c, d);
-    [ab[0] - cd[0], ab[1] - cd[1]]
+    // Compensate primitive products, not already-rounded complex products.
+    let mut re = Sum::default();
+    let mut im = Sum::default();
+    for (x, y) in [(a[0], b[0]), (-a[1], b[1]), (-c[0], d[0]), (c[1], d[1])] {
+        re.product(x, y);
+    }
+    for (x, y) in [(a[0], b[1]), (a[1], b[0]), (-c[0], d[1]), (-c[1], d[0])] {
+        im.product(x, y);
+    }
+    [re.total(), im.total()]
 }
 fn pair(row: &[f64], i: usize) -> [f64; 2] {
     [row[i], row[i + 1]]
@@ -134,26 +141,6 @@ fn chart_pair(x: &[f64], y: &[f64]) -> (f64, f64, f64) {
         }
     }
     (n / (a * b), a, b)
-}
-
-#[derive(Clone, Copy, Default)]
-struct Sum {
-    value: f64,
-    correction: f64,
-}
-impl Sum {
-    fn add(&mut self, x: f64) {
-        let total = self.value + x;
-        self.correction += if self.value.abs() >= x.abs() {
-            (self.value - total) + x
-        } else {
-            (x - total) + self.value
-        };
-        self.value = total;
-    }
-    fn total(self) -> f64 {
-        self.value + self.correction
-    }
 }
 
 fn chart_derivative(x: &[f64], y: &[f64], a: f64, b: f64, out: &mut [f64], seed: f64) {

@@ -93,12 +93,17 @@ pub(super) fn roots(input: &ResidentTensor) -> Result<ResidentTensor, TensorErro
     {
         return Err(TensorError::Limit("Fisher simplex bindings"));
     }
-    storage_limit(input.layout.len(), &limits)?;
+    let packed_len = input
+        .layout
+        .len()
+        .checked_mul(4)
+        .ok_or(FisherRaoError::Overflow)?;
+    storage_limit(packed_len, &limits)?;
     let mut encoder = context.device().create_command_encoder(&Default::default());
     let values = input.contiguous_into(&mut encoder)?;
     let guard = flags(device, input, &mut encoder)?;
-    let output = device
-        .allocate_output_with_guard(&NdLayout::contiguous(input.layout.shape())?, Some(guard))?;
+    let output =
+        device.allocate_output_with_guard(&NdLayout::contiguous(&[packed_len])?, Some(guard))?;
     let p = ChartParams {
         rows: (batch * time) as u32,
         cols: cols as u32,

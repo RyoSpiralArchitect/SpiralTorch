@@ -320,3 +320,20 @@ fn mixture_centering_precedes_position_and_batch_reduction() {
         assert_eq!(read(gradient.logits()), [-0.25, 0.25]);
     }
 }
+
+#[test]
+fn dynamic_range_router_reduction_keeps_cancelled_residual() {
+    let Some(d) = device() else { return };
+    let logits = d.upload(&[1, 2], &[0., 0.]).unwrap();
+    for large in [2f32.powi(60), 2f32.powi(124)] {
+        let f = d
+            .upload(&[1, 1, 3, 2], &[0., 2., 0., 2., 0., 2.])
+            .unwrap()
+            .headwise_mixture(&logits)
+            .unwrap();
+        let g = f
+            .backward(&d.upload(&[1, 1, 3], &[large, 1., -large]).unwrap())
+            .unwrap();
+        assert_eq!(read(g.logits()), [-0.5, 0.5], "large={large}");
+    }
+}

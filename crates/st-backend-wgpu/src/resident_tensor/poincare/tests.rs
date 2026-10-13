@@ -5,6 +5,67 @@ use st_kernel_contracts::poincare::PoincareBiasForward;
 use st_kernel_contracts::projective::{ProjectiveBiasForward, ProjectiveBiasSpec};
 
 #[test]
+fn dynamic_range_projective_wedge_retains_primitive_product_residual() {
+    let Some(d) = device() else { return };
+    for power in [30, 62] {
+        let l = 2f32.powi(power);
+        let f = d
+            .upload(&[1, 2, 4], &[l, 1., l, 2., l, 2., l, 3.])
+            .unwrap()
+            .causal_projective_bias(&d.upload(&[1], &[2f32.powi(120)]).unwrap())
+            .unwrap();
+        assert_eq!(
+            read(f.scores())[2],
+            (-0.75 * 2f64.powi(120 - 4 * power)) as f32
+        );
+    }
+}
+
+#[test]
+fn dynamic_range_fisher_roots_keep_recoverable_logit_gradients() {
+    let Some(d) = device() else { return };
+    let shape = [1, 2, 2];
+    for gap in [180f32, 240., 400.] {
+        let x = [0., -gap, -gap, 0.];
+        let raw = [1e30];
+        let seed = [0., 0., 1e30, 0.];
+        let cpu = FisherRaoBiasForward::new(FisherRaoBiasSpec::new(shape, 1).unwrap(), &x, &raw)
+            .unwrap()
+            .backward(&seed)
+            .unwrap();
+        let expected = (2.
+            * std::f64::consts::PI
+            * f64::from(raw[0])
+            * f64::from(seed[2])
+            * (-0.5 * f64::from(gap)).exp()) as f32;
+        let f = d
+            .upload(&shape, &x)
+            .unwrap()
+            .causal_fisher_rao_bias(&d.upload(&[1], &raw).unwrap())
+            .unwrap();
+        let g = f
+            .backward(&d.upload(&[1, 1, 2, 2], &seed).unwrap())
+            .unwrap();
+        for (i, actual) in read(g.coordinates()).into_iter().enumerate() {
+            let want = if i == 0 || i == 3 {
+                -expected
+            } else {
+                expected
+            };
+            assert!(
+                (cpu.coordinates[i] - want).abs() <= 2e-5 * expected,
+                "CPU {i}: {} != {want}",
+                cpu.coordinates[i]
+            );
+            assert!(
+                (actual - want).abs() <= 2e-5 * expected,
+                "GPU gap={gap}, {i}: {actual} != {want}"
+            );
+        }
+    }
+}
+
+#[test]
 fn projective_base_subtraction_preserves_recoverable_low_endpoint() {
     let Some(device) = device() else { return };
     let e = 2f32.powi(-121);

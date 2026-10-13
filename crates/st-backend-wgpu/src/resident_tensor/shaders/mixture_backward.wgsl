@@ -20,19 +20,19 @@ fn components(@builtin(workgroup_id) wid:vec3<u32>,@builtin(local_invocation_ind
 fn logits(@builtin(workgroup_id) wid:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
     let h=invocation(wid,lane); if(h>=params.heads) { return; }
     for(var k=0u;k<params.components;k++) {
-        var total=parts(0.0);
+        var total=wide_sum_zero();
         for(var b=0u;b<params.batch;b++) {
             for(var p=0u;p<params.positions;p++) {
                 let row=(b*params.heads+h)*params.positions+p;
                 let x=parts(checked(input[row*params.components+k]));
-                var centered=parts(0.0);
+                var centered=wide_sum_zero();
                 for(var j=0u;j<params.components;j++) {
                     let difference=wide_sub(x,parts(checked(input[row*params.components+j])));
-                    centered=wide_add(centered,wide_mul(parts(mass[h*params.components+j]),difference));
+                    centered=wide_sum_add(centered,wide_mul(parts(mass[h*params.components+j]),difference));
                 }
-                total=wide_add(total,wide_mul(parts(checked(seed[row])),centered));
+                total=wide_sum_add(total,wide_mul(parts(checked(seed[row])),wide_sum_value(centered)));
             }
         }
-        logits_grad[h*params.components+k]=checked(wide_float(wide_mul(parts(mass[h*params.components+k]),total)));
+        logits_grad[h*params.components+k]=checked(wide_float(wide_mul(parts(mass[h*params.components+k]),wide_sum_value(total))));
     }
 }

@@ -85,6 +85,22 @@ fn wide_add(a: Wide, b: Wide) -> Wide {
 fn wide_neg(a: Wide) -> Wide { return Wide(-a.hi, -a.lo, a.exponent, -a.tail); }
 fn wide_sub(a: Wide, b: Wide) -> Wide { return wide_add(a, wide_neg(b)); }
 
+// Retain a separate exponent for terms outside one Wide significand's range.
+// A later cancellation can make such a term the entire finite result.
+struct WideSum { value: Wide, correction: Wide };
+fn wide_sum_zero() -> WideSum { return WideSum(parts(0.0), parts(0.0)); }
+fn wide_sum_add(s: WideSum, x: Wide) -> WideSum {
+    let total = wide_add(s.value, x);
+    var a = s.value; var b = x;
+    if (a.hi < 0.0) { a = wide_neg(a); }
+    if (b.hi < 0.0) { b = wide_neg(b); }
+    var lost = parts(0.0);
+    if (wide_sub(a, b).hi >= 0.0) { lost = wide_add(wide_sub(s.value, total), x); }
+    else { lost = wide_add(wide_sub(x, total), s.value); }
+    return WideSum(total, wide_add(s.correction, lost));
+}
+fn wide_sum_value(s: WideSum) -> Wide { return wide_add(s.value, s.correction); }
+
 fn significand_product(a: f32, b: f32) -> vec2<f32> {
     // Exact 24 x 24 significand product in base 4096. Integer arithmetic also
     // prevents fast-math contraction from deleting a floating FMA residual.

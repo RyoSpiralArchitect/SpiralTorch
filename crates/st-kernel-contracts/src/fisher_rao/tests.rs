@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn dynamic_range_simplex_edge_keeps_both_logit_gradients() {
+    let spec = FisherRaoBiasSpec::new([1, 2, 2], 1).unwrap();
+    for gap in [180f32, 240., 400.] {
+        let gain = 1e30f32;
+        let f = FisherRaoBiasForward::new(spec, &[0., -gap, -gap, 0.], &[gain]).unwrap();
+        let dx = f.backward(&[0., 0., gain, 0.]).unwrap().coordinates;
+        let expected =
+            (2. * std::f64::consts::PI * f64::from(gain).powi(2) * (-0.5 * f64::from(gap)).exp())
+                as f32;
+        for (i, actual) in dx.into_iter().enumerate() {
+            let want = if i == 0 || i == 3 {
+                -expected
+            } else {
+                expected
+            };
+            assert!(
+                (actual - want).abs() <= 2e-6 * expected,
+                "gap={gap}, {i}: {actual} != {want}"
+            );
+        }
+    }
+}
+
+#[test]
 fn distance_and_slope_cover_identity_neighbours_and_disjoint_support() {
     assert_eq!(squared_distance_from_root_chord(0.).unwrap(), (0., 4.));
     let (d, slope) = squared_distance_from_root_chord(2.).unwrap();

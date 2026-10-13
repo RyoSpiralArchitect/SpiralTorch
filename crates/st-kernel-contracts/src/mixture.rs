@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Headwise convex mixtures. The router is shared over batch/positions, not
 //! conditioned on a future token. Gradients are sums, never implicit means.
+use crate::compensated::Sum;
 use thiserror::Error;
 
 mod querywise;
@@ -144,7 +145,7 @@ impl HeadwiseMixtureForward {
         }
         let [_, heads, positions, components] = self.spec.shape;
         let mut input = vec![0.; self.spec.len];
-        let mut reduced = vec![0f64; self.spec.router_len()];
+        let mut reduced = vec![Sum::default(); self.spec.router_len()];
         for (i, &s) in seed.iter().enumerate() {
             let h = i / positions % heads;
             let row = &self.input[i * components..(i + 1) * components];
@@ -153,18 +154,17 @@ impl HeadwiseMixtureForward {
                 input[i * components + k] = finite(s * weights[k])?;
                 // Center each position before reduction so a large common
                 // component cannot erase a later position's learning signal.
-                let centered: f64 = row
-                    .iter()
-                    .zip(weights)
-                    .map(|(&x, &w)| f64::from(w) * (f64::from(row[k]) - f64::from(x)))
-                    .sum();
-                reduced[h * components + k] += f64::from(s) * centered;
+                let mut centered = Sum::default();
+                for (&x, &w) in row.iter().zip(weights) {
+                    centered.add(f64::from(w) * (f64::from(row[k]) - f64::from(x)));
+                }
+                reduced[h * components + k].product(f64::from(s), centered.total());
             }
         }
         let logits = reduced
             .iter()
             .zip(&self.weights)
-            .map(|(&g, &w)| finite((f64::from(w) * g) as f32))
+            .map(|(&g, &w)| finite((f64::from(w) * g.total()) as f32))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(HeadwiseMixtureVjp { input, logits })
     }
@@ -173,6 +173,28 @@ impl HeadwiseMixtureForward {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dynamic_range_router_reduction_keeps_cancelled_residual() {
+        let x = [0., 2., 0., 2., 0., 2.];
+        for exponent in [24, 60, 96, 124] {
+            let seed = [2f32.powi(exponent), 1., -2f32.powi(exponent)];
+            let shared = HeadwiseMixtureForward::new(
+                HeadwiseMixtureSpec::new([1, 1, 3, 2]).unwrap(),
+                &x,
+                &[0., 0.],
+            )
+            .unwrap();
+            assert_eq!(shared.backward(&seed).unwrap().logits, [-0.5, 0.5]);
+            let query = QuerywiseMixtureForward::new(
+                QuerywiseMixtureSpec::new([1, 1, 1, 3, 2]).unwrap(),
+                &x,
+                &[0., 0.],
+            )
+            .unwrap();
+            assert_eq!(query.backward(&seed).unwrap().logits, [-0.5, 0.5]);
+        }
+    }
 
     #[test]
     fn shape_and_portable_lengths_are_checked() {
