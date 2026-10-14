@@ -103,6 +103,36 @@ fn resumed_query_bias_is_always_frozen_and_weight_policy_is_enforced() {
                 ["values"][0] = json!(0.1);
             cp.cases[i].model_json = model.to_string();
             assert_eq!(study.checked_models(&cp).is_ok(), i == 17 && slot == 0);
+            assert_eq!(
+                study.case_checkpoint(&cp, &cp.cases[0].name).is_ok(),
+                i == 17 && slot == 0
+            );
         }
     }
+}
+
+#[test]
+fn case_handoff_keeps_learned_query_and_mixture_parameters() {
+    let study = ByteCorpusStudy::from_json(prepared().to_string().as_bytes()).unwrap();
+    let mut checkpoint = saved(&study, 1);
+    let case = &mut checkpoint.cases[17];
+    let mut model: Value = serde_json::from_str(&case.model_json).unwrap();
+    model["model"]["geometry"]["mixture"]["query_projections"][0]["parameters"][0]["values"][0] =
+        json!(0.25);
+    model["model"]["geometry"]["mixture"]["raw_logits"][0][0] = json!(-0.125);
+    model["model"]["geometry"]["raw_phase"][0] = json!(-0.0);
+    case.model_json = model.to_string();
+    let before = checkpoint.to_json().unwrap();
+    for case in &checkpoint.cases {
+        let extracted = study.case_checkpoint(&checkpoint, &case.name).unwrap();
+        assert_eq!(extracted.attempted_revision(), 1);
+        assert_eq!(
+            extracted.to_json().unwrap(),
+            ByteDecoderCheckpoint::from_json(&case.model_json)
+                .unwrap()
+                .to_json()
+                .unwrap()
+        );
+    }
+    assert_eq!(checkpoint.to_json().unwrap(), before);
 }

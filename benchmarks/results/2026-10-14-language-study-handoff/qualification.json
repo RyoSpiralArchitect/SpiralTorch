@@ -1,0 +1,144 @@
+{
+  "scope": "Existing native/browser artifacts to fresh Python inference; no new updates, promotion or quality claim",
+  "version_metadata": "0.4.31",
+  "request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+  "cases": [
+    {
+      "source_client": "native",
+      "case_name": "seed11_ordinary",
+      "completed_updates": 128,
+      "checkpoint_sha256": "5ca2153464554fd7b75bf216ae027e061576bf2b7892a4582bec44ab70ad08c1",
+      "model_sha256": "2057789e9622afc86e3f345335ca556ca29cb8a0551878f8136601b18ccea3ca",
+      "logits_f32le_sha256": "4097d93983874c210c14bfb7a5cbafcde2f745f50d8df98a073ab7e2ab39978b",
+      "logits_count": 16384,
+      "heldout_first_batch_ce": 3.6505041122436523,
+      "historical_first_batch_ce": 3.650504,
+      "historical_ce_abs_difference": 1.1224365215056764E-7,
+      "historical_ce_f32_exact": true,
+      "fresh_process_exact": true,
+      "model_state_exact": true,
+      "source_unchanged": true,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      }
+    },
+    {
+      "source_client": "native",
+      "case_name": "mixture-11-0-train-query-train",
+      "completed_updates": 128,
+      "checkpoint_sha256": "5ca2153464554fd7b75bf216ae027e061576bf2b7892a4582bec44ab70ad08c1",
+      "model_sha256": "d5e25b85d88b27686638ddda331a4cab9b1df371ab628cf717fb0b418a305b70",
+      "logits_f32le_sha256": "87cfc96a374247f931bb7a9b8118106ef064f56623de88d6b32c2e6ad61a2065",
+      "logits_count": 16384,
+      "heldout_first_batch_ce": 3.648268938064575,
+      "historical_first_batch_ce": 3.648269,
+      "historical_ce_abs_difference": 6.193542478882819E-8,
+      "historical_ce_f32_exact": true,
+      "fresh_process_exact": true,
+      "model_state_exact": true,
+      "source_unchanged": true,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      }
+    },
+    {
+      "source_client": "native",
+      "case_name": "mixture-11-0-train-query-frozen",
+      "completed_updates": 128,
+      "checkpoint_sha256": "5ca2153464554fd7b75bf216ae027e061576bf2b7892a4582bec44ab70ad08c1",
+      "model_sha256": "eef35a527bc019d5d1b3eeb213d887e1103023c818cb1b4fbaefcc9d638c4b55",
+      "logits_f32le_sha256": "b285d80d0f4a557665041b8c693c8d338b51b7032b5a9de47a885572d424a25c",
+      "logits_count": 16384,
+      "heldout_first_batch_ce": 3.648268699645996,
+      "historical_first_batch_ce": 3.6482687,
+      "historical_ce_abs_difference": 3.54003937275138E-10,
+      "historical_ce_f32_exact": true,
+      "fresh_process_exact": true,
+      "model_state_exact": true,
+      "source_unchanged": true,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      }
+    },
+    {
+      "source_client": "browser",
+      "case_name": "seed11_ordinary",
+      "completed_updates": 128,
+      "checkpoint_sha256": "a81e625c51788f9a3c4b9f4da495ff57a7e8980a05cc63af2cef65219daf9e2c",
+      "model_sha256": "e123ae12ebfffc06d86125e8fc5fe83df8a3053aaae98a307296dcc898330972",
+      "logits_f32le_sha256": "08bd7e1b5d6b166420cb2f8d233a807f11668faa1403d3c6e976f23bfced1e27",
+      "logits_count": 16384,
+      "heldout_first_batch_ce": 3.6505041122436523,
+      "historical_first_batch_ce": 3.650504,
+      "historical_ce_abs_difference": 1.1224365215056764E-7,
+      "historical_ce_f32_exact": true,
+      "fresh_process_exact": true,
+      "model_state_exact": true,
+      "source_unchanged": true,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      }
+    },
+    {
+      "source_client": "browser",
+      "case_name": "mixture-11-0-train-query-train",
+      "completed_updates": 128,
+      "checkpoint_sha256": "a81e625c51788f9a3c4b9f4da495ff57a7e8980a05cc63af2cef65219daf9e2c",
+      "model_sha256": "c69dc04834a97b2584a91cff26a61eab5c7af0744f7ea19ff84ee6eb9f7dce8e",
+      "logits_f32le_sha256": "f9e07074afe949653c0195f7cf9f6f2dc47e5a4730442679990482355decaa62",
+      "logits_count": 16384,
+      "heldout_first_batch_ce": 3.648268699645996,
+      "historical_first_batch_ce": 3.6482687,
+      "historical_ce_abs_difference": 3.54003937275138E-10,
+      "historical_ce_f32_exact": true,
+      "fresh_process_exact": true,
+      "model_state_exact": true,
+      "source_unchanged": true,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      }
+    },
+    {
+      "source_client": "browser",
+      "case_name": "mixture-11-0-train-query-frozen",
+      "completed_updates": 128,
+      "checkpoint_sha256": "a81e625c51788f9a3c4b9f4da495ff57a7e8980a05cc63af2cef65219daf9e2c",
+      "model_sha256": "be125cfc07060610205cf5191cdccb8de2abf4c449d291baf465766391a6f4e3",
+      "logits_f32le_sha256": "55d5ab9250ac3a0fc4913008b3355d6c7f2eb75d0310d3bd3b248b1fbf9cf5c0",
+      "logits_count": 16384,
+      "heldout_first_batch_ce": 3.648268699645996,
+      "historical_first_batch_ce": 3.648269,
+      "historical_ce_abs_difference": 3.003540038903907E-7,
+      "historical_ce_f32_exact": false,
+      "fresh_process_exact": true,
+      "model_state_exact": true,
+      "source_unchanged": true,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      }
+    }
+  ],
+  "version_scope": "Unreleased source after 0.4.31; local candidate version metadata is not a PyPI release",
+  "wgpu_wheel_sha256": "0bba92665c5f8cebe05116b8986eb82a634fa7d5d9d007f96b9ab6ecaedf5cf4",
+  "wasm_sha256": "855caa740d4dc33dd505890b311f1c5da2b2162a364f0cb6b5c87747555f7ca9",
+  "browser_export": {
+    "completed_updates": 128,
+    "study_case_count": 75,
+    "selected_case": "mixture-11-0-train-query-train",
+    "exact_opaque_json": true,
+    "foreign_request_rejected": true,
+    "model_sha256": "c69dc04834a97b2584a91cff26a61eab5c7af0744f7ea19ff84ee6eb9f7dce8e"
+  }
+}

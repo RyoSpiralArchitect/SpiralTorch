@@ -342,6 +342,12 @@ pub(super) struct PyByteDecoderCheckpoint {
     inner: ByteDecoderCheckpoint,
 }
 
+impl From<ByteDecoderCheckpoint> for PyByteDecoderCheckpoint {
+    fn from(inner: ByteDecoderCheckpoint) -> Self {
+        Self { inner }
+    }
+}
+
 #[pymethods]
 impl PyByteDecoderCheckpoint {
     #[staticmethod]
