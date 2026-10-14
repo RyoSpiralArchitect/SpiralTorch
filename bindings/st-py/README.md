@@ -12,7 +12,7 @@ making NumPy, PyTorch, Transformers, or provider SDKs mandatory dependencies.
 python -m pip install -U spiraltorch
 ```
 
-Package version: **Version 0.4.30**. Wheels target CPython 3.8+, Linux x86_64,
+Package version: **Version 0.4.31**. Wheels target CPython 3.8+, Linux x86_64,
 Windows x86_64, and macOS 14+ universal2. The default wheel includes WGPU with
 CPU fallback; a compatible GPU and the appropriate execution route are still
 required for GPU use.
@@ -60,6 +60,7 @@ or [direct Rust use](https://github.com/RyoSpiralArchitect/SpiralTorch#native-au
 | `Tensor`, `AutogradTensor` | Native tensors and Rust-owned reverse-mode differentiation |
 | `nn`, `optim`, `SpiralSession` | Modules, training, optimization, and runtime planning |
 | `nn.ByteDecoderPlan`, `nn.ByteDecoderGeometryPlan` | Explicit resident byte-LM learning, geometry mixtures, and model checkpoints |
+| `nn.ByteCorpusStudy` | Shared Rust/WASM paired studies, geometry controls, and request-bound pause/resume |
 | `ecosystem` | Explicit tensor exchange with other ML libraries |
 | `ApiLLMZSpaceRuntime` | Connect hosted-model responses to Z-space runtime traces |
 | `runtime_import_preflight_report` | Check optional HF/Torch/PEFT dependencies before a larger run |
@@ -70,6 +71,7 @@ or [direct Rust use](https://github.com/RyoSpiralArchitect/SpiralTorch#native-au
 - [Model zoo](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/models/README.md): runnable language-model and other learning examples.
 - [Resident NN training](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/resident_nn_training.md): explicit GPU-resident execution and weight handoff.
 - [Geometric byte language models](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/byte-language-models.md): Rust-owned QKV learning, four metrics, query routing, and exact model resume.
+- [Paired byte-corpus studies](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/byte-corpus-studies.md): the shared experiment runner and geometry-control preparation, available from 0.4.31.
 - [DLPack interoperability](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/dlpack_interop.md): ownership and copy policies for tensor exchange.
 
 ## Optional HF Integration
