@@ -1,3 +1,103 @@
+/// CPU-only, all-case source binding; keep this opaque JSON intact in transport.
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn pack_resident_byte_learning_case_artifact(
+    input: &str,
+    checkpoint: &str,
+    case_name: &str,
+    policy: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    let error = |e: Box<dyn std::error::Error>| wasm_bindgen::JsValue::from_str(&e.to_string());
+    let policy = serde_json::from_value(serde_json::Value::String(policy.to_owned()))
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let study = st_nn::resident::ByteCorpusStudy::from_json(input.as_bytes()).map_err(error)?;
+    let saved = study
+        .checkpoint_from_json(checkpoint.as_bytes())
+        .map_err(error)?;
+    study
+        .case_artifact(&saved, case_name, policy)
+        .map(|a| a.to_json().to_owned())
+        .map_err(error)
+}
+
+/// Recheck the private source companions without a device or new training.
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn verify_resident_byte_learning_artifact(
+    input: &str,
+    checkpoint: &str,
+    artifact: &str,
+    expected_id: &str,
+) -> Result<(), wasm_bindgen::JsValue> {
+    let error = |e: Box<dyn std::error::Error>| wasm_bindgen::JsValue::from_str(&e.to_string());
+    let artifact =
+        st_nn::resident::ByteCorpusModelArtifact::from_json(artifact.as_bytes(), expected_id)
+            .map_err(error)?;
+    let study = st_nn::resident::ByteCorpusStudy::from_json(input.as_bytes()).map_err(error)?;
+    let saved = study
+        .checkpoint_from_json(checkpoint.as_bytes())
+        .map_err(error)?;
+    study.validate_artifact(&saved, &artifact).map_err(error)
+}
+
+/// Fresh policy-constrained inference, not a promotion gate or streaming decode.
+/// Windows contain B rows of T+1 bytes, with the last byte supplying a CE label.
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn infer_resident_byte_artifact(
+    artifact: &str,
+    expected_id: &str,
+    windows: Vec<u8>,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_kernel_contracts::classification::{ClassReduction, CrossEntropySpec};
+    use st_nn::resident::{ByteCorpusModelArtifact, ByteLmBatch};
+    let error = |e: Box<dyn std::error::Error>| wasm_bindgen::JsValue::from_str(&e.to_string());
+    let artifact =
+        ByteCorpusModelArtifact::from_json(artifact.as_bytes(), expected_id).map_err(error)?;
+    let shape = artifact.checkpoint().plan().input_layout().shape();
+    let row = shape[1]
+        .checked_add(1)
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("window overflow"))?;
+    if shape[0].checked_mul(row) != Some(windows.len()) {
+        return Err(wasm_bindgen::JsValue::from_str(
+            "windows differ from artifact shape",
+        ));
+    }
+    let batch = ByteLmBatch::from_windows(&windows.chunks_exact(row).collect::<Vec<_>>())
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let runtime = st_backend_wgpu::runtime::WgpuRuntime::request_headless("byte.artifact.browser")
+        .await
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let mut model = artifact
+        .restore_wgpu(runtime)
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let batch = model
+        .prepare_batch(&batch)
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let tagged = model
+        .forward(&batch)
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let forward = tagged.forward();
+    let spec = CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let loss = forward
+        .next_byte_loss(spec)
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let capture = model
+        .tensor_device()
+        .snapshot_many(&[forward.prediction(), loss.value()])
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let values = capture
+        .read_async()
+        .await
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let adapter = model.tensor_device().runtime().adapter_info();
+    Ok(serde_json::json!({"artifact_id":tagged.artifact_id(), "revision":forward.parameter_revision(),
+        "logits":values[0], "loss":values[1][0],
+        "adapter":{"name":adapter.name, "backend":format!("{:?}",adapter.backend),
+            "device_type":format!("{:?}",adapter.device_type)}}).to_string())
+}
+
 /// CPU-only transport to the existing byte-decoder checkpoint contract.
 /// The source request and study checkpoint remain the provenance/resume record.
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]

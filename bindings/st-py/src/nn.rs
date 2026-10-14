@@ -11044,6 +11044,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "ResidualAttentionGradients",
             "BYTE_CORPUS_STUDY_MAX_BYTES",
             "ByteCorpusStudy",
+            "ByteCorpusModelArtifact",
+            "ResidentByteInference",
             "ByteCorpusStudyCheckpoint",
             "ByteCorpusStudySegment",
             "ByteCorpusPreparedBiasStudy",

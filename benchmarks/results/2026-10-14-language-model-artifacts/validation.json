@@ -1,0 +1,151 @@
+{
+  "schema": "spiraltorch.byte_model_artifact.qualification.v1",
+  "scope": "Source-only executable artifact mechanics after published 0.4.31; no new training, quality, speed or promotion claim",
+  "source_base": "4155a261a315515d2bc8d88ca88f46293bcc27c5",
+  "source_files": "source-files.sha256",
+  "host": {
+    "os": "macOS",
+    "version": "26.4.1",
+    "build": "25E253",
+    "native_adapter": {
+      "backend": "Metal",
+      "device_type": "IntegratedGpu",
+      "name": "Apple M4"
+    }
+  },
+  "validation": {
+    "rust_portable": {
+      "passed": 54,
+      "failed": 0,
+      "toolchain": "1.99.0",
+      "filter": "resident::byte_study"
+    },
+    "rust_wgpu_artifact": {
+      "passed": 8,
+      "failed": 0,
+      "toolchain": "1.99.0",
+      "filter": "resident::byte_study::artifact",
+      "runtime_tests_enabled": true,
+      "includes_portable_artifact_tests": true
+    },
+    "installed_wgpu_study": {
+      "passed": 12,
+      "skipped": 1,
+      "skip_scope": "CPU-artifact-only rejection"
+    },
+    "installed_wgpu_decoder": {
+      "passed": 8,
+      "skipped": 1,
+      "skip_scope": "CPU-artifact-only rejection"
+    },
+    "installed_cpu_study": {
+      "passed": 10,
+      "skipped": 3,
+      "skip_scope": "GPU-required tests"
+    },
+    "installed_learning_smoke": {
+      "wgpu": "passed",
+      "cpu": "passed",
+      "study_artifact_exports": 10
+    },
+    "historical_replays": {
+      "models": 6,
+      "source_cases_per_archive": 75,
+      "new_updates": 0,
+      "logits_per_model": 16384,
+      "bare_restricted_fresh_process_exact": true,
+      "source_unchanged": true
+    },
+    "public_probe_replay": {
+      "exit_code": 0,
+      "qualification_json_byte_identical": true,
+      "forced_umask": "022",
+      "output_directory_mode": "0700",
+      "model_file_mode": "0600"
+    },
+    "browser": {
+      "status": "completed",
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "models_inferred": 1,
+      "source_cases_validated": 75,
+      "new_updates": 0,
+      "download_byte_identical_to_python_export": true,
+      "observation": "browser-observation.json",
+      "browser_logits_hash_recorded": false
+    },
+    "scoped_rustfmt": "passed nightly-2026-04-15",
+    "python_38_syntax_files": 4,
+    "browser_javascript_syntax": "passed",
+    "scoped_diff_check": "passed"
+  },
+  "private_binaries": {
+    "warning": "Development candidates, not the published 0.4.31 release; do not publish",
+    "wgpu_wheel": {
+      "filename": "spiraltorch-0.4.31-cp38-abi3-macosx_14_0_arm64.whl",
+      "sha256": "2cc6c4478468a51b9281043d3896514067c173154325bd6572438bb4f8ec5bcc",
+      "native_sha256": "5d45ebaea911f4a0cd6dca5ec9a257e5ff38446837aa0100f4ae3b9541009763",
+      "installed_native_matches_wheel": true
+    },
+    "cpu_wheel": {
+      "filename": "spiraltorch-0.4.31-cp38-abi3-macosx_14_0_arm64.whl",
+      "sha256": "ef8f97ac064f410997f54c414be50605f0190470e539adb24a14f98df56fb866",
+      "native_sha256": "feb1a80962eb22a430d084e1b8e6dfc89f3282ace2c477d693e9a98381b879bb",
+      "installed_native_matches_wheel": true,
+      "wgpu_available": false
+    },
+    "wasm": {
+      "filename": "resident_byte_learning_browser_bg.wasm",
+      "sha256": "9442f8c06b54062f09ffdf0e440be07eba9e65e37ae8066a3e4a31b1c2e3af96",
+      "toolchain": "stable",
+      "wasm_bindgen": "0.2.129"
+    }
+  },
+  "retained_attempts": [
+    {
+      "log": "rust-portable.log",
+      "outcome": "failed test fixture import path; corrected and final suite rerun"
+    },
+    {
+      "log": "build-wgpu.log",
+      "outcome": "interrupted with no output wheel; no success claim"
+    },
+    {
+      "log": "study-wgpu-tests.log",
+      "outcome": "failed missing native nn.__all__ exports; fixed, rebuilt and retested"
+    }
+  ],
+  "review": {
+    "method": "independent read-only local agents; static evidence separate from executed tests",
+    "fixed_finding": "preserve valid empty source case names across export/import",
+    "remaining_library_findings": 0,
+    "fixed_probe_finding": "enforce owner-only directory/model output modes rather than relying on umask"
+  },
+  "private_log_sha256": {
+    "rust-portable-final.log": "437093cf920da5202d14ba3a4c19980a30d36e3b51043195b129d5818e647c42",
+    "rust-wgpu-final.log": "53d16efb735b430517e0471afd7a5fe10050d723c2220d9890dd1a75c42b9c69",
+    "study-wgpu-exports-tests.log": "ea87386d14b9ebe817938f8047a8390881fd005aca577f183848be71261624e5",
+    "decoder-wgpu-tests.log": "a47ba28d495f3ce1634f76ffa062adc6940cac0557fbc14c3eeabc1e95a5ec18",
+    "study-cpu-tests.log": "7233d91dfd0a353fdbd1db6b94366a40a4c7491a1a3042af422b8e3dcf15c5ce",
+    "wgpu-smoke.json": "ecfdec6ea329b372a8baec350b7329ffd7c908544aac6a161577c04abfa0cafb",
+    "cpu-smoke.json": "ecfdec6ea329b372a8baec350b7329ffd7c908544aac6a161577c04abfa0cafb",
+    "qualification.json": "a49829d18176cf75177e8a77ea6275fa776be858e1fd482821619c92681a06ee",
+    "public-probe-replay.log": "a6d2a82557f44b0e0ecbf16ba24de83cefb92d4b096ad0048a7d189e75ed9872",
+    "browser-observation.json": "68de69bdac9fd01945249986918005a329ab08805e3c4e053f217d51153a759c",
+    "build-wgpu-exports.log": "cad961c2468856b32744d4c00e2f8f74337ed7cd156a6ae9088b24ee6906beb3",
+    "build-cpu.log": "b7a0812949e6d6ae9c9ed52ba47a8568ed8a82f56f1e04cefc902dd2565d30a3",
+    "wasm-build-adapter.log": "bd691c5a975cc73dd183b40ae216b0b2d3135172f5c85a408d48a850775d337a",
+    "rust-portable.log": "cdcc73f97135afcdad1c799bb2a7e859e4f0c279146eaa1df6fc797cf2f2e573",
+    "build-wgpu.log": "b8a793ee77c068a65b2e1e23b87f4c51a1e95fc80ec8717e4bd0914d82fc3ea7",
+    "study-wgpu-tests.log": "9a11e74c08cc12075a1b94cdd85e0a330ec2fbe014e4df2ca27937d8d94ccd2c",
+    "public-probe-replay-hardened.log": "a6d2a82557f44b0e0ecbf16ba24de83cefb92d4b096ad0048a7d189e75ed9872"
+  },
+  "limits": [
+    "Hash integrity and source consistency are not authenticity or proof of past training.",
+    "Only selected models were replayed; all source cases were validated.",
+    "One historical browser frozen-query CE differs by one f32 ULP from native replay.",
+    "No general cross-device bitwise equality, language-quality gain or serving-speed claim.",
+    "No model registry, activation/rollback, KV cache or streaming generation is implemented.",
+    "Historical corpus/weights and raw logs remain private; hashes alone do not reproduce missing inputs."
+  ]
+}

@@ -30,6 +30,7 @@ NAMES = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
     "ByteCorpusPreparedBiasStudy", "ByteCorpusBiasCalibration",
     "ByteCorpusHeadwiseControls", "ByteCorpusMixtureControls", "ByteCorpusQueryMixtureControls",
+    "ByteCorpusModelArtifact", "ResidentByteInference",
 )
 
 FRESH_INFERENCE = """
@@ -38,19 +39,29 @@ import sys
 import spiraltorch as st
 
 payload = json.load(sys.stdin)
-checkpoint = st.nn.ByteDecoderCheckpoint.from_json(payload["model_json"])
-model = checkpoint.restore_wgpu()
+artifact = None
+if "artifact_json" in payload:
+    artifact = st.nn.ByteCorpusModelArtifact.from_json(
+        payload["artifact_json"], expected_id=payload["expected_id"])
+    checkpoint = artifact.checkpoint()
+    model = artifact.restore_wgpu()
+else:
+    checkpoint = st.nn.ByteDecoderCheckpoint.from_json(payload["model_json"])
+    model = checkpoint.restore_wgpu()
 assert model.tensor_device().adapter_info()["device_type"] != "Cpu"
 batch = st.nn.ByteLmBatch.from_documents(
     [bytes(doc) for doc in payload["documents"]],
     [tuple(window) for window in payload["windows"]], payload["steps"],
 )
 forward = model.forward(model.prepare_batch(batch))
+assert forward.artifact_id == (artifact.artifact_id if artifact is not None else None)
 print(json.dumps({
+    "artifact_id": forward.artifact_id,
     "revision": model.attempted_updates,
     "logits": forward.prediction_tensor().snapshot().read_values(),
     "loss": forward.next_byte_loss().loss_tensor().snapshot().read_values()[0],
-    "model_json": model.checkpoint_snapshot().read().to_json(),
+    "model_json": (checkpoint.to_json() if artifact is not None
+                   else model.checkpoint_snapshot().read().to_json()),
 }))
 """
 
@@ -203,6 +214,73 @@ class StudyPortable(unittest.TestCase):
                 with self.assertRaises(NotImplementedError):
                     cls.from_json(source).prepare_wgpu()
 
+    def test_artifact_identity_policy_companions_and_cpu_restore(self):
+        raw = fixture()[0]
+        study = st.nn.ByteCorpusStudy.from_json(raw)
+        record = resume_fixture()[5]
+        record["request_sha256"] = study.request_sha256
+        saved = study.checkpoint_from_json(protocol.encoded(record))
+        name = record["cases"][0]["name"]
+        policy = "fixed_window_frozen.v1"
+        artifact = study.case_artifact(saved, name, policy=policy)
+        payload = artifact.to_json()
+        self.assertEqual(artifact.artifact_id, "sha256:" + hashlib.sha256(payload.encode()).hexdigest())
+        self.assertEqual(artifact.policy, policy)
+        self.assertEqual(artifact.case_name, name)
+        self.assertEqual(artifact.request_sha256, study.request_sha256)
+        self.assertEqual(artifact.study_checkpoint_sha256,
+                         hashlib.sha256(saved.to_json().encode()).hexdigest())
+        for source in (payload, payload.encode()):
+            loaded = st.nn.ByteCorpusModelArtifact.from_json(source, expected_id=artifact.artifact_id)
+            study.validate_artifact(saved, loaded)
+            self.assertEqual(loaded.to_json(), payload)
+            self.assertEqual(loaded.checkpoint().to_json(), study.case_checkpoint(saved, name).to_json())
+            if not st.wgpu_kernel_reports_available():
+                with self.assertRaises(NotImplementedError):
+                    loaded.restore_wgpu()
+        with self.assertRaises(AttributeError):
+            artifact.artifact_id = "sha256:" + "0" * 64
+        with self.assertRaises(TypeError):
+            study.case_artifact(saved, name)
+        for invalid in (None, True, {}):
+            with self.assertRaises(TypeError):
+                study.case_artifact(saved, name, policy=invalid)
+        for invalid in ("", "mutable", "fixed_window_frozen.v2"):
+            with self.assertRaises(ValueError):
+                study.case_artifact(saved, name, policy=invalid)
+        for source in (payload + " ", payload.replace(name, name + "x"), b"\xff"):
+            with self.assertRaises(ValueError):
+                st.nn.ByteCorpusModelArtifact.from_json(source, expected_id=artifact.artifact_id)
+        for source in (json.loads(payload), bytearray(payload.encode()), None):
+            with self.assertRaises(TypeError):
+                st.nn.ByteCorpusModelArtifact.from_json(source, expected_id=artifact.artifact_id)
+        with self.assertRaises(TypeError):
+            st.nn.ByteCorpusModelArtifact.from_json(payload)
+        with self.assertRaises(ValueError):
+            st.nn.ByteCorpusModelArtifact.from_json(b" " * (st.nn.BYTE_CORPUS_STUDY_MAX_BYTES + 1),
+                                                   expected_id=artifact.artifact_id)
+        with self.assertRaises(ValueError):
+            st.nn.ByteCorpusStudy.from_json(raw + b" ").validate_artifact(saved, artifact)
+        # Structurally valid unrelated history changes must break the companion binding.
+        record["cases"][1]["training"][0]["ce"] += 0.25
+        changed = study.checkpoint_from_json(protocol.encoded(record))
+        with self.assertRaises(ValueError):
+            study.validate_artifact(changed, artifact)
+        self.assertEqual(artifact.to_json(), payload)
+
+    def test_artifact_preserves_explicit_empty_source_case_name(self):
+        request = protocol.decode_json(fixture()[0])
+        request["cases"][0]["name"] = ""
+        study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+        record = resume_fixture()[5]
+        record["request_sha256"] = study.request_sha256
+        record["cases"][0]["name"] = ""
+        saved = study.checkpoint_from_json(protocol.encoded(record))
+        artifact = study.case_artifact(saved, "", policy="fixed_window_frozen.v1")
+        loaded = st.nn.ByteCorpusModelArtifact.from_json(artifact.to_json(), expected_id=artifact.artifact_id)
+        self.assertEqual(loaded.case_name, "")
+        study.validate_artifact(saved, loaded)
+
     def test_query_preparation_is_cpu_only_immutable_and_rust_owned(self):
         source = mixture_fixture()[0]
         recipe = st.nn.ByteCorpusQueryMixtureControls.from_json(source)
@@ -284,6 +362,10 @@ class StudyGpu(unittest.TestCase):
             model = study.case_checkpoint(saved, case["name"])
             self.assertEqual(model.to_json(),
                              st.nn.ByteDecoderCheckpoint.from_json(case["model_json"]).to_json())
+            artifact = study.case_artifact(saved, case["name"], policy="fixed_window_frozen.v1")
+            loaded = st.nn.ByteCorpusModelArtifact.from_json(artifact.to_json(), expected_id=artifact.artifact_id)
+            study.validate_artifact(saved, loaded)
+            self.assertEqual(loaded.checkpoint().to_json(), model.to_json())
         # A learned contextual router, not just the plain attention arm.
         index = next(i for i, case in enumerate(request["cases"])
                      if case.get("mixture", {}).get("query_projection", {}).get("weight_update") == "train")
@@ -297,6 +379,7 @@ class StudyGpu(unittest.TestCase):
         )
         forward = model.forward(model.prepare_batch(batch))
         expected = {
+            "artifact_id": None,
             "revision": saved.completed_updates,
             "logits": forward.prediction_tensor().snapshot().read_values(),
             "loss": forward.next_byte_loss().loss_tensor().snapshot().read_values()[0],
@@ -316,6 +399,33 @@ class StudyGpu(unittest.TestCase):
         )
         self.assertEqual(child.returncode, 0, child.stderr)
         self.assertEqual(json.loads(child.stdout), expected)
+        artifact = study.case_artifact(saved, case["name"], policy="fixed_window_frozen.v1")
+        restricted = artifact.restore_wgpu()
+        for method in ("sgd", "sgd_with_rates", "backward", "parameter_tensors", "checkpoint_snapshot"):
+            self.assertFalse(hasattr(restricted, method), method)
+        prepared = restricted.prepare_batch(batch)
+        with self.assertRaises(TypeError):
+            restricted.forward(prepared, pair_biases=[None])
+        retained = restricted.forward(prepared)
+        self.assertEqual(retained.artifact_id, artifact.artifact_id)
+        self.assertEqual(retained.prediction_tensor().snapshot().read_values(), expected["logits"])
+        # Failed candidate import leaves the active inference owner and retained forward intact.
+        with self.assertRaises(ValueError):
+            st.nn.ByteCorpusModelArtifact.from_json(artifact.to_json() + " ", expected_id=artifact.artifact_id)
+        self.assertEqual(restricted.forward(prepared).prediction_tensor().snapshot().read_values(), expected["logits"])
+        self.assertEqual(restricted.attempted_updates, expected["revision"])
+        del restricted
+        self.assertEqual(retained.artifact_id, artifact.artifact_id)
+        self.assertEqual(retained.prediction_tensor().snapshot().read_values(), expected["logits"])
+        fresh = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", FRESH_INFERENCE],
+            input=json.dumps({"artifact_json": artifact.to_json(), "expected_id": artifact.artifact_id,
+                              "documents": request["validation_documents"],
+                              "windows": request["validation_batches"][0], "steps": request["config"]["steps"]}),
+            text=True, capture_output=True, timeout=120,
+        )
+        self.assertEqual(fresh.returncode, 0, fresh.stderr)
+        self.assertEqual(json.loads(fresh.stdout), dict(expected, artifact_id=artifact.artifact_id))
         self.assertEqual(saved.to_json(), before)
 
 

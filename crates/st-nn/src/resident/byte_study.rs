@@ -29,11 +29,17 @@ type Result<T> = ByteCorpusStudyResult<T>;
 /// Input and checkpoint JSON are bounded before deserialization.
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
+mod artifact;
 mod calibration;
 mod headwise;
 mod mixture;
 mod policy;
 mod query;
+pub use artifact::{
+    ByteCorpusInferencePolicy, ByteCorpusModelArtifact, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
+};
+#[cfg(feature = "wgpu")]
+pub use artifact::{ResidentByteInference, ResidentByteInferenceForward};
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
 pub use headwise::ByteCorpusHeadwiseControls;
 pub use mixture::ByteCorpusMixtureControls;

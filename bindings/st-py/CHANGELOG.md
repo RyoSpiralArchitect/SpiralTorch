@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add source-bound `ByteCorpusModelArtifact` and policy-constrained
+  `ResidentByteInference`. Rust binds selected model/geometry, all-case study
+  identity and explicit `fixed_window_frozen.v1` policy; exact artifact bytes
+  require a caller-pinned ID at import. Forwards carry the originating ID and
+  expose no parameter updates or external biases. This is not promotion,
+  training attestation or a language-quality result. Source-only after 0.4.31.
 - Add CPU-only `ByteCorpusStudy.case_checkpoint` to hand an explicitly selected
   case to the existing typed byte-decoder restore API after Rust validates the
   entire request-bound study. Preserve learned geometry, routers and revision;
@@ -10,8 +16,11 @@
 
 ## 0.4.31
 
-Release candidate. Publication requires the signed platform wheels and verified
-PyPI upload; version metadata alone is not confirmation of availability.
+Published on 2026-10-14. The three platform wheels on
+[PyPI](https://pypi.org/project/spiraltorch/0.4.31/) were verified against the signed
+[release manifest](https://github.com/RyoSpiralArchitect/SpiralTorch/releases/tag/v0.4.31)
+and an isolated public-index installation. Source-only additions below
+`Unreleased` are not part of those immutable wheels.
 
 - Expose the shared Rust/WASM byte-corpus runner through eight `spiraltorch.nn`
   classes: bounded exact-byte study requests, immutable request-bound experiment

@@ -99,6 +99,11 @@ standalone WASM qualification module exposes the same validator through
 `extract_resident_byte_learning_case(request_json, checkpoint_json, case_name)`,
 returning opaque model JSON. This is not yet an export of packaged `st-wasm`.
 
+For source-bound identity and an immutable inference owner, see
+[Executable Byte-LM Artifacts](byte-model-artifacts.md). That source-only layer
+adds a caller-pinned digest and an explicit no-update/no-external-bias policy;
+it does not select or promote a case.
+
 ## Geometry Controls
 
 Preparation also lives in Rust. Start from the unchanged five-arm v3 recipe:
