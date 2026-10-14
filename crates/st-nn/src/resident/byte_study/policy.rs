@@ -449,6 +449,9 @@ mod tests {
             *model.pointer_mut(field).unwrap() = json!(0.2);
             altered.cases[2].model_json = model.to_string();
             assert!(study.checked_models(&altered).is_err());
+            assert!(study
+                .case_checkpoint(&altered, &altered.cases[0].name)
+                .is_err());
         }
         let mut changed = controls();
         changed["cases"][1]["geometry_update"] = json!("frozen");
@@ -479,5 +482,8 @@ mod tests {
         model["model"]["geometry"]["raw_decay"][0] = json!(-0.0);
         checkpoint.cases[2].model_json = model.to_string();
         assert!(study.checked_models(&checkpoint).is_err());
+        assert!(study
+            .case_checkpoint(&checkpoint, &checkpoint.cases[0].name)
+            .is_err());
     }
 }

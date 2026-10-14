@@ -535,6 +535,26 @@ impl ByteCorpusStudy {
         Ok(checkpoint)
     }
 
+    /// Extract one model only after validating the entire request-bound study.
+    /// This is CPU-only and preserves topology, learned geometry/router values
+    /// and the attempted revision, including at a partial update boundary.
+    /// The model alone has no study identity, histories or frozen-rate policy:
+    /// retain the request and study checkpoint for provenance and study resume.
+    /// Extraction is not a quality gate, promotion decision or training attestation.
+    pub fn case_checkpoint(
+        &self,
+        checkpoint: &ByteCorpusStudyCheckpoint,
+        case_name: &str,
+    ) -> Result<ByteDecoderCheckpoint> {
+        let models = self.checked_models(checkpoint)?;
+        checkpoint
+            .cases
+            .iter()
+            .zip(models)
+            .find_map(|(case, model)| (case.name == case_name).then_some(model))
+            .ok_or_else(|| "unknown study case name".into())
+    }
+
     /// Conservative bound through the final update, including escaped model
     /// JSON, case names and all scalar histories. Numeric text can grow after
     /// training even when the original request used compact literals like 1e-4.
@@ -992,6 +1012,49 @@ mod tests {
             .unwrap()
             .checkpoint_from_json(checkpoint.as_bytes())
             .is_err());
+    }
+
+    #[test]
+    fn case_handoff_preserves_models_at_every_cursor_without_mutating_study() {
+        let study = study();
+        for cursor in 0..=study.total_updates() {
+            let checkpoint = saved(&study, cursor);
+            let before = checkpoint.to_json().unwrap();
+            for case in &checkpoint.cases {
+                let model = study.case_checkpoint(&checkpoint, &case.name).unwrap();
+                assert_eq!(model.attempted_revision(), cursor as u64);
+                assert_eq!(
+                    model.to_json().unwrap(),
+                    ByteDecoderCheckpoint::from_json(&case.model_json)
+                        .unwrap()
+                        .to_json()
+                        .unwrap()
+                );
+            }
+            assert_eq!(checkpoint.to_json().unwrap(), before);
+            for name in ["", "missing", "Plain", "plain "] {
+                assert!(study.case_checkpoint(&checkpoint, name).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn case_handoff_revalidates_foreign_and_unselected_records() {
+        let study = study();
+        let checkpoint = saved(&study, 1);
+        let other = ByteCorpusStudy::from_json(format!("{} ", fixture()).as_bytes()).unwrap();
+        assert!(other.case_checkpoint(&checkpoint, "plain").is_err());
+
+        // Public Deserialize is not validation; corruption in an unselected
+        // case must not be hidden by extracting the healthy first case.
+        let mut raw = serde_json::to_value(&checkpoint).unwrap();
+        raw["cases"][1]["model_json"] = json!("{}");
+        let unvalidated: ByteCorpusStudyCheckpoint = serde_json::from_value(raw).unwrap();
+        assert!(study.case_checkpoint(&unvalidated, "plain").is_err());
+        let mut incomplete = checkpoint.clone();
+        incomplete.cases[1].training.clear();
+        assert!(study.case_checkpoint(&incomplete, "plain").is_err());
+        assert!(study.case_checkpoint(&checkpoint, "plain").is_ok());
     }
 
     #[test]

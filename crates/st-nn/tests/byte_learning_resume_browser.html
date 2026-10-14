@@ -7,6 +7,7 @@
 at target/resident-byte-learning-web/checkpoint.json and open ?resume=1.</p>
 <p id="summary">Loading the frozen request...</p>
 <p><a id="checkpoint" hidden>Download checkpoint</a></p>
+<p><a id="model" hidden>Download selected model (not a promotion decision)</a></p>
 <p><a id="download" hidden>Download learning report</a></p>
 <pre id="result" data-status="running">Numerical comparison is a separate step.</pre>
 <script type="module">
@@ -34,7 +35,7 @@ try {
   // Keep checkpoint/model JSON opaque; JS must not round or rebuild model values.
   const checkpoint = query.get("resume") === "1" ? await read("checkpoint.json") : undefined;
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), x => x.toString(16).padStart(2,"0")).join("");
-  const {default:init, advance_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  const {default:init, advance_resident_byte_learning, extract_resident_byte_learning_case} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
   await init();
   document.querySelector("#summary").textContent = `Advancing ${request.cases.length} cases to update ${stop}. Request ${hash}`;
   const segment = JSON.parse(await advance_resident_byte_learning(input, checkpoint, stop));
@@ -77,8 +78,18 @@ try {
         || c.final_parameters.some((p,j) => p.length !== request.cases[i].parameters[j].values.length || !p.every(Number.isFinite)))) {
     throw Error("Incomplete or mismatched segment");
   }
+  const selectedName = query.get("case") ?? request.cases.find(c => c.geometry)?.name ?? request.cases[0].name;
+  const modelJson = extract_resident_byte_learning_case(input, segment.checkpoint_json, selectedName);
+  // Decode the envelope, never the opaque model JSON or its float values.
+  const selected = JSON.parse(segment.checkpoint_json).cases.find(c => c.name === selectedName);
+  if (!selected || modelJson !== selected.model_json) throw Error("Selected model changed during handoff");
+  let rejectedForeign = false;
+  try { extract_resident_byte_learning_case(input + " ", segment.checkpoint_json, selectedName); }
+  catch { rejectedForeign = true; }
+  if (!rejectedForeign) throw Error("Foreign request accepted during handoff");
   for (const [id, filename, text] of [
     ["checkpoint", `resident-byte-corpus-checkpoint-${stop}.json`, segment.checkpoint_json],
+    ["model", `resident-byte-decoder-${stop}.json`, modelJson],
     ["download", `resident-byte-corpus-${stop}.json`, reportJson],
   ]) {
     const link = document.querySelector(`#${id}`);
@@ -88,7 +99,8 @@ try {
   }
   target.dataset.status = complete ? "completed" : "paused";
   target.textContent = JSON.stringify({request_sha256:hash, completed_updates:stop,
-    case_count:report.cases.length, evaluation_revisions:revisions}, null, 2);
+    case_count:report.cases.length, evaluation_revisions:revisions,
+    selected_case:selectedName, model_handoff:"exact opaque JSON", foreign_request_rejected:rejectedForeign}, null, 2);
   document.querySelector("#summary").textContent = `${complete ? "Completed" : "Paused"} all cases at update ${stop}. Numerical equivalence must still be checked against uninterrupted learning and Torch.`;
 } catch (error) {
   target.dataset.status = "error";

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add CPU-only `ByteCorpusStudy.case_checkpoint` to hand an explicitly selected
+  case to the existing typed byte-decoder restore API after Rust validates the
+  entire request-bound study. Preserve learned geometry, routers and revision;
+  retain the full study for provenance and policy-correct resume. Extraction is
+  not a model-promotion or language-quality decision. Source-only after 0.4.31.
+
 ## 0.4.31
 
 Release candidate. Publication requires the signed platform wheels and verified

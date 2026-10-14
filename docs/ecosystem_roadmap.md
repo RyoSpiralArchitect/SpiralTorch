@@ -383,9 +383,11 @@ controls rather than choosing between them:
    Frozen Torch fixtures extend the full-model probe to 23/37 parameter tensors,
    geometry-off/detached controls and zero-Q/K isolation. Corpus-scale utility,
    conditional routing and decoder continuation remain separate open work.
-   These are source additions after 0.4.29, not APIs in that published wheel.
-   The original host Modules remain unchanged; uncertainty outputs, KV-cache
-   ownership, full-model Python/WASM facades and learning-quality gains remain open.
+   The [Python model guide](python/byte-language-models.md) covers the native
+   model API introduced in 0.4.30; the standalone WASM qualification module is
+   not a packaged `st-wasm` model facade. The original host Modules remain
+   unchanged. Uncertainty outputs, KV-cache ownership and learning-quality
+   gains remain separate open work.
 3. **Measure the complete language path.** Require numerical agreement before
    transfer-inclusive throughput measurements, with resident-only timings
    labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are
@@ -407,6 +409,29 @@ controls rather than choosing between them:
    and a post-hoc sensitivity run are retained. Output head merging and
    submission costs remain optimization targets. These are inference
    measurements, not a reason to claim LLM quality gains.
+
+### Language-First MLOps With Learned Geometry
+
+The next operational unit is **weights plus learned geometry/routing plus an
+explicit operating policy**, not merely a job log or a dashboard. Keep Rust as
+the semantic core; Python orchestrates and WASM consumes the same contracts.
+
+The source-only [study-to-inference handoff](python/byte-corpus-studies.md#from-a-study-to-inference)
+first connects a request-bound paired study to an existing typed model
+checkpoint. It validates every case before extraction and preserves learned
+geometry, routers and revisions. It does not select a winner or promote an
+artifact. The full study retains provenance and frozen-rate resume semantics;
+the extracted model alone does not. Native byte-LM checkpoints and HF adapters
+remain different artifact kinds, not interchangeable optimizer snapshots.
+
+Next milestones are a Rust-owned artifact identity that keeps those companions
+together, explicit held-out language/geometry health gates, and fresh-runtime
+inference plus rollback to the last accepted artifact. Reuse the existing
+[HF lineage, promotion and experiment executor](python/build-and-validation.md)
+rather than adding a second scheduler or independently interpreted client gate.
+Geometry must affect the executable model, not just its report. Its benefit
+still needs matched-budget language evaluation; backend speed comparisons use
+the same PyTorch-equivalent operation, not extra geometric work hidden in one arm.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

@@ -1,4 +1,5 @@
 //! Thin clients of the same bounded study runner used by native and WASM.
+use super::byte_decoder::PyByteDecoderCheckpoint;
 use super::*;
 use pyo3::types::{PyBytes, PyString};
 #[cfg(feature = "wgpu")]
@@ -113,6 +114,23 @@ impl PyByteCorpusStudy {
                         .map_err(value_error)?,
                 ),
             })
+        })
+    }
+
+    /// CPU-only, all-case validation followed by an exact-name model handoff.
+    /// Retain the study request/checkpoint for provenance and frozen-rate resume.
+    /// Extraction does not promote the model or attest its training history.
+    fn case_checkpoint(
+        &self,
+        py: Python<'_>,
+        checkpoint: &PyByteCorpusStudyCheckpoint,
+        case_name: &str,
+    ) -> PyResult<PyByteDecoderCheckpoint> {
+        py.detach(|| {
+            self.inner
+                .case_checkpoint(&checkpoint.inner, case_name)
+                .map(PyByteDecoderCheckpoint::from)
+                .map_err(value_error)
         })
     }
 

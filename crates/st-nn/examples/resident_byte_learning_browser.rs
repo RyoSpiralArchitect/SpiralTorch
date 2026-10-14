@@ -1,3 +1,24 @@
+/// CPU-only transport to the existing byte-decoder checkpoint contract.
+/// The source request and study checkpoint remain the provenance/resume record.
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn extract_resident_byte_learning_case(
+    input: &str,
+    checkpoint: &str,
+    case_name: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    let error = |e: Box<dyn std::error::Error>| wasm_bindgen::JsValue::from_str(&e.to_string());
+    let study = st_nn::resident::ByteCorpusStudy::from_json(input.as_bytes()).map_err(error)?;
+    let saved = study
+        .checkpoint_from_json(checkpoint.as_bytes())
+        .map_err(error)?;
+    study
+        .case_checkpoint(&saved, case_name)
+        .map_err(error)?
+        .to_json()
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))
+}
+
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn prepare_resident_byte_learning_query_mixtures(

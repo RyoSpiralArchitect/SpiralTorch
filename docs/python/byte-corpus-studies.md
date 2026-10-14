@@ -62,6 +62,43 @@ and vice versa. Do not round-trip through a decoded dict to transport them:
 floating-point spelling and signed zero must not be silently changed.
 Cross-device floating-point equality is not promised.
 
+## From A Study To Inference
+
+**Source-only addition after 0.4.31:** `case_checkpoint` validates the entire
+study checkpoint against the exact request, then returns one existing typed
+`ByteDecoderCheckpoint`. No GPU is acquired during extraction. Case names are
+matched exactly; corruption in an unselected case still rejects the handoff.
+
+```python
+selected_name = "my-explicit-case-name"  # An exact name from request.json.
+model_checkpoint = study.case_checkpoint(finished.checkpoint, selected_name)
+with open("selected-model.json", "x", encoding="utf-8") as out:
+    out.write(model_checkpoint.to_json())
+
+# In a fresh process with an installed source candidate:
+restored = st.nn.ByteDecoderCheckpoint.from_json(
+    Path("selected-model.json").read_text(encoding="utf-8"),
+).restore_wgpu()
+print(restored.attempted_updates)        # Not reset to zero.
+```
+
+The model includes learned geometric coordinates, wave parameters, gains,
+mixture/query routers and topology as well as ordinary LM weights. Restore uses
+a fresh parameter owner. Partial checkpoints may also be extracted, but this
+does **not** select a winner, attest past training or declare readiness for
+deployment. Apply explicit held-out quality and operating-policy gates first.
+
+Retain the exact request and full study checkpoint alongside the selected model
+and case name: the bare model has no study identity, data cursor, histories or
+frozen-rate policy. Resume the paired experiment through `advance_wgpu`, not
+through unrestricted model SGD. This is a native byte-LM artifact, not an HF
+adapter or an Adam/optimizer-state interchange format.
+
+Rust uses `ByteCorpusStudy::case_checkpoint(&checkpoint, case_name)`. The
+standalone WASM qualification module exposes the same validator through
+`extract_resident_byte_learning_case(request_json, checkpoint_json, case_name)`,
+returning opaque model JSON. This is not yet an export of packaged `st-wasm`.
+
 ## Geometry Controls
 
 Preparation also lives in Rust. Start from the unchanged five-arm v3 recipe:

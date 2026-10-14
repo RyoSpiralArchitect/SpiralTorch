@@ -7,6 +7,8 @@ import itertools
 import json
 import os
 from pathlib import Path
+import struct
+import subprocess
 import sys
 import unittest
 
@@ -29,6 +31,28 @@ NAMES = (
     "ByteCorpusPreparedBiasStudy", "ByteCorpusBiasCalibration",
     "ByteCorpusHeadwiseControls", "ByteCorpusMixtureControls", "ByteCorpusQueryMixtureControls",
 )
+
+FRESH_INFERENCE = """
+import json
+import sys
+import spiraltorch as st
+
+payload = json.load(sys.stdin)
+checkpoint = st.nn.ByteDecoderCheckpoint.from_json(payload["model_json"])
+model = checkpoint.restore_wgpu()
+assert model.tensor_device().adapter_info()["device_type"] != "Cpu"
+batch = st.nn.ByteLmBatch.from_documents(
+    [bytes(doc) for doc in payload["documents"]],
+    [tuple(window) for window in payload["windows"]], payload["steps"],
+)
+forward = model.forward(model.prepare_batch(batch))
+print(json.dumps({
+    "revision": model.attempted_updates,
+    "logits": forward.prediction_tensor().snapshot().read_values(),
+    "loss": forward.next_byte_loss().loss_tensor().snapshot().read_values()[0],
+    "model_json": model.checkpoint_snapshot().read().to_json(),
+}))
+"""
 
 
 def two_head_source():
@@ -61,6 +85,8 @@ class StudyPortable(unittest.TestCase):
                 getattr(st.nn, name)()
         self.assertEqual(st.nn.BYTE_CORPUS_STUDY_MAX_BYTES, 64 * 1024 * 1024)
         self.assertIn("BYTE_CORPUS_STUDY_MAX_BYTES", namespace)
+        self.assertIn("case_checkpoint", {n.name for n in classes["_NnByteCorpusStudy"].body
+                                          if isinstance(n, ast.FunctionDef)})
 
     def test_all_versions_portable_and_exact_byte_identity(self):
         requests = [make()[0] for make in (fixture, frozen_fixture, metric_fixture,
@@ -125,6 +151,35 @@ class StudyPortable(unittest.TestCase):
         with self.assertRaises(ValueError):
             study.checkpoint_from_json(protocol.encoded(record))
         self.assertEqual(saved.to_json(), exact)
+
+    def test_case_handoff_is_portable_typed_and_request_bound(self):
+        raw = fixture()[0]
+        study = st.nn.ByteCorpusStudy.from_json(raw)
+        record = resume_fixture()[5]
+        record["request_sha256"] = study.request_sha256
+        saved = study.checkpoint_from_json(protocol.encoded(record))
+        before = saved.to_json()
+        for case in record["cases"]:
+            model = study.case_checkpoint(saved, case["name"])
+            self.assertIs(type(model), st.nn.ByteDecoderCheckpoint)
+            self.assertEqual(model.attempted_revision, saved.completed_updates)
+            self.assertEqual(model.to_json(),
+                             st.nn.ByteDecoderCheckpoint.from_json(case["model_json"]).to_json())
+            if not st.wgpu_kernel_reports_available():
+                with self.assertRaises(NotImplementedError):
+                    model.restore_wgpu()
+        other = st.nn.ByteCorpusStudy.from_json(raw + b" ")
+        with self.assertRaises(ValueError):
+            other.case_checkpoint(saved, record["cases"][0]["name"])
+        for name in ("", "unknown", record["cases"][0]["name"] + " "):
+            with self.assertRaisesRegex(ValueError, "case name"):
+                study.case_checkpoint(saved, name)
+        for name in (None, True, 0):
+            with self.assertRaises(TypeError):
+                study.case_checkpoint(saved, name)
+        with self.assertRaises(TypeError):
+            study.case_checkpoint(record, record["cases"][0]["name"])
+        self.assertEqual(saved.to_json(), before)
 
     def test_measured_preparation_preflight_and_selection_bounds(self):
         raw = two_head_source()
@@ -218,6 +273,50 @@ class StudyGpu(unittest.TestCase):
                 first = study.advance_wgpu(1)
                 resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
                 self.assertEqual(resumed.report_json, study.run_wgpu())
+                if version == 8:
+                    self.check_fresh_case_inference(study, prepared.request_json, resumed.checkpoint)
+
+    def check_fresh_case_inference(self, study, raw, saved):
+        request = protocol.decode_json(raw)
+        before = saved.to_json()
+        record = json.loads(before)
+        for case in record["cases"]:
+            model = study.case_checkpoint(saved, case["name"])
+            self.assertEqual(model.to_json(),
+                             st.nn.ByteDecoderCheckpoint.from_json(case["model_json"]).to_json())
+        # A learned contextual router, not just the plain attention arm.
+        index = next(i for i, case in enumerate(request["cases"])
+                     if case.get("mixture", {}).get("query_projection", {}).get("weight_update") == "train")
+        case = record["cases"][index]
+        checkpoint = study.case_checkpoint(saved, case["name"])
+        model = checkpoint.restore_wgpu()
+        self.assertNotEqual(model.tensor_device().adapter_info()["device_type"], "Cpu")
+        batch = st.nn.ByteLmBatch.from_documents(
+            [bytes(doc) for doc in request["validation_documents"]],
+            [tuple(window) for window in request["validation_batches"][0]], request["config"]["steps"],
+        )
+        forward = model.forward(model.prepare_batch(batch))
+        expected = {
+            "revision": saved.completed_updates,
+            "logits": forward.prediction_tensor().snapshot().read_values(),
+            "loss": forward.next_byte_loss().loss_tensor().snapshot().read_values()[0],
+            "model_json": checkpoint.to_json(),
+        }
+        # Rust JSON uses the shortest f32 spelling; Python decodes it as f64.
+        # Compare the underlying f32 bits, not those different decimal spellings.
+        self.assertEqual(struct.pack("<f", expected["loss"]),
+                         struct.pack("<f", case["validation"][-1]["batch_losses"][0]))
+        child = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", FRESH_INFERENCE],
+            input=json.dumps({"model_json": checkpoint.to_json(),
+                              "documents": request["validation_documents"],
+                              "windows": request["validation_batches"][0],
+                              "steps": request["config"]["steps"]}),
+            text=True, capture_output=True, timeout=120,
+        )
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(json.loads(child.stdout), expected)
+        self.assertEqual(saved.to_json(), before)
 
 
 if __name__ == "__main__":
