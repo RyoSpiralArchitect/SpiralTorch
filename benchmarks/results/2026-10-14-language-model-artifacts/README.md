@@ -57,6 +57,14 @@ its output directory/model now explicitly use owner-only `0700`/`0600` modes.
 Initial failed/interrupted attempt logs remain in the private
 archive and are not represented as successful checks.
 
+The first PR CI also caught a stale release-smoke assertion expecting eight
+native study exports instead of ten. The failure was reproduced locally, the
+explicit expectation updated, and negative tests extended to both new classes
+on the native and facade surfaces. The installed CPU-only and WGPU release-smoke
+suites then each passed all nine tests, including dependency-free execution.
+Only tests and evidence changed in this follow-up; native binary identities above
+remain valid. Independent static review found no remaining issue in the fix.
+
 ## Reproduction And Limits
 
 Use the [Python build guide](../../../docs/python/build-and-validation.md) and

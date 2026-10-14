@@ -77,7 +77,19 @@
     "scoped_rustfmt": "passed nightly-2026-04-15",
     "python_38_syntax_files": 4,
     "browser_javascript_syntax": "passed",
-    "scoped_diff_check": "passed"
+    "scoped_diff_check": "passed",
+    "installed_release_smoke": {
+      "wgpu": {
+        "passed": 9,
+        "failed": 0
+      },
+      "cpu": {
+        "passed": 9,
+        "failed": 0
+      },
+      "includes_optional_dependency_absence": true,
+      "negative_native_and_facade_artifact_export_checks": true
+    }
   },
   "private_binaries": {
     "warning": "Development candidates, not the published 0.4.31 release; do not publish",
@@ -113,6 +125,14 @@
     {
       "log": "study-wgpu-tests.log",
       "outcome": "failed missing native nn.__all__ exports; fixed, rebuilt and retested"
+    },
+    {
+      "log": "ci-python-docs-failure.log",
+      "outcome": "release-smoke expected8 instead of10 native exports; reproduced and fixed with negative export coverage"
+    },
+    {
+      "log": "release-smoke-before-fix.log",
+      "outcome": "local reproduction:1failure in9tests"
     }
   ],
   "review": {
@@ -138,7 +158,11 @@
     "rust-portable.log": "cdcc73f97135afcdad1c799bb2a7e859e4f0c279146eaa1df6fc797cf2f2e573",
     "build-wgpu.log": "b8a793ee77c068a65b2e1e23b87f4c51a1e95fc80ec8717e4bd0914d82fc3ea7",
     "study-wgpu-tests.log": "9a11e74c08cc12075a1b94cdd85e0a330ec2fbe014e4df2ca27937d8d94ccd2c",
-    "public-probe-replay-hardened.log": "a6d2a82557f44b0e0ecbf16ba24de83cefb92d4b096ad0048a7d189e75ed9872"
+    "public-probe-replay-hardened.log": "a6d2a82557f44b0e0ecbf16ba24de83cefb92d4b096ad0048a7d189e75ed9872",
+    "ci-python-docs-failure.log": "a5e9223d40cc3ddf34529bb15502a4ce0086a6fd210fd5b65e83bbe3906a6053",
+    "release-smoke-before-fix.log": "b263946eeeeea636f22d95887f1ca80b9a6152f2e06897b05174eb98dfa87bb1",
+    "release-smoke-wgpu-ci-fix.log": "392f3f5024465316ad9f6aa4f66bba5c91ffaad55daa4bc1f1a56eefd839f2c4",
+    "release-smoke-cpu-ci-fix.log": "02f41fb6d6f2593b5b46da263ec80e1fdde6e4889946958d3acfd600dba74f0d"
   },
   "limits": [
     "Hash integrity and source consistency are not authenticity or proof of past training.",
@@ -147,5 +171,13 @@
     "No general cross-device bitwise equality, language-quality gain or serving-speed claim.",
     "No model registry, activation/rollback, KV cache or streaming generation is implemented.",
     "Historical corpus/weights and raw logs remain private; hashes alone do not reproduce missing inputs."
-  ]
+  ],
+  "ci_follow_up": {
+    "failed_head": "10fb6f949dd6d131ce70eddd324896e33362302d",
+    "failed_job": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/38524062595/job/115720155049",
+    "cause": "tests/test_release_learning_smoke.py still expected eight native exports after API grew to ten",
+    "local_failure_reproduced": true,
+    "change_scope": "release test expectations and negative cases; no library/native changes",
+    "independent_static_review": "no actionable findings"
+  }
 }
