@@ -53,6 +53,7 @@ impl Case {
             .as_ref()
             .is_some_and(|m| m.router_update == GeometryUpdate::Frozen)
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(super) fn parameter_frozen(&self, name: &str) -> bool {
         (self.frozen() && name.starts_with("geometry."))
             || (self.router_frozen() && name.starts_with("geometry.mixture_logits."))
@@ -157,6 +158,7 @@ impl Request {
         }
     }
 
+    #[cfg(any(feature = "wgpu", test))]
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
         if self.query_controls() {
             return if complete {

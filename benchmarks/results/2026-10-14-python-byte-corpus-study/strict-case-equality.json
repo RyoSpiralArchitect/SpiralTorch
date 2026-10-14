@@ -1,0 +1,8 @@
+{
+  "signed_zero_and_types_checked": true,
+  "case_equality": {
+    "v1-full.json": true,
+    "v8-native-handoff.json": true,
+    "v8-browser-handoff.json": true
+  }
+}

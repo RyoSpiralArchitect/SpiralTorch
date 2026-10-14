@@ -187,6 +187,7 @@ jobs:
           cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_feature_ownership --test ensemble
           cargo run --locked -p st-tensor --release --no-default-features --features cpu,faer --example readme_autograd
           cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
+          cargo test --locked -p st-nn --release --no-default-features --lib resident::byte_study
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
       - name: Cross-crate layout and geometry regressions
@@ -329,6 +330,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_nn_attention_training.py -v
           python -I -B bindings/st-py/tests/test_nn_residual_attention_training.py -v
           python -I -B bindings/st-py/tests/test_nn_byte_decoder.py -v
+          python -I -B bindings/st-py/tests/test_nn_byte_study.py -v
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
@@ -536,6 +538,8 @@ jobs:
       - name: Install wheel
         run: |
           python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+      - name: Portable byte corpus study contracts
+        run: python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
       - name: Resident classifier surface and handoff verifier
         run: |
           python -I -m unittest discover -s bindings/st-py/tests -p test_vision_resident_training.py

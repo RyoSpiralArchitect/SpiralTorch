@@ -2,9 +2,18 @@
 
 ## Unreleased
 
+- Expose the shared Rust/WASM byte-corpus runner through eight `spiraltorch.nn`
+  classes: bounded exact-byte study requests, immutable request-bound experiment
+  checkpoints, accepted-update segments, and existing calibration/headwise/
+  shared-mixture/contextual preparation. No Python training semantics are added.
+- Make Rust study preflight and checkpoint validation usable without WGPU.
+  CPU wheels expose the same contracts and structural query preparation, while
+  measured preparation and execution explicitly require a real WGPU device.
+  These unreleased APIs are not part of the published 0.4.30 wheel.
+
 ## 0.4.30
 
-Release candidate preparation; not confirmation of PyPI publication.
+Published to PyPI after the signed release and installed-wheel verification.
 
 - Expose the Rust-owned complete byte decoder through `spiraltorch.nn`:
   immutable byte batches, model/geometry plans, owning resident forward/VJP

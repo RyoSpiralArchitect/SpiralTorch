@@ -3061,6 +3061,7 @@ dependencies = [
  "nalgebra 0.32.6",
  "ndarray",
  "num-complex",
+ "pollster",
  "pyo3",
  "pyo3-build-config",
  "pyo3-ffi",

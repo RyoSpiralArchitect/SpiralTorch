@@ -377,7 +377,6 @@ impl ByteDecoderGeometryPlan {
         Ok(())
     }
 
-    #[cfg(feature = "wgpu")]
     pub(super) fn parameter_values(&self) -> Result<Vec<GraphParameter>, InferenceError> {
         let mut values = self.projection.graph_definition()?.parameters().to_vec();
         for (role, v) in [
