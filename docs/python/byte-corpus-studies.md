@@ -1,8 +1,10 @@
 # Paired Byte-Corpus Studies From Python
 
-**Unreleased source API, not included in the published 0.4.30 wheel.**
-Build this checkout using the [Python build guide](../../bindings/st-py/README.md).
-The public model-level API in 0.4.30 is described in
+**Requires Python package 0.4.31 or a source build; absent from 0.4.30.**
+Check [PyPI release history](https://pypi.org/project/spiraltorch/#history) for
+published wheels. Version metadata in this source tree is not proof of upload.
+For a source build, use the [Python build guide](build-and-validation.md).
+The model-level API introduced in 0.4.30 is described in
 [Geometric Byte Language Models](byte-language-models.md).
 
 ## One Runner, Three Clients

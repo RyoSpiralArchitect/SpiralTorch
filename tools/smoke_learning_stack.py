@@ -1,6 +1,7 @@
 """Installed-wheel mechanics only: no model download, Torch, or GPU requirement."""
 
 from array import array
+import hashlib
 import importlib
 import importlib.machinery
 import json
@@ -218,6 +219,81 @@ def byte_decoder_portable():
     return {"modes": len(variants), "checkpoint_roundtrip": "exact", "gpu_execution": "not attempted"}
 
 
+BYTE_CORPUS_EXPORTS = (
+    "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
+    "ByteCorpusPreparedBiasStudy", "ByteCorpusBiasCalibration",
+    "ByteCorpusHeadwiseControls", "ByteCorpusMixtureControls", "ByteCorpusQueryMixtureControls",
+)
+
+
+def byte_corpus_portable():
+    """Check packaged study contracts, not training, without repository fixtures."""
+    native = importlib.import_module("spiraltorch.spiraltorch")
+    # Attribute forwarding can populate __all__; inspect before any lazy lookup.
+    public_exports, native_exports = set(st.nn.__all__), set(native.nn.__all__)
+    for name in BYTE_CORPUS_EXPORTS:
+        assert name in public_exports and name in native_exports, name
+        assert getattr(st.nn, name) is getattr(native.nn, name), name
+    limit = "BYTE_CORPUS_STUDY_MAX_BYTES"
+    assert limit in public_exports and limit in native_exports
+    assert getattr(st.nn, limit) == getattr(native.nn, limit) == 64 * 1024 * 1024
+
+    def parameter(name, shape):
+        return {"name": name, "shape": shape, "values": [0.1] * math.prod(shape)}
+
+    # Deliberately fabricated constant weights: this only exercises admission.
+    backbone = [parameter("token_embedding", [256, 2]),
+                parameter("position_embedding", [2, 2])]
+    for prefix, first, second in (
+        ("block.0.pre", [2], [2]), ("block.0.qkv", [2, 6], [6]),
+        ("block.0.output", [2, 2], [2]), ("block.0.feed", [2], [2]),
+        ("block.0.up", [2, 2], [2]), ("block.0.down", [2, 2], [2]),
+        ("head", [2], [2]), ("head.output", [2, 256], [256]),
+    ):
+        backbone += [parameter(prefix + (".gain" if len(first) == 1 else ".weight"), first),
+                     parameter(prefix + ".bias", second)]
+    geometry = [parameter(name, shape) for name, shape in (
+        ("geometry.projection.weight", [2, 2]), ("geometry.projection.bias", [2]),
+        ("geometry.raw_decay", [1]), ("geometry.raw_phase", [1]),
+        ("geometry.raw_gain.0", [1]),
+    )]
+    request = {
+        "schema": "spiraltorch.byte_corpus.request.v1",
+        "config": dict(batch=1, steps=2, width=2, hidden=2, heads=1, blocks=[False],
+                       geometry_cols=2, curvature=-0.75),
+        "cases": [
+            dict(name="plain", seed=11, geometry=False, parameters=backbone),
+            dict(name="geometry", seed=11, geometry=True,
+                 parameters=backbone[:2] + geometry + backbone[2:]),
+        ],
+        "train_documents": [[1, 2, 3, 4, 5]], "validation_documents": [[8, 9, 10]],
+        "train_batches": [[[0, 0]], [[0, 2]]], "validation_batches": [[[0, 0]]],
+        "checkpoint_every": 2, "rate": 0.05,
+    }
+    raw = json.dumps(request, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    study = st.nn.ByteCorpusStudy.from_json(raw)
+    assert study.request_sha256 == hashlib.sha256(raw).hexdigest()
+    assert st.nn.ByteCorpusStudy.from_json(raw.decode("utf-8")).request_sha256 == study.request_sha256
+    assert st.nn.ByteCorpusStudy.from_json(raw + b" ").request_sha256 != study.request_sha256
+    assert study.total_updates == 2 and 0 < study.checkpoint_size_bound() <= getattr(st.nn, limit)
+    study.validate_segment(0)
+    study.validate_segment()
+    for error, call in (
+        (TypeError, lambda: st.nn.ByteCorpusStudy.from_json(request)),
+        (TypeError, lambda: study.validate_segment(True)),
+        (ValueError, lambda: study.validate_segment(3)),
+        (ValueError, lambda: study.checkpoint_from_json("{}")),
+    ):
+        try:
+            call()
+        except error:
+            pass
+        else:
+            raise AssertionError("invalid study input was accepted")
+    return {"native_exports": len(BYTE_CORPUS_EXPORTS), "request_identity": "exact bytes",
+            "segment_validation": "CPU-only", "gpu_execution": "not attempted"}
+
+
 def main():
     native = importlib.import_module("spiraltorch.spiraltorch")
     assert any(str(native.__file__).endswith(suffix) for suffix in importlib.machinery.EXTENSION_SUFFIXES)
@@ -232,6 +308,7 @@ def main():
         "fractional_history": fractional_history(),
         "resident_plan": resident_plan(),
         "byte_decoder": byte_decoder_portable(),
+        "byte_corpus": byte_corpus_portable(),
     }
     print(json.dumps(report, sort_keys=True, allow_nan=False))
     return report

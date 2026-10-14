@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.4.31
+
+Release candidate. Publication requires the signed platform wheels and verified
+PyPI upload; version metadata alone is not confirmation of availability.
+
 - Expose the shared Rust/WASM byte-corpus runner through eight `spiraltorch.nn`
   classes: bounded exact-byte study requests, immutable request-bound experiment
   checkpoints, accepted-update segments, and existing calibration/headwise/
@@ -9,7 +14,12 @@
 - Make Rust study preflight and checkpoint validation usable without WGPU.
   CPU wheels expose the same contracts and structural query preparation, while
   measured preparation and execution explicitly require a real WGPU device.
-  These unreleased APIs are not part of the published 0.4.30 wheel.
+  These APIs require 0.4.31 or a source build; they are absent from 0.4.30.
+- Gate all installed release wheels on the new native study exports, exact-byte
+  request identity, and CPU-only segment preflight without optional ML packages.
+  Retain separate real-WGPU learning/resume and historical native/WASM checkpoint
+  qualification. This is API/numerical compatibility, not a new learning-quality
+  result or a GPU-speed claim.
 
 ## 0.4.30
 
