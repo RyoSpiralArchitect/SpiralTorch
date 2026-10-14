@@ -1,7 +1,7 @@
 # Geometric Byte Language Models From Python
 
-Model-level API published in **0.4.30**. For the newer, unreleased shared
-corpus runner and complete experiment resume, see
+Model-level API published in **0.4.30**. For the shared corpus runner and
+complete experiment resume (**0.4.31** or a source build), see
 [Paired Byte-Corpus Studies](byte-corpus-studies.md).
 This is explicit full-window WGPU learning, not the ordinary host Tensor route,
 HF fine-tuning, a streaming decoder or a KV cache.
