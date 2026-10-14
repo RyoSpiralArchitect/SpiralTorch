@@ -1,5 +1,5 @@
 //! Thin clients of the same bounded study runner used by native and WASM.
-use super::byte_decoder::PyByteDecoderCheckpoint;
+use super::byte_decoder::{PyByteCorpusModelArtifact, PyByteDecoderCheckpoint};
 use super::*;
 use pyo3::types::{PyBytes, PyString};
 #[cfg(feature = "wgpu")]
@@ -13,7 +13,7 @@ fn value_error(error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(error.to_string())
 }
 
-fn json_input(value: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+pub(super) fn json_input(value: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     use std::borrow::Cow;
     let bytes = if let Ok(value) = value.cast::<PyBytes>() {
         Cow::Borrowed(value.as_bytes())
@@ -130,6 +130,37 @@ impl PyByteCorpusStudy {
             self.inner
                 .case_checkpoint(&checkpoint.inner, case_name)
                 .map(PyByteDecoderCheckpoint::from)
+                .map_err(value_error)
+        })
+    }
+
+    #[pyo3(signature = (checkpoint, case_name, *, policy))]
+    fn case_artifact(
+        &self,
+        py: Python<'_>,
+        checkpoint: &PyByteCorpusStudyCheckpoint,
+        case_name: &str,
+        policy: &str,
+    ) -> PyResult<PyByteCorpusModelArtifact> {
+        let policy = serde_json::from_value(serde_json::Value::String(policy.to_owned()))
+            .map_err(value_error)?;
+        py.detach(|| {
+            self.inner
+                .case_artifact(&checkpoint.inner, case_name, policy)
+                .map(PyByteCorpusModelArtifact::from)
+                .map_err(value_error)
+        })
+    }
+
+    fn validate_artifact(
+        &self,
+        py: Python<'_>,
+        checkpoint: &PyByteCorpusStudyCheckpoint,
+        artifact: &PyByteCorpusModelArtifact,
+    ) -> PyResult<()> {
+        py.detach(|| {
+            self.inner
+                .validate_artifact(&checkpoint.inner, artifact.as_inner())
                 .map_err(value_error)
         })
     }

@@ -424,9 +424,15 @@ artifact. The full study retains provenance and frozen-rate resume semantics;
 the extracted model alone does not. Native byte-LM checkpoints and HF adapters
 remain different artifact kinds, not interchangeable optimizer snapshots.
 
-Next milestones are a Rust-owned artifact identity that keeps those companions
-together, explicit held-out language/geometry health gates, and fresh-runtime
-inference plus rollback to the last accepted artifact. Reuse the existing
+The next source slice, [executable byte-LM artifacts](python/byte-model-artifacts.md),
+binds the exact model, source-companion hashes and an explicit fixed-window
+inference policy in Rust. A caller-pinned artifact restores to an immutable
+owner without SGD or external biases; each retained forward carries the source
+artifact ID. Private corpus/study records stay separate and are required for
+source-companion validation. Hash integrity does not attest training or quality.
+
+Next milestones are explicit held-out language/geometry health gates and
+accepted-candidate activation plus rollback to the last accepted artifact. Reuse the existing
 [HF lineage, promotion and experiment executor](python/build-and-validation.md)
 rather than adding a second scheduler or independently interpreted client gate.
 Geometry must affect the executable model, not just its report. Its benefit

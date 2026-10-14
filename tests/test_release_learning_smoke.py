@@ -64,7 +64,7 @@ class LearningSmokeTests(unittest.TestCase):
         self.assertEqual(report["byte_decoder"], {
             "modes": 8, "checkpoint_roundtrip": "exact", "gpu_execution": "not attempted"})
         self.assertEqual(report["byte_corpus"], {
-            "native_exports": 8, "request_identity": "exact bytes",
+            "native_exports": 10, "request_identity": "exact bytes",
             "segment_validation": "CPU-only", "gpu_execution": "not attempted"})
         self.assertIn("not optimizer resume", report["topos"]["handoff"])
         self.assertEqual(set(report), {"scope", "sequential", "topos", "wave_gate",
@@ -72,16 +72,19 @@ class LearningSmokeTests(unittest.TestCase):
                                        "byte_decoder", "byte_corpus"})
 
     def test_missing_study_owner_is_failure_not_skip(self):
-        with mock.patch.object(st.nn, "ByteCorpusStudy", object()), self.assertRaises(AssertionError):
-            SMOKE.byte_corpus_portable()
+        for name in ("ByteCorpusStudy", "ByteCorpusModelArtifact", "ResidentByteInference"):
+            with self.subTest(name=name), mock.patch.object(st.nn, name, object()), \
+                    self.assertRaises(AssertionError):
+                SMOKE.byte_corpus_portable()
 
     def test_study_star_import_omission_is_failure_not_skip(self):
         native = SMOKE.importlib.import_module("spiraltorch.spiraltorch")
         for label, module in (("facade", st.nn), ("native", native.nn)):
-            exports = [name for name in module.__all__ if name != "ByteCorpusStudySegment"]
-            with self.subTest(surface=label), mock.patch.object(module, "__all__", exports), \
-                    self.assertRaises(AssertionError):
-                SMOKE.byte_corpus_portable()
+            for missing in ("ByteCorpusStudySegment", "ByteCorpusModelArtifact", "ResidentByteInference"):
+                exports = [name for name in module.__all__ if name != missing]
+                with self.subTest(surface=label, missing=missing), \
+                        mock.patch.object(module, "__all__", exports), self.assertRaises(AssertionError):
+                    SMOKE.byte_corpus_portable()
 
     def test_all_wheel_paths_execute_smoke_before_artifact_upload(self):
         for workflow in ("wheels.yml", "release_wheels.yml"):

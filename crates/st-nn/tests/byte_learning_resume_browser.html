@@ -8,6 +8,7 @@ at target/resident-byte-learning-web/checkpoint.json and open ?resume=1.</p>
 <p id="summary">Loading the frozen request...</p>
 <p><a id="checkpoint" hidden>Download checkpoint</a></p>
 <p><a id="model" hidden>Download selected model (not a promotion decision)</a></p>
+<p><a id="artifact" hidden>Download pinned inference artifact (not a promotion decision)</a></p>
 <p><a id="download" hidden>Download learning report</a></p>
 <pre id="result" data-status="running">Numerical comparison is a separate step.</pre>
 <script type="module">
@@ -35,7 +36,9 @@ try {
   // Keep checkpoint/model JSON opaque; JS must not round or rebuild model values.
   const checkpoint = query.get("resume") === "1" ? await read("checkpoint.json") : undefined;
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), x => x.toString(16).padStart(2,"0")).join("");
-  const {default:init, advance_resident_byte_learning, extract_resident_byte_learning_case} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  const {default:init, advance_resident_byte_learning, extract_resident_byte_learning_case,
+    pack_resident_byte_learning_case_artifact, verify_resident_byte_learning_artifact,
+    infer_resident_byte_artifact} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
   await init();
   document.querySelector("#summary").textContent = `Advancing ${request.cases.length} cases to update ${stop}. Request ${hash}`;
   const segment = JSON.parse(await advance_resident_byte_learning(input, checkpoint, stop));
@@ -87,9 +90,31 @@ try {
   try { extract_resident_byte_learning_case(input + " ", segment.checkpoint_json, selectedName); }
   catch { rejectedForeign = true; }
   if (!rejectedForeign) throw Error("Foreign request accepted during handoff");
+  const artifactJson = pack_resident_byte_learning_case_artifact(input, segment.checkpoint_json,
+    selectedName, "fixed_window_frozen.v1");
+  // Pin the freshly source-verified export. Deployment must obtain this ID from
+  // a trusted selection, not compute it from an untrusted downloaded artifact.
+  const artifactId = "sha256:" + Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",
+    new TextEncoder().encode(artifactJson))), x => x.toString(16).padStart(2,"0")).join("");
+  verify_resident_byte_learning_artifact(input, segment.checkpoint_json, artifactJson, artifactId);
+  const windows = Uint8Array.from(request.validation_batches[0].flatMap(([doc, start]) =>
+    request.validation_documents[doc].slice(start, start + request.config.steps + 1)));
+  let rejectedArtifact = false;
+  try { await infer_resident_byte_artifact(artifactJson + " ", artifactId, windows); }
+  catch { rejectedArtifact = true; }
+  if (!rejectedArtifact) throw Error("Altered artifact accepted");
+  const inference = JSON.parse(await infer_resident_byte_artifact(artifactJson, artifactId, windows));
+  if (inference.artifact_id !== artifactId || inference.revision !== stop || !Number.isFinite(inference.loss)
+      || !inference.adapter || inference.adapter.backend !== "BrowserWebGpu" || inference.adapter.device_type === "Cpu"
+      || inference.logits.length !== request.config.batch * request.config.steps * 256
+      || !inference.logits.every(Number.isFinite)) throw Error("Invalid artifact inference");
+  const scheduled = selected.validation.find(v => v.revision === stop);
+  if (scheduled && Math.fround(inference.loss) !== Math.fround(scheduled.batch_losses[0]))
+    throw Error("Same-browser artifact loss differs from study checkpoint");
   for (const [id, filename, text] of [
     ["checkpoint", `resident-byte-corpus-checkpoint-${stop}.json`, segment.checkpoint_json],
     ["model", `resident-byte-decoder-${stop}.json`, modelJson],
+    ["artifact", `resident-byte-artifact-${stop}.json`, artifactJson],
     ["download", `resident-byte-corpus-${stop}.json`, reportJson],
   ]) {
     const link = document.querySelector(`#${id}`);
@@ -100,7 +125,11 @@ try {
   target.dataset.status = complete ? "completed" : "paused";
   target.textContent = JSON.stringify({request_sha256:hash, completed_updates:stop,
     case_count:report.cases.length, evaluation_revisions:revisions,
-    selected_case:selectedName, model_handoff:"exact opaque JSON", foreign_request_rejected:rejectedForeign}, null, 2);
+    selected_case:selectedName, model_handoff:"exact opaque JSON", foreign_request_rejected:rejectedForeign,
+    artifact_id:artifactId, altered_artifact_rejected:rejectedArtifact,
+    artifact_adapter:inference.adapter,
+    artifact_inference_loss:inference.loss, artifact_logits_count:inference.logits.length,
+    source_loss_comparison:scheduled ? "exact f32" : "not scheduled at this cursor"}, null, 2);
   document.querySelector("#summary").textContent = `${complete ? "Completed" : "Paused"} all cases at update ${stop}. Numerical equivalence must still be checked against uninterrupted learning and Torch.`;
 } catch (error) {
   target.dataset.status = "error";

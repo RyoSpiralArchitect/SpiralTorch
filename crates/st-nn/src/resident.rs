@@ -36,11 +36,14 @@ pub use byte_decoder::{
     BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
 };
 pub use byte_study::{
-    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusMixtureControls,
-    ByteCorpusPreparedBiasStudy, ByteCorpusQueryMixtureControls, ByteCorpusStudy,
-    ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment,
+    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusInferencePolicy,
+    ByteCorpusMixtureControls, ByteCorpusModelArtifact, ByteCorpusPreparedBiasStudy,
+    ByteCorpusQueryMixtureControls, ByteCorpusStudy, ByteCorpusStudyCheckpoint,
+    ByteCorpusStudyResult, ByteCorpusStudySegment, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
     BYTE_CORPUS_STUDY_MAX_BYTES,
 };
+#[cfg(feature = "wgpu")]
+pub use byte_study::{ResidentByteInference, ResidentByteInferenceForward};
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]
 mod convolution;

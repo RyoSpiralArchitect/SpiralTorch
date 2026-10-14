@@ -1,0 +1,25 @@
+{
+  "status": "completed",
+  "request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+  "completed_updates": 128,
+  "new_updates": 0,
+  "case_count": 75,
+  "evaluation_revisions": [0, 64, 128],
+  "selected_case": "mixture-11-0-train-query-train",
+  "model_handoff": "exact opaque JSON",
+  "foreign_request_rejected": true,
+  "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+  "altered_artifact_rejected": true,
+  "artifact_adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "artifact_inference_loss": 3.648268699645996,
+  "artifact_logits_count": 16384,
+  "source_loss_comparison": "exact f32",
+  "downloaded_file_sha256": "628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+  "downloaded_file_matches_python_artifact_id": true,
+  "browser_logits_hash_recorded": false,
+  "note": "Observed via CUA DOM after completed fresh-owner WASM inference. Downloaded artifact SHA256 checked separately with shasum. No cross-device bitwise-logits claim."
+}

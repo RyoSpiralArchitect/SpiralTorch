@@ -17,6 +17,20 @@ pub(super) struct PyResidentByteBatch {
 }
 
 #[cfg(feature = "wgpu")]
+impl PyResidentByteBatch {
+    pub(super) fn as_inner(&self) -> &ResidentByteBatch {
+        &self.inner
+    }
+}
+
+#[cfg(feature = "wgpu")]
+impl From<ResidentByteBatch> for PyResidentByteBatch {
+    fn from(inner: ResidentByteBatch) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "wgpu")]
 #[pymethods]
 impl PyResidentByteBatch {
     #[getter]
@@ -117,14 +131,12 @@ impl PyResidentByteDecoder {
                 pair_bias: p.as_ref(),
             })
             .collect::<Vec<_>>();
-        Ok(PyByteDecoderForward {
-            inner: py
-                .detach(|| {
-                    self.inner
-                        .forward_with_external_biases(&batch.inner, &biases)
-                })
-                .map_err(plan_error)?,
+        py.detach(|| {
+            self.inner
+                .forward_with_external_biases(&batch.inner, &biases)
         })
+        .map(PyByteDecoderForward::from)
+        .map_err(plan_error)
     }
     /// StopCoordinates is an explicit ablation, not a freeze of router parameters.
     #[pyo3(signature = (forward, cotangent, *, query_pullback="full"))]
@@ -194,12 +206,39 @@ impl PyResidentByteDecoder {
 #[pyclass(name = "ByteDecoderForward", module = "spiraltorch.nn", frozen)]
 pub(super) struct PyByteDecoderForward {
     #[cfg(feature = "wgpu")]
+    artifact_id: Option<String>,
+    #[cfg(feature = "wgpu")]
     inner: ResidentByteDecoderForward,
+}
+
+#[cfg(feature = "wgpu")]
+impl From<ResidentByteDecoderForward> for PyByteDecoderForward {
+    fn from(inner: ResidentByteDecoderForward) -> Self {
+        Self {
+            inner,
+            artifact_id: None,
+        }
+    }
+}
+
+#[cfg(feature = "wgpu")]
+impl From<st_nn::resident::ResidentByteInferenceForward> for PyByteDecoderForward {
+    fn from(value: st_nn::resident::ResidentByteInferenceForward) -> Self {
+        let (artifact_id, inner) = value.into_parts();
+        Self {
+            inner,
+            artifact_id: Some(artifact_id),
+        }
+    }
 }
 
 #[cfg(feature = "wgpu")]
 #[pymethods]
 impl PyByteDecoderForward {
+    #[getter]
+    fn artifact_id(&self) -> Option<&str> {
+        self.artifact_id.as_deref()
+    }
     #[getter]
     fn parameter_revision(&self) -> u64 {
         self.inner.parameter_revision()

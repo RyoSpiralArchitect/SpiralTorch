@@ -9,6 +9,8 @@ use st_nn::resident::{
 
 mod training;
 use training::*;
+mod artifact;
+pub(super) use artifact::PyByteCorpusModelArtifact;
 
 fn metric(value: &str) -> PyResult<ByteDecoderPairMetric> {
     serde_json::from_value(serde_json::Value::String(value.to_owned()))
@@ -419,5 +421,6 @@ pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyByteDecoderGeometryPlan>()?;
     module.add_class::<PyByteDecoderPlan>()?;
     module.add_class::<PyByteDecoderCheckpoint>()?;
+    artifact::register(module)?;
     training::register(module)
 }
