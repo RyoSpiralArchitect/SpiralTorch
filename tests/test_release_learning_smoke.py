@@ -77,9 +77,11 @@ class LearningSmokeTests(unittest.TestCase):
 
     def test_study_star_import_omission_is_failure_not_skip(self):
         native = SMOKE.importlib.import_module("spiraltorch.spiraltorch")
-        exports = [name for name in native.nn.__all__ if name != "ByteCorpusStudySegment"]
-        with mock.patch.object(native.nn, "__all__", exports), self.assertRaises(AssertionError):
-            SMOKE.byte_corpus_portable()
+        for label, module in (("facade", st.nn), ("native", native.nn)):
+            exports = [name for name in module.__all__ if name != "ByteCorpusStudySegment"]
+            with self.subTest(surface=label), mock.patch.object(module, "__all__", exports), \
+                    self.assertRaises(AssertionError):
+                SMOKE.byte_corpus_portable()
 
     def test_all_wheel_paths_execute_smoke_before_artifact_upload(self):
         for workflow in ("wheels.yml", "release_wheels.yml"):

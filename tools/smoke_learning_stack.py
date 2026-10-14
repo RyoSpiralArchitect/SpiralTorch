@@ -229,12 +229,14 @@ BYTE_CORPUS_EXPORTS = (
 def byte_corpus_portable():
     """Check packaged study contracts, not training, without repository fixtures."""
     native = importlib.import_module("spiraltorch.spiraltorch")
+    # Attribute forwarding can populate __all__; inspect before any lazy lookup.
+    public_exports, native_exports = set(st.nn.__all__), set(native.nn.__all__)
     for name in BYTE_CORPUS_EXPORTS:
+        assert name in public_exports and name in native_exports, name
         assert getattr(st.nn, name) is getattr(native.nn, name), name
-        assert name in st.nn.__all__ and name in native.nn.__all__, name
     limit = "BYTE_CORPUS_STUDY_MAX_BYTES"
+    assert limit in public_exports and limit in native_exports
     assert getattr(st.nn, limit) == getattr(native.nn, limit) == 64 * 1024 * 1024
-    assert limit in st.nn.__all__ and limit in native.nn.__all__
 
     def parameter(name, shape):
         return {"name": name, "shape": shape, "values": [0.1] * math.prod(shape)}
