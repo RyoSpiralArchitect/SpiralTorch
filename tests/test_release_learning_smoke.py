@@ -64,7 +64,7 @@ class LearningSmokeTests(unittest.TestCase):
         self.assertEqual(report["byte_decoder"], {
             "modes": 8, "checkpoint_roundtrip": "exact", "gpu_execution": "not attempted"})
         self.assertEqual(report["byte_corpus"], {
-            "native_exports": 10, "request_identity": "exact bytes",
+            "native_exports": 13, "request_identity": "exact bytes",
             "segment_validation": "CPU-only", "gpu_execution": "not attempted"})
         self.assertIn("not optimizer resume", report["topos"]["handoff"])
         self.assertEqual(set(report), {"scope", "sequential", "topos", "wave_gate",
@@ -72,7 +72,8 @@ class LearningSmokeTests(unittest.TestCase):
                                        "byte_decoder", "byte_corpus"})
 
     def test_missing_study_owner_is_failure_not_skip(self):
-        for name in ("ByteCorpusStudy", "ByteCorpusModelArtifact", "ResidentByteInference"):
+        for name in ("ByteCorpusStudy", "ByteCorpusModelArtifact", "ResidentByteInference",
+                     "ByteCorpusServingGate", "ResidentByteCandidate", "ResidentByteServing"):
             with self.subTest(name=name), mock.patch.object(st.nn, name, object()), \
                     self.assertRaises(AssertionError):
                 SMOKE.byte_corpus_portable()
@@ -80,7 +81,8 @@ class LearningSmokeTests(unittest.TestCase):
     def test_study_star_import_omission_is_failure_not_skip(self):
         native = SMOKE.importlib.import_module("spiraltorch.spiraltorch")
         for label, module in (("facade", st.nn), ("native", native.nn)):
-            for missing in ("ByteCorpusStudySegment", "ByteCorpusModelArtifact", "ResidentByteInference"):
+            for missing in ("ByteCorpusStudySegment", "ByteCorpusModelArtifact", "ResidentByteInference",
+                            "ByteCorpusServingGate", "ResidentByteCandidate", "ResidentByteServing"):
                 exports = [name for name in module.__all__ if name != missing]
                 with self.subTest(surface=label, missing=missing), \
                         mock.patch.object(module, "__all__", exports), self.assertRaises(AssertionError):
@@ -97,6 +99,7 @@ class LearningSmokeTests(unittest.TestCase):
         self.assertIn("python -I tools/smoke_learning_stack.py", ci)
         self.assertIn("python -I tests/test_release_learning_smoke.py", ci)
         self.assertIn("python -I -B bindings/st-py/tests/test_nn_byte_decoder.py -v", ci)
+        self.assertEqual(ci.count("python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v"), 2)
 
     def test_homogeneous_substitute_does_not_pass_headwise_smoke(self):
         constructor = st.nn.ByteDecoderGeometryPlan

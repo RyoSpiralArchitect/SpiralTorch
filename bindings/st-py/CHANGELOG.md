@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add Rust-owned `ByteCorpusServingGate`, `ResidentByteServing` and
+  `ResidentByteCandidate`: fixed evaluation windows/limits, actual paired loss
+  and geometry/router measurements, slot/generation-bound activation and exact
+  one-step rollback. Python and the standalone WASM client share the same
+  implementation. Reports cannot be imported as permits. This is local serving
+  mechanics, not a registry, HF executor or quality claim. Source-only after 0.4.31.
 - Add source-bound `ByteCorpusModelArtifact` and policy-constrained
   `ResidentByteInference`. Rust binds selected model/geometry, all-case study
   identity and explicit `fixed_window_frozen.v1` policy; exact artifact bytes

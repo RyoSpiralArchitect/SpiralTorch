@@ -59,7 +59,9 @@ The inference owner has no SGD, backward, parameter-tensor or external-bias API.
 Each retained forward carries its originating `artifact_id`, even after its
 owner is dropped or a different model is selected. The existing training API's
 forwards have `artifact_id=None`. Invalid candidate imports leave an existing
-owner unchanged; an automatic promotion/rollback manager is **not** implemented.
+owner unchanged. The separate [serving gate](byte-serving-gates.md) can measure
+paired candidates, activate an accepted owner and explicitly roll back; it is
+not an automatic promotion service or a durable deployment manager.
 
 `loaded.checkpoint()` is a deliberate low-level escape hatch: restoring a
 separate mutable training owner does not mutate this artifact. Later updates to
@@ -108,9 +110,10 @@ The last creates a fresh owner and maps logits/loss for qualification. The
 `byte_learning_resume_browser.html` exercise them. These functions are **not**
 yet exports of the packaged `st-wasm` module.
 
-The next operational layer must pin held-out language and geometry-health
-criteria, bind measured evidence to the artifact/operating conditions, and
-exercise accepted-candidate activation plus rollback. Reuse existing HF lineage
+The [serving gate](byte-serving-gates.md) pins language and geometry-health
+criteria, binds actual paired inference to the artifact/operating conditions,
+and provides accepted-candidate activation plus one-step rollback. Held-outness
+and threshold selection remain caller responsibilities. Reuse existing HF lineage
 and execution management; do not silently change established HF adapter IDs or
 pretend native byte-model artifacts and HF adapters are interchangeable.
 Correct restore and identity checks are not evidence that geometry improves

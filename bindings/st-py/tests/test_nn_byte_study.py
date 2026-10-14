@@ -31,6 +31,7 @@ NAMES = (
     "ByteCorpusPreparedBiasStudy", "ByteCorpusBiasCalibration",
     "ByteCorpusHeadwiseControls", "ByteCorpusMixtureControls", "ByteCorpusQueryMixtureControls",
     "ByteCorpusModelArtifact", "ResidentByteInference",
+    "ByteCorpusServingGate", "ResidentByteCandidate", "ResidentByteServing",
 )
 
 FRESH_INFERENCE = """

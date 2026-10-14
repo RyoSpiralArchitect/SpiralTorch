@@ -1,0 +1,106 @@
+{
+  "schema": "spiraltorch.byte_corpus.serving_validation.v1",
+  "date_local": "2026-10-15",
+  "base_commit": "99f53806d35057c839840a72a3f3040565c232e5",
+  "status": "local qualification; not a PyPI release or deployment-readiness result",
+  "tests": {
+    "rust-portable-final.log": {
+      "passed": 58,
+      "skipped": 0,
+      "sha256": "64c67fa05db34da0310229fbd22c4c3d3247af1e1a61394b2581e105af0e5ecd"
+    },
+    "rust-wgpu-review.log": {
+      "passed": 8,
+      "skipped": 0,
+      "sha256": "eec95f2bc0fdd1082c9a2fee88868788df05b93263b3ac7f80ae9bc275bb1b55"
+    },
+    "python-wgpu-review.log": {
+      "passed": 5,
+      "skipped": 0,
+      "sha256": "d706e27376d605c5fd7a043d1756f6b9a860e9e9e57dc5aed3334d1e2107270b"
+    },
+    "python-cpu.log": {
+      "passed": 2,
+      "skipped": 3,
+      "sha256": "d8145735cfe9c0224945850f4584f7aebf26d5b93fc41ef0fe9f5c98d6f2bedf"
+    },
+    "study-wgpu.log": {
+      "passed": 12,
+      "skipped": 1,
+      "sha256": "b677befc6cbba2d18e7bda2764220df2eb8edfd00066e3e87d1e37f5e49194dd"
+    },
+    "study-cpu.log": {
+      "passed": 10,
+      "skipped": 3,
+      "sha256": "106833709e7430e31562ee3f3711cdca529a41d1feb89afd22ec894b6243db89"
+    },
+    "release-smoke-wgpu.log": {
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "c68a3d3813bd6dcb00c0a3a9d8a35b0e07a7d66c4230daa5198126ea60342941"
+    },
+    "release-smoke-cpu.log": {
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "96bf06807743d64198bc0156294acb1257e6dee9c91d00a6e613633ddc686bb5"
+    }
+  },
+  "source_sha256": {
+    "crates/st-nn/src/resident/byte_study/serving.rs": "049d36464dedd662244e63943c9c2ea0a07a5e588a6a778256363f40b0615bc0",
+    "crates/st-nn/src/resident/byte_study/serving/tests.rs": "b590bb1536b523ee90e4a1145a8ca8e7578463ce1f6c3b9cd2cc8af14b3daad8",
+    "crates/st-nn/src/resident/byte_study/serving/gpu.rs": "331dff48759f893e0aa48374e0060e33e2440eb41bfce5f1c576e7b2715c4cbb",
+    "crates/st-nn/src/resident/byte_study/serving/gpu/tests.rs": "2c624d7cc9322cd7a6a24e511a94daa0a225bf1c7505f716ef44c093eaba82cf",
+    "crates/st-nn/src/resident/byte_study.rs": "8b7431cf33c08ee012d9fe2b5d4db68efabbfd5778d348b8f400689433858392",
+    "crates/st-nn/src/resident.rs": "60642880fa2b490ce070334a3be5a6333f835f00af05fb5c563f6764337697fb",
+    "crates/st-nn/examples/resident_byte_learning_browser.rs": "9a86d344f7ead895afb4440b93ab8bfced813b4e7f2ebdc829a361ee354ef228",
+    "crates/st-nn/examples/resident_byte_learning_browser/serving.rs": "999fe26cfa9c940e51af4fe0f189a59867269ddc69330773f40a542088864424",
+    "crates/st-nn/tests/byte_serving_browser.html": "51b4271e2df4e100a01c3aca6d73961f2b0c7b3dc9ebce93d33bb5164f15b851",
+    "bindings/st-py/src/nn_resident/byte_decoder/serving.rs": "6b5e066c18f247b60bb637ae1a8e6b9e3226b1a2c836d8438ebd8acb758fdbc4",
+    "bindings/st-py/src/nn_resident/byte_decoder.rs": "2d1badd430e33d16219e75250852fa8d593d8842eda38ab3fb63c0a7e1c23b04",
+    "bindings/st-py/src/nn.rs": "5561bd1bde71d3287d2288adad3e2334ccbbf03928a17e6b6929fb74f4600c9d",
+    "bindings/st-py/spiraltorch/__init__.pyi": "995378cf055788fee15b5f43b35f6c72aaf75c9ffa8676919e3e0bdbe902bddc",
+    "bindings/st-py/tests/test_nn_byte_serving.py": "e4ab0724fb018c9b5c0f14de6046d11629dc1a3d216c1f90363d37ad04866525",
+    "bindings/st-py/tests/test_nn_byte_study.py": "57ce9c1116d8a5abc10b2519ab51b321eabe5f3a0882711958b850975ad4bf17",
+    "tools/smoke_learning_stack.py": "26c491e12285a4fce2c759e02ac8529eff82ea8438d86db2b117a1222f8235ca",
+    "tests/test_release_learning_smoke.py": "32adc5d047ecfded399b2d2188a2f56d8942da6f8003e933aea53606c3a2b4cf",
+    ".github/workflows/ci.yml": "7c12711b807b074c3e9b23a20d648ce6a20af3876bd4138881a0052868434642",
+    "benchmarks/results/2026-10-15-language-serving-gates/verify_serving.py": "0aababbb61fd6f2220a0f3734aa5dc0b76bcc05b69b9d6aa29d6b4babd1022ae"
+  },
+  "binaries": {
+    "cpu": {
+      "wheel_sha256": "eabde557a462909149f2bee98d58a5adc98adc72f24187c9b96cb7619189735a",
+      "native_sha256": "316a03585d36f64320216820e475513b8a458693196d5bfec34f6123efc1e7ab",
+      "installed_native_matches_wheel": true
+    },
+    "wgpu": {
+      "wheel_sha256": "63e37f71ba7c35faa4bb6d2e320c38fa04a8281e99c5c6b10e95cea4b30b106e",
+      "native_sha256": "9ffb18842b7ad32f8ca3bfef2e983cf8aac365c884a4e7b8950da2beef563cfb",
+      "installed_native_matches_wheel": true
+    }
+  },
+  "wasm_sha256": "e76c380fb89a23ea96ddbef2a74877e5e4c607e00ee958a19cf8a6da4139b6f8",
+  "wasm_js_sha256": "d72c6ca56cfb2659f5b613c4a1ff55943c2865b120820da9d8acaa4ae5a3eb12",
+  "wasm_bindgen": "0.2.129",
+  "build_log_sha256": {
+    "build-wgpu-reviewed.log": "19c7180b6bcb1250cc60ce8d2db4e92866e3d29b5c84249aeeaaa1de04aef71c",
+    "build-cpu.log": "24e7bd58b50fbbf04ac5667da11af24bc36bfd8900115d5e04f840fc4a95081b",
+    "build-wasm.log": "c128b6956a8b1547da675b4d68bb0ab44c611f3cc9aa09bf41c24f2078a20b04"
+  },
+  "historical_receipt_sha256": "22c936f6647132984c899402d2710483e52b0c42b9538ce65a71426f97d34828",
+  "browser_receipt_sha256": "4c18c23296eca2c58b77d607331a3d87a92e915155d7e86e8f19c82f7d2bf42c",
+  "attempts_retained": {
+    "python-wgpu-first.log": {
+      "status": "failed test fixture assumption: study mixture preparation is intentionally one-block",
+      "sha256": "9e52d364aeba13037b18517552b21a9b8e86180f70567a2485f2317bc2ed7e90"
+    }
+  },
+  "review": {
+    "kind": "independent read-only static review, not numerical rerun",
+    "fixed": [
+      "normalized router entropy and zero-mass rejection",
+      "independent mean-only and worst-batch regression tests",
+      "actual shared/contextual multi-block router measurement and entropy-only rejection"
+    ],
+    "follow_up": "no further actionable Rust/Python/WASM-wrapper findings"
+  }
+}

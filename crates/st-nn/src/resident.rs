@@ -35,6 +35,7 @@ pub use byte_decoder::{
     BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
     BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
 };
+pub use byte_study::ByteCorpusServingGate;
 pub use byte_study::{
     ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusInferencePolicy,
     ByteCorpusMixtureControls, ByteCorpusModelArtifact, ByteCorpusPreparedBiasStudy,
@@ -42,6 +43,8 @@ pub use byte_study::{
     ByteCorpusStudyResult, ByteCorpusStudySegment, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
     BYTE_CORPUS_STUDY_MAX_BYTES,
 };
+#[cfg(feature = "wgpu")]
+pub use byte_study::{ResidentByteCandidate, ResidentByteServing};
 #[cfg(feature = "wgpu")]
 pub use byte_study::{ResidentByteInference, ResidentByteInferenceForward};
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};

@@ -35,6 +35,7 @@ mod headwise;
 mod mixture;
 mod policy;
 mod query;
+mod serving;
 pub use artifact::{
     ByteCorpusInferencePolicy, ByteCorpusModelArtifact, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
 };
@@ -45,6 +46,9 @@ pub use headwise::ByteCorpusHeadwiseControls;
 pub use mixture::ByteCorpusMixtureControls;
 use policy::{BiasInitialization, GeometryUpdate};
 pub use query::ByteCorpusQueryMixtureControls;
+pub use serving::ByteCorpusServingGate;
+#[cfg(feature = "wgpu")]
+pub use serving::{ResidentByteCandidate, ResidentByteServing};
 
 /// A fixed request: documents, initial models, SGD rate and all selected windows.
 /// v1 pairs ordinary/learned geometry; v2 adds identical-initialization frozen

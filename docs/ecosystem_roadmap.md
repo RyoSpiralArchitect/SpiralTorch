@@ -431,8 +431,15 @@ owner without SGD or external biases; each retained forward carries the source
 artifact ID. Private corpus/study records stay separate and are required for
 source-companion validation. Hash integrity does not attest training or quality.
 
-Next milestones are explicit held-out language/geometry health gates and
-accepted-candidate activation plus rollback to the last accepted artifact. Reuse the existing
+The source-only [serving gate](python/byte-serving-gates.md) now fixes evaluation
+windows and explicit language/geometry limits at bootstrap. Rust measures both
+owners, issues process-local slot/generation-bound permits and supports exact
+one-step rollback; Python and the standalone WASM client share that path.
+Held-outness, threshold selection and model authenticity remain caller-owned.
+This is not yet a registry, durable deployment service or HF integration.
+
+Next, exercise this boundary on independently selected language cohorts and
+connect its lifecycle to orchestration without duplicating policy. Reuse the existing
 [HF lineage, promotion and experiment executor](python/build-and-validation.md)
 rather than adding a second scheduler or independently interpreted client gate.
 Geometry must affect the executable model, not just its report. Its benefit

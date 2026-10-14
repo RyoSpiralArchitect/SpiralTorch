@@ -1,0 +1,103 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Byte-LM serving qualification</title>
+<h1>Pinned language and geometry gates</h1>
+<p>This local qualification switches two explicitly selected artifacts, then rolls back.
+It does not choose a winner or establish language quality. Input stays on this host.</p>
+<p id="summary">Loading the private serving-input.json...</p>
+<p><a id="download" hidden>Download qualification receipt</a></p>
+<pre id="result" data-status="running"></pre>
+<script type="module">
+const target = document.querySelector("#result");
+const check = (condition, message) => { if (!condition) throw Error(message); };
+const rejected = async (call, name) => {
+  let caught = false;
+  try { await call(); } catch { caught = true; }
+  check(caught, `${name} was accepted`);
+};
+const digest = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+  x => x.toString(16).padStart(2,"0")).join("");
+const logitHash = async values => {
+  const bytes = new DataView(new ArrayBuffer(values.length * 4));
+  values.forEach((v, i) => bytes.setFloat32(i * 4, v, true));
+  return digest(bytes.buffer);
+};
+try {
+  const response = await fetch("/target/resident-byte-learning-web/serving-input.json", {cache:"no-store"});
+  check(response.ok, "Private serving input missing");
+  const raw = await response.text();
+  const input = JSON.parse(raw);
+  const {default:init, ByteCorpusServingGate, ResidentByteCandidate} =
+    await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  await init();
+  check(typeof ResidentByteCandidate.from_json === "undefined", "Reports must not be permits");
+  const gate = ByteCorpusServingGate.from_json(input.gate_json);
+  check(gate.to_json() === input.gate_json, "Gate bytes changed");
+  check(gate.request_sha256 === await digest(new TextEncoder().encode(input.gate_json)), "Gate hash mismatch");
+  await rejected(() => gate.bootstrap_wgpu(input.incumbent.json + " ", input.incumbent.id), "Altered artifact");
+  const serving = await gate.bootstrap_wgpu(input.incumbent.json, input.incumbent.id);
+  const windows = Uint8Array.from(input.windows);
+  const before = JSON.parse(await serving.forward(windows));
+  check(before.logits.length > 0 && before.logits.every(Number.isFinite) && Number.isFinite(before.loss), "Invalid initial forward");
+  const candidate = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
+  const assessment = JSON.parse(candidate.to_json());
+  check(assessment.adapter.backend === "BrowserWebGpu" && assessment.adapter.device_type !== "Cpu", "Not a browser GPU measurement");
+  check(candidate.accepted && assessment.accepted && assessment.failed_checks.length === 0, "Fixture candidate failed its fixed gate");
+  const stale = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
+  const foreign = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
+  const other = await gate.bootstrap_wgpu(input.incumbent.json, input.incumbent.id);
+  await rejected(() => other.activate(foreign), "Foreign permit");
+  check(foreign.consumed && other.generation === "0", "Foreign rejection changed owner");
+  await rejected(() => serving.activate(candidate.to_json()), "JSON permit");
+  check(!candidate.consumed, "JSON attempt consumed real permit");
+  const activation = JSON.parse(serving.activate(candidate));
+  check(candidate.consumed && serving.generation === "1", "Activation missing");
+  await rejected(() => serving.activate(candidate), "Reused permit");
+  await rejected(() => serving.activate(stale), "Stale permit");
+  const after = JSON.parse(await serving.forward(windows));
+  check(after.artifact_id === input.candidate.id && after.logits.length === before.logits.length
+    && after.logits.every(Number.isFinite) && Number.isFinite(after.loss), "Invalid candidate forward");
+  const staleOnRollback = await serving.prepare_candidate(input.incumbent.json, input.incumbent.id);
+  for (const value of ["0", "01", "1.0", "18446744073709551616"])
+    await rejected(() => serving.rollback(value), "Invalid rollback generation");
+  check(serving.generation === "1", "Rejected rollback changed generation");
+  const rollback = JSON.parse(serving.rollback("1"));
+  await rejected(() => serving.activate(staleOnRollback), "Pre-rollback permit");
+  await rejected(() => serving.rollback("2"), "Consumed rollback history");
+  const restored = JSON.parse(await serving.forward(windows));
+  check(serving.generation === "2" && restored.artifact_id === input.incumbent.id
+    && restored.loss === before.loss && JSON.stringify(restored.logits) === JSON.stringify(before.logits), "Rollback output changed");
+  // Fault-control gate, deliberately impossible; not a useful production threshold.
+  const strict = JSON.parse(input.gate_json);
+  strict.limits.max_mean_ce_regression = -100;
+  strict.limits.max_batch_ce_regression = -100;
+  const rejectGate = ByteCorpusServingGate.from_json(JSON.stringify(strict));
+  const rejectSlot = await rejectGate.bootstrap_wgpu(input.incumbent.json, input.incumbent.id);
+  const denied = await rejectSlot.prepare_candidate(input.candidate.json, input.candidate.id);
+  const deniedReport = JSON.parse(denied.to_json());
+  check(!denied.accepted && JSON.stringify(deniedReport.failed_checks) === JSON.stringify(["mean_ce_regression", "batch_ce_regression"]), "Rejection reasons differ");
+  await rejected(() => rejectSlot.activate(denied), "Rejected candidate");
+  check(rejectSlot.generation === "0" && rejectSlot.artifact_id === input.incumbent.id, "Rejected candidate replaced owner");
+  const receipt = {schema:"spiraltorch.byte_corpus.serving_browser_qualification.v1",
+    input_sha256:await digest(new TextEncoder().encode(raw)), gate_sha256:gate.request_sha256,
+    bootstrap:JSON.parse(serving.bootstrap_json()), assessment, activation, rollback,
+    rejected_assessment:deniedReport,
+    inference:{logits_count:before.logits.length, before_hash:await logitHash(before.logits),
+      after_hash:await logitHash(after.logits), rollback_hash:await logitHash(restored.logits),
+      before_loss:before.loss, after_loss:after.loss, rollback_loss:restored.loss},
+    scope:"Actual browser serving mechanics only; no training, held-outness or quality claim"};
+  target.dataset.status = "completed";
+  target.textContent = JSON.stringify(receipt, null, 2);
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([target.textContent], {type:"application/json"}));
+  link.download = "byte-serving-browser-receipt.json";
+  link.hidden = false;
+  document.querySelector("#summary").textContent = "Switch, rejection and exact-output rollback verified on BrowserWebGpu.";
+  for (const handle of [denied, rejectSlot, rejectGate, staleOnRollback, stale, foreign, candidate, other, serving, gate]) handle.free();
+} catch (error) {
+  target.dataset.status = "error";
+  target.textContent = String(error.stack || error);
+  document.querySelector("#summary").textContent = "Qualification failed; no artifact is promoted outside this local process.";
+}
+</script>

@@ -10,6 +10,7 @@ use st_nn::resident::{
 mod training;
 use training::*;
 mod artifact;
+mod serving;
 pub(super) use artifact::PyByteCorpusModelArtifact;
 
 fn metric(value: &str) -> PyResult<ByteDecoderPairMetric> {
@@ -422,5 +423,6 @@ pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyByteDecoderPlan>()?;
     module.add_class::<PyByteDecoderCheckpoint>()?;
     artifact::register(module)?;
+    serving::register(module)?;
     training::register(module)
 }

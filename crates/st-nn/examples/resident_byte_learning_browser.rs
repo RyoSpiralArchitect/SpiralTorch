@@ -1,3 +1,7 @@
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[path = "resident_byte_learning_browser/serving.rs"]
+mod serving;
+
 /// CPU-only, all-case source binding; keep this opaque JSON intact in transport.
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 #[wasm_bindgen::prelude::wasm_bindgen]
