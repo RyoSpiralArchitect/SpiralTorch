@@ -481,6 +481,8 @@
     "policy": "fixed_window_frozen.v1",
     "schema": "spiraltorch.byte_corpus.candidate_assessment.v1"
   },
+  "aba_generation_rejected": true,
+  "measured_forward_hashes_exact": true,
   "inference": {
     "logits_count": 16384,
     "before_hash": "08bd7e1b5d6b166420cb2f8d233a807f11668faa1403d3c6e976f23bfced1e27",

@@ -82,23 +82,32 @@ def main():
             before_values = logits(before)
             permit = slot.prepare_candidate(candidate)
             assessment = json.loads(permit.to_json())
+            assert assessment["incumbent"]["logits_f32le_sha256"][0] == logits_hash(before_values)
             record = {"source_client": client, "case_name": name, "bootstrap": json.loads(slot.bootstrap_json()),
                       "assessment": assessment, "before_logits_f32le_sha256": logits_hash(before_values)}
             if permit.accepted:
                 stale = slot.prepare_candidate(candidate)
+                aba = slot.prepare_candidate(candidate)
+                assert aba.accepted
                 record["activation"] = json.loads(slot.activate(permit))
                 reject(lambda: slot.activate(stale))
                 after = slot.forward(batch)
                 assert after.artifact_id == candidate.artifact_id
                 record["after_logits_f32le_sha256"] = logits_hash(logits(after))
+                assert record["after_logits_f32le_sha256"] == assessment["candidate"]["logits_f32le_sha256"][0]
                 record["rollback"] = json.loads(slot.rollback(1))
                 restored = slot.forward(batch)
-                assert logits(restored) == before_values
+                assert logits_hash(logits(restored)) == logits_hash(before_values)
                 assert restored.artifact_id == initial.artifact_id
-                assert before.artifact_id == initial.artifact_id and logits(before) == before_values
+                assert before.artifact_id == initial.artifact_id and logits_hash(logits(before)) == logits_hash(before_values)
                 assert slot.previous_artifact_id is None and slot.generation == 2
+                reject(lambda: slot.activate(aba))
+                assert slot.artifact_id == initial.artifact_id and slot.generation == 2
+                assert slot.previous_artifact_id is None
+                assert logits_hash(logits(slot.forward(batch))) == logits_hash(before_values)
                 reject(lambda: slot.rollback(2))
-                record.update(stale_rejected=True, rollback_exact=True, retained_forward_exact=True)
+                record.update(stale_rejected=True, aba_generation_rejected=True,
+                              measured_forward_hashes_exact=True, rollback_exact=True, retained_forward_exact=True)
             else:
                 reject(lambda: slot.activate(permit))
                 assert slot.artifact_id == initial.artifact_id and slot.generation == 0

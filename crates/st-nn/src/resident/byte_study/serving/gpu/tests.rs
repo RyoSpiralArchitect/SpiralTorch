@@ -16,6 +16,14 @@ fn artifact(
         .unwrap()
 }
 
+fn output_hash(values: &[f32]) -> String {
+    let mut hash = Sha256::new();
+    for value in values {
+        hash.update(value.to_le_bytes());
+    }
+    format!("{:x}", hash.finalize())
+}
+
 #[test]
 fn observed_router_health_handles_uniform_one_hot_and_invalid_masses() {
     let uniform = router_health(2, &[0.5, 0.5, 0.5, 0.5]).unwrap();
@@ -154,6 +162,10 @@ fn live_slot_switches_trained_models_rejects_stale_permits_and_rolls_back_exactl
     assert_eq!(report["incumbent"]["artifact_id"], initial.artifact_id());
     assert_eq!(report["candidate"]["artifact_id"], candidate.artifact_id());
     assert_eq!(report["candidate"]["target_bytes"], 4);
+    assert_eq!(
+        report["incumbent"]["logits_f32le_sha256"][0],
+        output_hash(&before)
+    );
     assert!(
         report["candidate"]["geometry_centered_rms"][0][0]
             .as_f64()
@@ -170,6 +182,8 @@ fn live_slot_switches_trained_models_rejects_stale_permits_and_rolls_back_exactl
     assert!(foreign.activate(stale).is_err());
     assert_eq!(foreign.generation(), 0);
     let stale = pollster::block_on(serving.prepare_candidate(candidate.clone())).unwrap();
+    let aba = pollster::block_on(serving.prepare_candidate(candidate.clone())).unwrap();
+    assert!(aba.accepted());
     let event = serving.activate(prepared).unwrap();
     assert_eq!(event["to"], candidate.artifact_id());
     assert_eq!(serving.generation(), 1);
@@ -177,15 +191,17 @@ fn live_slot_switches_trained_models_rejects_stale_permits_and_rolls_back_exactl
     assert!(serving.activate(stale).is_err());
     let after = serving.forward(&batch).unwrap();
     assert_eq!(after.artifact_id(), candidate.artifact_id());
-    assert_ne!(
-        after
-            .forward()
-            .prediction()
-            .snapshot()
-            .unwrap()
-            .read()
-            .unwrap(),
-        before
+    let after_values = after
+        .forward()
+        .prediction()
+        .snapshot()
+        .unwrap()
+        .read()
+        .unwrap();
+    assert_ne!(output_hash(&after_values), output_hash(&before));
+    assert_eq!(
+        report["candidate"]["logits_f32le_sha256"][0],
+        output_hash(&after_values)
     );
     let stale_after_rollback =
         pollster::block_on(serving.prepare_candidate(initial.clone())).unwrap();
@@ -194,30 +210,39 @@ fn live_slot_switches_trained_models_rejects_stale_permits_and_rolls_back_exactl
     assert_eq!(serving.generation(), 2);
     assert_eq!(serving.artifact_id(), initial.artifact_id());
     assert_eq!(serving.previous_artifact_id(), None);
+    // Same slot and incumbent again: only the generation binds this old permit.
+    assert!(serving.activate(aba).is_err());
+    assert_eq!(serving.generation(), 2);
+    assert_eq!(serving.artifact_id(), initial.artifact_id());
+    assert_eq!(serving.previous_artifact_id(), None);
     assert!(serving.activate(stale_after_rollback).is_err());
     assert!(serving.rollback(2).is_err());
     assert_eq!(
-        serving
-            .forward(&batch)
-            .unwrap()
-            .forward()
-            .prediction()
-            .snapshot()
-            .unwrap()
-            .read()
-            .unwrap(),
-        before
+        output_hash(
+            &serving
+                .forward(&batch)
+                .unwrap()
+                .forward()
+                .prediction()
+                .snapshot()
+                .unwrap()
+                .read()
+                .unwrap()
+        ),
+        output_hash(&before)
     );
     assert_eq!(retained.artifact_id(), initial.artifact_id());
     assert_eq!(
-        retained
-            .forward()
-            .prediction()
-            .snapshot()
-            .unwrap()
-            .read()
-            .unwrap(),
-        before
+        output_hash(
+            &retained
+                .forward()
+                .prediction()
+                .snapshot()
+                .unwrap()
+                .read()
+                .unwrap()
+        ),
+        output_hash(&before)
     );
     drop(serving);
     assert_eq!(after.artifact_id(), candidate.artifact_id());

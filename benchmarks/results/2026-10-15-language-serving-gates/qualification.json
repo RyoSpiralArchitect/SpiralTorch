@@ -304,6 +304,8 @@
         "to": "sha256:fa536280a644265f9ab2a8c56ef1831d1ff262a6b0bdbf627be55d3c1d7288de"
       },
       "stale_rejected": true,
+      "aba_generation_rejected": true,
+      "measured_forward_hashes_exact": true,
       "rollback_exact": true,
       "retained_forward_exact": true
     },
@@ -603,6 +605,8 @@
         "to": "sha256:fa536280a644265f9ab2a8c56ef1831d1ff262a6b0bdbf627be55d3c1d7288de"
       },
       "stale_rejected": true,
+      "aba_generation_rejected": true,
+      "measured_forward_hashes_exact": true,
       "rollback_exact": true,
       "retained_forward_exact": true
     },
@@ -902,6 +906,8 @@
         "to": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1"
       },
       "stale_rejected": true,
+      "aba_generation_rejected": true,
+      "measured_forward_hashes_exact": true,
       "rollback_exact": true,
       "retained_forward_exact": true
     },
@@ -1201,6 +1207,8 @@
         "to": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1"
       },
       "stale_rejected": true,
+      "aba_generation_rejected": true,
+      "measured_forward_hashes_exact": true,
       "rollback_exact": true,
       "retained_forward_exact": true
     }

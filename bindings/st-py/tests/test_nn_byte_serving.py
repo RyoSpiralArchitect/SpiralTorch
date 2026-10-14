@@ -31,6 +31,10 @@ def gate(value=None):
     return st.nn.ByteCorpusServingGate.from_json(json.dumps(gate_value() if value is None else value))
 
 
+def output_hash(values):
+    return hashlib.sha256(struct.pack("<" + "f" * len(values), *values)).hexdigest()
+
+
 def duplicated_block_fixture(artifact):
     # The paired study recipe intentionally supports one block. Build a separate
     # synthetic two-block inference fixture; it is NOT a source-attested study.
@@ -116,6 +120,8 @@ class ServingRuntime(unittest.TestCase):
         before = serving.forward(batch)
         before_values = before.prediction_tensor().snapshot().read_values()
         prepared = serving.prepare_candidate(self.trained)
+        aba = serving.prepare_candidate(self.trained)
+        self.assertTrue(aba.accepted)
         stale = serving.prepare_candidate(self.trained)
         foreign = serving.prepare_candidate(self.trained)
         other = gate().bootstrap_wgpu(self.initial)
@@ -128,6 +134,7 @@ class ServingRuntime(unittest.TestCase):
         self.assertEqual(receipt["incumbent"]["artifact_id"], self.initial.artifact_id)
         self.assertEqual(receipt["candidate"]["artifact_id"], self.trained.artifact_id)
         self.assertGreater(receipt["candidate"]["geometry_centered_rms"][0][0], 0)
+        self.assertEqual(receipt["incumbent"]["logits_f32le_sha256"][0], output_hash(before_values))
         with self.assertRaises(TypeError):
             serving.activate(prepared.to_json())
         self.assertFalse(prepared.consumed)
@@ -140,7 +147,9 @@ class ServingRuntime(unittest.TestCase):
         self.assertEqual(serving.generation, 1)
         after = serving.forward(batch)
         self.assertEqual(after.artifact_id, self.trained.artifact_id)
-        self.assertNotEqual(after.prediction_tensor().snapshot().read_values(), before_values)
+        after_hash = output_hash(after.prediction_tensor().snapshot().read_values())
+        self.assertNotEqual(after_hash, output_hash(before_values))
+        self.assertEqual(after_hash, receipt["candidate"]["logits_f32le_sha256"][0])
         for generation in (True, 1.0, "1"):
             with self.assertRaises(TypeError):
                 serving.rollback(generation)
@@ -150,10 +159,16 @@ class ServingRuntime(unittest.TestCase):
         self.assertEqual(json.loads(serving.rollback(1))["to"], self.initial.artifact_id)
         self.assertEqual(serving.generation, 2)
         self.assertIsNone(serving.previous_artifact_id)
-        self.assertEqual(serving.forward(batch).prediction_tensor().snapshot().read_values(), before_values)
+        with self.assertRaises(ValueError):
+            serving.activate(aba)
+        self.assertTrue(aba.consumed)
+        self.assertEqual(serving.generation, 2)
+        self.assertEqual(serving.artifact_id, self.initial.artifact_id)
+        self.assertIsNone(serving.previous_artifact_id)
+        self.assertEqual(output_hash(serving.forward(batch).prediction_tensor().snapshot().read_values()), output_hash(before_values))
         del serving
         self.assertEqual(before.artifact_id, self.initial.artifact_id)
-        self.assertEqual(before.prediction_tensor().snapshot().read_values(), before_values)
+        self.assertEqual(output_hash(before.prediction_tensor().snapshot().read_values()), output_hash(before_values))
         self.assertEqual(after.artifact_id, self.trained.artifact_id)
 
     def test_rejected_and_nonfinite_candidates_never_change_active_owner(self):

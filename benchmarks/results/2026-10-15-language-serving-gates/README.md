@@ -66,8 +66,14 @@ companion validation and are not labelled as trained two-block models. The
 original failed test assumption (multi-block study calibration) remains in the
 private attempt log. No study policy was broadened just to make that test pass.
 
-The follow-up independent review found no further actionable issues. It was
-static/read-only, not an independent rerun of our numerical tests. Concurrent
+The follow-up code review found no further actionable Rust/Python/WASM-wrapper
+issues. A final verifier review added mandatory first-batch output-hash agreement
+with each measured artifact and signed-zero-sensitive rollback hashes. It also
+added an accepted generation-0 permit retained through A-to-B-to-A: rejection at
+generation 2 now isolates generation binding even with the same incumbent restored.
+Rust/Python, historical and actual-browser checks were rerun after these test-only
+changes; production binaries are unchanged and initial receipts stay private.
+Review was static/read-only, not an independent numerical rerun. Concurrent
 async scheduling and cross-process durable deployment remain outside this slice.
 
 ## Reproduce

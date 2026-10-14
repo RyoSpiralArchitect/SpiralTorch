@@ -44,6 +44,10 @@ try {
   const assessment = JSON.parse(candidate.to_json());
   check(assessment.adapter.backend === "BrowserWebGpu" && assessment.adapter.device_type !== "Cpu", "Not a browser GPU measurement");
   check(candidate.accepted && assessment.accepted && assessment.failed_checks.length === 0, "Fixture candidate failed its fixed gate");
+  const beforeHash = await logitHash(before.logits);
+  check(beforeHash === assessment.incumbent.logits_f32le_sha256[0], "Initial forward differs from measured incumbent");
+  const aba = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
+  check(aba.accepted, "A-to-B-to-A permit was not accepted initially");
   const stale = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
   const foreign = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
   const other = await gate.bootstrap_wgpu(input.incumbent.json, input.incumbent.id);
@@ -58,6 +62,8 @@ try {
   const after = JSON.parse(await serving.forward(windows));
   check(after.artifact_id === input.candidate.id && after.logits.length === before.logits.length
     && after.logits.every(Number.isFinite) && Number.isFinite(after.loss), "Invalid candidate forward");
+  const afterHash = await logitHash(after.logits);
+  check(afterHash === assessment.candidate.logits_f32le_sha256[0], "Activated forward differs from measured candidate");
   const staleOnRollback = await serving.prepare_candidate(input.incumbent.json, input.incumbent.id);
   for (const value of ["0", "01", "1.0", "18446744073709551616"])
     await rejected(() => serving.rollback(value), "Invalid rollback generation");
@@ -66,8 +72,14 @@ try {
   await rejected(() => serving.activate(staleOnRollback), "Pre-rollback permit");
   await rejected(() => serving.rollback("2"), "Consumed rollback history");
   const restored = JSON.parse(await serving.forward(windows));
+  const rollbackHash = await logitHash(restored.logits);
   check(serving.generation === "2" && restored.artifact_id === input.incumbent.id
-    && restored.loss === before.loss && JSON.stringify(restored.logits) === JSON.stringify(before.logits), "Rollback output changed");
+    && restored.loss === before.loss && rollbackHash === beforeHash, "Rollback output changed");
+  await rejected(() => serving.activate(aba), "Generation-zero permit after A-to-B-to-A");
+  check(aba.consumed && serving.generation === "2" && serving.artifact_id === input.incumbent.id
+    && serving.previous_artifact_id === undefined, "A-to-B-to-A rejection changed state");
+  const afterRejection = JSON.parse(await serving.forward(windows));
+  check(await logitHash(afterRejection.logits) === beforeHash, "A-to-B-to-A rejection changed output");
   // Fault-control gate, deliberately impossible; not a useful production threshold.
   const strict = JSON.parse(input.gate_json);
   strict.limits.max_mean_ce_regression = -100;
@@ -83,8 +95,9 @@ try {
     input_sha256:await digest(new TextEncoder().encode(raw)), gate_sha256:gate.request_sha256,
     bootstrap:JSON.parse(serving.bootstrap_json()), assessment, activation, rollback,
     rejected_assessment:deniedReport,
-    inference:{logits_count:before.logits.length, before_hash:await logitHash(before.logits),
-      after_hash:await logitHash(after.logits), rollback_hash:await logitHash(restored.logits),
+    aba_generation_rejected:true, measured_forward_hashes_exact:true,
+    inference:{logits_count:before.logits.length, before_hash:beforeHash,
+      after_hash:afterHash, rollback_hash:rollbackHash,
       before_loss:before.loss, after_loss:after.loss, rollback_loss:restored.loss},
     scope:"Actual browser serving mechanics only; no training, held-outness or quality claim"};
   target.dataset.status = "completed";
@@ -94,7 +107,7 @@ try {
   link.download = "byte-serving-browser-receipt.json";
   link.hidden = false;
   document.querySelector("#summary").textContent = "Switch, rejection and exact-output rollback verified on BrowserWebGpu.";
-  for (const handle of [denied, rejectSlot, rejectGate, staleOnRollback, stale, foreign, candidate, other, serving, gate]) handle.free();
+  for (const handle of [denied, rejectSlot, rejectGate, aba, staleOnRollback, stale, foreign, candidate, other, serving, gate]) handle.free();
 } catch (error) {
   target.dataset.status = "error";
   target.textContent = String(error.stack || error);
