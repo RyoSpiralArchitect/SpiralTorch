@@ -453,6 +453,13 @@ Geometry must affect the executable model, not just its report. Its benefit
 still needs matched-budget language evaluation; backend speed comparisons use
 the same PyTorch-equivalent operation, not extra geometric work hidden in one arm.
 
+The [saved-model selector](byte_corpus_checkpoint_selection.md) now keeps actual
+weights, geometry and optimizer history together through development selection.
+The [width/budget diagnostic](../benchmarks/results/2026-10-16-language-capacity-budget/README.md)
+completed 18 models and 72 restored generations. Its long-run numerical gate still
+fails, despite lower observed loss, so the next language rail is focused Rust
+Attention/AdamW numerical work rather than model promotion or more audit layers.
+
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the
 working end-to-end path rather than multiplying disconnected entry points.

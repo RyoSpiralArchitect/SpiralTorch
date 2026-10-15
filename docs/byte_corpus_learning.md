@@ -337,3 +337,10 @@ remain separate work. Legacy v1-v8 studies are stateless SGD. The explicit
 frozen clocks and optimizer-aware resume without changing those geometry
 designs. Changing learning-rate schedules, continuous recurrent context and a
 live sampler remain separate work.
+
+The [capacity/budget diagnostic](../benchmarks/results/2026-10-16-language-capacity-budget/README.md)
+extends the AdamW path to 18 models across widths16/32 and1024 updates, retaining
+all saved-model generations and training-only baselines. It exactly reproduces
+the earlier256-step width16 states, but all six long-run studies fail the
+unchanged parameter-comparison gate. Lower observed loss is therefore retained
+as diagnostic evidence, not validated geometry efficacy or serving promotion.

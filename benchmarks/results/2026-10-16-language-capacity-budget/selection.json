@@ -1,0 +1,1768 @@
+{
+  "schema": "spiraltorch.byte_corpus.capacity_selection.v1",
+  "studies": [
+    {
+      "name": "w16-seed11",
+      "width": 16,
+      "seed": 11,
+      "request_sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+      "checkpoint_size_bound": 3508462,
+      "parameter_scalars": [
+        11216,
+        11290,
+        11290
+      ],
+      "comparison": {
+        "numerical_checks_passed": false,
+        "error": "seed11_ordinary.block.0.qkv.bias: strict scalar tolerance exceeded",
+        "scope": "Strict qualification failed; diagnostic outputs only, no quality or promotion claim",
+        "reference_sha256": "96d37dd50825679d52687bb699ab8bcbeb4424af881d75ecabd566bcccc0090b",
+        "native_report_sha256": "6f4ca125c9d4ded06d8cf3fb06f518992efa66dc90e7f912c38ba62efb2edcf5",
+        "private_error_sha256": "7d3be7e36255ea6be1f7a375d0ecff655069dae8de532d4c0ff87a25bf9775c6"
+      },
+      "decisions": [
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.093789126795532,
+              "completed_updates": 0,
+              "mean_ce": 5.610187113285065,
+              "study_checkpoint_sha256": "8838121a8200417a50636502b7d12a91684423faea91b5e2662997ba449351f8",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.934816321040964,
+              "completed_updates": 256,
+              "mean_ce": 3.420554019510746,
+              "study_checkpoint_sha256": "dde018833c53a51fff2f52eed0051d8f67709904b347a7a8a8147b45f502ca03",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.658854098851563,
+              "completed_updates": 512,
+              "mean_ce": 3.2292715832591057,
+              "study_checkpoint_sha256": "d1cedeacd421944867a16688f1794052cc81eccd6b8fc35ca1fe901026c1ed89",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.499276556595489,
+              "completed_updates": 1024,
+              "mean_ce": 3.1186608597636223,
+              "study_checkpoint_sha256": "0dd04986041cb89c5527ebc40dd1a1f2107a442c7698c25292957d672e4d23b7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed11_ordinary",
+          "request_sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:cae8ee741486e689afee1d08ff1122e0e9078fedd7ffa84592f767763abdc3a1",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.101673800411326,
+              "completed_updates": 0,
+              "mean_ce": 5.615652352571487,
+              "study_checkpoint_sha256": "8838121a8200417a50636502b7d12a91684423faea91b5e2662997ba449351f8",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.929554210868178,
+              "completed_updates": 256,
+              "mean_ce": 3.416906602680683,
+              "study_checkpoint_sha256": "dde018833c53a51fff2f52eed0051d8f67709904b347a7a8a8147b45f502ca03",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.658731324736679,
+              "completed_updates": 512,
+              "mean_ce": 3.2291864827275276,
+              "study_checkpoint_sha256": "d1cedeacd421944867a16688f1794052cc81eccd6b8fc35ca1fe901026c1ed89",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.471923554391182,
+              "completed_updates": 1024,
+              "mean_ce": 3.099701203405857,
+              "study_checkpoint_sha256": "0dd04986041cb89c5527ebc40dd1a1f2107a442c7698c25292957d672e4d23b7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed11_geometry",
+          "request_sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:e6f780b96cea97359178493148504ca0010493eda2ce530c8e7193c2c95fdbd7",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.101673800411326,
+              "completed_updates": 0,
+              "mean_ce": 5.615652352571487,
+              "study_checkpoint_sha256": "8838121a8200417a50636502b7d12a91684423faea91b5e2662997ba449351f8",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.929888641881695,
+              "completed_updates": 256,
+              "mean_ce": 3.4171384125947952,
+              "study_checkpoint_sha256": "dde018833c53a51fff2f52eed0051d8f67709904b347a7a8a8147b45f502ca03",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.661372580544051,
+              "completed_updates": 512,
+              "mean_ce": 3.2310172617435455,
+              "study_checkpoint_sha256": "d1cedeacd421944867a16688f1794052cc81eccd6b8fc35ca1fe901026c1ed89",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.496336061724531,
+              "completed_updates": 1024,
+              "mean_ce": 3.1166226640343666,
+              "study_checkpoint_sha256": "0dd04986041cb89c5527ebc40dd1a1f2107a442c7698c25292957d672e4d23b7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed11_geometry_frozen",
+          "request_sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:8fd49aae5db37206276411a99a0198b2ce1022dbffe170e70b5f0c112b1419fe",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        }
+      ],
+      "artifacts": [
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 0,
+          "file": "w16-seed11-case0-revision0.json",
+          "artifact_id": "sha256:37bd622eb4eff0cbbea13eea725d1bf995bf12c0314a20edf93a88f8ce4e7463",
+          "sha256": "37bd622eb4eff0cbbea13eea725d1bf995bf12c0314a20edf93a88f8ce4e7463",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 256,
+          "file": "w16-seed11-case0-revision256.json",
+          "artifact_id": "sha256:ca1e8a7429736346e78a889bce0599ee6c6dd57349d06c97abd312c774928ba9",
+          "sha256": "ca1e8a7429736346e78a889bce0599ee6c6dd57349d06c97abd312c774928ba9",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 512,
+          "file": "w16-seed11-case0-revision512.json",
+          "artifact_id": "sha256:8096ad705cc7e432242dfb1a54755376b7644dcf4882412f7acf946ee07a2cd5",
+          "sha256": "8096ad705cc7e432242dfb1a54755376b7644dcf4882412f7acf946ee07a2cd5",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 1024,
+          "file": "w16-seed11-case0-revision1024.json",
+          "artifact_id": "sha256:cae8ee741486e689afee1d08ff1122e0e9078fedd7ffa84592f767763abdc3a1",
+          "sha256": "cae8ee741486e689afee1d08ff1122e0e9078fedd7ffa84592f767763abdc3a1",
+          "selected": true
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 0,
+          "file": "w16-seed11-case1-revision0.json",
+          "artifact_id": "sha256:c44bfd2bbf5fd1ab3ab303eec2bc86a30a4005cb95b66f350fb2ab160fbade10",
+          "sha256": "c44bfd2bbf5fd1ab3ab303eec2bc86a30a4005cb95b66f350fb2ab160fbade10",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 256,
+          "file": "w16-seed11-case1-revision256.json",
+          "artifact_id": "sha256:5a2c883d699304c7c0c5ec0d3ce08a905f8a0947e1bfec49edd3209c04893eab",
+          "sha256": "5a2c883d699304c7c0c5ec0d3ce08a905f8a0947e1bfec49edd3209c04893eab",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 512,
+          "file": "w16-seed11-case1-revision512.json",
+          "artifact_id": "sha256:b051dd7ebe884011d5c53c73371654e9cfe5189b23358005ab626412f0072377",
+          "sha256": "b051dd7ebe884011d5c53c73371654e9cfe5189b23358005ab626412f0072377",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 1024,
+          "file": "w16-seed11-case1-revision1024.json",
+          "artifact_id": "sha256:e6f780b96cea97359178493148504ca0010493eda2ce530c8e7193c2c95fdbd7",
+          "sha256": "e6f780b96cea97359178493148504ca0010493eda2ce530c8e7193c2c95fdbd7",
+          "selected": true
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 0,
+          "file": "w16-seed11-case2-revision0.json",
+          "artifact_id": "sha256:6f9e6f3f1c9e81cd018fb8efbbeb6b0eef9f880360d8ef45593767ba3272c539",
+          "sha256": "6f9e6f3f1c9e81cd018fb8efbbeb6b0eef9f880360d8ef45593767ba3272c539",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 256,
+          "file": "w16-seed11-case2-revision256.json",
+          "artifact_id": "sha256:7268dbe9cc18f40c7276386eddd4568aa4add99b45bc2dbf500b92fbed477db8",
+          "sha256": "7268dbe9cc18f40c7276386eddd4568aa4add99b45bc2dbf500b92fbed477db8",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 512,
+          "file": "w16-seed11-case2-revision512.json",
+          "artifact_id": "sha256:0a7b662e7fe6ed4abd85ff6bdd737274e30fef127d3fd73e647fa5a522fc8382",
+          "sha256": "0a7b662e7fe6ed4abd85ff6bdd737274e30fef127d3fd73e647fa5a522fc8382",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 1024,
+          "file": "w16-seed11-case2-revision1024.json",
+          "artifact_id": "sha256:8fd49aae5db37206276411a99a0198b2ce1022dbffe170e70b5f0c112b1419fe",
+          "sha256": "8fd49aae5db37206276411a99a0198b2ce1022dbffe170e70b5f0c112b1419fe",
+          "selected": true
+        }
+      ],
+      "segment_binding": true,
+      "historical_256": [
+        {
+          "case_name": "seed11_ordinary",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        },
+        {
+          "case_name": "seed11_geometry",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "w16-seed29",
+      "width": 16,
+      "seed": 29,
+      "request_sha256": "c3f609588d4f456e7836ab1ddcf7ceac13210659724f7be713f0f0b3d287cb3a",
+      "checkpoint_size_bound": 3508462,
+      "parameter_scalars": [
+        11216,
+        11290,
+        11290
+      ],
+      "comparison": {
+        "numerical_checks_passed": false,
+        "error": "seed29_ordinary.block.0.qkv.bias: strict scalar tolerance exceeded",
+        "scope": "Strict qualification failed; diagnostic outputs only, no quality or promotion claim",
+        "reference_sha256": "45738ccfa4b1a2c48bdf7ba56ad1d159c4ca3af267590c3782d92b82219ed98f",
+        "native_report_sha256": "73579ee9c851456c9760573c09afd5909ad5fc1f7831d6b8293c0ebf5c23e7bc",
+        "private_error_sha256": "df7bb641cca624cbde0bd75ef82ef297d88aefffb2c081fa7d0b32cd859ae988"
+      },
+      "decisions": [
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.064071707107164,
+              "completed_updates": 0,
+              "mean_ce": 5.589588567614555,
+              "study_checkpoint_sha256": "0710150c7484fddca8569c55969e4c1d1ec058b64a96bd0bc071ea21e985ab12",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.906114802871242,
+              "completed_updates": 256,
+              "mean_ce": 3.400659643113613,
+              "study_checkpoint_sha256": "8738931c7f86944036dc99fa6bad866d1599faf4a30dac63c534704e6a36b38e",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.638617577506224,
+              "completed_updates": 512,
+              "mean_ce": 3.215244695544243,
+              "study_checkpoint_sha256": "f5e3166a6a97f4483c8b7c4109740eaf35a9024ba222d2ed9758e5d7e69e5b2a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.453485788842301,
+              "completed_updates": 1024,
+              "mean_ce": 3.0869211181998253,
+              "study_checkpoint_sha256": "8ed8f79599943982c2ce45d052c5f19c82100c43415f3ef1dec5ccd11902474d",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed29_ordinary",
+          "request_sha256": "c3f609588d4f456e7836ab1ddcf7ceac13210659724f7be713f0f0b3d287cb3a",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:dfe0ec70605a1b24357e47c01dd2e132b6c85031d5aa6f709b30f1d88963fb58",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.067077662874606,
+              "completed_updates": 0,
+              "mean_ce": 5.591672137379646,
+              "study_checkpoint_sha256": "0710150c7484fddca8569c55969e4c1d1ec058b64a96bd0bc071ea21e985ab12",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.8992815881871605,
+              "completed_updates": 256,
+              "mean_ce": 3.3959232196211815,
+              "study_checkpoint_sha256": "8738931c7f86944036dc99fa6bad866d1599faf4a30dac63c534704e6a36b38e",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.630653824117781,
+              "completed_updates": 512,
+              "mean_ce": 3.2097246423363686,
+              "study_checkpoint_sha256": "f5e3166a6a97f4483c8b7c4109740eaf35a9024ba222d2ed9758e5d7e69e5b2a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.4601453870403365,
+              "completed_updates": 1024,
+              "mean_ce": 3.0915371999144554,
+              "study_checkpoint_sha256": "8ed8f79599943982c2ce45d052c5f19c82100c43415f3ef1dec5ccd11902474d",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed29_geometry",
+          "request_sha256": "c3f609588d4f456e7836ab1ddcf7ceac13210659724f7be713f0f0b3d287cb3a",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:36e792264317544691c191421e83a09a475a58f46d799e79205dada2eedc2066",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.067077662874606,
+              "completed_updates": 0,
+              "mean_ce": 5.591672137379646,
+              "study_checkpoint_sha256": "0710150c7484fddca8569c55969e4c1d1ec058b64a96bd0bc071ea21e985ab12",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.89980245914313,
+              "completed_updates": 256,
+              "mean_ce": 3.3962842598557472,
+              "study_checkpoint_sha256": "8738931c7f86944036dc99fa6bad866d1599faf4a30dac63c534704e6a36b38e",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.635775908166018,
+              "completed_updates": 512,
+              "mean_ce": 3.2132750004529953,
+              "study_checkpoint_sha256": "f5e3166a6a97f4483c8b7c4109740eaf35a9024ba222d2ed9758e5d7e69e5b2a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.461599242379406,
+              "completed_updates": 1024,
+              "mean_ce": 3.092544935643673,
+              "study_checkpoint_sha256": "8ed8f79599943982c2ce45d052c5f19c82100c43415f3ef1dec5ccd11902474d",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed29_geometry_frozen",
+          "request_sha256": "c3f609588d4f456e7836ab1ddcf7ceac13210659724f7be713f0f0b3d287cb3a",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:c1aaf757eebf5898e0d7a624e4a5daff25bb2f706092471137a4815834df9431",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        }
+      ],
+      "artifacts": [
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 0,
+          "file": "w16-seed29-case0-revision0.json",
+          "artifact_id": "sha256:5979b10263c3b4178d4342dcf50b987f1938fa97ac74451ee2408ff25edd5e5d",
+          "sha256": "5979b10263c3b4178d4342dcf50b987f1938fa97ac74451ee2408ff25edd5e5d",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 256,
+          "file": "w16-seed29-case0-revision256.json",
+          "artifact_id": "sha256:e3f0c7535b2ab66d3dbdd4a435e64ba08cc1bbe1402825fb0a37edd5c5830d0e",
+          "sha256": "e3f0c7535b2ab66d3dbdd4a435e64ba08cc1bbe1402825fb0a37edd5c5830d0e",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 512,
+          "file": "w16-seed29-case0-revision512.json",
+          "artifact_id": "sha256:02c51314654bb772c278ca3b542a3394f497e0569e123b1829b43bd745f1d69f",
+          "sha256": "02c51314654bb772c278ca3b542a3394f497e0569e123b1829b43bd745f1d69f",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 1024,
+          "file": "w16-seed29-case0-revision1024.json",
+          "artifact_id": "sha256:dfe0ec70605a1b24357e47c01dd2e132b6c85031d5aa6f709b30f1d88963fb58",
+          "sha256": "dfe0ec70605a1b24357e47c01dd2e132b6c85031d5aa6f709b30f1d88963fb58",
+          "selected": true
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 0,
+          "file": "w16-seed29-case1-revision0.json",
+          "artifact_id": "sha256:db6ba24a3e108e0ba39e49a7cd3475e2553db816b415a892c959a4fa556dd6c9",
+          "sha256": "db6ba24a3e108e0ba39e49a7cd3475e2553db816b415a892c959a4fa556dd6c9",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 256,
+          "file": "w16-seed29-case1-revision256.json",
+          "artifact_id": "sha256:2496e669f582be450d44852c1bf841fe493d78e7c135aeda475f8d94a48dcf0d",
+          "sha256": "2496e669f582be450d44852c1bf841fe493d78e7c135aeda475f8d94a48dcf0d",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 512,
+          "file": "w16-seed29-case1-revision512.json",
+          "artifact_id": "sha256:28e4fb9f2f49288b9f85b9616ad7b9a2db76e04d271fe2061502a707efaedc40",
+          "sha256": "28e4fb9f2f49288b9f85b9616ad7b9a2db76e04d271fe2061502a707efaedc40",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 1024,
+          "file": "w16-seed29-case1-revision1024.json",
+          "artifact_id": "sha256:36e792264317544691c191421e83a09a475a58f46d799e79205dada2eedc2066",
+          "sha256": "36e792264317544691c191421e83a09a475a58f46d799e79205dada2eedc2066",
+          "selected": true
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 0,
+          "file": "w16-seed29-case2-revision0.json",
+          "artifact_id": "sha256:a1f116cd931c4e38c18660cb727e7fe390cbdb70969698f3fe3aedc80d121c04",
+          "sha256": "a1f116cd931c4e38c18660cb727e7fe390cbdb70969698f3fe3aedc80d121c04",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 256,
+          "file": "w16-seed29-case2-revision256.json",
+          "artifact_id": "sha256:e94f92c47557b60390d6a00085a9adc784092438952e370ecab30e83ef8155a1",
+          "sha256": "e94f92c47557b60390d6a00085a9adc784092438952e370ecab30e83ef8155a1",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 512,
+          "file": "w16-seed29-case2-revision512.json",
+          "artifact_id": "sha256:dc0641f0d1225ce78db89917a945e39cf156c13a5c7908f2184150d571886908",
+          "sha256": "dc0641f0d1225ce78db89917a945e39cf156c13a5c7908f2184150d571886908",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 1024,
+          "file": "w16-seed29-case2-revision1024.json",
+          "artifact_id": "sha256:c1aaf757eebf5898e0d7a624e4a5daff25bb2f706092471137a4815834df9431",
+          "sha256": "c1aaf757eebf5898e0d7a624e4a5daff25bb2f706092471137a4815834df9431",
+          "selected": true
+        }
+      ],
+      "segment_binding": true,
+      "historical_256": [
+        {
+          "case_name": "seed29_ordinary",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        },
+        {
+          "case_name": "seed29_geometry",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "w16-seed47",
+      "width": 16,
+      "seed": 47,
+      "request_sha256": "66e5569e145750378b238e8ad5629376f2fdf23f4470360ae6f7c212f01044a3",
+      "checkpoint_size_bound": 3508462,
+      "parameter_scalars": [
+        11216,
+        11290,
+        11290
+      ],
+      "comparison": {
+        "numerical_checks_passed": false,
+        "error": "seed47_ordinary.block.0.qkv.bias: strict scalar tolerance exceeded",
+        "scope": "Strict qualification failed; diagnostic outputs only, no quality or promotion claim",
+        "reference_sha256": "705923666402ba8e31f204a9beea116baa453354fc69263bb1101cfe875ff0f0",
+        "native_report_sha256": "f274b79dbd0de11ce73060f8bb9a0edad3689be50785f9f2b188b7c197f4b8ac",
+        "private_error_sha256": "a9c30757376f1cbbc50c81bea583e8921d34aea0efaa0a72d761bb9545a43920"
+      },
+      "decisions": [
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 7.973188851119919,
+              "completed_updates": 0,
+              "mean_ce": 5.526593372225761,
+              "study_checkpoint_sha256": "1f2e418eab066b2eaa560a5a70637ece7cebd6acc0b1c53bdc9003d351dd348b",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.90079014475812,
+              "completed_updates": 256,
+              "mean_ce": 3.3969688713550568,
+              "study_checkpoint_sha256": "9b7dc6e3e65a62bdab458c21d27b73158242eb5af8871ead9811ac8f3786f98d",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.607858684628809,
+              "completed_updates": 512,
+              "mean_ce": 3.193924255669117,
+              "study_checkpoint_sha256": "c2230253b46c77a228da7a20024dfae8228a5f1b492a37db1c1583c323948ff1",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.41787928547851,
+              "completed_updates": 1024,
+              "mean_ce": 3.062240570783615,
+              "study_checkpoint_sha256": "4aa2bfb4b003547da31f82c74b207fe0843c6970f6c63f1343c44b001d4a43c7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed47_ordinary",
+          "request_sha256": "66e5569e145750378b238e8ad5629376f2fdf23f4470360ae6f7c212f01044a3",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:1cd77519f900ed16f92944c6d3cf049c3a9877522deb67a7deec7729f736de0d",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 7.9650669704329236,
+              "completed_updates": 0,
+              "mean_ce": 5.520963713526726,
+              "study_checkpoint_sha256": "1f2e418eab066b2eaa560a5a70637ece7cebd6acc0b1c53bdc9003d351dd348b",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.885344888083168,
+              "completed_updates": 256,
+              "mean_ce": 3.386263035237789,
+              "study_checkpoint_sha256": "9b7dc6e3e65a62bdab458c21d27b73158242eb5af8871ead9811ac8f3786f98d",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.606999029348471,
+              "completed_updates": 512,
+              "mean_ce": 3.1933283880352974,
+              "study_checkpoint_sha256": "c2230253b46c77a228da7a20024dfae8228a5f1b492a37db1c1583c323948ff1",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.405893631808315,
+              "completed_updates": 1024,
+              "mean_ce": 3.053932748734951,
+              "study_checkpoint_sha256": "4aa2bfb4b003547da31f82c74b207fe0843c6970f6c63f1343c44b001d4a43c7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed47_geometry",
+          "request_sha256": "66e5569e145750378b238e8ad5629376f2fdf23f4470360ae6f7c212f01044a3",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:cd4305258fbb8b2fb5018763ae975c5e096e17f2d21aa15a7788ee074daaeae9",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 7.9650669704329236,
+              "completed_updates": 0,
+              "mean_ce": 5.520963713526726,
+              "study_checkpoint_sha256": "1f2e418eab066b2eaa560a5a70637ece7cebd6acc0b1c53bdc9003d351dd348b",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.886835418722533,
+              "completed_updates": 256,
+              "mean_ce": 3.3872961923480034,
+              "study_checkpoint_sha256": "9b7dc6e3e65a62bdab458c21d27b73158242eb5af8871ead9811ac8f3786f98d",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.609563290672836,
+              "completed_updates": 512,
+              "mean_ce": 3.1951057985424995,
+              "study_checkpoint_sha256": "c2230253b46c77a228da7a20024dfae8228a5f1b492a37db1c1583c323948ff1",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.414000646744927,
+              "completed_updates": 1024,
+              "mean_ce": 3.059552103281021,
+              "study_checkpoint_sha256": "4aa2bfb4b003547da31f82c74b207fe0843c6970f6c63f1343c44b001d4a43c7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed47_geometry_frozen",
+          "request_sha256": "66e5569e145750378b238e8ad5629376f2fdf23f4470360ae6f7c212f01044a3",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:d4c1ec2922a907a66b4b6865b7a542963273087dce1d039b4d3699eb9b7210ed",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        }
+      ],
+      "artifacts": [
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 0,
+          "file": "w16-seed47-case0-revision0.json",
+          "artifact_id": "sha256:df7dc10886b7e961876481fe491919dced0bbb9806d8dd462eacce88e2a1921f",
+          "sha256": "df7dc10886b7e961876481fe491919dced0bbb9806d8dd462eacce88e2a1921f",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 256,
+          "file": "w16-seed47-case0-revision256.json",
+          "artifact_id": "sha256:9889e839d951a813371d33fe0b126bc436dbb2e5ece4f00f5224772e43688b10",
+          "sha256": "9889e839d951a813371d33fe0b126bc436dbb2e5ece4f00f5224772e43688b10",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 512,
+          "file": "w16-seed47-case0-revision512.json",
+          "artifact_id": "sha256:555e2376833c351b98ecb49305e4e4d2299fbe7ea71b65ec494e1c72802d6fd4",
+          "sha256": "555e2376833c351b98ecb49305e4e4d2299fbe7ea71b65ec494e1c72802d6fd4",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 1024,
+          "file": "w16-seed47-case0-revision1024.json",
+          "artifact_id": "sha256:1cd77519f900ed16f92944c6d3cf049c3a9877522deb67a7deec7729f736de0d",
+          "sha256": "1cd77519f900ed16f92944c6d3cf049c3a9877522deb67a7deec7729f736de0d",
+          "selected": true
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 0,
+          "file": "w16-seed47-case1-revision0.json",
+          "artifact_id": "sha256:34af4c5570a221c22481b1aac922df584a5cc0ae531d49707c999c68505f4288",
+          "sha256": "34af4c5570a221c22481b1aac922df584a5cc0ae531d49707c999c68505f4288",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 256,
+          "file": "w16-seed47-case1-revision256.json",
+          "artifact_id": "sha256:e2c5ac7e3d0c209cd38f11ad410a92f876f12376323e01068b57a16ae8fd5f3e",
+          "sha256": "e2c5ac7e3d0c209cd38f11ad410a92f876f12376323e01068b57a16ae8fd5f3e",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 512,
+          "file": "w16-seed47-case1-revision512.json",
+          "artifact_id": "sha256:fd73439c56ea204679b5374b9afaa510b40149932d6cc817c280229f77a8b83e",
+          "sha256": "fd73439c56ea204679b5374b9afaa510b40149932d6cc817c280229f77a8b83e",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 1024,
+          "file": "w16-seed47-case1-revision1024.json",
+          "artifact_id": "sha256:cd4305258fbb8b2fb5018763ae975c5e096e17f2d21aa15a7788ee074daaeae9",
+          "sha256": "cd4305258fbb8b2fb5018763ae975c5e096e17f2d21aa15a7788ee074daaeae9",
+          "selected": true
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 0,
+          "file": "w16-seed47-case2-revision0.json",
+          "artifact_id": "sha256:6c62d908ade752655ab4ded3e0a25be71cd186492056c501e18ca91c3511937d",
+          "sha256": "6c62d908ade752655ab4ded3e0a25be71cd186492056c501e18ca91c3511937d",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 256,
+          "file": "w16-seed47-case2-revision256.json",
+          "artifact_id": "sha256:c9f3dfe66f6bd497b9a79585ed50663045d5c054a22229439f4784a39ebfd15b",
+          "sha256": "c9f3dfe66f6bd497b9a79585ed50663045d5c054a22229439f4784a39ebfd15b",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 512,
+          "file": "w16-seed47-case2-revision512.json",
+          "artifact_id": "sha256:d1851fa81759ebbc98a1aca7d35642ef82dd82853a914a48305e42971a6e90dd",
+          "sha256": "d1851fa81759ebbc98a1aca7d35642ef82dd82853a914a48305e42971a6e90dd",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 1024,
+          "file": "w16-seed47-case2-revision1024.json",
+          "artifact_id": "sha256:d4c1ec2922a907a66b4b6865b7a542963273087dce1d039b4d3699eb9b7210ed",
+          "sha256": "d4c1ec2922a907a66b4b6865b7a542963273087dce1d039b4d3699eb9b7210ed",
+          "selected": true
+        }
+      ],
+      "segment_binding": true,
+      "historical_256": [
+        {
+          "case_name": "seed47_ordinary",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        },
+        {
+          "case_name": "seed47_geometry",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "fields": {
+            "parameters": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "training": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "validation": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "first_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            },
+            "second_moments": {
+              "exact_f32": true,
+              "max_abs_error": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "w32-seed11",
+      "width": 32,
+      "seed": 11,
+      "request_sha256": "ec4d9907e1e709ceb262ac2c1a51cc9ab494a95d411a232553ae0479d8b7df42",
+      "checkpoint_size_bound": 7856878,
+      "parameter_scalars": [
+        26272,
+        26410,
+        26410
+      ],
+      "comparison": {
+        "numerical_checks_passed": false,
+        "error": "seed11_ordinary.block.0.qkv.bias: strict scalar tolerance exceeded",
+        "scope": "Strict qualification failed; diagnostic outputs only, no quality or promotion claim",
+        "reference_sha256": "acea5eed1e4cf2f85748ec4a80a6617b13de08830f2939277abde9fd13aa3930",
+        "native_report_sha256": "c88f3aefec931da9bb3301c682c54c38826fa7061c537e030a2fc23df76e61ff",
+        "private_error_sha256": "97fa9cbf379d02dad573f0f2d345d7621d80124c1a4ef0fb7bbb4d9a47118a80"
+      },
+      "decisions": [
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.228842802951824,
+              "completed_updates": 0,
+              "mean_ce": 5.703799188137054,
+              "study_checkpoint_sha256": "51b84558608408776d06351b17ea19eb033bf48cacbaa067b585fd3e067c00f9",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.695131022835165,
+              "completed_updates": 256,
+              "mean_ce": 3.2544168308377266,
+              "study_checkpoint_sha256": "302a950bc5f2fb9afe3bdecf0eefc9649e56761e005942b5bce4c39c1896d69a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.48638864969212,
+              "completed_updates": 512,
+              "mean_ce": 3.109727643430233,
+              "study_checkpoint_sha256": "3a93ff378776630dfbe9fb0bb3a35ea39aab1a49abfb2ce72d4e146189351fdf",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.331908737701114,
+              "completed_updates": 1024,
+              "mean_ce": 3.0026503279805183,
+              "study_checkpoint_sha256": "f49e92daf183e4af87b14ac27c3d128fda82314102c2a319ff715d6de4726954",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed11_ordinary",
+          "request_sha256": "ec4d9907e1e709ceb262ac2c1a51cc9ab494a95d411a232553ae0479d8b7df42",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:67dd686dc4d71354db0523862e604dae2851607952290766b302f49d8c7de170",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.22324936820215,
+              "completed_updates": 0,
+              "mean_ce": 5.699922114610672,
+              "study_checkpoint_sha256": "51b84558608408776d06351b17ea19eb033bf48cacbaa067b585fd3e067c00f9",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.653569125735127,
+              "completed_updates": 256,
+              "mean_ce": 3.225608319044113,
+              "study_checkpoint_sha256": "302a950bc5f2fb9afe3bdecf0eefc9649e56761e005942b5bce4c39c1896d69a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.450440728519619,
+              "completed_updates": 512,
+              "mean_ce": 3.0848104432225227,
+              "study_checkpoint_sha256": "3a93ff378776630dfbe9fb0bb3a35ea39aab1a49abfb2ce72d4e146189351fdf",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.270080641499548,
+              "completed_updates": 1024,
+              "mean_ce": 2.959794357419014,
+              "study_checkpoint_sha256": "f49e92daf183e4af87b14ac27c3d128fda82314102c2a319ff715d6de4726954",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed11_geometry",
+          "request_sha256": "ec4d9907e1e709ceb262ac2c1a51cc9ab494a95d411a232553ae0479d8b7df42",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:0f3a666bdd2439dae2ce5c072c5f26ee247758453e79a770f2ad41d68d25e39a",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.22324936820215,
+              "completed_updates": 0,
+              "mean_ce": 5.699922114610672,
+              "study_checkpoint_sha256": "51b84558608408776d06351b17ea19eb033bf48cacbaa067b585fd3e067c00f9",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.655612655839427,
+              "completed_updates": 256,
+              "mean_ce": 3.2270247861742973,
+              "study_checkpoint_sha256": "302a950bc5f2fb9afe3bdecf0eefc9649e56761e005942b5bce4c39c1896d69a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.4574476671789025,
+              "completed_updates": 512,
+              "mean_ce": 3.089667282998562,
+              "study_checkpoint_sha256": "3a93ff378776630dfbe9fb0bb3a35ea39aab1a49abfb2ce72d4e146189351fdf",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.286719812485705,
+              "completed_updates": 1024,
+              "mean_ce": 2.9713277518749237,
+              "study_checkpoint_sha256": "f49e92daf183e4af87b14ac27c3d128fda82314102c2a319ff715d6de4726954",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed11_geometry_frozen",
+          "request_sha256": "ec4d9907e1e709ceb262ac2c1a51cc9ab494a95d411a232553ae0479d8b7df42",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:0fdad06f1ad3f894551155fcbc1975aafb0e5da71771f056ef5f5518c6144dbe",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        }
+      ],
+      "artifacts": [
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 0,
+          "file": "w32-seed11-case0-revision0.json",
+          "artifact_id": "sha256:955b4e78a7a7f4062eb31e72eee90f7248a14b25e7113d14c8e51a6d674e2b86",
+          "sha256": "955b4e78a7a7f4062eb31e72eee90f7248a14b25e7113d14c8e51a6d674e2b86",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 256,
+          "file": "w32-seed11-case0-revision256.json",
+          "artifact_id": "sha256:0b92111129a2790ca43e896d182360c7cf93c3a1d8a66ab53f8ad39570d0d6de",
+          "sha256": "0b92111129a2790ca43e896d182360c7cf93c3a1d8a66ab53f8ad39570d0d6de",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 512,
+          "file": "w32-seed11-case0-revision512.json",
+          "artifact_id": "sha256:c94e94389d071f398309ff21fb47e921625f8c6d6a8ebf1d3d953fa4dcada61f",
+          "sha256": "c94e94389d071f398309ff21fb47e921625f8c6d6a8ebf1d3d953fa4dcada61f",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_ordinary",
+          "cursor": 1024,
+          "file": "w32-seed11-case0-revision1024.json",
+          "artifact_id": "sha256:67dd686dc4d71354db0523862e604dae2851607952290766b302f49d8c7de170",
+          "sha256": "67dd686dc4d71354db0523862e604dae2851607952290766b302f49d8c7de170",
+          "selected": true
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 0,
+          "file": "w32-seed11-case1-revision0.json",
+          "artifact_id": "sha256:d328a197f8744a7018942ca8d7510f7fa7ece884de07c8679cdf3235a78e9318",
+          "sha256": "d328a197f8744a7018942ca8d7510f7fa7ece884de07c8679cdf3235a78e9318",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 256,
+          "file": "w32-seed11-case1-revision256.json",
+          "artifact_id": "sha256:4c5c816fe78b5bb96bc98c162c31d873d667dfaa0e337e43dc71c25f86e6d344",
+          "sha256": "4c5c816fe78b5bb96bc98c162c31d873d667dfaa0e337e43dc71c25f86e6d344",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 512,
+          "file": "w32-seed11-case1-revision512.json",
+          "artifact_id": "sha256:53e66b5deac8f8abeb623daaa2877d1c1b8c9601233a41054d82f35b2b9a2ffd",
+          "sha256": "53e66b5deac8f8abeb623daaa2877d1c1b8c9601233a41054d82f35b2b9a2ffd",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry",
+          "cursor": 1024,
+          "file": "w32-seed11-case1-revision1024.json",
+          "artifact_id": "sha256:0f3a666bdd2439dae2ce5c072c5f26ee247758453e79a770f2ad41d68d25e39a",
+          "sha256": "0f3a666bdd2439dae2ce5c072c5f26ee247758453e79a770f2ad41d68d25e39a",
+          "selected": true
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 0,
+          "file": "w32-seed11-case2-revision0.json",
+          "artifact_id": "sha256:a95d29db66fda307659ecde7a988eebf092b8c43610a6ab98b9af3435299abbe",
+          "sha256": "a95d29db66fda307659ecde7a988eebf092b8c43610a6ab98b9af3435299abbe",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 256,
+          "file": "w32-seed11-case2-revision256.json",
+          "artifact_id": "sha256:f3ce61b116036ab2c5afcf2cf635a3d86be7f93c809c2d6c6a98bc780f306b23",
+          "sha256": "f3ce61b116036ab2c5afcf2cf635a3d86be7f93c809c2d6c6a98bc780f306b23",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 512,
+          "file": "w32-seed11-case2-revision512.json",
+          "artifact_id": "sha256:1d37d6474ba6c0d2398ca82f0e21060ed6fb07461e6eba7d9e0fd4516f9e9186",
+          "sha256": "1d37d6474ba6c0d2398ca82f0e21060ed6fb07461e6eba7d9e0fd4516f9e9186",
+          "selected": false
+        },
+        {
+          "case_name": "seed11_geometry_frozen",
+          "cursor": 1024,
+          "file": "w32-seed11-case2-revision1024.json",
+          "artifact_id": "sha256:0fdad06f1ad3f894551155fcbc1975aafb0e5da71771f056ef5f5518c6144dbe",
+          "sha256": "0fdad06f1ad3f894551155fcbc1975aafb0e5da71771f056ef5f5518c6144dbe",
+          "selected": true
+        }
+      ],
+      "segment_binding": true,
+      "historical_256": []
+    },
+    {
+      "name": "w32-seed29",
+      "width": 32,
+      "seed": 29,
+      "request_sha256": "38dfafaaf21f16c8284d79cb82815c442cd55ae3a2e45c3df2fe74bb4ec5ae97",
+      "checkpoint_size_bound": 7856878,
+      "parameter_scalars": [
+        26272,
+        26410,
+        26410
+      ],
+      "comparison": {
+        "numerical_checks_passed": false,
+        "error": "seed29_ordinary.block.0.qkv.bias: strict scalar tolerance exceeded",
+        "scope": "Strict qualification failed; diagnostic outputs only, no quality or promotion claim",
+        "reference_sha256": "a7b47f4d49c73cadfd395100a317bcd6aaa305cc39b0fddf316f87e362e0392f",
+        "native_report_sha256": "63f41986b81fb3bf29bb75dc13c44787bba6495940b6ad906c80faf824f71ce9",
+        "private_error_sha256": "243f118cbb238fd37faa2720c515ac5c60aa3145b272ae9cfbc47841d2e828a1"
+      },
+      "decisions": [
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.19508759608433,
+              "completed_updates": 0,
+              "mean_ce": 5.680401861667633,
+              "study_checkpoint_sha256": "4fa1866a4cfc04494bfe6eb9979b41e55c605b19225c986df057ef4282c308f0",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.731218110218961,
+              "completed_updates": 256,
+              "mean_ce": 3.2794304937124252,
+              "study_checkpoint_sha256": "1d63e66db545b7c6b47740bc0051614315e5f9d6524bbfa216faa097cf3a918d",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.496236182800042,
+              "completed_updates": 512,
+              "mean_ce": 3.11655343323946,
+              "study_checkpoint_sha256": "ec9eb3d258dbb24b189b6b4b8e39a80c4ebfe3bff90ba9f25fef524b96635a8a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.37989067191545,
+              "completed_updates": 1024,
+              "mean_ce": 3.0359088703989983,
+              "study_checkpoint_sha256": "5b46ec952b11c7ba84266bc2d64565a734a2f3c64098cb5bcb6dccdb1a4d0936",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed29_ordinary",
+          "request_sha256": "38dfafaaf21f16c8284d79cb82815c442cd55ae3a2e45c3df2fe74bb4ec5ae97",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:3b9253f4d936d2f1353abeae2b25e4a576799b1c4afaa328030d7e2484af1dc1",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.218009723263133,
+              "completed_updates": 0,
+              "mean_ce": 5.696290269494057,
+              "study_checkpoint_sha256": "4fa1866a4cfc04494bfe6eb9979b41e55c605b19225c986df057ef4282c308f0",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.678528365915569,
+              "completed_updates": 256,
+              "mean_ce": 3.2429087460041046,
+              "study_checkpoint_sha256": "1d63e66db545b7c6b47740bc0051614315e5f9d6524bbfa216faa097cf3a918d",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.474583051108462,
+              "completed_updates": 512,
+              "mean_ce": 3.101544626057148,
+              "study_checkpoint_sha256": "ec9eb3d258dbb24b189b6b4b8e39a80c4ebfe3bff90ba9f25fef524b96635a8a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.34294304784023,
+              "completed_updates": 1024,
+              "mean_ce": 3.010298728942871,
+              "study_checkpoint_sha256": "5b46ec952b11c7ba84266bc2d64565a734a2f3c64098cb5bcb6dccdb1a4d0936",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed29_geometry",
+          "request_sha256": "38dfafaaf21f16c8284d79cb82815c442cd55ae3a2e45c3df2fe74bb4ec5ae97",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:c91c201370ff5abaa2f3d852a81434f7f0956efe9c15433915db587ecdcde536",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.218009723263133,
+              "completed_updates": 0,
+              "mean_ce": 5.696290269494057,
+              "study_checkpoint_sha256": "4fa1866a4cfc04494bfe6eb9979b41e55c605b19225c986df057ef4282c308f0",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.679619875307101,
+              "completed_updates": 256,
+              "mean_ce": 3.2436653226614,
+              "study_checkpoint_sha256": "1d63e66db545b7c6b47740bc0051614315e5f9d6524bbfa216faa097cf3a918d",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.478987731026456,
+              "completed_updates": 512,
+              "mean_ce": 3.104597717523575,
+              "study_checkpoint_sha256": "ec9eb3d258dbb24b189b6b4b8e39a80c4ebfe3bff90ba9f25fef524b96635a8a",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.369016757096094,
+              "completed_updates": 1024,
+              "mean_ce": 3.028371647000313,
+              "study_checkpoint_sha256": "5b46ec952b11c7ba84266bc2d64565a734a2f3c64098cb5bcb6dccdb1a4d0936",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed29_geometry_frozen",
+          "request_sha256": "38dfafaaf21f16c8284d79cb82815c442cd55ae3a2e45c3df2fe74bb4ec5ae97",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:508401c0c9bc5f66a08109e6a6bfc1d77b6fd62e867f57e1caaa4efce3b9d333",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        }
+      ],
+      "artifacts": [
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 0,
+          "file": "w32-seed29-case0-revision0.json",
+          "artifact_id": "sha256:13ccd98dbf2cc7b2ad30efcc3b8b94c7b6328907ec32304bdcf001b1427c9501",
+          "sha256": "13ccd98dbf2cc7b2ad30efcc3b8b94c7b6328907ec32304bdcf001b1427c9501",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 256,
+          "file": "w32-seed29-case0-revision256.json",
+          "artifact_id": "sha256:0fcdee3c13d014bbf3ecc83641ef85eade742ccfb48ba057b3bb887880b42521",
+          "sha256": "0fcdee3c13d014bbf3ecc83641ef85eade742ccfb48ba057b3bb887880b42521",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 512,
+          "file": "w32-seed29-case0-revision512.json",
+          "artifact_id": "sha256:7b370648f2988f1c1fbdedb28593ef356c44d769664d9ad7ded18a985096874d",
+          "sha256": "7b370648f2988f1c1fbdedb28593ef356c44d769664d9ad7ded18a985096874d",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_ordinary",
+          "cursor": 1024,
+          "file": "w32-seed29-case0-revision1024.json",
+          "artifact_id": "sha256:3b9253f4d936d2f1353abeae2b25e4a576799b1c4afaa328030d7e2484af1dc1",
+          "sha256": "3b9253f4d936d2f1353abeae2b25e4a576799b1c4afaa328030d7e2484af1dc1",
+          "selected": true
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 0,
+          "file": "w32-seed29-case1-revision0.json",
+          "artifact_id": "sha256:8551c7c58c24e2780ffda4f1b3a468f0118f3c353860a3a3b2f432782c4cffff",
+          "sha256": "8551c7c58c24e2780ffda4f1b3a468f0118f3c353860a3a3b2f432782c4cffff",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 256,
+          "file": "w32-seed29-case1-revision256.json",
+          "artifact_id": "sha256:512becca3dd847cd473452934100d6d09cf9ba1b5fedf43611118e7e396d1c24",
+          "sha256": "512becca3dd847cd473452934100d6d09cf9ba1b5fedf43611118e7e396d1c24",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 512,
+          "file": "w32-seed29-case1-revision512.json",
+          "artifact_id": "sha256:7c27e3e762db97998e9c94b410ae2a403079aa7581edf1ff5da5e7092f9f4b09",
+          "sha256": "7c27e3e762db97998e9c94b410ae2a403079aa7581edf1ff5da5e7092f9f4b09",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry",
+          "cursor": 1024,
+          "file": "w32-seed29-case1-revision1024.json",
+          "artifact_id": "sha256:c91c201370ff5abaa2f3d852a81434f7f0956efe9c15433915db587ecdcde536",
+          "sha256": "c91c201370ff5abaa2f3d852a81434f7f0956efe9c15433915db587ecdcde536",
+          "selected": true
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 0,
+          "file": "w32-seed29-case2-revision0.json",
+          "artifact_id": "sha256:bf36e04ce1e83d1e764aab6d02baa3948af913b3ce5c3befcd2f08db0b141bf2",
+          "sha256": "bf36e04ce1e83d1e764aab6d02baa3948af913b3ce5c3befcd2f08db0b141bf2",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 256,
+          "file": "w32-seed29-case2-revision256.json",
+          "artifact_id": "sha256:3902b94acd84b0d5e61bd9ae8a456944c012ffcc5470d8dbf5e1df2acebccce2",
+          "sha256": "3902b94acd84b0d5e61bd9ae8a456944c012ffcc5470d8dbf5e1df2acebccce2",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 512,
+          "file": "w32-seed29-case2-revision512.json",
+          "artifact_id": "sha256:e462a7e7bac03a94793eced7c4bc50dfc15b5a5ab4fb7aa7bacd3e7997675e5b",
+          "sha256": "e462a7e7bac03a94793eced7c4bc50dfc15b5a5ab4fb7aa7bacd3e7997675e5b",
+          "selected": false
+        },
+        {
+          "case_name": "seed29_geometry_frozen",
+          "cursor": 1024,
+          "file": "w32-seed29-case2-revision1024.json",
+          "artifact_id": "sha256:508401c0c9bc5f66a08109e6a6bfc1d77b6fd62e867f57e1caaa4efce3b9d333",
+          "sha256": "508401c0c9bc5f66a08109e6a6bfc1d77b6fd62e867f57e1caaa4efce3b9d333",
+          "selected": true
+        }
+      ],
+      "segment_binding": true,
+      "historical_256": []
+    },
+    {
+      "name": "w32-seed47",
+      "width": 32,
+      "seed": 47,
+      "request_sha256": "d189c56cda79a42756e1df748f79d053034f4a56274812c6ab55cb2c0e29bd31",
+      "checkpoint_size_bound": 7856878,
+      "parameter_scalars": [
+        26272,
+        26410,
+        26410
+      ],
+      "comparison": {
+        "numerical_checks_passed": false,
+        "error": "seed47_ordinary.block.0.qkv.bias: strict scalar tolerance exceeded",
+        "scope": "Strict qualification failed; diagnostic outputs only, no quality or promotion claim",
+        "reference_sha256": "1c09700d729fc7b8d5a67975220e1cb9fe031950971e89e60d121b859e2c2154",
+        "native_report_sha256": "6a3831fbcf41f4c84190fbf90e751992ebb06353d4dee7c29008bb6556434638",
+        "private_error_sha256": "88862b5b18593dbb7b03eb827f233f187df7295498a851842a69032d26dd7277"
+      },
+      "decisions": [
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.10064652653989,
+              "completed_updates": 0,
+              "mean_ce": 5.614940300583839,
+              "study_checkpoint_sha256": "19f177f760bc66ea5aa550b6db8da3f505d8e4f28c71355b77bd03fe933b4e71",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.646180170612615,
+              "completed_updates": 256,
+              "mean_ce": 3.2204866856336594,
+              "study_checkpoint_sha256": "a53a55a72d48ecf5be8c5253cc78c0f85f0a859e3ef8b2e9a6763a84f945b830",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.472920935528114,
+              "completed_updates": 512,
+              "mean_ce": 3.100392535328865,
+              "study_checkpoint_sha256": "5e5c6c28bf561e605bcd3f580d040c9fc43a8a8fd57f1feb8d9a9a4d76236e74",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.387234288111629,
+              "completed_updates": 1024,
+              "mean_ce": 3.0409990772604942,
+              "study_checkpoint_sha256": "cb56df04365629a86653fc04f96de2a951930a3c0358b7d4618767db3c9730d7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed47_ordinary",
+          "request_sha256": "d189c56cda79a42756e1df748f79d053034f4a56274812c6ab55cb2c0e29bd31",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:1d39533643d2cc4a0fb45365df2552b9002bc8257bd41f5bd4f5891af25751ea",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.087838505577848,
+              "completed_updates": 0,
+              "mean_ce": 5.6060624569654465,
+              "study_checkpoint_sha256": "19f177f760bc66ea5aa550b6db8da3f505d8e4f28c71355b77bd03fe933b4e71",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.641867458417169,
+              "completed_updates": 256,
+              "mean_ce": 3.21749734133482,
+              "study_checkpoint_sha256": "a53a55a72d48ecf5be8c5253cc78c0f85f0a859e3ef8b2e9a6763a84f945b830",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.458449283388612,
+              "completed_updates": 512,
+              "mean_ce": 3.090361550450325,
+              "study_checkpoint_sha256": "5e5c6c28bf561e605bcd3f580d040c9fc43a8a8fd57f1feb8d9a9a4d76236e74",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.3327200873543905,
+              "completed_updates": 1024,
+              "mean_ce": 3.0032127127051353,
+              "study_checkpoint_sha256": "cb56df04365629a86653fc04f96de2a951930a3c0358b7d4618767db3c9730d7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed47_geometry",
+          "request_sha256": "d189c56cda79a42756e1df748f79d053034f4a56274812c6ab55cb2c0e29bd31",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:a1baab98d05253b1ff9c81fce15ce8488d3b4026445b3cb7313294073cf6541b",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        },
+        {
+          "candidates": [
+            {
+              "bits_per_byte": 8.087838505577848,
+              "completed_updates": 0,
+              "mean_ce": 5.6060624569654465,
+              "study_checkpoint_sha256": "19f177f760bc66ea5aa550b6db8da3f505d8e4f28c71355b77bd03fe933b4e71",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.643211287855348,
+              "completed_updates": 256,
+              "mean_ce": 3.218428812921047,
+              "study_checkpoint_sha256": "a53a55a72d48ecf5be8c5253cc78c0f85f0a859e3ef8b2e9a6763a84f945b830",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.468991217947225,
+              "completed_updates": 512,
+              "mean_ce": 3.0976686626672745,
+              "study_checkpoint_sha256": "5e5c6c28bf561e605bcd3f580d040c9fc43a8a8fd57f1feb8d9a9a4d76236e74",
+              "target_bytes": 2048
+            },
+            {
+              "bits_per_byte": 4.364187183290227,
+              "completed_updates": 1024,
+              "mean_ce": 3.02502404153347,
+              "study_checkpoint_sha256": "cb56df04365629a86653fc04f96de2a951930a3c0358b7d4618767db3c9730d7",
+              "target_bytes": 2048
+            }
+          ],
+          "case_name": "seed47_geometry_frozen",
+          "request_sha256": "d189c56cda79a42756e1df748f79d053034f4a56274812c6ab55cb2c0e29bd31",
+          "rule": "minimum_validation_ce_earliest_saved.v1",
+          "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+          "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+          "selected": {
+            "artifact_id": "sha256:03af26991e8708613b5a796e9554d0777eef74ca235de420763ce1d0f09d6c9a",
+            "candidate_index": 3,
+            "completed_updates": 1024
+          },
+          "selection_data": "request_validation_windows"
+        }
+      ],
+      "artifacts": [
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 0,
+          "file": "w32-seed47-case0-revision0.json",
+          "artifact_id": "sha256:889fa9985fd5fef92ecd1b8b9799e92fcded6ff9840a8edaaa97fe3e81c462ac",
+          "sha256": "889fa9985fd5fef92ecd1b8b9799e92fcded6ff9840a8edaaa97fe3e81c462ac",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 256,
+          "file": "w32-seed47-case0-revision256.json",
+          "artifact_id": "sha256:59b947397703966cd45203b5d1cd564f05e9ea97b99de2a4bd1ec915535e1346",
+          "sha256": "59b947397703966cd45203b5d1cd564f05e9ea97b99de2a4bd1ec915535e1346",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 512,
+          "file": "w32-seed47-case0-revision512.json",
+          "artifact_id": "sha256:1efa30c40d8cd6a312f0708c3e3a71c0085d4f55cd3c4771db69688ab11d3d84",
+          "sha256": "1efa30c40d8cd6a312f0708c3e3a71c0085d4f55cd3c4771db69688ab11d3d84",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_ordinary",
+          "cursor": 1024,
+          "file": "w32-seed47-case0-revision1024.json",
+          "artifact_id": "sha256:1d39533643d2cc4a0fb45365df2552b9002bc8257bd41f5bd4f5891af25751ea",
+          "sha256": "1d39533643d2cc4a0fb45365df2552b9002bc8257bd41f5bd4f5891af25751ea",
+          "selected": true
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 0,
+          "file": "w32-seed47-case1-revision0.json",
+          "artifact_id": "sha256:e53653b0bb5b3305c09748d4bfd611755f5b0f8952466520d344da17284f5d4d",
+          "sha256": "e53653b0bb5b3305c09748d4bfd611755f5b0f8952466520d344da17284f5d4d",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 256,
+          "file": "w32-seed47-case1-revision256.json",
+          "artifact_id": "sha256:1fa46eecf875a3d804c20ff562d58dd964ce40258e417d5305fdd2d511ccd0d0",
+          "sha256": "1fa46eecf875a3d804c20ff562d58dd964ce40258e417d5305fdd2d511ccd0d0",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 512,
+          "file": "w32-seed47-case1-revision512.json",
+          "artifact_id": "sha256:fe9bd3fd78fe03e54ccee742d04eb37e54bbea3364129dc3f2585c5a01460444",
+          "sha256": "fe9bd3fd78fe03e54ccee742d04eb37e54bbea3364129dc3f2585c5a01460444",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry",
+          "cursor": 1024,
+          "file": "w32-seed47-case1-revision1024.json",
+          "artifact_id": "sha256:a1baab98d05253b1ff9c81fce15ce8488d3b4026445b3cb7313294073cf6541b",
+          "sha256": "a1baab98d05253b1ff9c81fce15ce8488d3b4026445b3cb7313294073cf6541b",
+          "selected": true
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 0,
+          "file": "w32-seed47-case2-revision0.json",
+          "artifact_id": "sha256:9fd8cca883d32f2ae070e7129c8606b8408c554fbe4b2d589992d12c7207a3ca",
+          "sha256": "9fd8cca883d32f2ae070e7129c8606b8408c554fbe4b2d589992d12c7207a3ca",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 256,
+          "file": "w32-seed47-case2-revision256.json",
+          "artifact_id": "sha256:3b86e7d87c5d463eb3b2c2d72971d390abad1fac6b638de67b91d964b56b539c",
+          "sha256": "3b86e7d87c5d463eb3b2c2d72971d390abad1fac6b638de67b91d964b56b539c",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 512,
+          "file": "w32-seed47-case2-revision512.json",
+          "artifact_id": "sha256:71a44a73b81e6b43c2b5f7af7d9f6269a515b97c886b4349a377b76090240082",
+          "sha256": "71a44a73b81e6b43c2b5f7af7d9f6269a515b97c886b4349a377b76090240082",
+          "selected": false
+        },
+        {
+          "case_name": "seed47_geometry_frozen",
+          "cursor": 1024,
+          "file": "w32-seed47-case2-revision1024.json",
+          "artifact_id": "sha256:03af26991e8708613b5a796e9554d0777eef74ca235de420763ce1d0f09d6c9a",
+          "sha256": "03af26991e8708613b5a796e9554d0777eef74ca235de420763ce1d0f09d6c9a",
+          "selected": true
+        }
+      ],
+      "segment_binding": true,
+      "historical_256": []
+    }
+  ],
+  "prepared_sha256": "d98ee159568a1867d658df1bc4fe1a4cdc4206f2154fdf1d363ca88f88f1360a",
+  "sources": [
+    {
+      "path": "benchmarks/results/2026-10-16-language-capacity-budget/qualify.py",
+      "sha256": "52074ad9f55065b974d1718bc8fea36a65ac0972e6fb9e2b13a4261b4c4d888c"
+    },
+    {
+      "path": "benchmarks/results/2026-10-16-language-capacity-budget/launch.py",
+      "sha256": "f9580d7b1c445fbb1c5fb837217443789162c3fac6165ace8b635292b8f8a169"
+    },
+    {
+      "path": "benchmarks/results/2026-10-15-language-adamw-256/qualify.py",
+      "sha256": "e8aa7063a2380c68c7d29ba81fca6560da3dabedd758dbc19e1336ba652894be"
+    },
+    {
+      "path": "tools/byte_corpus_study.py",
+      "sha256": "3f55ab2b2f901e0f6f095374035487eab2dc0213165bc6fdb46c1c9df3e2bfaa"
+    },
+    {
+      "path": "tools/byte_corpus_optimizer.py",
+      "sha256": "1a680a251f2e5bbdc20b8146883aca1122fa5dc64b73b96f054333e2c9056a1a"
+    },
+    {
+      "path": "tools/verify_byte_corpus_resume.py",
+      "sha256": "2160bff24f6406298d9cd5323b4d25092773781becf96c88f006e36eb194d1b9"
+    }
+  ],
+  "native_extension_sha256": "ac92d86e83bf8baa3c02c7db0ea85c70d650da970aadfecb7b07d0d706260d21",
+  "private_record_sha256": "f8d128620fc390a9f5f38f707237ae162c5006dde4eacda1999c77acf733fc60"
+}
