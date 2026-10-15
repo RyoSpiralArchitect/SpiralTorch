@@ -1,0 +1,109 @@
+{
+  "schema": "spiraltorch.byte_corpus.serving_validation.v1",
+  "date_local": "2026-10-15",
+  "base_commit": "b4446cbc7c7b39da38156f51630cb44985dd3ea7",
+  "status": "local qualification; not a PyPI release or deployment-readiness result",
+  "tests": {
+    "rust-portable-final.log": {
+      "passed": 58,
+      "skipped": 0,
+      "sha256": "64c67fa05db34da0310229fbd22c4c3d3247af1e1a61394b2581e105af0e5ecd"
+    },
+    "rust-wgpu-final.log": {
+      "passed": 8,
+      "skipped": 0,
+      "sha256": "f6a481da4dcc80a283532c5288fe29298afcd2e0a9653ccc9a509424f071f0db"
+    },
+    "python-wgpu-final.log": {
+      "passed": 5,
+      "skipped": 0,
+      "sha256": "951041b2bd02f0ad2e0b395a6325987f770651e29f75ed6a627434b29af5f971"
+    },
+    "python-cpu-final.log": {
+      "passed": 2,
+      "skipped": 3,
+      "sha256": "bf6b8dc45785959d6fa334bc2f919cb66f8c501dcc5e4c1080f50b5053b823d5"
+    },
+    "study-wgpu.log": {
+      "passed": 12,
+      "skipped": 1,
+      "sha256": "b677befc6cbba2d18e7bda2764220df2eb8edfd00066e3e87d1e37f5e49194dd"
+    },
+    "study-cpu.log": {
+      "passed": 10,
+      "skipped": 3,
+      "sha256": "106833709e7430e31562ee3f3711cdca529a41d1feb89afd22ec894b6243db89"
+    },
+    "release-smoke-wgpu.log": {
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "c68a3d3813bd6dcb00c0a3a9d8a35b0e07a7d66c4230daa5198126ea60342941"
+    },
+    "release-smoke-cpu.log": {
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "96bf06807743d64198bc0156294acb1257e6dee9c91d00a6e613633ddc686bb5"
+    }
+  },
+  "source_sha256": {
+    "crates/st-nn/src/resident/byte_study/serving.rs": "049d36464dedd662244e63943c9c2ea0a07a5e588a6a778256363f40b0615bc0",
+    "crates/st-nn/src/resident/byte_study/serving/tests.rs": "b590bb1536b523ee90e4a1145a8ca8e7578463ce1f6c3b9cd2cc8af14b3daad8",
+    "crates/st-nn/src/resident/byte_study/serving/gpu.rs": "331dff48759f893e0aa48374e0060e33e2440eb41bfce5f1c576e7b2715c4cbb",
+    "crates/st-nn/src/resident/byte_study/serving/gpu/tests.rs": "5e5162505620ffbf53f9e9a5a33ab1820b226f35654bf3bed9bd53cb1f528755",
+    "crates/st-nn/src/resident/byte_study.rs": "8b7431cf33c08ee012d9fe2b5d4db68efabbfd5778d348b8f400689433858392",
+    "crates/st-nn/src/resident.rs": "60642880fa2b490ce070334a3be5a6333f835f00af05fb5c563f6764337697fb",
+    "crates/st-nn/examples/resident_byte_learning_browser.rs": "9a86d344f7ead895afb4440b93ab8bfced813b4e7f2ebdc829a361ee354ef228",
+    "crates/st-nn/examples/resident_byte_learning_browser/serving.rs": "999fe26cfa9c940e51af4fe0f189a59867269ddc69330773f40a542088864424",
+    "crates/st-nn/tests/byte_serving_browser.html": "ee5891c9b61361658bf64366001968c623c832efd40d9c0aed8ce4af5c3a5689",
+    "bindings/st-py/src/nn_resident/byte_decoder/serving.rs": "6b5e066c18f247b60bb637ae1a8e6b9e3226b1a2c836d8438ebd8acb758fdbc4",
+    "bindings/st-py/src/nn_resident/byte_decoder.rs": "2d1badd430e33d16219e75250852fa8d593d8842eda38ab3fb63c0a7e1c23b04",
+    "bindings/st-py/src/nn.rs": "5561bd1bde71d3287d2288adad3e2334ccbbf03928a17e6b6929fb74f4600c9d",
+    "bindings/st-py/spiraltorch/__init__.pyi": "995378cf055788fee15b5f43b35f6c72aaf75c9ffa8676919e3e0bdbe902bddc",
+    "bindings/st-py/tests/test_nn_byte_serving.py": "688a109d1c4a45c57954798910af94a7ef3f6a8543939c74480fb4c68f645814",
+    "bindings/st-py/tests/test_nn_byte_study.py": "57ce9c1116d8a5abc10b2519ab51b321eabe5f3a0882711958b850975ad4bf17",
+    "tools/smoke_learning_stack.py": "26c491e12285a4fce2c759e02ac8529eff82ea8438d86db2b117a1222f8235ca",
+    "tests/test_release_learning_smoke.py": "32adc5d047ecfded399b2d2188a2f56d8942da6f8003e933aea53606c3a2b4cf",
+    ".github/workflows/ci.yml": "7c12711b807b074c3e9b23a20d648ce6a20af3876bd4138881a0052868434642",
+    "benchmarks/results/2026-10-15-language-serving-gates/verify_serving.py": "602bbff4f86219f541037b7bc9906fbd9c8265a8d276a650d747c9b0c5cbf856"
+  },
+  "binaries": {
+    "cpu": {
+      "wheel_sha256": "eabde557a462909149f2bee98d58a5adc98adc72f24187c9b96cb7619189735a",
+      "native_sha256": "316a03585d36f64320216820e475513b8a458693196d5bfec34f6123efc1e7ab",
+      "installed_native_matches_wheel": true
+    },
+    "wgpu": {
+      "wheel_sha256": "63e37f71ba7c35faa4bb6d2e320c38fa04a8281e99c5c6b10e95cea4b30b106e",
+      "native_sha256": "9ffb18842b7ad32f8ca3bfef2e983cf8aac365c884a4e7b8950da2beef563cfb",
+      "installed_native_matches_wheel": true
+    }
+  },
+  "wasm_sha256": "e76c380fb89a23ea96ddbef2a74877e5e4c607e00ee958a19cf8a6da4139b6f8",
+  "wasm_js_sha256": "d72c6ca56cfb2659f5b613c4a1ff55943c2865b120820da9d8acaa4ae5a3eb12",
+  "wasm_bindgen": "0.2.129",
+  "build_log_sha256": {
+    "build-wgpu-reviewed.log": "19c7180b6bcb1250cc60ce8d2db4e92866e3d29b5c84249aeeaaa1de04aef71c",
+    "build-cpu.log": "24e7bd58b50fbbf04ac5667da11af24bc36bfd8900115d5e04f840fc4a95081b",
+    "build-wasm.log": "c128b6956a8b1547da675b4d68bb0ab44c611f3cc9aa09bf41c24f2078a20b04"
+  },
+  "historical_receipt_sha256": "82898a283b91a40080e5d033b58dc3bb614b4640c4f15e59f4aaa734ce3217c8",
+  "browser_receipt_sha256": "846ca9f37ed0efb4baae67537bf1bde028e4966c979e9683be2167b72ba0c8d9",
+  "attempts_retained": {
+    "python-wgpu-first.log": {
+      "status": "failed test fixture assumption: study mixture preparation is intentionally one-block",
+      "sha256": "9e52d364aeba13037b18517552b21a9b8e86180f70567a2485f2317bc2ed7e90"
+    }
+  },
+  "review": {
+    "kind": "independent read-only static review, not numerical rerun",
+    "fixed": [
+      "normalized router entropy and zero-mass rejection",
+      "independent mean-only and worst-batch regression tests",
+      "actual shared/contextual multi-block router measurement and entropy-only rejection",
+      "activation output hashes must equal measured candidate; signed-zero-sensitive rollback equality",
+      "generation-only stale rejection after A-to-B-to-A with accepted old permit"
+    ],
+    "follow_up": "Rust/Python/WASM wrappers reviewed; final verifier gaps fixed and rerun",
+    "binary_scope": "follow-up changes tests/probes/HTML only; measured native and WASM code unchanged"
+  }
+}

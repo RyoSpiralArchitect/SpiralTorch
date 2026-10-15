@@ -222,6 +222,7 @@ def byte_decoder_portable():
 BYTE_CORPUS_EXPORTS = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
     "ByteCorpusModelArtifact", "ResidentByteInference",
+    "ByteCorpusServingGate", "ResidentByteCandidate", "ResidentByteServing",
     "ByteCorpusPreparedBiasStudy", "ByteCorpusBiasCalibration",
     "ByteCorpusHeadwiseControls", "ByteCorpusMixtureControls", "ByteCorpusQueryMixtureControls",
 )
