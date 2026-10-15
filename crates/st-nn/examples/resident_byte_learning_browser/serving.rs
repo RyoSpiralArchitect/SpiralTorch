@@ -31,6 +31,30 @@ impl WasmServingGate {
         self.inner.request_sha256().to_owned()
     }
 
+    #[wasm_bindgen(getter)]
+    pub fn schema_version(&self) -> u8 {
+        self.inner.schema_version()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn cohort_names(&self) -> Vec<String> {
+        self.inner
+            .cohort_names()
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn batch_count(&self) -> usize {
+        self.inner.batch_count()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn batch_shape(&self) -> Vec<usize> {
+        self.inner.batch_shape().to_vec()
+    }
+
     pub async fn bootstrap_wgpu(
         &self,
         artifact: &str,

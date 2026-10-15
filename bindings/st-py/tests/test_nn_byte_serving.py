@@ -31,8 +31,34 @@ def gate(value=None):
     return st.nn.ByteCorpusServingGate.from_json(json.dumps(gate_value() if value is None else value))
 
 
+def cohort_gate_value(request=None):
+    legacy = gate_value(request)
+    return dict(schema="spiraltorch.byte_corpus.serving_gate.v2",
+                documents=legacy["documents"], steps=legacy["steps"],
+                cohorts=[dict(name="prefix", batches=legacy["batches"][:1], limits=copy.deepcopy(legacy["limits"])),
+                         dict(name="suffix", batches=legacy["batches"][1:] * 2, limits=copy.deepcopy(legacy["limits"]))])
+
+
 def output_hash(values):
     return hashlib.sha256(struct.pack("<" + "f" * len(values), *values)).hexdigest()
+
+
+def causal_squared(shape, values):
+    """Independent f64 oracle over raw causal rows, not a Rust report consumer."""
+    batch, heads, steps, keys = shape
+    if steps != keys or len(values) != batch * heads * steps * keys:
+        raise ValueError("invalid raw pair-bias shape")
+    squared = []
+    for head in range(heads):
+        deviations = []
+        for item in range(batch):
+            for query in range(steps):
+                start = ((item * heads + head) * steps + query) * keys
+                row = values[start:start + query + 1]
+                mean = math.fsum(row) / len(row)
+                deviations.extend((x - mean) ** 2 for x in row)
+        squared.append(math.fsum(deviations))
+    return squared, batch * steps * (steps + 1) // 2
 
 
 def duplicated_block_fixture(artifact):
@@ -55,6 +81,11 @@ def duplicated_block_fixture(artifact):
 
 
 class ServingPortable(unittest.TestCase):
+    def test_geometry_oracle_centers_causal_rows_per_head(self):
+        squared, count = causal_squared((1, 2, 2, 2), [3., 100., 1., 3., 8., -100., -2., 2.])
+        self.assertEqual(squared, [2., 8.])
+        self.assertEqual(count, 3)
+
     def test_exact_bytes_thresholds_and_window_admission(self):
         raw = json.dumps(gate_value()).encode()
         value = st.nn.ByteCorpusServingGate.from_json(raw)
@@ -62,6 +93,15 @@ class ServingPortable(unittest.TestCase):
         self.assertEqual(value.request_sha256, hashlib.sha256(raw).hexdigest())
         self.assertEqual(value.batch_shape, (1, 2))
         self.assertEqual(value.batch_count, 2)
+        self.assertEqual(value.schema_version, 1)
+        self.assertEqual(value.cohort_names, ["default"])
+        source = gate_value()
+        positional = json.dumps([source[k] for k in ("schema", "documents", "batches", "steps", "limits")])
+        legacy = st.nn.ByteCorpusServingGate.from_json(positional)
+        self.assertEqual(legacy.to_json(), positional)
+        self.assertEqual(legacy.batch_shape, value.batch_shape)
+        self.assertEqual(legacy.batch_count, value.batch_count)
+        self.assertEqual(legacy.schema_version, 1)
         self.assertNotEqual(value.request_sha256,
                             st.nn.ByteCorpusServingGate.from_json(raw + b" ").request_sha256)
         with self.assertRaises(AttributeError):
@@ -77,6 +117,28 @@ class ServingPortable(unittest.TestCase):
             invalid = gate_value()
             invalid[key] = changed
             with self.subTest(key=key), self.assertRaises(ValueError):
+                gate(invalid)
+
+    def test_named_cohorts_require_explicit_policy_and_common_shapes(self):
+        source = cohort_gate_value()
+        source["cohorts"][1]["name"] = "\u65e5\u672c\u8a9e"
+        value = gate(source)
+        self.assertEqual(value.schema_version, 2)
+        self.assertEqual(value.cohort_names, ["prefix", "\u65e5\u672c\u8a9e"])
+        self.assertEqual(value.batch_shape, (1, 2))
+        self.assertEqual(value.batch_count, 3)
+        names = value.cohort_names
+        names.append("not-mutated")
+        self.assertEqual(value.cohort_names, ["prefix", "\u65e5\u672c\u8a9e"])
+        for field in ("schema_version", "cohort_names"):
+            with self.assertRaises(AttributeError):
+                setattr(value, field, None)
+        for key, changed in (("name", "prefix"), ("name", " trailing "),
+                             ("name", "x\n"), ("batches", []), ("limits", {}),
+                             ("batches", [[[0, 0], [0, 2]]]), ("unknown", 1)):
+            invalid = copy.deepcopy(source)
+            invalid["cohorts"][1][key] = changed
+            with self.subTest(key=key, changed=changed), self.assertRaises(ValueError):
                 gate(invalid)
 
     def test_cpu_validation_and_no_constructor_or_permit_import(self):
@@ -111,6 +173,50 @@ class ServingRuntime(unittest.TestCase):
                                              "geometry", policy=POLICY)
         cls.trained = cls.study.case_artifact(cls.study.advance_wgpu().checkpoint,
                                              "geometry", policy=POLICY)
+
+    def test_cohort_measurements_match_isolated_gates_and_all_must_pass(self):
+        policy = cohort_gate_value()
+        serving = gate(policy).bootstrap_wgpu(self.initial)
+        bootstrap = json.loads(serving.bootstrap_json())
+        self.assertEqual(bootstrap["schema"], "spiraltorch.byte_corpus.serving_bootstrap.v2")
+        prepared = serving.prepare_candidate(self.trained)
+        report = json.loads(prepared.to_json())
+        self.assertTrue(prepared.accepted)
+        self.assertEqual(report["schema"], "spiraltorch.byte_corpus.candidate_assessment.v2")
+        self.assertEqual(report["failed_checks"], [])
+        self.assertNotIn("candidate", report)
+        for i, cohort in enumerate(policy["cohorts"]):
+            isolated = gate_value()
+            isolated.update(batches=cohort["batches"], limits=cohort["limits"])
+            isolated = gate(isolated).bootstrap_wgpu(self.initial)
+            self.assertEqual(bootstrap["cohorts"][i]["observation"],
+                             json.loads(isolated.bootstrap_json())["observation"])
+            measured = json.loads(isolated.prepare_candidate(self.trained).to_json())
+            for field in ("incumbent", "candidate", "limits", "accepted", "failed_checks",
+                          "mean_ce_delta", "max_batch_ce_delta"):
+                self.assertEqual(report["cohorts"][i][field], measured[field])
+        batch = serving.prepare_batch(st.nn.ByteLmBatch.from_windows([b"\x07\x08\x09"]))
+        before = output_hash(serving.forward(batch).prediction_tensor().snapshot().read_values())
+        self.assertEqual(report["cohorts"][0]["incumbent"]["logits_f32le_sha256"][0], before)
+        serving.activate(prepared)
+        after = output_hash(serving.forward(batch).prediction_tensor().snapshot().read_values())
+        self.assertEqual(report["cohorts"][0]["candidate"]["logits_f32le_sha256"][0], after)
+        self.assertNotEqual(before, after)
+        serving.rollback(1)
+        self.assertEqual(output_hash(serving.forward(batch).prediction_tensor().snapshot().read_values()), before)
+        policy["cohorts"][1]["limits"]["max_mean_ce_regression"] = -100.0
+        guarded = gate(policy).bootstrap_wgpu(self.initial)
+        rejected = guarded.prepare_candidate(self.trained)
+        receipt = json.loads(rejected.to_json())
+        self.assertFalse(rejected.accepted)
+        self.assertTrue(receipt["cohorts"][0]["accepted"])
+        self.assertEqual(receipt["failed_checks"], [{"cohort": "suffix", "checks": ["mean_ce_regression"]}])
+        with self.assertRaises(ValueError):
+            guarded.activate(rejected)
+        self.assertTrue(rejected.consumed)
+        self.assertEqual(guarded.generation, 0)
+        self.assertEqual(guarded.artifact_id, self.initial.artifact_id)
+        self.assertIsNone(guarded.previous_artifact_id)
 
     def test_switch_reject_stale_foreign_and_rollback_preserves_retained_forwards(self):
         serving = gate().bootstrap_wgpu(self.initial)
@@ -222,6 +328,7 @@ class ServingRuntime(unittest.TestCase):
                 measured = json.loads(candidate.to_json())["candidate"]
                 independent = trained.restore_wgpu()
                 expected_hashes, expected_losses, all_rows = [], [], [[], []]
+                all_bias = [[], []]
                 components = len(json.loads(trained.checkpoint().to_json())["model"]["geometry"]["mixture"]["metrics"])
                 for windows in request["validation_batches"]:
                     host = st.nn.ByteLmBatch.from_documents([bytes(d) for d in request["validation_documents"]],
@@ -233,11 +340,17 @@ class ServingRuntime(unittest.TestCase):
                     for block in range(2):
                         weights = forward.geometry_mixture_weights_tensor(block).snapshot().read_values()
                         all_rows[block].extend(weights[i:i+components] for i in range(0, len(weights), components))
+                        bias = forward.geometry_pair_bias_tensor(block)
+                        all_bias[block].append(causal_squared(bias.shape, bias.snapshot().read_values()))
                 self.assertEqual(measured["logits_f32le_sha256"], expected_hashes)
                 self.assertEqual(measured["batch_ce"], expected_losses)
                 self.assertEqual(len(measured["router"]), 2)
                 self.assertEqual([len(heads) for heads in measured["geometry_centered_rms"]], [2, 2])
                 for block, rows in enumerate(all_rows):
+                    for head in range(2):
+                        expected_rms = math.sqrt(math.fsum(sums[head] for sums, _ in all_bias[block])
+                                                 / sum(count for _, count in all_bias[block]))
+                        self.assertAlmostEqual(measured["geometry_centered_rms"][block][head], expected_rms, places=12)
                     expected_rows = 2 * 2 * (request["config"]["steps"] if name == contextual else 1)
                     self.assertEqual(len(rows), expected_rows)
                     self.assertEqual(measured["router"][block]["rows"], expected_rows)
@@ -246,6 +359,28 @@ class ServingRuntime(unittest.TestCase):
                     self.assertAlmostEqual(measured["router"][block]["min_normalized_entropy"],
                                            min(-sum((p/sum(row))*math.log(p/sum(row)) for p in row if p>0)
                                                / math.log(components) for row in rows), places=12)
+
+                # Cohort accumulators must reset for geometry and contextual
+                # router rows, not only CE. Compare unequal-sized groups with
+                # their independently measured v1 gates on the same runtime.
+                cohorts = cohort_gate_value(request)
+                multi = gate(cohorts).bootstrap_wgpu(initial)
+                grouped = json.loads(multi.prepare_candidate(trained).to_json())["cohorts"]
+                for index, cohort in enumerate(cohorts["cohorts"]):
+                    isolated = gate_value(request)
+                    isolated.update(batches=cohort["batches"], limits=cohort["limits"])
+                    isolated = gate(isolated).bootstrap_wgpu(initial)
+                    single = json.loads(isolated.prepare_candidate(trained).to_json())
+                    self.assertEqual(grouped[index]["incumbent"], single["incumbent"])
+                    self.assertEqual(grouped[index]["candidate"], single["candidate"])
+                    selections = [request["validation_batches"].index(batch) for batch in cohort["batches"]]
+                    for block in range(2):
+                        samples = [all_bias[block][i] for i in selections]
+                        for head in range(2):
+                            expected_rms = math.sqrt(math.fsum(sums[head] for sums, _ in samples)
+                                                     / sum(count for _, count in samples))
+                            self.assertAlmostEqual(grouped[index]["candidate"]["geometry_centered_rms"][block][head],
+                                                   expected_rms, places=12)
 
                 # Deliberately collapse only block 1/head 0, without training.
                 # This tests admission, not a trained failure or model quality.

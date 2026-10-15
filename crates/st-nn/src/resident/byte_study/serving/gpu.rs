@@ -112,7 +112,7 @@ struct Active {
     model: ResidentByteInference,
 }
 
-async fn measure(gate: &ByteCorpusServingGate, active: &mut Active) -> Result<Observation> {
+async fn measure_cohort(cohort: &Cohort, active: &mut Active) -> Result<Observation> {
     let plan = active.artifact.checkpoint().plan();
     let blocks = plan.block_count();
     let geometry = plan.causal_geometry();
@@ -121,7 +121,7 @@ async fn measure(gate: &ByteCorpusServingGate, active: &mut Active) -> Result<Ob
     let mut router: Vec<RouterHealth> = Vec::new();
     let mut batch_ce = Vec::new();
     let mut hashes = Vec::new();
-    for host in &gate.batches {
+    for host in &cohort.batches {
         let batch = active.model.prepare_batch(host)?;
         let tagged = active.model.forward(&batch)?;
         let forward = tagged.forward();
@@ -199,17 +199,90 @@ async fn measure(gate: &ByteCorpusServingGate, active: &mut Active) -> Result<Ob
             }
         }
     }
-    let shape = gate.batch_shape();
+    let shape = cohort.batches[0].shape();
     Ok(Observation {
         artifact_id: active.artifact.artifact_id().to_owned(),
         revision: active.artifact.checkpoint().attempted_revision(),
         mean_ce: batch_ce.iter().sum::<f64>() / batch_ce.len() as f64,
         batch_ce,
-        target_bytes: shape[0] * shape[1] * gate.batch_count(),
+        target_bytes: shape[0] * shape[1] * cohort.batches.len(),
         logits_f32le_sha256: hashes,
         geometry_centered_rms: moments.iter().map(CausalBiasMoments::rms).collect(),
         router,
     })
+}
+
+async fn measure(gate: &ByteCorpusServingGate, active: &mut Active) -> Result<Vec<Observation>> {
+    let mut observations = Vec::with_capacity(gate.cohorts.len());
+    for cohort in &gate.cohorts {
+        observations.push(
+            measure_cohort(cohort, active)
+                .await
+                .map_err(|e| format!("cohort {:?}: {e}", cohort.name))?,
+        );
+    }
+    Ok(observations)
+}
+
+fn absolute_failures(gate: &ByteCorpusServingGate, observed: &[Observation]) -> Result<Vec<Value>> {
+    if observed.len() != gate.cohorts.len() {
+        return Err("incomplete serving cohort observations".into());
+    }
+    Ok(gate
+        .cohorts
+        .iter()
+        .zip(observed)
+        .filter_map(|(c, o)| {
+            let checks = o.failures(&c.limits);
+            (!checks.is_empty()).then(|| json!({"cohort":c.name,"checks":checks}))
+        })
+        .collect())
+}
+
+#[derive(Serialize)]
+struct CohortAssessment<'a> {
+    name: &'a str,
+    limits: &'a Limits,
+    incumbent: &'a Observation,
+    candidate: &'a Observation,
+    accepted: bool,
+    failed_checks: Vec<&'static str>,
+    mean_ce_delta: f64,
+    max_batch_ce_delta: f64,
+}
+
+fn assess_cohorts<'a>(
+    gate: &'a ByteCorpusServingGate,
+    reference: &'a [Observation],
+    observed: &'a [Observation],
+) -> Result<Vec<CohortAssessment<'a>>> {
+    if reference.len() != gate.cohorts.len() || observed.len() != gate.cohorts.len() {
+        return Err("incomplete paired serving cohort observations".into());
+    }
+    gate.cohorts
+        .iter()
+        .zip(reference)
+        .zip(observed)
+        .map(|((c, incumbent), candidate)| {
+            if incumbent.batch_ce.len() != c.batches.len()
+                || candidate.batch_ce.len() != c.batches.len()
+            {
+                return Err("incomplete paired cohort batches".into());
+            }
+            let (failed_checks, mean_ce_delta, max_batch_ce_delta) =
+                candidate.assess(incumbent, &c.limits);
+            Ok(CohortAssessment {
+                name: &c.name,
+                limits: &c.limits,
+                incumbent,
+                candidate,
+                accepted: failed_checks.is_empty(),
+                failed_checks,
+                mean_ce_delta,
+                max_batch_ce_delta,
+            })
+        })
+        .collect()
 }
 
 fn restore(runtime: WgpuRuntime, artifact: ByteCorpusModelArtifact) -> Result<Active> {
@@ -266,12 +339,23 @@ impl ResidentByteServing {
         gate.validate_artifact(&artifact)?;
         let mut active = restore(runtime.clone(), artifact)?;
         let observed = measure(&gate, &mut active).await?;
-        let failed = observed.failures(&gate.limits);
+        let failed = absolute_failures(&gate, &observed)?;
         if !failed.is_empty() {
             return Err(format!("bootstrap gate rejected: {failed:?}").into());
         }
-        let bootstrap = json!({"schema":"spiraltorch.byte_corpus.serving_bootstrap.v1",
-            "gate_sha256":gate.request_sha256(), "observation":observed, "limits":gate.limits});
+        let bootstrap = if gate.version == 1 {
+            json!({"schema":"spiraltorch.byte_corpus.serving_bootstrap.v1",
+                "gate_sha256":gate.request_sha256(), "observation":observed[0], "limits":gate.cohorts[0].limits})
+        } else {
+            let cohorts: Vec<_> = gate
+                .cohorts
+                .iter()
+                .zip(&observed)
+                .map(|(c, o)| json!({"name":c.name,"limits":c.limits,"observation":o}))
+                .collect();
+            json!({"schema":"spiraltorch.byte_corpus.serving_bootstrap.v2",
+                "gate_sha256":gate.request_sha256(), "cohorts":cohorts})
+        };
         Ok(Self {
             owner: Arc::new(()),
             generation: 0,
@@ -320,23 +404,39 @@ impl ResidentByteServing {
         }
         let mut incumbent = restore(self.runtime.clone(), self.active.artifact.clone())?;
         let reference = measure(&self.gate, &mut incumbent).await?;
-        if !reference.failures(&self.gate.limits).is_empty() {
+        if !absolute_failures(&self.gate, &reference)?.is_empty() {
             return Err("incumbent no longer meets the pinned absolute gate".into());
         }
         drop(incumbent);
         let mut candidate = restore(self.runtime.clone(), artifact)?;
         let observed = measure(&self.gate, &mut candidate).await?;
-        let (failures, mean_delta, max_batch_delta) =
-            observed.assess(&reference, &self.gate.limits);
+        let assessments = assess_cohorts(&self.gate, &reference, &observed)?;
         let adapter = self.runtime.adapter_info();
-        let accepted = failures.is_empty();
-        let report = json!({"schema":"spiraltorch.byte_corpus.candidate_assessment.v1",
+        let accepted = assessments.iter().all(|c| c.accepted);
+        let mut report = json!({"schema":format!("spiraltorch.byte_corpus.candidate_assessment.v{}", self.gate.version),
             "gate_sha256":self.gate_sha256(), "generation":self.generation.to_string(),
-            "policy":self.active.artifact.policy(), "limits":self.gate.limits,
-            "incumbent":reference, "candidate":observed, "accepted":accepted,
-            "failed_checks":failures, "mean_ce_delta":mean_delta, "max_batch_ce_delta":max_batch_delta,
+            "policy":self.active.artifact.policy(), "accepted":accepted,
             "adapter":{"name":adapter.name, "backend":format!("{:?}",adapter.backend),
                 "device_type":format!("{:?}",adapter.device_type)}});
+        if self.gate.version == 1 {
+            let mut legacy = serde_json::to_value(&assessments[0])?;
+            legacy
+                .as_object_mut()
+                .expect("assessment object")
+                .remove("name");
+            report
+                .as_object_mut()
+                .expect("report object")
+                .extend(legacy.as_object().expect("assessment object").clone());
+        } else {
+            let failures: Vec<_> = assessments
+                .iter()
+                .filter(|c| !c.accepted)
+                .map(|c| json!({"cohort":c.name,"checks":c.failed_checks}))
+                .collect();
+            report["failed_checks"] = json!(failures);
+            report["cohorts"] = serde_json::to_value(&assessments)?;
+        }
         Ok(ResidentByteCandidate {
             owner: self.owner.clone(),
             generation: self.generation,
