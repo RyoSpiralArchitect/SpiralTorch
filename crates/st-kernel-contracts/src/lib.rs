@@ -8,6 +8,7 @@
 //! deliberately contains no runtime routing, device discovery, telemetry,
 //! allocation, or foreign-function interfaces.
 
+pub mod adamw;
 pub mod attention;
 pub mod causal_bias;
 pub mod causal_wave;

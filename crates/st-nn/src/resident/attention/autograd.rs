@@ -37,15 +37,6 @@ pub(crate) struct AttentionAutograd {
     spec: AttentionSpec,
 }
 
-impl AttentionInferencePlan {
-    pub(crate) fn graph_parts(&self) -> Result<[GraphDefinition; 2], InferenceError> {
-        Ok([
-            self.qkv.graph_definition()?,
-            self.output.graph_definition()?,
-        ])
-    }
-}
-
 impl AttentionAutograd {
     pub(crate) fn new(
         plan: &AttentionInferencePlan,

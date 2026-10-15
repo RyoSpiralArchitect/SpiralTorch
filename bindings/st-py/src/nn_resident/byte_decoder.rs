@@ -378,6 +378,12 @@ impl PyByteDecoderCheckpoint {
     fn attempted_revision(&self) -> u64 {
         self.inner.attempted_revision()
     }
+    #[getter]
+    fn adamw_config(&self) -> Option<(f32, f32, f32)> {
+        self.inner
+            .adamw_state()
+            .map(|s| (s.config.beta1(), s.config.beta2(), s.config.epsilon()))
+    }
     /// Frozen topology and values; compiling the plan starts a new revision zero.
     fn plan(&self) -> PyByteDecoderPlan {
         PyByteDecoderPlan {

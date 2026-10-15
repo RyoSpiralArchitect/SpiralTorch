@@ -27,6 +27,10 @@ pub use readback::{
 #[derive(Debug, Error)]
 pub enum TrainingError {
     #[error(transparent)]
+    AdamW(#[from] st_kernel_contracts::adamw::AdamWError),
+    #[error("invalid optimizer state: {0}")]
+    OptimizerState(&'static str),
+    #[error(transparent)]
     Momentum(#[from] st_kernel_contracts::momentum::MomentumError),
     #[error("enable momentum before resetting or observing its state")]
     MissingMomentum,
