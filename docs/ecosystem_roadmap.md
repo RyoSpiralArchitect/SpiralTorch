@@ -438,8 +438,15 @@ one-step rollback; Python and the standalone WASM client share that path.
 Held-outness, threshold selection and model authenticity remain caller-owned.
 This is not yet a registry, durable deployment service or HF integration.
 
-Next, exercise this boundary on independently selected language cohorts and
-connect its lifecycle to orchestration without duplicating policy. Reuse the existing
+Named cohorts now carry separate explicit limits; every cohort must pass, and
+no global mean can override a failing group. The source-only
+[greedy generation loop](python/byte-generation.md) connects selected artifacts
+to actual byte output with model identity and serving-generation checks. Rust
+owns window movement and byte selection; Python and the standalone browser are
+clients. Teacher-forced admission does not certify free-running quality.
+
+Next, compare generated behavior alongside the fixed-window cohort measurements,
+and connect this lifecycle to orchestration without duplicating policy. Reuse the existing
 [HF lineage, promotion and experiment executor](python/build-and-validation.md)
 rather than adding a second scheduler or independently interpreted client gate.
 Geometry must affect the executable model, not just its report. Its benefit

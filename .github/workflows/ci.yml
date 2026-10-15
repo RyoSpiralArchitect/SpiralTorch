@@ -332,6 +332,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_nn_byte_decoder.py -v
           python -I -B bindings/st-py/tests/test_nn_byte_study.py -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
+          python -I -B bindings/st-py/tests/test_nn_byte_generation.py -v
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)

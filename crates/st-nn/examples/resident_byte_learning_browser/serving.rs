@@ -131,6 +131,43 @@ impl WasmServing {
     pub fn bootstrap_json(&self) -> Result<String, JsValue> {
         self.inner.bootstrap_json().map_err(error)
     }
+    /// Flattened B*T bytes. Only the Rust core selects bytes and slides windows.
+    pub async fn generate_greedy(
+        &mut self,
+        prompts: Vec<u8>,
+        max_new_bytes: f64,
+        expected_generation: &str,
+    ) -> Result<String, JsValue> {
+        if !max_new_bytes.is_finite()
+            || max_new_bytes.fract() != 0.
+            || !(1. ..=256.).contains(&max_new_bytes)
+        {
+            return Err(error("max_new_bytes must be an integer in 1..256"));
+        }
+        let generation: u64 = expected_generation.parse().map_err(error)?;
+        if generation.to_string() != expected_generation {
+            return Err(error("generation must be a canonical decimal u64"));
+        }
+        if prompts.len() != self.shape[0] * self.shape[1] {
+            return Err(error("prompts differ from the exact B*T serving shape"));
+        }
+        self.inner
+            .validate_generation(
+                std::iter::repeat_n(self.shape[1], self.shape[0]),
+                max_new_bytes as usize,
+                generation,
+            )
+            .map_err(error)?;
+        let rows: Vec<_> = prompts
+            .chunks_exact(self.shape[1])
+            .map(<[u8]>::to_vec)
+            .collect();
+        self.inner
+            .generate_greedy(&rows, max_new_bytes as usize, generation)
+            .await
+            .and_then(|result| result.to_json())
+            .map_err(error)
+    }
     pub async fn prepare_candidate(
         &self,
         artifact: &str,

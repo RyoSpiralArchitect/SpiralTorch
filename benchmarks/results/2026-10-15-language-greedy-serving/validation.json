@@ -1,0 +1,171 @@
+{
+  "schema": "spiraltorch.byte_corpus.generation_validation.v1",
+  "source_head": "cb05c789e015003e8274f7ede4d6502359b5cb03",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "313e8205eb1bca7230b502d2c02b4ea586025dbac0bc7b515e24ffa0831b471f",
+    "README.md": "4c25ca61816838d41518b2a3eb1ed350e4c77869c7ad0212540c758f225ae3fc",
+    "benchmarks/results/2026-10-15-language-greedy-serving/README.md": "e8f1dc2de70cc9f73abd36a22fc418de336bfa06488b24b8f3729be5a7b52da6",
+    "benchmarks/results/2026-10-15-language-greedy-serving/test_verify_generation.py": "47467a084b67140d76161977a3af25ebacaefc57ec339852823ce9d7d4ce2adc",
+    "benchmarks/results/2026-10-15-language-greedy-serving/verify_generation.py": "27f3948f27744ce4912335cb6af935f024fd9db0b2af6a6f5ce75092ed6ab78d",
+    "bindings/st-py/spiraltorch/__init__.pyi": "08243e963bb4b635afb06bb7f98b2f6cfaaffae56f02d969fa67871cb3c6c47f",
+    "bindings/st-py/src/nn_resident/byte_decoder.rs": "06357660120f8d02eabc73ba5dd7512400e430c248ade915dac2c10b932fbbaa",
+    "bindings/st-py/src/nn_resident/byte_decoder/artifact.rs": "594bdae24b5442eabe9038f9e2a6c62d82a5e3d3824295c95ad33bcc0ddfef64",
+    "bindings/st-py/src/nn_resident/byte_decoder/serving.rs": "9c5b497bd5452461ccd85e442677ee87bd7fd7b376c9e06daa84c53f59406eda",
+    "bindings/st-py/tests/test_nn_byte_generation.py": "cc8f4944d67b9d24c6c057dc5a50d295da5cde7d8e3de3197b8b7b9bc6baad34",
+    "crates/st-nn/examples/resident_byte_learning_browser/serving.rs": "9960e93c07321cf92d9547dcb676913038a63794b71f48a98d2b2a3b496f4201",
+    "crates/st-nn/src/resident.rs": "cb9b0e65f27c5c5cdef67888dbbe1eaec9cab930622855fb794ae36e8713a8c4",
+    "crates/st-nn/src/resident/byte_study.rs": "42e916f57f7ead9fe1b9b9682d32135bd7d964ab103e0179ef17c329a00b2fed",
+    "crates/st-nn/src/resident/byte_study/generation.rs": "491c18c204711fac6dbb6b8fed830f1c4f1718ede7118a3a65b3774e9915b20e",
+    "crates/st-nn/src/resident/byte_study/generation/tests.rs": "ce16a7e93751e0fb7e5c5c46b98ad0a756fb0a23aa7dc01f52b8b85a5a87a428",
+    "crates/st-nn/src/resident/byte_study/serving/gpu.rs": "ee0bc2bb20981de84f7c860a755b35092758c94c9890632ae40bc2359ee0a844",
+    "crates/st-nn/src/resident/byte_study/serving/gpu/tests.rs": "148f953bb3f39cd392eba3b2a914b48a9f7a9e0b94a73ac8a815616d30eac0fa",
+    "crates/st-nn/tests/byte_generation_browser.html": "e0a3d1f119f45432863d751a25544ad0ad8aa6c36db263b15d21425cfb18aa76",
+    "docs/ecosystem_roadmap.md": "35a5b61c1eb27de8cd31944dfc7cfb9885225ea39fc129c66b13f1830eae064a",
+    "docs/python/byte-generation.md": "c611611b282b10908825f760923cf9d4e0a1ba98b333eecb21ad4dc5025fb895",
+    "docs/python/byte-model-artifacts.md": "fe73eb7ed29e6dc9d9f49a150ef56bad090fbb98d1682efe9028f8ed28ee71d7",
+    "docs/python/byte-serving-gates.md": "8186a65a6d0acd78a332a5c84c993844f9ad43ece87a135d61165f214da83c36"
+  },
+  "builds": {
+    "build-wheel-wgpu-reviewed.log": "378bb0f157bc26a9ca69639c13286aa9101cbb62e496646b99f921fa182ac890",
+    "build-wheel-cpu.log": "9b815d06a5eac7f0020f7b7fd90ccd22ff2a8537d0ec59fecd7ea0e5ea6201ca",
+    "build-wasm.log": "f332c386365a1b07ba8d21edba374b68e7012d85f1e55dd69471467598f553ed"
+  },
+  "packages": {
+    "wgpu": {
+      "filename": "spiraltorch-0.4.31-cp38-abi3-macosx_14_0_arm64.whl",
+      "wheel_sha256": "419cf46badf9417fb84b3b4b2d2bdc1845d787cfe123d65891164c171b2ef8ae",
+      "native_sha256": "29f10ca727915ac968020b0566f60ce73d84349386fb0e6321b7eb998ef14e84",
+      "stub_sha256": "08243e963bb4b635afb06bb7f98b2f6cfaaffae56f02d969fa67871cb3c6c47f",
+      "installed_identity_sha256": "70e8c36c8e3974acac40c5566dcb7392155d6cb4f568fc5dafbb5a87cb2358f4",
+      "public_upload": false
+    },
+    "cpu": {
+      "filename": "spiraltorch-0.4.31-cp38-abi3-macosx_14_0_arm64.whl",
+      "wheel_sha256": "b4f9094ed24ad8e06dfe740b27287b7a2cdf6959bdb518ddaf7ce196f1e49ace",
+      "native_sha256": "53ab2654bf99e58c24778abda7bbc6d1de45c89876fabfc1bcd43a347d0952de",
+      "stub_sha256": "08243e963bb4b635afb06bb7f98b2f6cfaaffae56f02d969fa67871cb3c6c47f",
+      "installed_identity_sha256": "99bb913c94232eb2837c8870547794079dcfaa54293b64e2faf3edd0baf90b63",
+      "public_upload": false
+    }
+  },
+  "wasm_sha256": "24dc734bf07503aa566ceb8e1a1a75351663e7e86c043ee1f6372b74f84ecf88",
+  "wasm_bindgen_js_sha256": "61290c0ceaf9e704d758cd726ddcb33faef6c8a8565f1907bfa354e935a1dc5d",
+  "input_sha256": "0cf6de2e0bb4b530bbc38c877e81e0331ce23a5d6595e025bc09016bd0855fdd",
+  "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+  "suites": [
+    {
+      "log": "rust-wgpu-final.log",
+      "passed": 71,
+      "skipped": 0,
+      "sha256": "f0c257d2f14f82978ab5bc2c0348a7cc039d5af945c843c049d3578e2f4611ba"
+    },
+    {
+      "log": "rust-portable.log",
+      "passed": 63,
+      "skipped": 0,
+      "sha256": "51aa1150c7ab315b25aac51bf692a345a09170d81579308b1d0c0997e869b833"
+    },
+    {
+      "log": "python-generation-reviewed.log",
+      "passed": 3,
+      "skipped": 0,
+      "sha256": "781aa1648490da0c1dae5cdafb9dff6d0069e954bbfa4f938323f455e2d50198"
+    },
+    {
+      "log": "python-serving.log",
+      "passed": 8,
+      "skipped": 0,
+      "sha256": "7b87bdfa4cbe0c740f5800ea77f945679cde092cb1d1696b34473c63311b711a"
+    },
+    {
+      "log": "python-study.log",
+      "passed": 12,
+      "skipped": 1,
+      "sha256": "19129e29d340e3f324a0b603bf7bc832a6ce23d03345fb6e2a5ca1ef42e8d33b"
+    },
+    {
+      "log": "python-release.log",
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "02f41fb6d6f2593b5b46da263ec80e1fdde6e4889946958d3acfd600dba74f0d"
+    },
+    {
+      "log": "python-cpu-serving.log",
+      "passed": 4,
+      "skipped": 4,
+      "sha256": "c76546e93cffdfd64fe9c8fdf77cbcfc73dc334ca75250f9594d0b31c3a5bc92"
+    },
+    {
+      "log": "python-cpu-study.log",
+      "passed": 10,
+      "skipped": 3,
+      "sha256": "7bf388bb1b459a82c5c9feddb5489fe96c7befe2659383c1a7108f3868d5c6d6"
+    },
+    {
+      "log": "python-cpu-release.log",
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "c5ead51e33be42aff75609b0c80f3e32ba9049b3c87dcbf97767632312c5cd3b"
+    },
+    {
+      "log": "probe-controls.log",
+      "passed": 3,
+      "skipped": 0,
+      "sha256": "2b483d61cd24b9284e3677fbe663a03bbd564d767c986c4e3d1044bca8a220f4"
+    }
+  ],
+  "passed_executions": 192,
+  "skipped_executions": 8,
+  "independent_reviews": {
+    "mode": "two read-only local reviewers, no independent numeric rerun",
+    "resolved": [
+      "Rust preflight before copying Python prompt bytes",
+      "pinned input artifact IDs and literal serving generations",
+      "pristine independent owner oracle and unchanged revision checks"
+    ],
+    "remaining_findings": 0
+  },
+  "comparison": {
+    "before": {
+      "generated_bytes_equal": true,
+      "exact_next_logit_hash_steps": 32,
+      "steps": 32
+    },
+    "after": {
+      "generated_bytes_equal": true,
+      "exact_next_logit_hash_steps": 0,
+      "steps": 32
+    },
+    "restored": {
+      "generated_bytes_equal": true,
+      "exact_next_logit_hash_steps": 32,
+      "steps": 32
+    }
+  },
+  "observation": {
+    "space_bytes_per_phase": 63,
+    "total_bytes_per_phase": 64,
+    "useful_prose_observed": false,
+    "no_quality_claim": true,
+    "new_training_updates": 0
+  },
+  "failure_history": [
+    "Initial Python wheel build: error adapter type mismatch; fixed before tested builds. Old failed log retained privately."
+  ],
+  "limits": [
+    "One seed and two preselected prompts, not a language-quality benchmark",
+    "No streaming, KV cache, HF executor or automatic promotion",
+    "Generation does not reapply teacher-forced cohort limits to unseen contexts",
+    "CPU wheels cannot execute this WGPU decoder",
+    "No new optional strict whole-st-nn clippy run; previously recorded legacy failures are not repaired here",
+    "Public PyPI 0.4.31 unchanged"
+  ],
+  "raw_receipts_sha256": {
+    "native-receipt.json": "9241641c87831b1d376e3d27fed5f45df70d1f8410677efe74cf3f9a972933a6",
+    "browser-receipt.json": "877e59a4be555124e9285bc74bfe357851bf93ec11b47035bc0f834069068093"
+  },
+  "public_receipts_sha256": {
+    "native-receipt.json": "9241641c87831b1d376e3d27fed5f45df70d1f8410677efe74cf3f9a972933a6",
+    "browser-receipt.json": "77a0c12809dad9cd91146cff0142da554a0a191bf85577e4e1aaf5229a505c0a"
+  }
+}

@@ -31,6 +31,8 @@ pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
 mod artifact;
 mod calibration;
+#[cfg(any(feature = "wgpu", test))]
+mod generation;
 mod headwise;
 mod mixture;
 mod policy;
@@ -42,6 +44,8 @@ pub use artifact::{
 #[cfg(feature = "wgpu")]
 pub use artifact::{ResidentByteInference, ResidentByteInferenceForward};
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
+#[cfg(feature = "wgpu")]
+pub use generation::ByteCorpusGeneration;
 pub use headwise::ByteCorpusHeadwiseControls;
 pub use mixture::ByteCorpusMixtureControls;
 use policy::{BiasInitialization, GeometryUpdate};

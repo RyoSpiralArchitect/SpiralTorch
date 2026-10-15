@@ -204,6 +204,35 @@ impl PyResidentByteServing {
             })
         })
     }
+    #[pyo3(signature = (prompts, *, max_new_bytes, expected_generation))]
+    fn generate_greedy(
+        &mut self,
+        py: Python<'_>,
+        prompts: Vec<Bound<'_, PyBytes>>,
+        max_new_bytes: &Bound<'_, PyAny>,
+        expected_generation: &Bound<'_, PyAny>,
+    ) -> PyResult<String> {
+        let count = super::generation_count(max_new_bytes)?;
+        if expected_generation.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err(
+                "expected_generation must be an integer, not bool",
+            ));
+        }
+        let generation = expected_generation.extract()?;
+        self.inner
+            .validate_generation(
+                prompts.iter().map(|p| p.as_bytes().len()),
+                count,
+                generation,
+            )
+            .map_err(serving_error)?;
+        let prompts: Vec<_> = prompts.iter().map(|p| p.as_bytes().to_vec()).collect();
+        py.detach(|| {
+            pollster::block_on(self.inner.generate_greedy(&prompts, count, generation))
+                .and_then(|result| result.to_json())
+                .map_err(serving_error)
+        })
+    }
     /// One activation attempt consumes the permit, including a rejected attempt.
     fn activate(
         &mut self,

@@ -69,7 +69,9 @@ that separate owner must not be labelled with the old artifact ID.
 
 The current inference wrapper reuses the existing forward, including retained
 backward tapes. It is not an inference-kernel optimization, KV cache, streaming
-decoder or text-generation API. Cross-device bitwise equality is not promised.
+decoder. The separate [bounded greedy loop](byte-generation.md) now composes
+this owner into byte generation; it does not replace the underlying kernels.
+Cross-device bitwise equality is not promised.
 A CPU-only wheel can create, pin, transport and source-validate artifacts;
 `restore_wgpu()` explicitly raises `NotImplementedError`, without CPU fallback.
 

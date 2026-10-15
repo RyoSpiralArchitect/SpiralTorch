@@ -10,7 +10,8 @@ NumPy, PyTorch, and Transformers are optional, not mandatory dependencies.
 The language-first MLOps direction carries **weights, learned geometry and an
 explicit operating policy together**. Source-only [model artifacts and serving
 gates](docs/python/byte-serving-gates.md) connect paired evaluation to local
-activation and rollback; this is not yet a durable deployment service.
+activation and rollback, with [bounded byte generation](docs/python/byte-generation.md)
+from the selected model. This is not yet a durable deployment service.
 
 [Manifesto](docs/spiraltorch_manifesto.md) · [Z-space](docs/zspace_intro.md) ·
 [Documentation](docs/README.md) · [Model zoo](models/README.md)
