@@ -1,0 +1,20 @@
+{
+  "schema": "spiraltorch.byte_corpus.fresh_budget_preparation.v1",
+  "request_sha256": "830d5cee8318bb6aaab67d17ec63843c4fcae8ac2bd28c0abd44533f87dcdf32",
+  "plan_sha256": "3c76a52274123734785b2700db060133e49ad023c405795c64f5c2af55316cee",
+  "runner_sha256": "2bb018acd1e6234c2f28dec3dee9d808b6b7938094868fca8a1a6a6b1164823f",
+  "adopter_sha256": "c61af8bb8e788b582fd637804900ae3a24b3949eaf7df7dbaf1baafa041f26b8",
+  "historical_request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+  "retained_preparation_hashes": {
+    "v3/request.json": "0c77b4abbc29cdd79b17d2bfeec2fc275cce6d29f8f8388a9a5eebeeb528a21c",
+    "v5-packet.json": "741f44cac78d69729d50d150cea3d2901905375ffb35a6607a732bf1cc7c2536",
+    "v7-packet.json": "8bf6828bb6d4e2e79b4dbf00a7f8244da210472dcb64b31b7f217a0e34588e46",
+    "v8-packet.json": "571b0ca502664625e215313f8647726ebbc5e70ea86180d8a69ca6c47d5cd0c4"
+  },
+  "primary_contrast": "within_new_run_128_256_512",
+  "historical_initial_bits_equal": false,
+  "arms": 25,
+  "updates": 512,
+  "seed": 11,
+  "checkpoint_size_bound": 10173932
+}
