@@ -1,0 +1,154 @@
+{
+  "schema": "spiraltorch.byte_corpus.cohort_validation.v1",
+  "date_local": "2026-10-15",
+  "base_commit": "ff8894a8af221eb0b6f691dd73f34fa2c3b19835",
+  "source_head": "9f4b154f1e2e1578366809c71613e74dec3dfa89",
+  "source_binding": "File digests are authoritative; source_head is revision context, not the exact worktree identity",
+  "source_uncommitted_files": [
+    "bindings/st-py/spiraltorch/__init__.pyi",
+    "crates/st-nn/tests/byte_serving_browser.html"
+  ],
+  "scope": "Source-only local qualification, not PyPI publication, deployment readiness or generalization evidence",
+  "tests": {
+    "rust-wgpu-compat.log": {
+      "passed": 12,
+      "skipped": 0,
+      "sha256": "bf7f5d8c955240471d2e244d4db6e2c9729cded713dbec2bb3bec27b69a8eed0"
+    },
+    "python-wgpu-compat.log": {
+      "passed": 8,
+      "skipped": 0,
+      "sha256": "c0bb7453deb31170043ccc53a7f479b7b6f58cdde4e39116aff619cb40e6342c"
+    },
+    "python-cpu.log": {
+      "passed": 4,
+      "skipped": 4,
+      "sha256": "c76546e93cffdfd64fe9c8fdf77cbcfc73dc334ca75250f9594d0b31c3a5bc92"
+    },
+    "release-smoke-wgpu-compat.log": {
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "b9bd5c2ee12e60cc213cdc6a9daef3166f9674fab2ba988dce96c6ae0f6e406c"
+    },
+    "release-smoke-cpu.log": {
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "e5c8712d6b236d2f797e9fb6246c62c4fd6792666e9564e6eb602ef3d2afeffa"
+    },
+    "study-wgpu.log": {
+      "passed": 12,
+      "skipped": 1,
+      "sha256": "0c360462685fb1afb7c194ea4b758b054c011bc43acb81e3c0e4feb18f70426c"
+    },
+    "study-cpu.log": {
+      "passed": 10,
+      "skipped": 3,
+      "sha256": "90859ad978a8ae2c931c6f036086f14166e56fffb5aa177ab143c185ae1494d9"
+    },
+    "probe-tests.log": {
+      "passed": 4,
+      "skipped": 0,
+      "sha256": "256e590ba9183f73cc663d8cfa132c3c8611787f5bb806ea54e951f3d8a7d3ca"
+    }
+  },
+  "binaries": {
+    "cpu": {
+      "wheel_sha256": "99e9905ff32eb6f50955c39b31eaaa2800b2276e32571f47ec669d2429ec4077",
+      "native_sha256": "3e5c296b0e828e01ebbab0cab79d7ef31f895c2d73c8941fcab54d532e376975",
+      "stub_sha256": "7e2368c1ad7368534b3c3ce08ddace0555f547376fd105d1e2d2763d2874ba45",
+      "installed_native_matches_wheel": true,
+      "installed_stubs_match_source": true
+    },
+    "wgpu": {
+      "wheel_sha256": "7c1a7045041174468fbcf7b1ad4f0ad31e729d2a377c10ce827ad8d96a66eb50",
+      "native_sha256": "5f2c1100219574517ff154ca99921e34f862672c1fe25bfe23aacbfcf942c4c5",
+      "stub_sha256": "7e2368c1ad7368534b3c3ce08ddace0555f547376fd105d1e2d2763d2874ba45",
+      "installed_native_matches_wheel": true,
+      "installed_stubs_match_source": true
+    }
+  },
+  "source_sha256": {
+    "crates/st-nn/src/resident/byte_study/serving.rs": "5b40759d6d29214162245a9bd116f84859f2487abb6297b3d15913ac79c9dbae",
+    "crates/st-nn/src/resident/byte_study/serving/gpu.rs": "a6bcb0bde26260a088ea5a38235c789967865bdb3fc85811b5cdd8a7d68f80a4",
+    "crates/st-nn/src/resident/byte_study/serving/tests.rs": "3eb5f67b74dc75ee325e02d528ed4de5530ac5479a3d13e70f223fcd1d97ab5f",
+    "crates/st-nn/src/resident/byte_study/serving/gpu/tests.rs": "beb8e97ac313557a1eed6827fb2faed55502d1b846b1273bbba592924ede5c0b",
+    "crates/st-nn/examples/resident_byte_learning_browser/serving.rs": "a673b8b99b301c0ef380ff9a8cc801511703411715acca79045547350a68193b",
+    "crates/st-nn/tests/byte_serving_browser.html": "e83a90a0f17ba3f65d5adedc3f79b70dc178b0b51d3c26388be04d832d7f2127",
+    "bindings/st-py/src/nn_resident/byte_decoder/serving.rs": "65279b4d9dac5f17a18d10e3c29c5b941f3dad51386572eda003501b95548e6c",
+    "bindings/st-py/spiraltorch/__init__.pyi": "7e2368c1ad7368534b3c3ce08ddace0555f547376fd105d1e2d2763d2874ba45",
+    "bindings/st-py/tests/test_nn_byte_serving.py": "4bb8eb198a4eab260dea38a5b17c6da2513a220d8f9b7383779f37efb14bc010",
+    "benchmarks/results/2026-10-15-language-serving-cohorts/verify_cohorts.py": "acbeda3f5bae833e2a9733fe006bd338eba869fae46a37a63d699bb30210e8d3",
+    "benchmarks/results/2026-10-15-language-serving-cohorts/test_verify_cohorts.py": "3c3be412490e8cac1ad9e8aa09b14abfa823b3024907c7a4cbcae219449afd1e"
+  },
+  "toolchains": {
+    "native_and_wasm": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "rust_unit_tests": "rustc 1.99.0 (b940084d7 2026-09-28)"
+  },
+  "additional_strict_lint": {
+    "status": "failed",
+    "toolchain": "clippy 0.1.97 (2d8144b788 2026-07-07)",
+    "command": "cargo +stable clippy --locked -p st-nn --lib --no-default-features --features wgpu --no-deps -- -D warnings",
+    "scope": "Optional st-nn library -D warnings probe; st-nn is outside the CI strict subset",
+    "error_count": 23,
+    "unchanged_source_paths": [
+      "crates/st-nn/src/language/automation.rs",
+      "crates/st-nn/src/language/gw.rs",
+      "crates/st-nn/src/layers/activation.rs",
+      "crates/st-nn/src/layers/continuous_wavelet.rs",
+      "crates/st-nn/src/layers/conv.rs",
+      "crates/st-nn/src/layers/dropout.rs",
+      "crates/st-nn/src/layers/embedding.rs",
+      "crates/st-nn/src/layers/lstm.rs",
+      "crates/st-nn/src/layers/non_liner.rs",
+      "crates/st-nn/src/layers/normalization.rs",
+      "crates/st-nn/src/layers/zspace_projector.rs",
+      "crates/st-nn/src/z_rba/cov_head.rs",
+      "crates/st-nn/src/zspace_coherence/sequencer.rs",
+      "crates/st-nn/src/zspace_coherence/vae.rs"
+    ],
+    "source_paths_verified_against_base": true,
+    "log_sha256": "c9e5736f9eecb965cad89252a1e2aad0d1fa92e67e16922734d425ec4ab62ca4",
+    "dependency_probe_log_sha256": "e2e066ccf6f7e2fff32f46f0cf021510a79ad62438ef240f5cfc20f0ac41f8fc",
+    "note": "No serving-file diagnostics; legacy lints in unchanged source remain. Dependency-inclusive attempt also hit seven existing unknown lint names."
+  },
+  "wasm_bindgen": "0.2.129",
+  "wasm_sha256": "573bc03db8a1d0c0ffd694cc05e668a10518f7f8fb8a852558dabec84195df31",
+  "wasm_js_sha256": "070f84cb9c86e6cc57f6dcc2a08b529371a38ebe82e3c29c9c2b3f3cf3566753",
+  "build_log_sha256": {
+    "build-wgpu-compat.log": "6fe2e6809af9655254c7ccd56a082fcd7c404404b8b2faeb45097b98071eabd9",
+    "build-cpu.log": "912313453acc842a574ffffcf604953d82b4ab3b973be45c6e304545f96ab342",
+    "build-wasm-compat.log": "7080787c011970921296c2ed24b5d4ae74e0a33ebba54b1c08e6948e211104a9"
+  },
+  "selection_sha256": "bd99f0bca8c551b01dd9d34726930253283ea96db8e54198efc912d7397e4ce3",
+  "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+  "raw_replay_sha256": "160a1b0c0023adf4cd06d3a6520bea774171b93ca1d4913541f457197d07cc7a",
+  "raw_browser_sha256": "6e95a0f1303b5cf463d312d9a1c6e50a3ce268e41bad25606bd7ae5ef3e524f1",
+  "published_receipts_sha256": {
+    "qualification.json": "160a1b0c0023adf4cd06d3a6520bea774171b93ca1d4913541f457197d07cc7a",
+    "browser-receipt.json": "11d4c9a2195e15f588ca82c28ae4795b60e5a98d4d6b5d509af101262ab53212"
+  },
+  "review": {
+    "kind": "independent read-only static review; not an independent numerical rerun",
+    "fixed": [
+      "direct typed byte deserialization without tagged-enum Content buffering",
+      "optimized Python forbidden before evidence generation; tamper regressions",
+      "independent numerical raw-bias RMS oracle for multi-block/head cohorts",
+      "isolated 33-cohort cap and v1 positional JSON compatibility",
+      "batch-level versus row-level regression wording",
+      "browser expected-failure comparison ignores JSON map key order"
+    ],
+    "follow_up": "all reported findings fixed; final source re-reviewed"
+  },
+  "prior_attempts_retained": [
+    "wheels-wgpu-prereview",
+    "wheels-wgpu",
+    "replay",
+    "python-wgpu-prereview.log",
+    "rust-wgpu-final.log",
+    "python-wgpu-compat-prepackage.log"
+  ],
+  "failed_browser_attempt": {
+    "sha256": "2722ca15832fe8dd99f6b1fcc4bae3c4544e77f138f09302b0865d58d03240d4",
+    "cause": "Verifier compared JSON key order, not structural failure reasons; fixed in HTML and rerun successfully"
+  }
+}

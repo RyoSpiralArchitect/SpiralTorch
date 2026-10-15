@@ -39,6 +39,14 @@ impl PyByteCorpusServingGate {
         self.inner.batch_count()
     }
     #[getter]
+    fn schema_version(&self) -> u8 {
+        self.inner.schema_version()
+    }
+    #[getter]
+    fn cohort_names(&self) -> Vec<&str> {
+        self.inner.cohort_names()
+    }
+    #[getter]
     fn batch_shape(&self) -> (usize, usize) {
         let [batch, steps] = self.inner.batch_shape();
         (batch, steps)

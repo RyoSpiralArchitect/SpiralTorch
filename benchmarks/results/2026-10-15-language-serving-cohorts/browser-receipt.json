@@ -1,0 +1,690 @@
+{
+  "schema": "spiraltorch.byte_corpus.serving_browser_qualification.v2",
+  "input_sha256": "0cf6de2e0bb4b530bbc38c877e81e0331ce23a5d6595e025bc09016bd0855fdd",
+  "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+  "bootstrap": {
+    "cohorts": [
+      {
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "name": "autograd-prose",
+        "observation": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.644577980041504,
+            3.304800510406494,
+            3.689664363861084,
+            3.567361831665039,
+            3.8267669677734375,
+            3.374546766281128,
+            3.512211799621582,
+            3.427506923675537
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "b4103fc0a9af06f3d5b9517ae85edb7bf1bd3e9a719d06b7a7ea829ef560e6d5",
+            "aab6efb26c61235497e346a1853d63200a7012a9592c361dd6b7b6dab1458e9f",
+            "545607c70ab04adbddeb233985eec461271e1c375896211082f50194c6583ab2",
+            "6c7b7159837beb403dfdcdaeb1984e4b2b53a81b80331cc580f823636a6bc3b4",
+            "a2e7512936df8878cc1564a973483eaad7cd381dfbf863d97acc511ff7de59cd",
+            "58a160e28a1f023dedea867327577ff38de6034b05bd1bbe8f701665a37c14f2",
+            "99c2c70f76a3bdd0e6e1c312db914a1ebfd0d6df54023818275f48f882061792",
+            "9583efbf019dcec9a00502f8b6183c7ad09da7be6387c9be32b4fb385e586803"
+          ],
+          "mean_ce": 3.5434296429157257,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        }
+      },
+      {
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "name": "geometry-prose",
+        "observation": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.679690361022949,
+            3.649150848388672,
+            3.3857369422912598,
+            3.338350296020508,
+            3.797395706176758,
+            3.6909072399139404,
+            3.3287014961242676,
+            3.5787062644958496
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "d5769134785fb1a6d62f916ebdf23a820042377ca921fce26b7fc4295351d700",
+            "b0fa74fa5e0a55158531d4a438dfa0bdb97dec679467844104da88e43d5c966f",
+            "80623b3951fefa097a8ce2c4110a3bb5960a31892d29bd8311f009d262e37741",
+            "9af15e582b8f1a7c03e0b90cf7208df4f77dd94b3c4c3bf763d886b915267dde",
+            "d17991714737118ab2fbd9ba5d8298af39a35696ca12abc82745c1d5fb7e37e3",
+            "cbeb533e445edccbfc647c4bdaff75675a56cbee12f034578db99d657443dc8e",
+            "9e08c2417197cabddae5d7fbac90ae85180720fa44693b6a634cd6829aa2898a",
+            "7ed8a8d72967faf1722e5c85fcc70be568277fd1683971c92123b39a3d25600f"
+          ],
+          "mean_ce": 3.5560798943042755,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        }
+      },
+      {
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "name": "rust-code",
+        "observation": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.7102301120758057,
+            3.686492919921875,
+            3.7590651512145996,
+            3.642545700073242,
+            4.0071024894714355,
+            3.956904888153076,
+            3.9405159950256348,
+            4.078225135803223
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "389391d00206f19807d28def301050fe9a176d9a1ae0a4ca66007b90137c1d1d",
+            "5da047736ac27e151ce4151a5e050786aae86c8b22553be577abde6d11f1f6a9",
+            "6c899f7271487c273a8f4c4d3b0012e88ec61721a1037ccd680a161ddda6269d",
+            "d520c14d09512e192735007248377e1decf48517db50c0a4b05217c9a00f8d64",
+            "775698a4667e07c81557329149b43b14d0fe4be3cb43713896f5655f754e688a",
+            "742eb8c60895b034302a05d9f5303b1ee6acdfa2f4e7c25ae5145159a64d6c63",
+            "e5edf3f9a4bc09b7579d27eb3bcff2472fa9345009731f833e39dec86a8f10ce",
+            "893b92d07e31b5b9d6fe55ac67e6125062059681d13e3fb0c72482eee484a002"
+          ],
+          "mean_ce": 3.8476352989673615,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        }
+      }
+    ],
+    "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+    "schema": "spiraltorch.byte_corpus.serving_bootstrap.v2"
+  },
+  "assessment": {
+    "accepted": true,
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "cohorts": [
+      {
+        "accepted": true,
+        "candidate": {
+          "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+          "batch_ce": [
+            3.6457767486572266,
+            3.3054068088531494,
+            3.689547538757324,
+            3.559803009033203,
+            3.8212554454803467,
+            3.3752787113189697,
+            3.514190196990967,
+            3.4175527095794678
+          ],
+          "geometry_centered_rms": [
+            [
+              0.3382714382476427,
+              0.2444059468250458
+            ]
+          ],
+          "logits_f32le_sha256": [
+            "81fb0f2128fc38c5d84a3c802ac99066a9fd47dc0db3c5a173e584a7362f6b8e",
+            "8c5de202095f5fdf884146d1f53dcc60dd711bb2c114580f331b1647f2d58b08",
+            "03ded4d3155ed439c12db6d2473342573fd097bbc5f6f1b64858e276c7fde0e1",
+            "c7fed78519763d87aa074a15091f4bd0b7de008b4f491ea23a13027fa203800c",
+            "21d2327c7c6bb5f0b782298cdd45901b8030ff03f15988e8b7a20ac665ff31a7",
+            "30ce9b47b82cb9ff3dd4fef0a332b7ab9969fa3a8037174d5752b39d1d8f2d5a",
+            "17ee6b4ee1158c8f7461fe05e17e6924e156cd97fdfae3b3465a954c82b6712c",
+            "278e9e5eed029b81dbd4967191ceea3012e77f283f88ab69f6e0ccdfbd829b2b"
+          ],
+          "mean_ce": 3.541101396083832,
+          "revision": 128,
+          "router": [
+            {
+              "max_mass_error": 5.960464477539063e-08,
+              "min_normalized_entropy": 0.9999999935048248,
+              "rows": 1024
+            }
+          ],
+          "target_bytes": 512
+        },
+        "failed_checks": [],
+        "incumbent": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.644577980041504,
+            3.304800510406494,
+            3.689664363861084,
+            3.567361831665039,
+            3.8267669677734375,
+            3.374546766281128,
+            3.512211799621582,
+            3.427506923675537
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "b4103fc0a9af06f3d5b9517ae85edb7bf1bd3e9a719d06b7a7ea829ef560e6d5",
+            "aab6efb26c61235497e346a1853d63200a7012a9592c361dd6b7b6dab1458e9f",
+            "545607c70ab04adbddeb233985eec461271e1c375896211082f50194c6583ab2",
+            "6c7b7159837beb403dfdcdaeb1984e4b2b53a81b80331cc580f823636a6bc3b4",
+            "a2e7512936df8878cc1564a973483eaad7cd381dfbf863d97acc511ff7de59cd",
+            "58a160e28a1f023dedea867327577ff38de6034b05bd1bbe8f701665a37c14f2",
+            "99c2c70f76a3bdd0e6e1c312db914a1ebfd0d6df54023818275f48f882061792",
+            "9583efbf019dcec9a00502f8b6183c7ad09da7be6387c9be32b4fb385e586803"
+          ],
+          "mean_ce": 3.5434296429157257,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        },
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "max_batch_ce_delta": 0.0019783973693847656,
+        "mean_ce_delta": -0.002328246831893921,
+        "name": "autograd-prose"
+      },
+      {
+        "accepted": true,
+        "candidate": {
+          "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+          "batch_ce": [
+            3.6758370399475098,
+            3.6460094451904297,
+            3.384443759918213,
+            3.337646007537842,
+            3.7970447540283203,
+            3.6910157203674316,
+            3.3298163414001465,
+            3.5849857330322266
+          ],
+          "geometry_centered_rms": [
+            [
+              0.34680977232247445,
+              0.25057494311182615
+            ]
+          ],
+          "logits_f32le_sha256": [
+            "9ac76c3cce4f61ed144f1cbdf75298ae82dc4b9ff7ecd0f42fc28323978c3247",
+            "c5a797a4fd8408e576b75123e2ce43bea5ed85142b529e2913f4613a9e321fa6",
+            "cf791ffab97b8badd51844c86df13b4e9d2ea806b381adcf05656f7e01d1666c",
+            "6c2ec0ecb46e98afe6a9d2233983c3a822b48edd65d1028a83c75b2285b1a563",
+            "f73ff9620299c840b72816a26bad3be9ee524c6deca042aeeb6cbf75e8b07a49",
+            "b83f6c1215ee166b2ea11006fa0591f0668391f451c946d7617017272447bf64",
+            "3f740519f4c24ce8ebf9c50eea7b6786bed63b30e5af3222fb1fa7863a3264d6",
+            "c5de55beb31b25d5767d7748d5f6ff6a24902ad217897f3f8195e6ee6a5b41e1"
+          ],
+          "mean_ce": 3.555849850177765,
+          "revision": 128,
+          "router": [
+            {
+              "max_mass_error": 5.960464477539063e-08,
+              "min_normalized_entropy": 0.9999999935577554,
+              "rows": 1024
+            }
+          ],
+          "target_bytes": 512
+        },
+        "failed_checks": [],
+        "incumbent": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.679690361022949,
+            3.649150848388672,
+            3.3857369422912598,
+            3.338350296020508,
+            3.797395706176758,
+            3.6909072399139404,
+            3.3287014961242676,
+            3.5787062644958496
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "d5769134785fb1a6d62f916ebdf23a820042377ca921fce26b7fc4295351d700",
+            "b0fa74fa5e0a55158531d4a438dfa0bdb97dec679467844104da88e43d5c966f",
+            "80623b3951fefa097a8ce2c4110a3bb5960a31892d29bd8311f009d262e37741",
+            "9af15e582b8f1a7c03e0b90cf7208df4f77dd94b3c4c3bf763d886b915267dde",
+            "d17991714737118ab2fbd9ba5d8298af39a35696ca12abc82745c1d5fb7e37e3",
+            "cbeb533e445edccbfc647c4bdaff75675a56cbee12f034578db99d657443dc8e",
+            "9e08c2417197cabddae5d7fbac90ae85180720fa44693b6a634cd6829aa2898a",
+            "7ed8a8d72967faf1722e5c85fcc70be568277fd1683971c92123b39a3d25600f"
+          ],
+          "mean_ce": 3.5560798943042755,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        },
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "max_batch_ce_delta": 0.006279468536376953,
+        "mean_ce_delta": -0.00023004412651062012,
+        "name": "geometry-prose"
+      },
+      {
+        "accepted": true,
+        "candidate": {
+          "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+          "batch_ce": [
+            3.7142395973205566,
+            3.6894898414611816,
+            3.753025531768799,
+            3.6450133323669434,
+            4.007315635681152,
+            3.9446749687194824,
+            3.9337215423583984,
+            4.0851945877075195
+          ],
+          "geometry_centered_rms": [
+            [
+              0.35388701350435425,
+              0.2556882967865255
+            ]
+          ],
+          "logits_f32le_sha256": [
+            "3cca7b209f64c698af939b7af31a1f9caead56468fd534918c61cb1b3915c16f",
+            "aba89839ff888354a3d0d86cbc32ad6fcf33b6e5541aab756632b2f1bdf1b0b2",
+            "13d6ce0c1ea3134f2b7c99e37dc56fae7f1d560f5b4a19e90402e30668bd967d",
+            "074b4c776044765afc9c993b71066719cf305c802c39bca6d4f4a916a1502ad1",
+            "ad787641db05ca9249d9bc82171d11f20d0027014d332351ab07bb3eb7e0535f",
+            "777d0046c18c8f4adc88494b7aec07c1d9a1c4bb160fb770a79400a674063ec8",
+            "1dbaad463969f8f921ce4859c56ad79f1337314aa85b8e58f776a9104669466a",
+            "2c6a5a10197297282e66ce348773334079dc472487fc60018da92f5d0ad6ad05"
+          ],
+          "mean_ce": 3.846584379673004,
+          "revision": 128,
+          "router": [
+            {
+              "max_mass_error": 5.960464477539063e-08,
+              "min_normalized_entropy": 0.9999999936951635,
+              "rows": 1024
+            }
+          ],
+          "target_bytes": 512
+        },
+        "failed_checks": [],
+        "incumbent": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.7102301120758057,
+            3.686492919921875,
+            3.7590651512145996,
+            3.642545700073242,
+            4.0071024894714355,
+            3.956904888153076,
+            3.9405159950256348,
+            4.078225135803223
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "389391d00206f19807d28def301050fe9a176d9a1ae0a4ca66007b90137c1d1d",
+            "5da047736ac27e151ce4151a5e050786aae86c8b22553be577abde6d11f1f6a9",
+            "6c899f7271487c273a8f4c4d3b0012e88ec61721a1037ccd680a161ddda6269d",
+            "d520c14d09512e192735007248377e1decf48517db50c0a4b05217c9a00f8d64",
+            "775698a4667e07c81557329149b43b14d0fe4be3cb43713896f5655f754e688a",
+            "742eb8c60895b034302a05d9f5303b1ee6acdfa2f4e7c25ae5145159a64d6c63",
+            "e5edf3f9a4bc09b7579d27eb3bcff2472fa9345009731f833e39dec86a8f10ce",
+            "893b92d07e31b5b9d6fe55ac67e6125062059681d13e3fb0c72482eee484a002"
+          ],
+          "mean_ce": 3.8476352989673615,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        },
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "max_batch_ce_delta": 0.006969451904296875,
+        "mean_ce_delta": -0.0010509192943572998,
+        "name": "rust-code"
+      }
+    ],
+    "failed_checks": [],
+    "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+    "generation": "0",
+    "policy": "fixed_window_frozen.v1",
+    "schema": "spiraltorch.byte_corpus.candidate_assessment.v2"
+  },
+  "activation": {
+    "action": "activate",
+    "from": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+    "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+    "generation": "1",
+    "schema": "spiraltorch.byte_corpus.serving_transition.v1",
+    "to": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f"
+  },
+  "rollback": {
+    "action": "rollback",
+    "from": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+    "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+    "generation": "2",
+    "schema": "spiraltorch.byte_corpus.serving_transition.v1",
+    "to": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1"
+  },
+  "rejected_assessment": {
+    "accepted": false,
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "cohorts": [
+      {
+        "accepted": true,
+        "candidate": {
+          "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+          "batch_ce": [
+            3.6457767486572266,
+            3.3054068088531494,
+            3.689547538757324,
+            3.559803009033203,
+            3.8212554454803467,
+            3.3752787113189697,
+            3.514190196990967,
+            3.4175527095794678
+          ],
+          "geometry_centered_rms": [
+            [
+              0.3382714382476427,
+              0.2444059468250458
+            ]
+          ],
+          "logits_f32le_sha256": [
+            "81fb0f2128fc38c5d84a3c802ac99066a9fd47dc0db3c5a173e584a7362f6b8e",
+            "8c5de202095f5fdf884146d1f53dcc60dd711bb2c114580f331b1647f2d58b08",
+            "03ded4d3155ed439c12db6d2473342573fd097bbc5f6f1b64858e276c7fde0e1",
+            "c7fed78519763d87aa074a15091f4bd0b7de008b4f491ea23a13027fa203800c",
+            "21d2327c7c6bb5f0b782298cdd45901b8030ff03f15988e8b7a20ac665ff31a7",
+            "30ce9b47b82cb9ff3dd4fef0a332b7ab9969fa3a8037174d5752b39d1d8f2d5a",
+            "17ee6b4ee1158c8f7461fe05e17e6924e156cd97fdfae3b3465a954c82b6712c",
+            "278e9e5eed029b81dbd4967191ceea3012e77f283f88ab69f6e0ccdfbd829b2b"
+          ],
+          "mean_ce": 3.541101396083832,
+          "revision": 128,
+          "router": [
+            {
+              "max_mass_error": 5.960464477539063e-08,
+              "min_normalized_entropy": 0.9999999935048248,
+              "rows": 1024
+            }
+          ],
+          "target_bytes": 512
+        },
+        "failed_checks": [],
+        "incumbent": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.644577980041504,
+            3.304800510406494,
+            3.689664363861084,
+            3.567361831665039,
+            3.8267669677734375,
+            3.374546766281128,
+            3.512211799621582,
+            3.427506923675537
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "b4103fc0a9af06f3d5b9517ae85edb7bf1bd3e9a719d06b7a7ea829ef560e6d5",
+            "aab6efb26c61235497e346a1853d63200a7012a9592c361dd6b7b6dab1458e9f",
+            "545607c70ab04adbddeb233985eec461271e1c375896211082f50194c6583ab2",
+            "6c7b7159837beb403dfdcdaeb1984e4b2b53a81b80331cc580f823636a6bc3b4",
+            "a2e7512936df8878cc1564a973483eaad7cd381dfbf863d97acc511ff7de59cd",
+            "58a160e28a1f023dedea867327577ff38de6034b05bd1bbe8f701665a37c14f2",
+            "99c2c70f76a3bdd0e6e1c312db914a1ebfd0d6df54023818275f48f882061792",
+            "9583efbf019dcec9a00502f8b6183c7ad09da7be6387c9be32b4fb385e586803"
+          ],
+          "mean_ce": 3.5434296429157257,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        },
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "max_batch_ce_delta": 0.0019783973693847656,
+        "mean_ce_delta": -0.002328246831893921,
+        "name": "autograd-prose"
+      },
+      {
+        "accepted": true,
+        "candidate": {
+          "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+          "batch_ce": [
+            3.6758370399475098,
+            3.6460094451904297,
+            3.384443759918213,
+            3.337646007537842,
+            3.7970447540283203,
+            3.6910157203674316,
+            3.3298163414001465,
+            3.5849857330322266
+          ],
+          "geometry_centered_rms": [
+            [
+              0.34680977232247445,
+              0.25057494311182615
+            ]
+          ],
+          "logits_f32le_sha256": [
+            "9ac76c3cce4f61ed144f1cbdf75298ae82dc4b9ff7ecd0f42fc28323978c3247",
+            "c5a797a4fd8408e576b75123e2ce43bea5ed85142b529e2913f4613a9e321fa6",
+            "cf791ffab97b8badd51844c86df13b4e9d2ea806b381adcf05656f7e01d1666c",
+            "6c2ec0ecb46e98afe6a9d2233983c3a822b48edd65d1028a83c75b2285b1a563",
+            "f73ff9620299c840b72816a26bad3be9ee524c6deca042aeeb6cbf75e8b07a49",
+            "b83f6c1215ee166b2ea11006fa0591f0668391f451c946d7617017272447bf64",
+            "3f740519f4c24ce8ebf9c50eea7b6786bed63b30e5af3222fb1fa7863a3264d6",
+            "c5de55beb31b25d5767d7748d5f6ff6a24902ad217897f3f8195e6ee6a5b41e1"
+          ],
+          "mean_ce": 3.555849850177765,
+          "revision": 128,
+          "router": [
+            {
+              "max_mass_error": 5.960464477539063e-08,
+              "min_normalized_entropy": 0.9999999935577554,
+              "rows": 1024
+            }
+          ],
+          "target_bytes": 512
+        },
+        "failed_checks": [],
+        "incumbent": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.679690361022949,
+            3.649150848388672,
+            3.3857369422912598,
+            3.338350296020508,
+            3.797395706176758,
+            3.6909072399139404,
+            3.3287014961242676,
+            3.5787062644958496
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "d5769134785fb1a6d62f916ebdf23a820042377ca921fce26b7fc4295351d700",
+            "b0fa74fa5e0a55158531d4a438dfa0bdb97dec679467844104da88e43d5c966f",
+            "80623b3951fefa097a8ce2c4110a3bb5960a31892d29bd8311f009d262e37741",
+            "9af15e582b8f1a7c03e0b90cf7208df4f77dd94b3c4c3bf763d886b915267dde",
+            "d17991714737118ab2fbd9ba5d8298af39a35696ca12abc82745c1d5fb7e37e3",
+            "cbeb533e445edccbfc647c4bdaff75675a56cbee12f034578db99d657443dc8e",
+            "9e08c2417197cabddae5d7fbac90ae85180720fa44693b6a634cd6829aa2898a",
+            "7ed8a8d72967faf1722e5c85fcc70be568277fd1683971c92123b39a3d25600f"
+          ],
+          "mean_ce": 3.5560798943042755,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        },
+        "limits": {
+          "max_batch_ce_regression": 2,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": 2,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "max_batch_ce_delta": 0.006279468536376953,
+        "mean_ce_delta": -0.00023004412651062012,
+        "name": "geometry-prose"
+      },
+      {
+        "accepted": false,
+        "candidate": {
+          "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+          "batch_ce": [
+            3.7142395973205566,
+            3.6894898414611816,
+            3.753025531768799,
+            3.6450133323669434,
+            4.007315635681152,
+            3.9446749687194824,
+            3.9337215423583984,
+            4.0851945877075195
+          ],
+          "geometry_centered_rms": [
+            [
+              0.35388701350435425,
+              0.2556882967865255
+            ]
+          ],
+          "logits_f32le_sha256": [
+            "3cca7b209f64c698af939b7af31a1f9caead56468fd534918c61cb1b3915c16f",
+            "aba89839ff888354a3d0d86cbc32ad6fcf33b6e5541aab756632b2f1bdf1b0b2",
+            "13d6ce0c1ea3134f2b7c99e37dc56fae7f1d560f5b4a19e90402e30668bd967d",
+            "074b4c776044765afc9c993b71066719cf305c802c39bca6d4f4a916a1502ad1",
+            "ad787641db05ca9249d9bc82171d11f20d0027014d332351ab07bb3eb7e0535f",
+            "777d0046c18c8f4adc88494b7aec07c1d9a1c4bb160fb770a79400a674063ec8",
+            "1dbaad463969f8f921ce4859c56ad79f1337314aa85b8e58f776a9104669466a",
+            "2c6a5a10197297282e66ce348773334079dc472487fc60018da92f5d0ad6ad05"
+          ],
+          "mean_ce": 3.846584379673004,
+          "revision": 128,
+          "router": [
+            {
+              "max_mass_error": 5.960464477539063e-08,
+              "min_normalized_entropy": 0.9999999936951635,
+              "rows": 1024
+            }
+          ],
+          "target_bytes": 512
+        },
+        "failed_checks": [
+          "mean_ce_regression",
+          "batch_ce_regression"
+        ],
+        "incumbent": {
+          "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+          "batch_ce": [
+            3.7102301120758057,
+            3.686492919921875,
+            3.7590651512145996,
+            3.642545700073242,
+            4.0071024894714355,
+            3.956904888153076,
+            3.9405159950256348,
+            4.078225135803223
+          ],
+          "geometry_centered_rms": [],
+          "logits_f32le_sha256": [
+            "389391d00206f19807d28def301050fe9a176d9a1ae0a4ca66007b90137c1d1d",
+            "5da047736ac27e151ce4151a5e050786aae86c8b22553be577abde6d11f1f6a9",
+            "6c899f7271487c273a8f4c4d3b0012e88ec61721a1037ccd680a161ddda6269d",
+            "d520c14d09512e192735007248377e1decf48517db50c0a4b05217c9a00f8d64",
+            "775698a4667e07c81557329149b43b14d0fe4be3cb43713896f5655f754e688a",
+            "742eb8c60895b034302a05d9f5303b1ee6acdfa2f4e7c25ae5145159a64d6c63",
+            "e5edf3f9a4bc09b7579d27eb3bcff2472fa9345009731f833e39dec86a8f10ce",
+            "893b92d07e31b5b9d6fe55ac67e6125062059681d13e3fb0c72482eee484a002"
+          ],
+          "mean_ce": 3.8476352989673615,
+          "revision": 128,
+          "router": [],
+          "target_bytes": 512
+        },
+        "limits": {
+          "max_batch_ce_regression": -100,
+          "max_geometry_centered_rms": 100,
+          "max_mean_ce": 10,
+          "max_mean_ce_regression": -100,
+          "max_router_mass_error": 1e-05,
+          "min_router_normalized_entropy": 0
+        },
+        "max_batch_ce_delta": 0.006969451904296875,
+        "mean_ce_delta": -0.0010509192943572998,
+        "name": "rust-code"
+      }
+    ],
+    "failed_checks": [
+      {
+        "checks": [
+          "mean_ce_regression",
+          "batch_ce_regression"
+        ],
+        "cohort": "rust-code"
+      }
+    ],
+    "gate_sha256": "be9fb55824fce7f2db957a503e617be541bbc19f13e4fab361c2d25005efb2f7",
+    "generation": "0",
+    "policy": "fixed_window_frozen.v1",
+    "schema": "spiraltorch.byte_corpus.candidate_assessment.v2"
+  },
+  "aba_generation_rejected": true,
+  "measured_forward_hashes_exact": true,
+  "inference": {
+    "logits_count": 16384,
+    "before_hash": "b4103fc0a9af06f3d5b9517ae85edb7bf1bd3e9a719d06b7a7ea829ef560e6d5",
+    "after_hash": "81fb0f2128fc38c5d84a3c802ac99066a9fd47dc0db3c5a173e584a7362f6b8e",
+    "rollback_hash": "b4103fc0a9af06f3d5b9517ae85edb7bf1bd3e9a719d06b7a7ea829ef560e6d5",
+    "before_loss": 3.644577980041504,
+    "after_loss": 3.6457767486572266,
+    "rollback_loss": 3.644577980041504
+  },
+  "scope": "Actual browser serving mechanics only; no training, held-outness or quality claim",
+  "isolated_cohort_measurements_exact": true
+}

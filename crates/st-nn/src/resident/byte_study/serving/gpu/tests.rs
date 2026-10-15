@@ -1,5 +1,5 @@
 use super::super::super::tests::saved;
-use super::super::tests::{gate_value, study};
+use super::super::tests::{cohort_gate_value, gate_value, study};
 use super::*;
 
 fn gate(value: &Value) -> ByteCorpusServingGate {
@@ -62,7 +62,7 @@ fn mean_and_worst_window_regression_are_independent() {
         router: vec![],
     };
     let reference = observation(vec![2., 2.]);
-    let mut limits = gate(&gate_value()).limits;
+    let mut limits = gate(&gate_value()).cohorts[0].limits.clone();
     limits.max_mean_ce_regression = 0.5;
     limits.max_batch_ce_regression = 2.;
     assert_eq!(
@@ -97,7 +97,7 @@ fn mean_and_worst_window_regression_are_independent() {
 
 #[test]
 fn every_absolute_gate_has_an_independent_failure_reason() {
-    let limits = gate(&gate_value()).limits;
+    let limits = gate(&gate_value()).cohorts[0].limits.clone();
     let mut value = Observation {
         artifact_id: "test".into(),
         revision: 0,
@@ -124,6 +124,168 @@ fn every_absolute_gate_has_an_independent_failure_reason() {
             "router_entropy"
         ]
     );
+}
+
+#[test]
+fn a_larger_improving_cohort_cannot_hide_a_smaller_regression() {
+    let observation = |batches: usize, ce: f64| Observation {
+        artifact_id: "test".into(),
+        revision: 0,
+        batch_ce: vec![ce; batches],
+        mean_ce: ce,
+        target_bytes: 2 * batches,
+        logits_f32le_sha256: vec![],
+        geometry_centered_rms: vec![vec![0.]],
+        router: vec![],
+    };
+    let mut value = cohort_gate_value();
+    value["cohorts"][1]["limits"]["max_mean_ce_regression"] = json!(0.);
+    value["cohorts"][0]["batches"] = json!([[[0, 0]], [[0, 0]], [[0, 0]]]);
+    value["cohorts"][1]["batches"] = json!([[[0, 2]]]);
+    let gate = gate(&value);
+    let reference = vec![observation(3, 2.), observation(1, 2.)];
+    let mut candidate = vec![observation(3, 1.), observation(1, 2.5)];
+    assert!((3. * candidate[0].mean_ce + candidate[1].mean_ce) / 4. < 2.);
+    let assessment = assess_cohorts(&gate, &reference, &candidate).unwrap();
+    assert!(assessment[0].accepted);
+    assert_eq!(assessment[1].name, "suffix");
+    assert_eq!(assessment[1].failed_checks, ["mean_ce_regression"]);
+    candidate[1].geometry_centered_rms[0][0] = 101.;
+    assert_eq!(
+        absolute_failures(&gate, &candidate).unwrap(),
+        vec![json!({"cohort":"suffix","checks":["geometry_centered_rms"]})]
+    );
+    assert!(assess_cohorts(&gate, &reference[..1], &candidate).is_err());
+    assert!(assess_cohorts(&gate, &reference, &candidate[..1]).is_err());
+    assert!(absolute_failures(&gate, &candidate[..1]).is_err());
+    candidate[1].batch_ce.clear();
+    assert!(assess_cohorts(&gate, &reference, &candidate).is_err());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn live_cohorts_equal_isolated_measurements_and_reject_one_failed_slice() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.cohorts.test").unwrap();
+    let study = study();
+    let initial = artifact(&study, &saved(&study, 0), "geometry");
+    let trained =
+        pollster::block_on(study.advance(runtime.clone(), None, study.total_updates())).unwrap();
+    let candidate = artifact(&study, &trained.checkpoint, "geometry");
+    let value = cohort_gate_value();
+    let mut serving = pollster::block_on(ResidentByteServing::bootstrap(
+        runtime.clone(),
+        initial.clone(),
+        gate(&value),
+    ))
+    .unwrap();
+    let bootstrap: Value = serde_json::from_str(&serving.bootstrap_json().unwrap()).unwrap();
+    assert_eq!(
+        bootstrap["schema"],
+        "spiraltorch.byte_corpus.serving_bootstrap.v2"
+    );
+    let permit = pollster::block_on(serving.prepare_candidate(candidate.clone())).unwrap();
+    let report: Value = serde_json::from_str(&permit.to_json().unwrap()).unwrap();
+    assert!(permit.accepted());
+    assert_eq!(report["failed_checks"], json!([]));
+    assert_eq!(
+        report["schema"],
+        "spiraltorch.byte_corpus.candidate_assessment.v2"
+    );
+    assert!(report.get("candidate").is_none());
+    for i in 0..2 {
+        let mut isolated = gate_value();
+        isolated["batches"] = value["cohorts"][i]["batches"].clone();
+        let isolated = pollster::block_on(ResidentByteServing::bootstrap(
+            runtime.clone(),
+            initial.clone(),
+            gate(&isolated),
+        ))
+        .unwrap();
+        let single: Value = serde_json::from_str(&isolated.bootstrap_json().unwrap()).unwrap();
+        assert_eq!(
+            bootstrap["cohorts"][i]["observation"],
+            single["observation"]
+        );
+        let single: Value = serde_json::from_str(
+            &pollster::block_on(isolated.prepare_candidate(candidate.clone()))
+                .unwrap()
+                .to_json()
+                .unwrap(),
+        )
+        .unwrap();
+        for key in [
+            "incumbent",
+            "candidate",
+            "limits",
+            "accepted",
+            "failed_checks",
+            "mean_ce_delta",
+            "max_batch_ce_delta",
+        ] {
+            assert_eq!(report["cohorts"][i][key], single[key], "cohort {i}, {key}");
+        }
+        let mut keys: Vec<_> = single
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "accepted",
+                "adapter",
+                "candidate",
+                "failed_checks",
+                "gate_sha256",
+                "generation",
+                "incumbent",
+                "limits",
+                "max_batch_ce_delta",
+                "mean_ce_delta",
+                "policy",
+                "schema"
+            ]
+        );
+    }
+    assert_eq!(report["cohorts"][0]["candidate"]["target_bytes"], 2);
+    assert_eq!(report["cohorts"][1]["candidate"]["target_bytes"], 4);
+    serving.activate(permit).unwrap();
+    serving.rollback(1).unwrap();
+    assert_eq!(serving.artifact_id(), initial.artifact_id());
+    assert_eq!(serving.generation(), 2);
+    let mut strict = value;
+    strict["cohorts"][1]["limits"]["max_mean_ce_regression"] = json!(-100.);
+    let mut guarded = pollster::block_on(ResidentByteServing::bootstrap(
+        runtime.clone(),
+        initial.clone(),
+        gate(&strict),
+    ))
+    .unwrap();
+    let rejected = pollster::block_on(guarded.prepare_candidate(candidate)).unwrap();
+    let report: Value = serde_json::from_str(&rejected.to_json().unwrap()).unwrap();
+    assert!(!rejected.accepted());
+    assert_eq!(report["cohorts"][0]["accepted"], true);
+    assert_eq!(
+        report["failed_checks"],
+        json!([{"cohort":"suffix","checks":["mean_ce_regression"]}])
+    );
+    assert!(guarded.activate(rejected).is_err());
+    assert_eq!(guarded.generation(), 0);
+    assert_eq!(guarded.artifact_id(), initial.artifact_id());
+    assert!(guarded.previous_artifact_id().is_none());
+    strict["cohorts"][1]["limits"]["max_mean_ce"] = json!(0.);
+    assert!(pollster::block_on(ResidentByteServing::bootstrap(
+        runtime,
+        initial,
+        gate(&strict)
+    ))
+    .is_err());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

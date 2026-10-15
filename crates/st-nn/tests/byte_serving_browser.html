@@ -33,6 +33,12 @@ try {
   await init();
   check(typeof ResidentByteCandidate.from_json === "undefined", "Reports must not be permits");
   const gate = ByteCorpusServingGate.from_json(input.gate_json);
+  const policy = JSON.parse(input.gate_json);
+  const cohortMode = policy.schema === "spiraltorch.byte_corpus.serving_gate.v2";
+  check(gate.schema_version === (cohortMode ? 2 : 1), "Wrong gate version");
+  check(JSON.stringify(gate.cohort_names) === JSON.stringify(cohortMode ? policy.cohorts.map(c => c.name) : ["default"]), "Wrong cohort names");
+  const batches = cohortMode ? policy.cohorts.flatMap(c => c.batches) : policy.batches;
+  check(gate.batch_count === batches.length && JSON.stringify(Array.from(gate.batch_shape)) === JSON.stringify([batches[0].length, policy.steps]), "Wrong gate shape/count");
   check(gate.to_json() === input.gate_json, "Gate bytes changed");
   check(gate.request_sha256 === await digest(new TextEncoder().encode(input.gate_json)), "Gate hash mismatch");
   await rejected(() => gate.bootstrap_wgpu(input.incumbent.json + " ", input.incumbent.id), "Altered artifact");
@@ -45,7 +51,23 @@ try {
   check(assessment.adapter.backend === "BrowserWebGpu" && assessment.adapter.device_type !== "Cpu", "Not a browser GPU measurement");
   check(candidate.accepted && assessment.accepted && assessment.failed_checks.length === 0, "Fixture candidate failed its fixed gate");
   const beforeHash = await logitHash(before.logits);
-  check(beforeHash === assessment.incumbent.logits_f32le_sha256[0], "Initial forward differs from measured incumbent");
+  const first = cohortMode ? assessment.cohorts[0] : assessment;
+  check(beforeHash === first.incumbent.logits_f32le_sha256[0], "Initial forward differs from measured incumbent");
+  if (cohortMode) {
+    check(assessment.cohorts.length === policy.cohorts.length, "Missing cohort");
+    for (const [i, cohort] of policy.cohorts.entries()) {
+      const legacyGate = ByteCorpusServingGate.from_json(JSON.stringify({
+        schema:"spiraltorch.byte_corpus.serving_gate.v1", documents:policy.documents,
+        steps:policy.steps, batches:cohort.batches, limits:cohort.limits}));
+      const isolated = await legacyGate.bootstrap_wgpu(input.incumbent.json, input.incumbent.id);
+      const measured = await isolated.prepare_candidate(input.candidate.json, input.candidate.id);
+      const single = JSON.parse(measured.to_json());
+      check(assessment.cohorts[i].name === cohort.name, "Cohort order changed");
+      for (const key of ["incumbent", "candidate", "limits", "accepted", "failed_checks", "mean_ce_delta", "max_batch_ce_delta"])
+        check(JSON.stringify(single[key]) === JSON.stringify(assessment.cohorts[i][key]), `Cohort ${cohort.name} differs from isolated ${key}`);
+      measured.free(); isolated.free(); legacyGate.free();
+    }
+  }
   const aba = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
   check(aba.accepted, "A-to-B-to-A permit was not accepted initially");
   const stale = await serving.prepare_candidate(input.candidate.json, input.candidate.id);
@@ -63,7 +85,7 @@ try {
   check(after.artifact_id === input.candidate.id && after.logits.length === before.logits.length
     && after.logits.every(Number.isFinite) && Number.isFinite(after.loss), "Invalid candidate forward");
   const afterHash = await logitHash(after.logits);
-  check(afterHash === assessment.candidate.logits_f32le_sha256[0], "Activated forward differs from measured candidate");
+  check(afterHash === first.candidate.logits_f32le_sha256[0], "Activated forward differs from measured candidate");
   const staleOnRollback = await serving.prepare_candidate(input.incumbent.json, input.incumbent.id);
   for (const value of ["0", "01", "1.0", "18446744073709551616"])
     await rejected(() => serving.rollback(value), "Invalid rollback generation");
@@ -82,16 +104,24 @@ try {
   check(await logitHash(afterRejection.logits) === beforeHash, "A-to-B-to-A rejection changed output");
   // Fault-control gate, deliberately impossible; not a useful production threshold.
   const strict = JSON.parse(input.gate_json);
-  strict.limits.max_mean_ce_regression = -100;
-  strict.limits.max_batch_ce_regression = -100;
+  const strictLimits = cohortMode ? strict.cohorts.at(-1).limits : strict.limits;
+  strictLimits.max_mean_ce_regression = -100;
+  strictLimits.max_batch_ce_regression = -100;
   const rejectGate = ByteCorpusServingGate.from_json(JSON.stringify(strict));
   const rejectSlot = await rejectGate.bootstrap_wgpu(input.incumbent.json, input.incumbent.id);
   const denied = await rejectSlot.prepare_candidate(input.candidate.json, input.candidate.id);
   const deniedReport = JSON.parse(denied.to_json());
-  check(!denied.accepted && JSON.stringify(deniedReport.failed_checks) === JSON.stringify(["mean_ce_regression", "batch_ce_regression"]), "Rejection reasons differ");
+  const checks = ["mean_ce_regression", "batch_ce_regression"];
+  const expectedFailure = cohortMode
+    ? deniedReport.failed_checks.length === 1
+      && deniedReport.failed_checks[0].cohort === strict.cohorts.at(-1).name
+      && JSON.stringify(deniedReport.failed_checks[0].checks) === JSON.stringify(checks)
+    : JSON.stringify(deniedReport.failed_checks) === JSON.stringify(checks);
+  check(!denied.accepted && expectedFailure, "Rejection reasons differ");
+  if (cohortMode) check(deniedReport.cohorts.slice(0,-1).every(c => c.accepted), "Unaffected cohorts failed");
   await rejected(() => rejectSlot.activate(denied), "Rejected candidate");
   check(rejectSlot.generation === "0" && rejectSlot.artifact_id === input.incumbent.id, "Rejected candidate replaced owner");
-  const receipt = {schema:"spiraltorch.byte_corpus.serving_browser_qualification.v1",
+  const receipt = {schema:`spiraltorch.byte_corpus.serving_browser_qualification.v${gate.schema_version}`,
     input_sha256:await digest(new TextEncoder().encode(raw)), gate_sha256:gate.request_sha256,
     bootstrap:JSON.parse(serving.bootstrap_json()), assessment, activation, rollback,
     rejected_assessment:deniedReport,
@@ -100,6 +130,7 @@ try {
       after_hash:afterHash, rollback_hash:rollbackHash,
       before_loss:before.loss, after_loss:after.loss, rollback_loss:restored.loss},
     scope:"Actual browser serving mechanics only; no training, held-outness or quality claim"};
+  if (cohortMode) receipt.isolated_cohort_measurements_exact = true;
   target.dataset.status = "completed";
   target.textContent = JSON.stringify(receipt, null, 2);
   const link = document.querySelector("#download");

@@ -64,6 +64,59 @@ independence, training provenance or generalization. The gate does not enforce
 an architecture/source allowlist: compatible fixed-window byte models may differ
 in geometry or architecture. Apply any such selection rules before admission.
 
+## Protect Named Evaluation Groups
+
+Use `spiraltorch.byte_corpus.serving_gate.v2` when language, task or data-source
+groups must each meet their own limits. It replaces the top-level `batches` and
+`limits` with `cohorts`; `documents` and `steps` remain shared. Each cohort has
+`name`, `batches` and all six explicit `limits` from v1. No global-average rule
+can override a failing cohort.
+
+```python
+# Start from a reviewed v1 request. These labels are caller declarations, not
+# language detection. Choose the actual windows and thresholds before measuring.
+cohort_request = {
+    "schema": "spiraltorch.byte_corpus.serving_gate.v2",
+    "documents": request_v1["documents"],
+    "steps": request_v1["steps"],
+    "cohorts": [
+        {"name": "general-prose", "batches": prose_batches, "limits": prose_limits},
+        {"name": "code", "batches": code_batches, "limits": code_limits},
+    ],
+}
+gate = st.nn.ByteCorpusServingGate.from_json(json.dumps(cohort_request))
+assert gate.schema_version == 2
+assert gate.cohort_names == ["general-prose", "code"]
+slot = gate.bootstrap_wgpu(initial)
+permit = slot.prepare_candidate(candidate)
+assessment = json.loads(permit.to_json())
+for cohort in assessment["cohorts"]:
+    print(cohort["name"], cohort["mean_ce_delta"], cohort["failed_checks"])
+# Only permit.accepted can authorize slot.activate(permit).
+```
+
+Bounds are 1..32 unique names, 1..128 **total** batches and the same fixed batch
+shape across every cohort. Names are nonempty, trimmed, at most 128 UTF-8 bytes
+and contain no control characters. Unicode names are supported. Each cohort
+needs at least one batch. Data/windows may overlap, including across cohorts;
+the core does not assert independent samples or detect near-duplicate text.
+Adding/removing a cohort or changing its policy requires a new gate and slot.
+
+Measurements reset between cohorts: mean and worst paired batch CE, merged
+centered RMS per block/head, and router row count/mass/entropy all belong to
+that cohort alone. Bootstrap and incumbent rechecks require absolute health
+in **every** cohort; candidate admission additionally requires all paired
+regression limits. No weights or normalization mix cohorts together.
+
+v2 produces `serving_bootstrap.v2` with a `cohorts` array of
+`{name, limits, observation}`, and `candidate_assessment.v2` with one full
+paired assessment per cohort. Root `failed_checks` contains
+`{cohort, checks}` entries only for failing cohorts. There is intentionally no
+root candidate mean. v1 keeps its original report shape and numbers and exposes
+one implicit `cohort_names == ["default"]`, `schema_version == 1`.
+Activation/rollback events remain `serving_transition.v1`; they carry the exact
+gate hash. Neither report version is an importable activation permit.
+
 ## Measure, Activate, Roll Back
 
 ```python
@@ -88,10 +141,11 @@ All logits/losses must be finite. No corpus text or model weights are included.
 - Absolute CE checks the mean over fixed-size batches, equivalent to equal
   weighting of target bytes. Relative CE checks both mean and the worst paired
   batch delta against the incumbent. Negative regression limits require an
-  improvement; equality passes. A good mean cannot hide a failing window.
+  improvement; equality passes. A good mean cannot hide a failing batch, but
+  improvement in one row can offset another row within that batch.
 - Geometry health reuses Rust `CausalBiasMoments`: remove each causal row's mean,
   exclude future positions from moments, merge sums/counts across evaluation
-  batches, then take RMS per block/head. The threshold is **corpus-merged RMS**,
+  batches within a cohort, then take RMS per block/head. The threshold is **cohort-merged RMS**,
   not a per-window peak bound. Full bias tensors must still be finite.
 - Router health covers every observed row in each block, including all heads
   and contextual query positions. It independently checks maximum probability
@@ -132,6 +186,8 @@ The standalone `resident_byte_learning_browser` WASM example exposes
 Browser imports accept opaque artifact JSON plus a separately pinned ID;
 `forward(Uint8Array)` maps B windows of T+1 bytes to logits/loss/identity.
 Generation counters are canonical decimal strings to avoid JS rounding.
+The gate exposes `schema_version`, ordered `cohort_names`, `batch_count` and
+`batch_shape` in Rust, Python and the standalone browser client.
 `byte_serving_browser.html` runs positive, negative, stale, cross-slot and exact
 rollback checks using a private `target/resident-byte-learning-web/serving-input.json`.
 See the [browser build recipe](../byte_corpus_learning.md#browser-execution).
