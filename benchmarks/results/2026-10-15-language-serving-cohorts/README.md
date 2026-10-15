@@ -74,3 +74,56 @@ typed permit ownership, stale/reused/ABA handles and exact-output rollback.
 Public receipts contain measurements, selection metadata, hashes and validation
 records only. Raw documents, model payloads, wheels and browser input remain
 private. A successful permissive gate is not a production threshold endorsement.
+
+## Observed Results
+
+All 12 native-WGPU replay conditions passed the fixed permissive gate; all
+activated output hashes matched their measured candidates and all rollbacks
+were bit-exact. Both source checkpoint digests and the source request stayed
+unchanged. The post-review replay reproduced the earlier receipt exactly.
+
+Ranges below cover both checkpoint origins, three seeds and train/frozen query
+controls. CE is natural-log next-byte cross entropy; negative delta favors the
+candidate. These are descriptive ranges, not confidence intervals.
+
+| Cohort | Mean CE delta | Worst paired batch CE delta |
+|---|---:|---:|
+| autograd-prose | -0.00333104 to -0.00232825 | +0.00093365 to +0.00197864 |
+| geometry-prose | -0.00047028 to -0.00007579 | +0.00314522 to +0.00748587 |
+| rust-code | -0.01210749 to -0.00105086 | +0.00318789 to +0.00696993 |
+
+Every cohort mean improved slightly, yet every condition also contained a
+regressing batch in each cohort. The permissive +2.0 regression limits knowingly
+allow this; the experiment does **not** establish a production-safe threshold.
+This is why mean and worst-batch checks remain separate.
+
+Candidate centered RMS ranged from about 0.2444 to 0.4118 across all cohort,
+block and head observations. Minimum normalized router entropy exceeded
+0.9999999848, essentially uniform. The largest train-vs-frozen query mean-CE
+difference was only 8.94e-8. These results do not establish a query-router
+learning benefit, routing specialization, external generalization or generation
+quality. The useful operational result is separate, source-bound observations
+and admission decisions for each declared group.
+
+## Validation And Limits
+
+The [full paired receipt](qualification.json), [actual BrowserWebGpu receipt](browser-receipt.json)
+and [source/binary/test record](validation.json) retain all conditions. Local
+validation passed 68 test executions across eight suites, with eight explicit
+feature skips, including CPU-only and WGPU installed wheels. These counts are
+not independent samples. Installed native binaries and type stubs matched their
+wheels; stubs also matched source. Browser v2 cohorts exactly matched isolated
+v1 measurements, and all 16,384 logits returned to their original hash on rollback.
+
+Independent read-only review fixed typed-deserialization memory amplification,
+optimized-Python evidence checks, independent geometry RMS coverage, isolated
+cohort-count limits, legacy v1 positional input and batch/row wording. The first
+browser attempt failed in its expected-JSON key-order comparison; that verifier
+was corrected and the browser rerun passed. The failed attempt is retained.
+
+An additional strict `st-nn --lib -D warnings` probe under local Clippy 0.1.97
+failed on 23 pre-existing lints in source files verified unchanged from the base;
+there were no serving-file diagnostics. `st-nn` is outside CI's strict subset.
+The dependency-inclusive probe also encountered seven existing unknown lint
+names. These diagnostics are recorded as **failed**, not counted as test passes
+or silently suppressed. No claim of workspace-wide lint cleanliness is made.

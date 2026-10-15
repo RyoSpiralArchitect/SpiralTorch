@@ -112,8 +112,12 @@ try {
   const denied = await rejectSlot.prepare_candidate(input.candidate.json, input.candidate.id);
   const deniedReport = JSON.parse(denied.to_json());
   const checks = ["mean_ce_regression", "batch_ce_regression"];
-  const expectedFailures = cohortMode ? [{cohort:strict.cohorts.at(-1).name, checks}] : checks;
-  check(!denied.accepted && JSON.stringify(deniedReport.failed_checks) === JSON.stringify(expectedFailures), "Rejection reasons differ");
+  const expectedFailure = cohortMode
+    ? deniedReport.failed_checks.length === 1
+      && deniedReport.failed_checks[0].cohort === strict.cohorts.at(-1).name
+      && JSON.stringify(deniedReport.failed_checks[0].checks) === JSON.stringify(checks)
+    : JSON.stringify(deniedReport.failed_checks) === JSON.stringify(checks);
+  check(!denied.accepted && expectedFailure, "Rejection reasons differ");
   if (cohortMode) check(deniedReport.cohorts.slice(0,-1).every(c => c.accepted), "Unaffected cohorts failed");
   await rejected(() => rejectSlot.activate(denied), "Rejected candidate");
   check(rejectSlot.generation === "0" && rejectSlot.artifact_id === input.incumbent.id, "Rejected candidate replaced owner");
