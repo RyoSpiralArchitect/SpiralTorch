@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Saved Byte-Language Model Selection</title>
+<style>
+body { max-width: 72rem; margin: 3rem auto; padding: 0 1rem; color: #183431; background: #f2f5ee; font: 18px Georgia, serif; }
+button { padding: .7rem 1rem; margin-right: 1rem; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+</style>
+<h1>Saved Byte-Language Model Selection</h1>
+<p>Rust chooses actual saved weights using development loss. Selection does not request a GPU or promote a model.</p>
+<button id="select">Select Saved Models</button>
+<button id="infer" disabled>Infer With First Selected Model</button>
+<p id="status">Ready. Requires private request, checkpoint and selection companions on loopback.</p>
+<a id="download" hidden>Download Selection Receipt</a>
+<pre id="result"></pre>
+<script type="module">
+import init, {select_resident_byte_learning_checkpoint, infer_resident_byte_artifact}
+  from './target/resident-byte-learning-web/resident_byte_learning_browser.js';
+const status = document.getElementById('status');
+const result = document.getElementById('result');
+const select = document.getElementById('select');
+const infer = document.getElementById('infer');
+const download = document.getElementById('download');
+let requestText, request, checkpoints, packets, receipt, receiptUrl;
+const require = (ok, message) => { if (!ok) throw new Error(message); };
+async function read(path) {
+  const response = await fetch(path);
+  require(response.ok, `Could not read ${path}`);
+  return response.text();
+}
+const canonical = value => JSON.stringify(value, function (_, value) {
+  return value && !Array.isArray(value) && typeof value === 'object'
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value;
+});
+function show() {
+  result.textContent = JSON.stringify(receipt, null, 2);
+  if (receiptUrl) URL.revokeObjectURL(receiptUrl);
+  receiptUrl = URL.createObjectURL(new Blob([result.textContent], {type: 'application/json'}));
+  download.href = receiptUrl;
+  download.download = 'browser-selection.json';
+  download.hidden = false;
+}
+select.onclick = async () => {
+  select.disabled = true;
+  try {
+    status.textContent = 'Selecting through Rust, without GPU execution...';
+    await init();
+    requestText = await read('request.json');
+    request = JSON.parse(requestText);
+    const stops = [0, 64, 128, 256];
+    checkpoints = [];
+    for (const stop of stops) checkpoints.push(await read(`native/checkpoint-${stop}.json`));
+    packets = request.cases.map(item => JSON.parse(select_resident_byte_learning_checkpoint(
+      requestText, checkpoints, item.name, 'fixed_window_frozen.v1')));
+    // Expected decisions are loaded only after the Rust selector has returned.
+    const expected = JSON.parse(await read('selection.json'));
+    for (const [index, packet] of packets.entries()) {
+      require(canonical(packet.report) === canonical(expected.decisions[index]), 'Native/browser decision differs');
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(packet.artifact_json));
+      const id = 'sha256:' + [...new Uint8Array(hash)].map(v => v.toString(16).padStart(2, '0')).join('');
+      require(id === packet.report.selected.artifact_id, 'Selected artifact identity differs');
+    }
+    let rejected = 0;
+    for (const [source, saved] of [[requestText, []], [requestText, [...checkpoints].reverse()], [requestText+' ', checkpoints]]) {
+      try { select_resident_byte_learning_checkpoint(source, saved, request.cases[0].name, 'fixed_window_frozen.v1'); }
+      catch (_) { rejected++; }
+    }
+    require(rejected === 3, 'Invalid selection accepted');
+    receipt = {schema: 'spiraltorch.byte_corpus.browser_selection.v1',
+      selection_completed_before_inference: true, native_decisions_and_artifact_ids_equal: true,
+      rejected_inputs: rejected, decisions: packets.map(p => p.report)};
+    show();
+    status.textContent = `Selected ${packets.length} models. Every decision and artifact identity matches native Rust.`;
+    infer.disabled = false;
+  } catch (error) { status.textContent = 'FAILED: ' + error; }
+};
+infer.onclick = async () => {
+  infer.disabled = true;
+  try {
+    status.textContent = 'Restoring the first selected artifact on WebGPU...';
+    const packet = packets[0], stop = packet.report.selected.completed_updates;
+    const windows = request.validation_batches[0].flatMap(([doc, start]) =>
+      request.validation_documents[doc].slice(start, start + request.config.steps + 1));
+    const measured = JSON.parse(await infer_resident_byte_artifact(packet.artifact_json,
+      packet.report.selected.artifact_id, new Uint8Array(windows)));
+    const report = JSON.parse(await read(`native/report-${stop}.json`));
+    const expected = report.cases[0].validation.at(-1).batch_losses[0];
+    require(measured.revision === stop && measured.artifact_id === packet.report.selected.artifact_id, 'Inference identity/revision');
+    require(Number.isFinite(measured.loss) && Math.abs(measured.loss-expected) <= 3e-6 + 5e-5*Math.abs(expected), 'Inference loss mismatch');
+    require(measured.adapter.device_type !== 'Cpu', 'Real WebGPU adapter required');
+    receipt.inference = {artifact_id: measured.artifact_id, revision: measured.revision,
+      adapter: measured.adapter, native_loss: expected, browser_loss: measured.loss,
+      loss_within_existing_tolerance: true, logits_count: measured.logits.length};
+    show();
+    status.textContent = 'Selection and explicit selected-model WebGPU inference passed.';
+  } catch (error) { status.textContent = 'FAILED: ' + error; }
+};
+</script>
+</html>

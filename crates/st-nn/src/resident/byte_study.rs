@@ -38,6 +38,7 @@ mod mixture;
 mod optimizer;
 mod policy;
 mod query;
+mod selection;
 mod serving;
 pub use artifact::{
     ByteCorpusInferencePolicy, ByteCorpusModelArtifact, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
@@ -51,6 +52,7 @@ pub use headwise::ByteCorpusHeadwiseControls;
 pub use mixture::ByteCorpusMixtureControls;
 use policy::{BiasInitialization, GeometryUpdate};
 pub use query::ByteCorpusQueryMixtureControls;
+pub use selection::ByteCorpusCheckpointSelection;
 pub use serving::ByteCorpusServingGate;
 #[cfg(feature = "wgpu")]
 pub use serving::{ResidentByteCandidate, ResidentByteServing};

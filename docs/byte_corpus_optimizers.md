@@ -102,6 +102,10 @@ creates a separate training owner with the complete optimizer state.
 Hash binding and valid resume state do not attest that training really occurred,
 and creating an artifact does not promote it through a quality gate.
 
+For model choice across retained update boundaries, use the
+[shared saved-checkpoint selector](byte_corpus_checkpoint_selection.md), not the
+minimum of a loss history whose corresponding weights were never saved.
+
 ## Independent Comparison
 
 ```bash

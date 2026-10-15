@@ -27,6 +27,8 @@ jobs:
         run: |
           python3 -I -S -B -m unittest discover -s tools -p 'test_byte_corpus*.py'
           python3 -I -S -B -m unittest discover -s tools -p 'test_verify_byte_corpus*.py'
+          python3 -I -S -B tools/test_run_byte_corpus_segments.py
+          python3 -I -S -B benchmarks/results/2026-10-15-language-adamw-256/test_qualify.py
           python3 -I -S -B tools/test_verify_byte_parameter_rates.py
           python3 -I -S -B tools/test_verify_byte_flat_metric.py
           python3 -I -S -B tools/test_verify_byte_fisher_rao.py

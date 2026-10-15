@@ -81,6 +81,54 @@ def two_head_source():
 
 
 class StudyPortable(unittest.TestCase):
+    def test_saved_checkpoint_selection_is_rust_owned_and_portable(self):
+        request = protocol.decode_json(fixture()[0])
+        # Match the synthetic checkpoint fixture, including its cursor-zero bits.
+        for case in request["cases"]:
+            for parameter in case["parameters"]:
+                parameter["values"] = [0.1] * len(parameter["values"])
+        study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+        records = []
+        for cursor in (0, 2):
+            record = resume_fixture()[5]
+            record["request_sha256"] = study.request_sha256
+            record["completed_updates"] = cursor
+            for case in record["cases"]:
+                model = json.loads(case["model_json"])
+                model["attempted_revision"] = str(cursor)
+                case["model_json"] = json.dumps(model)
+                case["training"] = [{"revision": i, "ce": 2.0} for i in range(1, cursor + 1)]
+                if cursor:
+                    case["validation"].append({"revision": cursor, "batch_losses": [1.0]})
+            records.append(record)
+        checkpoints = [study.checkpoint_from_json(protocol.encoded(r)) for r in records]
+        artifact, report_json = study.select_checkpoint(checkpoints, "plain", policy="fixed_window_frozen.v1")
+        report = json.loads(report_json)
+        self.assertEqual(report["selected"]["completed_updates"], 2)
+        self.assertEqual(report["selected"]["artifact_id"], artifact.artifact_id)
+        study.validate_artifact(checkpoints[1], artifact)
+        self.assertEqual(artifact.to_json(), study.case_artifact(
+            checkpoints[1], "plain", policy="fixed_window_frozen.v1").to_json())
+        for candidates in ([], list(reversed(checkpoints)), [checkpoints[0]] * 33):
+            with self.assertRaises(ValueError):
+                study.select_checkpoint(candidates, "plain", policy="fixed_window_frozen.v1")
+        for candidates in ([{}], [True], None):
+            with self.assertRaises(TypeError):
+                study.select_checkpoint(candidates, "plain", policy="fixed_window_frozen.v1")
+        with self.assertRaises(TypeError):
+            study.select_checkpoint(checkpoints, "plain")
+        with self.assertRaises(ValueError):
+            study.select_checkpoint(checkpoints, "plain", policy="automatic_promotion")
+        for case in records[1]["cases"]:
+            case["validation"][-1]["batch_losses"] = [2.0]
+        tied = study.checkpoint_from_json(protocol.encoded(records[1]))
+        _, tie_json = study.select_checkpoint([checkpoints[0], tied], "plain", policy="fixed_window_frozen.v1")
+        self.assertEqual(json.loads(tie_json)["selected"]["completed_updates"], 0)
+        records[1]["cases"][1]["validation"][0]["batch_losses"] = [3.0]
+        forked = study.checkpoint_from_json(protocol.encoded(records[1]))
+        with self.assertRaisesRegex(ValueError, "history"):
+            study.select_checkpoint([checkpoints[0], forked], "plain", policy="fixed_window_frozen.v1")
+
     def test_optimizer_recipe_and_design_are_rust_owned_portable_metadata(self):
         sources = [source()[0] for source in (fixture, frozen_fixture, metric_fixture,
                    calibrated_fixture, fisher_fixture, headwise_fixture, mixture_fixture)]
@@ -121,8 +169,9 @@ class StudyPortable(unittest.TestCase):
                 getattr(st.nn, name)()
         self.assertEqual(st.nn.BYTE_CORPUS_STUDY_MAX_BYTES, 64 * 1024 * 1024)
         self.assertIn("BYTE_CORPUS_STUDY_MAX_BYTES", namespace)
-        self.assertIn("case_checkpoint", {n.name for n in classes["_NnByteCorpusStudy"].body
-                                          if isinstance(n, ast.FunctionDef)})
+        for method in ("case_checkpoint", "select_checkpoint"):
+            self.assertIn(method, {n.name for n in classes["_NnByteCorpusStudy"].body
+                                  if isinstance(n, ast.FunctionDef)})
 
     def test_all_versions_portable_and_exact_byte_identity(self):
         requests = [make()[0] for make in (fixture, frozen_fixture, metric_fixture,
@@ -424,6 +473,11 @@ class StudyGpu(unittest.TestCase):
             self.assertEqual(model.to_json(),
                              st.nn.ByteDecoderCheckpoint.from_json(case["model_json"]).to_json())
             artifact = study.case_artifact(saved, case["name"], policy="fixed_window_frozen.v1")
+            selected, decision_json = study.select_checkpoint(
+                [saved], case["name"], policy="fixed_window_frozen.v1")
+            self.assertEqual(selected.to_json(), artifact.to_json())
+            self.assertEqual(json.loads(decision_json)["selected"]["completed_updates"],
+                             saved.completed_updates)
             loaded = st.nn.ByteCorpusModelArtifact.from_json(artifact.to_json(), expected_id=artifact.artifact_id)
             study.validate_artifact(saved, loaded)
             self.assertEqual(loaded.checkpoint().to_json(), model.to_json())

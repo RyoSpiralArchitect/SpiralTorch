@@ -162,6 +162,35 @@ impl PyByteCorpusStudy {
         })
     }
 
+    /// Select an actual saved model on development CE, without a GPU or promotion.
+    /// Returns the immutable artifact and Rust's weight-free decision JSON.
+    #[pyo3(signature = (checkpoints, case_name, *, policy))]
+    fn select_checkpoint(
+        &self,
+        py: Python<'_>,
+        checkpoints: Vec<Py<PyByteCorpusStudyCheckpoint>>,
+        case_name: &str,
+        policy: &str,
+    ) -> PyResult<(PyByteCorpusModelArtifact, String)> {
+        let policy = serde_json::from_value(serde_json::Value::String(policy.to_owned()))
+            .map_err(value_error)?;
+        let checkpoints: Vec<_> = checkpoints
+            .iter()
+            .map(|c| c.borrow(py).inner.clone())
+            .collect();
+        py.detach(|| {
+            let refs: Vec<_> = checkpoints.iter().map(Arc::as_ref).collect();
+            let selected = self
+                .inner
+                .select_checkpoint(&refs, case_name, policy)
+                .map_err(value_error)?;
+            Ok((
+                selected.artifact.into(),
+                serde_json::to_string(&selected.report).map_err(value_error)?,
+            ))
+        })
+    }
+
     fn validate_artifact(
         &self,
         py: Python<'_>,
