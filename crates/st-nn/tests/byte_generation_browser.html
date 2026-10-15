@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Byte-LM generation qualification</title>
+<h1>Generate with the selected geometry model</h1>
+<p>Private fixed-window greedy decoding. No text quality, streaming or HF claim.</p>
+<pre id="result" data-status="running">Loading private serving-input.json...</pre>
+<a id="download" hidden>Download generation receipt</a>
+<script type="module">
+const target = document.querySelector("#result");
+const check = (condition, message) => { if (!condition) throw Error(message); };
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const rejected = async call => {
+  let failed = false;
+  try { await call(); } catch { failed = true; }
+  check(failed, "Invalid generation call succeeded");
+};
+const digest = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+  x => x.toString(16).padStart(2, "0")).join("");
+const logitHash = async values => {
+  const bytes = new DataView(new ArrayBuffer(values.length * 4));
+  values.forEach((v, i) => bytes.setFloat32(i * 4, v, true));
+  return digest(bytes.buffer);
+};
+try {
+  const response = await fetch("/target/resident-byte-learning-web/serving-input.json", {cache:"no-store"});
+  check(response.ok, "Missing private input");
+  const raw = await response.text(), input = JSON.parse(raw);
+  const {default:init, ByteCorpusServingGate} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  await init();
+  const gate = ByteCorpusServingGate.from_json(input.gate_json);
+  const [batch, steps] = gate.batch_shape;
+  check(input.windows.length === batch * (steps + 1), "Invalid source windows");
+  const prompts = Array.from({length:batch}, (_, i) => input.windows.slice(i * (steps+1), i * (steps+1)+steps));
+  const flat = Uint8Array.from(prompts.flat()), count = 32;
+  const slot = await gate.bootstrap_wgpu(input.incumbent.json, input.incumbent.id);
+  const verified = async (generation, expectedId) => {
+    const result = JSON.parse(await slot.generate_greedy(flat, count, generation));
+    check(result.artifact_id === slot.artifact_id && result.artifact_id === expectedId
+      && slot.generation === generation && result.serving.generation === generation
+      && result.serving.gate_sha256 === gate.request_sha256, "Wrong generation owner");
+    check(same(result.prompt_sha256, await Promise.all(prompts.map(p => digest(Uint8Array.from(p))))), "Prompt hashes differ");
+    const windows = prompts.map(p => [...p]), generated = prompts.map(() => []), hashes = [];
+    // Independent test oracle reads full logits and uses a different dummy target.
+    for (let step=0; step<count; step++) {
+      const forward = JSON.parse(await slot.forward(Uint8Array.from(windows.flatMap(w => [...w, 255]))));
+      const last = [];
+      check(forward.artifact_id === result.artifact_id, "Oracle switched owner");
+      for (let row=0; row<batch; row++) {
+        const scores = forward.logits.slice(((row+1)*steps-1)*256, (row+1)*steps*256);
+        check(scores.length === 256 && scores.every(Number.isFinite), "Invalid next scores");
+        const byte = scores.indexOf(Math.max(...scores));
+        generated[row].push(byte);
+        windows[row] = [...windows[row].slice(1), byte];
+        last.push(...scores);
+      }
+      hashes.push(await logitHash(last));
+    }
+    check(same(generated, result.generated_bytes) && same(hashes, result.next_logits_f32le_sha256), "Full-forward oracle differs");
+    return result;
+  };
+  const before = await verified("0", input.incumbent.id);
+  for (const count of [0, 257, -1, 1.5, NaN, Infinity]) await rejected(() => slot.generate_greedy(flat, count, "0"));
+  for (const generation of ["00", "0.0", "1", "18446744073709551616"]) await rejected(() => slot.generate_greedy(flat, 1, generation));
+  await rejected(() => slot.generate_greedy(flat.slice(1), 1, "0"));
+  const candidate = await slot.prepare_candidate(input.candidate.json, input.candidate.id);
+  check(candidate.accepted, "Candidate failed its explicit gate");
+  const assessment = JSON.parse(candidate.to_json());
+  check(assessment.adapter.backend === "BrowserWebGpu" && assessment.adapter.device_type !== "Cpu", "No real browser GPU");
+  slot.activate(candidate);
+  await rejected(() => slot.generate_greedy(flat, count, "0"));
+  const after = await verified("1", input.candidate.id);
+  slot.rollback("1");
+  await rejected(() => slot.generate_greedy(flat, count, "0"));
+  const restored = await verified("2", input.incumbent.id);
+  const normalized = structuredClone(restored);
+  normalized.serving.generation = "0";
+  check(same(normalized, before), "Rollback changed bytes or next-logit hashes");
+  const receipt = {schema:"spiraltorch.byte_corpus.generation_browser_qualification.v1",
+    input_sha256:await digest(new TextEncoder().encode(raw)), adapter:assessment.adapter,
+    gate_sha256:gate.request_sha256, full_forward_oracle_exact:true, selected_artifact_ids_verified:true,
+    stale_dispatch_rejected:true, rollback_exact:true, before, after, restored,
+    scope:"Actual BrowserWebGpu greedy mechanics; no new updates or language-quality claim"};
+  target.textContent = JSON.stringify(receipt, null, 2);
+  target.dataset.status = "completed";
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([target.textContent], {type:"application/json"}));
+  link.download = "byte-generation-browser-receipt.json";
+  link.hidden = false;
+  candidate.free(); slot.free(); gate.free();
+} catch(error) {
+  target.dataset.status = "error";
+  target.textContent = String(error.stack || error);
+}
+</script>

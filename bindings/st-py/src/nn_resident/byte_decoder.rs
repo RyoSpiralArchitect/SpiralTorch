@@ -13,6 +13,16 @@ mod artifact;
 mod serving;
 pub(super) use artifact::PyByteCorpusModelArtifact;
 
+#[cfg(feature = "wgpu")]
+fn generation_count(count: &Bound<'_, PyAny>) -> PyResult<usize> {
+    if count.is_instance_of::<PyBool>() {
+        return Err(PyTypeError::new_err(
+            "max_new_bytes must be an integer, not bool",
+        ));
+    }
+    count.extract()
+}
+
 fn metric(value: &str) -> PyResult<ByteDecoderPairMetric> {
     serde_json::from_value(serde_json::Value::String(value.to_owned()))
         .map_err(|e| PyValueError::new_err(e.to_string()))

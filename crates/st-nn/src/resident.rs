@@ -35,6 +35,8 @@ pub use byte_decoder::{
     BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
     BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
 };
+#[cfg(feature = "wgpu")]
+pub use byte_study::ByteCorpusGeneration;
 pub use byte_study::ByteCorpusServingGate;
 pub use byte_study::{
     ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusInferencePolicy,

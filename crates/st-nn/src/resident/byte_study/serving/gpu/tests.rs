@@ -311,6 +311,15 @@ fn live_slot_switches_trained_models_rejects_stale_permits_and_rolls_back_exactl
         .prepare_batch(&ByteLmBatch::from_windows(&[&[7, 8, 9]]).unwrap())
         .unwrap();
     let retained = serving.forward(&batch).unwrap();
+    let prompts = vec![vec![7, 8]];
+    let generated_before = pollster::block_on(serving.generate_greedy(&prompts, 3, 0)).unwrap();
+    let generated_before_json: Value =
+        serde_json::from_str(&generated_before.to_json().unwrap()).unwrap();
+    assert_eq!(generated_before_json["serving"]["generation"], "0");
+    assert_eq!(
+        generated_before_json["serving"]["gate_sha256"],
+        serving.gate_sha256()
+    );
     let before = retained
         .forward()
         .prediction()
@@ -350,6 +359,13 @@ fn live_slot_switches_trained_models_rejects_stale_permits_and_rolls_back_exactl
     assert_eq!(event["to"], candidate.artifact_id());
     assert_eq!(serving.generation(), 1);
     assert_eq!(serving.previous_artifact_id(), Some(initial.artifact_id()));
+    assert!(pollster::block_on(serving.generate_greedy(&prompts, 3, 0)).is_err());
+    let generated_after = pollster::block_on(serving.generate_greedy(&prompts, 3, 1)).unwrap();
+    assert_eq!(generated_after.artifact_id(), candidate.artifact_id());
+    assert_ne!(
+        generated_before.generated_bytes(),
+        generated_after.generated_bytes()
+    );
     assert!(serving.activate(stale).is_err());
     let after = serving.forward(&batch).unwrap();
     assert_eq!(after.artifact_id(), candidate.artifact_id());
@@ -371,6 +387,12 @@ fn live_slot_switches_trained_models_rejects_stale_permits_and_rolls_back_exactl
     serving.rollback(1).unwrap();
     assert_eq!(serving.generation(), 2);
     assert_eq!(serving.artifact_id(), initial.artifact_id());
+    assert!(pollster::block_on(serving.generate_greedy(&prompts, 3, 0)).is_err());
+    let restored = pollster::block_on(serving.generate_greedy(&prompts, 3, 2)).unwrap();
+    let mut restored_json: Value = serde_json::from_str(&restored.to_json().unwrap()).unwrap();
+    assert_eq!(restored_json["serving"]["generation"], "2");
+    restored_json["serving"]["generation"] = json!("0");
+    assert_eq!(restored_json, generated_before_json);
     assert_eq!(serving.previous_artifact_id(), None);
     // Same slot and incumbent again: only the generation binds this old permit.
     assert!(serving.activate(aba).is_err());

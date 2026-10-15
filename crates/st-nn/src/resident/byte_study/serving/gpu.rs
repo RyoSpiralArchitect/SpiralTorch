@@ -392,6 +392,43 @@ impl ResidentByteServing {
         Ok(self.active.model.forward(batch)?)
     }
 
+    /// Validate borrowed prompt lengths before a client copies prompt data.
+    pub fn validate_generation(
+        &self,
+        prompt_lengths: impl ExactSizeIterator<Item = usize>,
+        max_new_bytes: usize,
+        expected_generation: u64,
+    ) -> Result<()> {
+        if self.generation != expected_generation {
+            return Err("stale generation dispatch".into());
+        }
+        self.active
+            .model
+            .validate_generation(prompt_lengths, max_new_bytes)
+    }
+
+    /// Decode with this exact live owner. A stale dispatch fails before any
+    /// forward; the exclusive borrow pins the owner for the entire generation.
+    pub async fn generate_greedy(
+        &mut self,
+        prompts: &[Vec<u8>],
+        max_new_bytes: usize,
+        expected_generation: u64,
+    ) -> Result<ByteCorpusGeneration> {
+        self.validate_generation(
+            prompts.iter().map(Vec::len),
+            max_new_bytes,
+            expected_generation,
+        )?;
+        let mut result = self
+            .active
+            .model
+            .generate_greedy(prompts, max_new_bytes)
+            .await?;
+        result.bind_serving(self.generation, self.gate_sha256());
+        Ok(result)
+    }
+
     /// Remeasure both artifacts on identical pinned windows, without touching
     /// the live owner. JSON output is evidence, never a deserializable permit.
     pub async fn prepare_candidate(

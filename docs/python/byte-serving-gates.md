@@ -171,6 +171,12 @@ artifact ID and output. No retraining, reset or checkpoint reconstruction occurs
 State/history is not persisted across a process restart; start with a newly
 validated bootstrap, not an old report or permit.
 
+The active slot also supports [bounded greedy byte generation](byte-generation.md)
+with an expected serving generation. The same Rust decoder is exposed to Python
+and the standalone browser client; adoption and rollback now select actual
+generated output as well as fixed-window logits. Teacher-forced gate acceptance
+does not certify free-running generation quality or health on unseen contexts.
+
 ## Rust And Browser Clients
 
 Rust uses `ByteCorpusServingGate::from_json`,
