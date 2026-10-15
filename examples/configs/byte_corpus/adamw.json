@@ -1,0 +1,8 @@
+{
+  "kind": "adamw_zero_rate_freeze.v1",
+  "beta1": 0.9,
+  "beta2": 0.999,
+  "epsilon": 0.00001,
+  "weight_decay": 0.01,
+  "geometry_weight_decay": 0.0
+}

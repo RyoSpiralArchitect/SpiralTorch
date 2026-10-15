@@ -2,6 +2,26 @@
 #[path = "resident_byte_learning_browser/serving.rs"]
 mod serving;
 
+/// CPU-only metadata inspection uses the same parser as execution.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn inspect_resident_byte_learning(input: &str) -> Result<String, wasm_bindgen::JsValue> {
+    let error = |e: Box<dyn std::error::Error>| wasm_bindgen::JsValue::from_str(&e.to_string());
+    let study = st_nn::resident::ByteCorpusStudy::from_json(input.as_bytes()).map_err(error)?;
+    let optimizer: serde_json::Value =
+        serde_json::from_str(&study.optimizer_recipe_json().map_err(error)?)
+            .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    Ok(serde_json::json!({
+        "schema":"spiraltorch.byte_corpus.inspection.v1",
+        "request_sha256":study.request_sha256(),
+        "design_schema":study.design_schema(),
+        "optimizer":optimizer,
+        "total_updates":study.total_updates(),
+        "checkpoint_size_bound":study.checkpoint_size_bound().map_err(error)?
+    })
+    .to_string())
+}
+
 /// CPU-only, all-case source binding; keep this opaque JSON intact in transport.
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 #[wasm_bindgen::prelude::wasm_bindgen]

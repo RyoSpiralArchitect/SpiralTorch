@@ -132,7 +132,7 @@ impl ByteCorpusModelArtifact {
         match self.policy() {
             ByteCorpusInferencePolicy::FixedWindowFrozenV1 => Ok(ResidentByteInference {
                 artifact_id: self.artifact_id.clone(),
-                model: self.model.restore_wgpu(runtime)?,
+                model: self.model.restore_weights_wgpu(runtime)?,
             }),
         }
     }

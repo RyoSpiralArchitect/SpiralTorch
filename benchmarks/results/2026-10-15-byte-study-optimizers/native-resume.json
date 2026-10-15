@@ -1,0 +1,136 @@
+{
+  "schema": "spiraltorch.byte_corpus.resume_verification.v9",
+  "passed": true,
+  "request_sha256": "208975bab0905a1ee968d5940975259491163680ce7bd2c0132bce23a637e523",
+  "exact_resumed_report_equal": true,
+  "exact_training_and_evaluation_prefixes": true,
+  "saved_parameter_bits_match_paused_report": true,
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.486500859260559
+    },
+    {
+      "name": "seed11_geometry",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.488199710845947
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.488260865211487
+    },
+    {
+      "name": "seed29_ordinary",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.52065896987915
+    },
+    {
+      "name": "seed29_geometry",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.522782802581787
+    },
+    {
+      "name": "seed29_geometry_frozen",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.522882580757141
+    },
+    {
+      "name": "seed47_ordinary",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.472856402397156
+    },
+    {
+      "name": "seed47_geometry",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.474058747291565
+    },
+    {
+      "name": "seed47_geometry_frozen",
+      "updates": 12,
+      "pause": 5,
+      "evaluation_revisions": [
+        0,
+        4,
+        8,
+        12
+      ],
+      "final_mean_ce": 5.4740153551101685
+    }
+  ],
+  "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence",
+  "design_schema": "spiraltorch.byte_corpus.request.v2",
+  "optimizer": {
+    "kind": "adamw_zero_rate_freeze.v1",
+    "beta1": 0.8999999761581421,
+    "beta2": 0.9990000128746033,
+    "epsilon": 9.999999747378752e-06,
+    "geometry_weight_decay": 0.0,
+    "weight_decay": 0.009999999776482582
+  },
+  "saved_optimizer_bits_and_clocks_match": true,
+  "input_sha256": {
+    "request": "208975bab0905a1ee968d5940975259491163680ce7bd2c0132bce23a637e523",
+    "baseline": "6ec0585ce14c0f872544314cae039d050bea8dc456275f186003d934dbef2076",
+    "partial": "839a9401af8f1c82b11bd590fe2d99296b2437dd6ce7d0874dde71bc1e370441",
+    "resumed": "6ec0585ce14c0f872544314cae039d050bea8dc456275f186003d934dbef2076",
+    "checkpoint": "5b3fbf0ac25a86744f95c23b3fbae119de06ed30a9a4bd6ae8913254501c91a4"
+  }
+}

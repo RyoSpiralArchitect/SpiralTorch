@@ -418,6 +418,43 @@ impl ByteDecoderPlan {
 }
 
 impl ByteDecoderCheckpoint {
+    pub(crate) fn with_zero_adamw(
+        mut self,
+        config: st_kernel_contracts::adamw::AdamWConfig,
+    ) -> Result<Self, InferenceError> {
+        if self.optimizer.is_some() {
+            return Err(InferenceError::ByteDecoder(
+                "optimizer history already exists",
+            ));
+        }
+        self.optimizer = Some(AdamWState {
+            config,
+            slots: self
+                .plan
+                .parameter_shapes()?
+                .into_iter()
+                .map(|shape| {
+                    let len = shape.iter().product();
+                    st_kernel_contracts::adamw::AdamWSlot {
+                        shape,
+                        first: vec![0.; len],
+                        second: vec![0.; len],
+                        steps: 0,
+                    }
+                })
+                .collect(),
+        });
+        Ok(self)
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub(crate) fn adamw_json(&self) -> Result<serde_json::Value, InferenceError> {
+        Ok(match &self.optimizer {
+            Some(state) => serde_json::to_value(AdamWRecord::from_state(state)?)?,
+            None => serde_json::Value::Null,
+        })
+    }
+
     pub(crate) fn geometry_parameters_match(&self, other: &Self) -> Result<bool, InferenceError> {
         match (&self.plan.geometry, &other.plan.geometry) {
             (None, None) => Ok(true),

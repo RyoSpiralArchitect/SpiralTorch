@@ -45,7 +45,7 @@ pub(in crate::resident::byte_study) fn source() -> Value {
     value
 }
 
-fn prepared() -> Value {
+pub(in crate::resident::byte_study) fn prepared() -> Value {
     serde_json::from_str(
         &ByteCorpusHeadwiseControls::from_json(source().to_string().as_bytes())
             .unwrap()

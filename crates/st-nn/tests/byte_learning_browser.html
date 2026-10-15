@@ -13,18 +13,13 @@ try {
   if (!requestResponse.ok) throw Error("Frozen request is missing");
   const input = await requestResponse.text();
   const request = JSON.parse(input);
-  const version = request.schema === "spiraltorch.byte_corpus.request.v1" ? 1
-    : request.schema === "spiraltorch.byte_corpus.request.v2" ? 2
-    : request.schema === "spiraltorch.byte_corpus.request.v3" ? 3
-    : request.schema === "spiraltorch.byte_corpus.request.v4" ? 4
-    : request.schema === "spiraltorch.byte_corpus.request.v5" ? 5
-    : request.schema === "spiraltorch.byte_corpus.request.v6" ? 6
-    : request.schema === "spiraltorch.byte_corpus.request.v7" ? 7
-    : request.schema === "spiraltorch.byte_corpus.request.v8" ? 8 : null;
-  if (!version) throw Error("Unsupported study version");
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), x => x.toString(16).padStart(2,"0")).join("");
-  const {default:init, run_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  const {default:init, run_resident_byte_learning, inspect_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
   await init();
+  const inspection = JSON.parse(inspect_resident_byte_learning(input));
+  const version = Number(inspection.design_schema.split(".v").at(-1));
+  const wireVersion = Number(request.schema.split(".v").at(-1));
+  if (inspection.request_sha256 !== hash) throw Error("Rust inspection identity mismatch");
   document.querySelector("#summary").textContent = `Running ${request.cases.length} cases, ${request.train_batches.length} updates per case. Request ${hash}`;
   const reportJson = await run_resident_byte_learning(input);
   const report = JSON.parse(reportJson);
@@ -36,7 +31,12 @@ try {
   const sameCalibration = version < 4 || (report.bias_calibration?.source_request_sha256 === request.bias_calibration.source_request_sha256
     && report.bias_calibration.relative_tolerance === request.bias_calibration.relative_tolerance
     && JSON.stringify(report.bias_calibration.train_batch_indices) === JSON.stringify(request.bias_calibration.train_batch_indices));
-  if (report.schema !== `spiraltorch.byte_corpus.result.v${version}` || report.engine !== "spiraltorch" || report.request_sha256 !== hash
+  const sameOptimizer = wireVersion !== 9 || (report.design_schema === inspection.design_schema
+    && Object.keys(report.optimizer ?? {}).length === Object.keys(inspection.optimizer).length
+    && Object.entries(inspection.optimizer).every(([k,v]) => report.optimizer?.[k] === v)
+    && report.cases.every(c => Object.hasOwn(c, "optimizer_state")));
+  if (report.schema !== `spiraltorch.byte_corpus.result.v${wireVersion}` || report.engine !== "spiraltorch" || report.request_sha256 !== hash
+      || !sameOptimizer
       || !sameCalibration
       || report.cases.length !== request.cases.length
       || report.cases.some((c, i) => c.name !== request.cases[i].name
@@ -64,6 +64,7 @@ try {
     throw Error("Incomplete or mismatched corpus result");
   }
   target.textContent = JSON.stringify({schema:report.schema, request_sha256:hash, cases:report.cases.length,
+    design_schema:inspection.design_schema, optimizer:inspection.optimizer,
     updates_per_case:request.train_batches.length, evaluation_revisions:revisions,
     raw_weights:"Retained only in the downloadable report; independent verification required."}, null, 2);
   target.dataset.status = "completed";

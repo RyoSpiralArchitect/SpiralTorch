@@ -96,6 +96,16 @@ impl PyByteCorpusStudy {
         self.inner.request_sha256()
     }
 
+    #[getter]
+    fn design_schema(&self) -> &str {
+        self.inner.design_schema()
+    }
+
+    #[getter]
+    fn optimizer_recipe_json(&self) -> PyResult<String> {
+        self.inner.optimizer_recipe_json().map_err(value_error)
+    }
+
     fn checkpoint_size_bound(&self, py: Python<'_>) -> PyResult<usize> {
         py.detach(|| self.inner.checkpoint_size_bound().map_err(value_error))
     }

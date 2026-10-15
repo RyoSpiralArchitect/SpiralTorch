@@ -2,8 +2,9 @@
 
 Source API after PyPI 0.4.31. This is a learning-path extension, not a claim that
 the earlier SGD language pilot now has better generated text. The existing
-`ByteCorpusStudy` request/reference protocol still specifies SGD and rejects
-AdamW checkpoints. A future matched study must declare its optimizer explicitly.
+`ByteCorpusStudy` v1-v8 protocols still specify SGD and reject AdamW checkpoints.
+The [v9 study protocol](byte_corpus_optimizers.md) declares the optimizer
+orthogonally to the unchanged geometry design and binds history on resume.
 
 ## One Owner, Including Geometry
 

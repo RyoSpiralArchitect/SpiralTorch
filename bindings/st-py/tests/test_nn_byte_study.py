@@ -25,6 +25,7 @@ from test_byte_corpus_headwise import fixture as headwise_fixture
 from test_byte_corpus_mixture import fixture as mixture_fixture
 from test_byte_corpus_query import fixture as query_fixture
 from test_verify_byte_corpus_resume import fixture as resume_fixture
+from test_byte_corpus_optimizer import wrap as optimizer_request, recipe as optimizer_recipe
 
 NAMES = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
@@ -80,6 +81,29 @@ def two_head_source():
 
 
 class StudyPortable(unittest.TestCase):
+    def test_optimizer_recipe_and_design_are_rust_owned_portable_metadata(self):
+        sources = [source()[0] for source in (fixture, frozen_fixture, metric_fixture,
+                   calibrated_fixture, fisher_fixture, headwise_fixture, mixture_fixture)]
+        sources.append(query_fixture()[1])
+        for source in sources:
+            design = protocol.decode_json(source)
+            for recipe in (optimizer_recipe(), {"kind": "stateless_sgd.v1"}):
+                request = optimizer_request(design, recipe)
+                raw = protocol.encoded(request)
+                study = st.nn.ByteCorpusStudy.from_json(raw)
+                self.assertEqual(study.design_schema, design["schema"])
+                self.assertEqual(study.request_sha256, hashlib.sha256(raw).hexdigest())
+                self.assertEqual(json.loads(study.optimizer_recipe_json),
+                                 protocol.load_reference("byte_corpus_optimizer").recipe(request))
+                study.validate_segment(0)
+                with self.assertRaises(AttributeError):
+                    study.optimizer_recipe_json = "{}"
+        for key in ("optimizer", "design_schema"):
+            request = optimizer_request(protocol.decode_json(fixture()[0]))
+            request[key] = None
+            with self.assertRaises(ValueError):
+                st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+
     def test_exports_and_stubs(self):
         namespace = {}
         exec("from spiraltorch.nn import *", namespace)
@@ -311,6 +335,30 @@ class StudyPortable(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class StudyGpu(unittest.TestCase):
+    def test_adamw_optimizer_history_survives_study_resume(self):
+        request = optimizer_request(protocol.decode_json(frozen_fixture()[0]))
+        request["rate"] = .001
+        raw = protocol.encoded(request)
+        study = st.nn.ByteCorpusStudy.from_json(raw)
+        full = study.advance_wgpu()
+        partial = study.advance_wgpu(1)
+        loaded = study.checkpoint_from_json(partial.checkpoint.to_json())
+        resumed = study.advance_wgpu(resume=loaded)
+        self.assertEqual(full.report_json, resumed.report_json)
+        self.assertEqual(full.checkpoint.to_json(), resumed.checkpoint.to_json())
+        self.assertEqual(study.run_wgpu(), full.report_json)
+        for case, row in zip(request["cases"], json.loads(full.report_json)["cases"]):
+            protocol.load_reference("byte_corpus_optimizer").validate_state(
+                case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
+                protocol.parameter_frozen)
+        model = json.loads(json.loads(partial.checkpoint.to_json())["cases"][0]["model_json"])
+        self.assertEqual(model["update_rule"], "adamw_zero_rate_freeze.v1")
+        corrupted = json.loads(partial.checkpoint.to_json())
+        model["optimizer"]["slots"][0]["steps"] = 0
+        corrupted["cases"][0]["model_json"] = json.dumps(model)
+        with self.assertRaises(ValueError):
+            study.checkpoint_from_json(protocol.encoded(corrupted))
+
     def test_detached_calls_share_a_recipe_not_mutable_models(self):
         study = st.nn.ByteCorpusStudy.from_json(fixture()[0])
         expected = study.run_wgpu()
@@ -354,6 +402,18 @@ class StudyGpu(unittest.TestCase):
                 self.assertEqual(resumed.report_json, study.run_wgpu())
                 if version == 8:
                     self.check_fresh_case_inference(study, prepared.request_json, resumed.checkpoint)
+        request = optimizer_request(protocol.decode_json(query.request_json))
+        request["rate"] = .001
+        raw = protocol.encoded(request)
+        study = st.nn.ByteCorpusStudy.from_json(raw)
+        first = study.advance_wgpu(1)
+        resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
+        self.assertEqual(resumed.report_json, study.run_wgpu())
+        for case, row in zip(request["cases"], protocol.decode_json(resumed.report_json)["cases"]):
+            protocol.load_reference("byte_corpus_optimizer").validate_state(
+                case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
+                protocol.parameter_frozen)
+        self.check_fresh_case_inference(study, raw, resumed.checkpoint)
 
     def check_fresh_case_inference(self, study, raw, saved):
         request = protocol.decode_json(raw)

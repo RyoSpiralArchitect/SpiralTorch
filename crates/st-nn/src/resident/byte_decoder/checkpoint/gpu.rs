@@ -88,6 +88,21 @@ impl ByteDecoderCheckpointReadback {
 }
 
 impl ByteDecoderCheckpoint {
+    /// Immutable serving does not consume optimizer history. Keep the original
+    /// checkpoint intact for provenance and explicit training restoration.
+    pub(crate) fn restore_weights_wgpu(
+        &self,
+        runtime: WgpuRuntime,
+    ) -> Result<ResidentByteDecoder, InferenceError> {
+        self.plan.compile_training_wgpu_at_revision(
+            runtime,
+            MatmulTile::default(),
+            MatmulKernel::Scalar,
+            MatmulAccumulation::default(),
+            self.attempted_revision,
+        )
+    }
+
     pub fn restore_wgpu(
         &self,
         runtime: WgpuRuntime,

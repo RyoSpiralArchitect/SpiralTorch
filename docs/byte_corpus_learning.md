@@ -332,5 +332,8 @@ prose. Report each paired seed difference, including regressions; do not select
 a favorable seed, tune on this held-out set, or loosen the numerical gate after
 seeing the result. Larger independent corpora, repeated runs, capacity/compute
 controls, generation evaluation and general streamed/long-running training
-remain separate work. The resumable fixed study does not supply an Adam state,
-changing learning-rate schedule, continuous recurrent context or live sampler.
+remain separate work. Legacy v1-v8 studies are stateless SGD. The explicit
+[v9 optimizer recipe](byte_corpus_optimizers.md) adds resident AdamW history,
+frozen clocks and optimizer-aware resume without changing those geometry
+designs. Changing learning-rate schedules, continuous recurrent context and a
+live sampler remain separate work.

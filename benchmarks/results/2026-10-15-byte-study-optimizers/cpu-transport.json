@@ -1,0 +1,27 @@
+{
+  "schema": "spiraltorch.byte_corpus.cpu_transport.v1",
+  "request_sha256": "208975bab0905a1ee968d5940975259491163680ce7bd2c0132bce23a637e523",
+  "checkpoint_sha256": "3281610aa1cebe088b12ebf99a43205c4aafec726765245226bb3be07fcbfaea",
+  "cases": [
+    "seed11_ordinary",
+    "seed11_geometry",
+    "seed11_geometry_frozen",
+    "seed29_ordinary",
+    "seed29_geometry",
+    "seed29_geometry_frozen",
+    "seed47_ordinary",
+    "seed47_geometry",
+    "seed47_geometry_frozen"
+  ],
+  "completed_updates": 12,
+  "roundtrip": "exact Rust JSON",
+  "cpu_execution": "explicit NotImplementedError",
+  "optimizer": {
+    "beta1": 0.8999999761581421,
+    "beta2": 0.9990000128746033,
+    "epsilon": 9.999999747378752e-06,
+    "geometry_weight_decay": 0.0,
+    "kind": "adamw_zero_rate_freeze.v1",
+    "weight_decay": 0.009999999776482582
+  }
+}

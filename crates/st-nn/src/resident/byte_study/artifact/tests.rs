@@ -258,3 +258,47 @@ fn inference_owner_retains_trained_geometry_without_mutable_parameter_escape() {
         before
     );
 }
+
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+#[test]
+fn immutable_inference_omits_gpu_moments_but_artifact_keeps_resume_history() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte_artifact.adamw").unwrap();
+    let mut request = fixture();
+    request["design_schema"] = request["schema"].clone();
+    request["schema"] = json!("spiraltorch.byte_corpus.request.v9");
+    request["optimizer"] = json!({"kind":"adamw_zero_rate_freeze.v1", "beta1":0.9,
+        "beta2":0.999, "epsilon":1e-8, "weight_decay":0.01, "geometry_weight_decay":0.0});
+    let study = ByteCorpusStudy::from_json(request.to_string().as_bytes()).unwrap();
+    let trained = pollster::block_on(study.advance(runtime.clone(), None, 1)).unwrap();
+    let artifact = artifact(&study, &trained.checkpoint);
+    let before = artifact.checkpoint().to_json().unwrap();
+    assert!(artifact.checkpoint().adamw_state().is_some());
+    let mut active = artifact.restore_wgpu(runtime.clone()).unwrap();
+    assert!(active.model.adamw_config().is_none());
+    let mut training = artifact.checkpoint().restore_wgpu(runtime).unwrap();
+    assert!(training.adamw_config().is_some());
+    assert_eq!(
+        active.attempted_revision(),
+        training.parameter_snapshot().revision()
+    );
+    let batch = active
+        .prepare_batch(&ByteLmBatch::from_windows(&[&[7, 8, 9]]).unwrap())
+        .unwrap();
+    let predicted = active.forward(&batch).unwrap();
+    let reference = training.forward(&batch).unwrap();
+    assert_eq!(
+        predicted
+            .forward()
+            .prediction()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap(),
+        reference.prediction().snapshot().unwrap().read().unwrap()
+    );
+    assert_eq!(before, artifact.checkpoint().to_json().unwrap());
+}
