@@ -1,0 +1,66 @@
+{
+  "schema": "spiraltorch.dense_bias_reduction.verification.v1",
+  "date": "2026-10-16",
+  "base_commit": "ec19510e0a0d1764bbed2a37f38bdd9f4a2a52ea",
+  "production": {
+    "arithmetic": "signed 320-bit integer sum of finite f32 terms; final round to nearest ties to even",
+    "term_bound": "u32::MAX",
+    "sequential_prefix_guard_preserved": true,
+    "non_gelu_identity_vjp": "checked copy instead of multiply by one",
+    "gelu_arithmetic_unchanged": true
+  },
+  "tests": {
+    "gpu_opt_in_enabled": true,
+    "kernel_contracts": {"passed": 132, "failed": 0},
+    "independent_integer_fixture_cases": 92,
+    "native_and_browser_each": {"finite_integer_cases": 84, "cancellation_boundaries": 8, "guard_recovery_cases": 5, "passed": true},
+    "native_training": {"passed": 52, "failed": 0},
+    "native_byte_model_study": {"passed": 120, "failed": 0},
+    "python_probe": {"passed": 5, "failed": 0},
+    "kernel_contracts_all_targets_strict_clippy": "passed",
+    "backend_native_strict_clippy": "passed",
+    "backend_wasm_example_strict_clippy": "passed",
+    "nn_strict_clippy": {"passed": false, "diagnostics": 24, "scope": "unchanged files; no suppressions added"},
+    "rustfmt": "passed",
+    "rustc": "1.99.0 (b940084d7 2026-09-28)",
+    "wasm_bindgen": "0.2.129",
+    "torch": "2.12.1 CPU, one thread, deterministic algorithms",
+    "browser_hardware_execution": "unverified"
+  },
+  "retained_failures": [
+    "Original naive kernel loses cancellation residuals",
+    "Compensated prototype rejects representable maximum-tail case",
+    "Initial harness used native-unavailable read_async; repaired",
+    "Initial harness expected NaN seed to reach dispatch; upload rejects it earlier; repaired",
+    "Non-isolated generator stdout was polluted by global Python site initialization; regenerated with -I -S",
+    "Exact reduction exposed subnormal flushing in identity delta; removed unnecessary multiply",
+    "First exact CLI build enabled default/selfsup features; retained and excluded from matched comparison",
+    "Whole st-nn strict Clippy blocked by existing diagnostics"
+  ],
+  "language": {
+    "new_training_runs": 0,
+    "saved_models": 3,
+    "fixed_batches_each": [0, 127, 511, 1023],
+    "native_checkpoint_unchanged": true,
+    "key_residual_max_improved": 12,
+    "parameter_l2_vs_f64": {"improved": 51, "equal": 188, "worse": 17},
+    "previous_failed_gate_changed": false,
+    "quality_or_serving_promotion": false,
+    "primary_record": "comparison.json"
+  },
+  "review": {
+    "mode": "read-only independent local agent",
+    "resolved_findings": ["prototype finite overflow boundary", "report hash reread race", "browser discards complete failed report"],
+    "final_math_and_test_review": "no additional findings",
+    "independent_execution": false
+  },
+  "ci_observation": {
+    "pull_request": 2270,
+    "head": "d487e367c1cc97112564a56cea2d9fccf6bce527",
+    "run": 38739550458,
+    "conclusion": "failure",
+    "scope": "latest observed parent run, not execution of this patch or live billing state",
+    "merge_performed": false
+  },
+  "limits": ["no full-language retraining", "no Python wheel rebuild or publication", "no full public-binding rerun", "no kernel throughput or geometry-efficacy claim", "no exact continuation guarantee across builds"]
+}

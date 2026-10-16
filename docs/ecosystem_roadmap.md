@@ -467,8 +467,14 @@ The bounded full-language follow-up still fails on Key-bias. The subsequent
 passes native/browser isolated controls, including causal Poincare pullbacks,
 but its 1,024-update language follow-up still fails and does not uniformly
 reduce parameter differences. Float32 reference drift is also visible along
-the exact-arithmetic Key-shift invariant direction. Next, isolate projection
-reductions and optimizer amplification against a higher-precision control.
+the exact-arithmetic Key-shift invariant direction. The subsequent
+[dense-bias isolation](../benchmarks/results/2026-10-16-dense-bias-reduction/README.md)
+fixes reproduced cancellation and boundary defects in a Rust-owned exact-sum
+contract shared with WGSL. Twelve saved-state probes reduce Key residuals but
+retain 17 worsened parameter-L2 comparisons against float64 Torch. No new
+training run or promotion is included. Next, localize the remaining projection
+gradient error and optimizer amplification before repeating the fixed long-run
+gate, then return to matched-budget language/cohort quality evaluation.
 Do not drop coordinates or relax the gate to turn diagnostic loss reductions
 into geometry-efficacy claims.
 

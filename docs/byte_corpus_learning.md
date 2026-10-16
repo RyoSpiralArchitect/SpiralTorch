@@ -359,3 +359,12 @@ language follow-up still fails the unchanged Key-bias gate (nine components
 versus eight before). A saved-report diagnostic also finds invariant-direction
 drift in the independent float32 reference. These observations motivate a
 higher-precision gradient/reduction isolation, not a loosened gate or promotion.
+
+That [fixed-state isolation](../benchmarks/results/2026-10-16-dense-bias-reduction/README.md)
+now reproduces and repairs dense/QKV bias-sum cancellation, including finite
+overflow boundaries and identity-VJP subnormals. All three saved models are
+probed on four fixed batches against independent float32 and float64 Torch
+controls without changing weights, moments or revisions. Key residuals decrease
+in all twelve probes; full-parameter L2 error improves in 51 comparisons, stays
+equal in 188 and worsens in 17. No retraining, generation, gate change or model
+promotion is implied. This keeps numerical repair distinct from Z-Space efficacy.

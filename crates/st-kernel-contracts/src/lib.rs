@@ -17,6 +17,7 @@ pub mod compaction;
 mod compensated;
 pub mod elementwise;
 pub mod euclidean;
+pub mod f32_sum;
 pub mod fisher_rao;
 pub mod gradient_clip;
 pub mod graph;

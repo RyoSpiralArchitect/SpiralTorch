@@ -1,0 +1,142 @@
+{
+  "schema": "spiraltorch.dense_bias_reduction.process_cost.v1",
+  "passed": true,
+  "scope": "3 restored models x 4 backward-only batches per process; startup, pipeline compilation, JSON and readbacks included; not kernel throughput",
+  "binary_sha256": {
+    "before": "768ce8ed141e0858f15671ae158d4321735e7b7be7673480ef8a543643bf3980",
+    "exact": "cb772e4e3dada87c7d8328d459b0d83b7c7b2338d4a460e3cd53e4a7234f9c18"
+  },
+  "build_controls": {
+    "before": {
+      "features": [
+        "wgpu"
+      ],
+      "profile": {
+        "opt_level": "0",
+        "debuginfo": 2,
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": false
+      }
+    },
+    "exact": {
+      "features": [
+        "wgpu"
+      ],
+      "profile": {
+        "opt_level": "0",
+        "debuginfo": 2,
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": false
+      }
+    }
+  },
+  "request_checkpoint_sha256": [
+    "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+    "9e8ae028c81705e05935e70ba8386e9db602ebfa4603d78ce874670f7b6c491c"
+  ],
+  "rows": [
+    {
+      "phase": "warmup",
+      "variant": "before",
+      "seconds": 4.1483010000083596,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "aa04780e9c7f2b305555139983c4c16c785759ea2ababff9da2734892c43fb00",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "warmup",
+      "variant": "exact",
+      "seconds": 2.311507625010563,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "a698b72b5ffa9c209d95d2bd63c83ce451b3e7daec67e3f1bb872dfad4eecf6a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "before",
+      "seconds": 2.2134725829819217,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "aa04780e9c7f2b305555139983c4c16c785759ea2ababff9da2734892c43fb00",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "exact",
+      "seconds": 2.2592376670218073,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "a698b72b5ffa9c209d95d2bd63c83ce451b3e7daec67e3f1bb872dfad4eecf6a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "exact",
+      "seconds": 2.2565976250043605,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "a698b72b5ffa9c209d95d2bd63c83ce451b3e7daec67e3f1bb872dfad4eecf6a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "before",
+      "seconds": 2.184760042000562,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "aa04780e9c7f2b305555139983c4c16c785759ea2ababff9da2734892c43fb00",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "before",
+      "seconds": 2.175241416989593,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "aa04780e9c7f2b305555139983c4c16c785759ea2ababff9da2734892c43fb00",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "exact",
+      "seconds": 2.2755147079878952,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "a698b72b5ffa9c209d95d2bd63c83ce451b3e7daec67e3f1bb872dfad4eecf6a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "exact",
+      "seconds": 2.2588557089911774,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "a698b72b5ffa9c209d95d2bd63c83ce451b3e7daec67e3f1bb872dfad4eecf6a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "phase": "measured",
+      "variant": "before",
+      "seconds": 2.1725962910277303,
+      "exit_code": 0,
+      "report_matches": true,
+      "stdout_sha256": "aa04780e9c7f2b305555139983c4c16c785759ea2ababff9da2734892c43fb00",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "median_seconds": {
+    "before": 2.1800007294950774,
+    "exact": 2.2590466880064923
+  },
+  "median_ratio_exact_over_before": 1.0362596018624834,
+  "limitations": [
+    "four measured processes per variant on one host",
+    "not isolated from OS noise",
+    "no timestamps or register/spill measurements",
+    "no PyTorch speed comparison"
+  ]
+}

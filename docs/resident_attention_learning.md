@@ -52,6 +52,14 @@ The [shift-conservation record](../benchmarks/results/2026-10-16-attention-shift
 retains the failing baseline and native/browser checks, including causal
 Poincare coordinate/gain pullbacks. No bias gradient is masked or zeroed.
 
+The adjacent QKV/Linear bias reduction now uses the shared Rust/WGSL exact
+f32-sum contract, with one final rounding and separate prefix-overflow rejection.
+Its identity VJP copies rather than multiplying by one, preserving subnormal
+cotangents on the tested paths. [Dense-bias isolation](../benchmarks/results/2026-10-16-dense-bias-reduction/README.md)
+retains native/browser exact-oracle checks and twelve unchanged-checkpoint
+language probes against float32/float64 Torch. Key-shift residuals decrease,
+but some parameter errors increase; the previous language gate remains failed.
+
 ## Python and WASM
 
 Python only converts arguments and releases the GIL around the same Rust calls:
