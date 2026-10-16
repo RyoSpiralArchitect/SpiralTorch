@@ -12,4 +12,9 @@ fn attention_gradients_and_resident_sgd_match_pytorch() {
         st_backend_wgpu::runtime::ensure_default_runtime_blocking("attention.vjp.torch").unwrap();
     let report = pollster::block_on(support::run(runtime)).unwrap();
     println!("{report}");
+    assert_eq!(report["passed"], true);
+    assert_eq!(
+        report["shift_checks"]["cases"].as_array().unwrap().len(),
+        13
+    );
 }

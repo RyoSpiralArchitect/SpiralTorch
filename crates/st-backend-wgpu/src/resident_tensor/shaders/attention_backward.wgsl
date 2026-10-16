@@ -101,7 +101,7 @@ fn load_wide(offset: u32) -> Wide {
 }
 
 // All callers enter with a uniform context/query/key and all 64 lanes.
-fn compute_pair(context: u32, query: u32, key: u32, lane: u32) {
+fn compute_pair(context: u32, query: u32, key: u32, lane: u32, with_dp: bool) {
     let qb = base(params.query, context, query);
     let kb = base(params.key, context, key);
     let vb = base(params.value, context, key);
@@ -116,8 +116,10 @@ fn compute_pair(context: u32, query: u32, key: u32, lane: u32) {
             dot = checked(dot + checked(queries[qb + i * params.query.strides.w] * keys[kb + i * params.key.strides.w]));
         }
     }
-    for (var i = lane; i < params.head_dim; i += 64u) {
-        dp = wide_add(dp, wide_mul(parts(upstream[ub + i * params.upstream.strides.w]), parts(values[vb + i * params.value.strides.w])));
+    if (with_dp) {
+        for (var i = lane; i < params.head_dim; i += 64u) {
+            dp = wide_add(dp, wide_mul(parts(upstream[ub + i * params.upstream.strides.w]), parts(values[vb + i * params.value.strides.w])));
+        }
     }
     dots[lane] = dot;
     dp_parts[lane] = dp;
@@ -125,7 +127,7 @@ fn compute_pair(context: u32, query: u32, key: u32, lane: u32) {
     for (var stride = 32u; stride > 0u; stride >>= 1u) {
         if (lane < stride) {
             if (stride < dot_lanes) { dots[lane] = checked(dots[lane] + dots[lane + stride]); }
-            dp_parts[lane] = wide_add(dp_parts[lane], dp_parts[lane + stride]);
+            if (with_dp) { dp_parts[lane] = wide_add(dp_parts[lane], dp_parts[lane + stride]); }
         }
         workgroupBarrier();
     }
@@ -156,14 +158,19 @@ fn statistics(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation
     }
     workgroupBarrier();
     for (var key = 0u; key < visible_keys(query); key += 1u) {
-        compute_pair(context, query, key, lane);
+        compute_pair(context, query, key, lane, false);
+        if (lane == 0u) { row_maximum = max(row_maximum, pair_score); }
+        workgroupBarrier();
+    }
+    // Derivatives recompute weights at this final maximum. Online rescaling
+    // with rounded exponentials is not multiplicatively consistent with that
+    // recomputation and can break both probability and score-gradient sums.
+    for (var key = 0u; key < visible_keys(query); key += 1u) {
+        compute_pair(context, query, key, lane, true);
         if (lane == 0u) {
-            let maximum = max(row_maximum, pair_score);
-            let previous = score_weight(row_maximum, maximum);
-            let current = score_weight(pair_score, maximum);
-            row_sum = wide_add(wide_mul(row_sum, previous), current);
-            row_center = wide_add(wide_mul(row_center, previous), wide_mul(pair_dp, current));
-            row_maximum = maximum;
+            let weight = score_weight(pair_score, row_maximum);
+            row_sum = wide_add(row_sum, weight);
+            row_center = wide_add(row_center, wide_mul(pair_dp, weight));
         }
         workgroupBarrier();
     }
@@ -193,7 +200,7 @@ fn query_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
     for (var i = lane; i < params.head_dim; i += 64u) { gradient_a[i] = parts(0.0); }
     workgroupBarrier();
     for (var key = 0u; key < visible_keys(query); key += 1u) {
-        compute_pair(context, query, key, lane);
+        compute_pair(context, query, key, lane, true);
         compute_derivatives(row, lane);
         let scaled = wide_mul(parts(params.scale), score_gradient);
         let kb = base(params.key, context, key);
@@ -229,7 +236,7 @@ fn key_value_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_in
     workgroupBarrier();
     for (var query = 0u; query < params.queries; query += 1u) {
         if (key >= visible_keys(query)) { continue; }
-        compute_pair(context, query, key, lane);
+        compute_pair(context, query, key, lane, true);
         compute_derivatives(context * params.queries + query, lane);
         let scaled = wide_mul(parts(params.scale), score_gradient);
         let qb = base(params.query, context, query);

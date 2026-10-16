@@ -8,6 +8,8 @@ use st_kernel_contracts::{attention::AttentionSpec, layout::NdLayout};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+mod attention_shift;
+
 fn floats(value: &Value) -> Vec<f32> {
     value
         .as_array()
@@ -235,6 +237,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     }
     let device = TensorDevice::new(runtime.clone())?;
     let edges = edge_checks(&device).await?;
+    let shifts = attention_shift::run(&device).await?;
     let fixture: Value = serde_json::from_str(include_str!(
         "../fixtures/resident_attention_vjp_torch.json"
     ))?;
@@ -447,9 +450,12 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         );
     }
     Ok(
-        json!({"schema": "spiraltorch.resident_attention_vjp.validation.v1", "passed": true,
+        json!({"schema": "spiraltorch.resident_attention_vjp.validation.v1", "passed": shifts["passed"],
         "adapter": format!("{:?}", runtime.adapter_info()), "torch_version": fixture["torch_version"],
-        "checks": checks, "edge_checks": edges, "learning": {"steps": steps, "trace": trace, "final_parameter_errors": final_errors,
+        "backend": format!("{:?}", runtime.adapter_info().backend),
+        "browser_hardware_execution": if cfg!(target_arch = "wasm32") {Some("unverified")} else {None},
+        "checks": checks, "edge_checks": edges, "shift_checks": shifts,
+        "learning": {"steps": steps, "trace": trace, "final_parameter_errors": final_errors,
         "validation_readbacks": "after all updates"},
         "scope": "synthetic gradient/update parity; no speed, full-decoder or quality claim"}),
     )

@@ -43,6 +43,15 @@ hidden by a crop or empty query, invalidates every output. Unrepresentable
 **requested** gradients also invalidate the whole result. An absent bias gradient
 does not make an otherwise representable Q/K/V result fail.
 
+The statistics dispatch now scans visible keys twice: first for the final score
+maximum, then for normalization and the weighted upstream/value product at that
+maximum. This avoids disagreement between rounded online exponential rescaling
+and the pullbacks' final-maximum weights. The three-dispatch layout and scratch
+size are unchanged; this is a numerical correction, not a measured speedup.
+The [shift-conservation record](../benchmarks/results/2026-10-16-attention-shift-invariance/README.md)
+retains the failing baseline and native/browser checks, including causal
+Poincare coordinate/gain pullbacks. No bias gradient is masked or zeroed.
+
 ## Python and WASM
 
 Python only converts arguments and releases the GIL around the same Rust calls:
@@ -126,7 +135,8 @@ python3 -I -S -m http.server 8783 --bind 127.0.0.1
 
 Match the wasm-bindgen CLI to Cargo.lock (`0.2.129`). Open
 `http://127.0.0.1:8783/crates/st-backend-wgpu/tests/attention_vjp_browser.html` and
-require `passed: true`, 36 checks and all 16 update checks. The public binding
+require `passed: true`, 36 checks, all 16 update checks and
+`shift_checks.passed: true` with 13 shift cases. The public binding
 regressions are `bindings/st-py/tests/test_wgpu_attention.py` and
 `bindings/st-wasm/tests/resident_attention_clients.html`; the latter expects a
 fresh full `webgpu` package in its adjacent `module/` directory.

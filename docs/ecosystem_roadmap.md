@@ -462,9 +462,15 @@ Attention/AdamW numerical work rather than model promotion or more audit layers.
 
 The first [shared optimizer repair](../benchmarks/results/2026-10-16-attention-adamw-numerics/README.md)
 has now passed native/browser same-gradient replays and large-clock restoration.
-The bounded full-language follow-up still fails on Key-bias. Next, test Attention
-shift invariance and its pullback directly; do not drop coordinates or relax the
-gate to turn diagnostic loss reductions into geometry-efficacy claims.
+The bounded full-language follow-up still fails on Key-bias. The subsequent
+[Attention shift-conservation repair](../benchmarks/results/2026-10-16-attention-shift-invariance/README.md)
+passes native/browser isolated controls, including causal Poincare pullbacks,
+but its 1,024-update language follow-up still fails and does not uniformly
+reduce parameter differences. Float32 reference drift is also visible along
+the exact-arithmetic Key-shift invariant direction. Next, isolate projection
+reductions and optimizer amplification against a higher-precision control.
+Do not drop coordinates or relax the gate to turn diagnostic loss reductions
+into geometry-efficacy claims.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

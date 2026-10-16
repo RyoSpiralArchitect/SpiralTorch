@@ -53,6 +53,50 @@ fn data(len: usize, phase: f32) -> Vec<f32> {
 }
 
 #[test]
+fn normalized_pullbacks_preserve_value_and_score_shift_directions() {
+    let Some(device) = device() else { return };
+    let mut passed = true;
+    for count in [8, 16, 32, 64, 257] {
+        let q = device.upload(&[1, 1, 1, 1], &[1.0]).unwrap();
+        let k = device
+            .upload(
+                &[1, 1, count, 1],
+                &(0..count).map(|i| i as f32 / 32.0).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        let v = device
+            .upload(
+                &[1, 1, count, 1],
+                &(0..count).map(|i| i as f32 / 8.0).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        let pair = device.upload(&[1, 1, 1, count], &vec![0.0; count]).unwrap();
+        let gradients = q
+            .scaled_dot_attention_vjp(&k, &v, &q, 1.0, AttentionMask::None, None, Some(&pair))
+            .unwrap();
+        for (name, data, expected) in [
+            ("value", read(&gradients.value), 1.0),
+            ("key", read(&gradients.key), 0.0),
+            ("pair", read(gradients.pair_bias.as_ref().unwrap()), 0.0),
+        ] {
+            let sum: f64 = data.iter().map(|&v| f64::from(v)).sum();
+            // Allow final f32 narrowing, but not a biased normalization before it.
+            let rounding: f64 = data
+                .iter()
+                .map(|v| f64::from(v.abs().next_up()) - f64::from(v.abs()))
+                .sum();
+            let bound = rounding + 2e-12;
+            eprintln!("K={count} {name}: sum={sum:e}, expected={expected:e}, bound={bound:e}");
+            passed &= (sum - expected).abs() <= bound;
+        }
+    }
+    assert!(
+        passed,
+        "normalization residual exceeds final-narrowing budget"
+    );
+}
+
+#[test]
 fn shader_abi_and_workgroup_storage_validate_without_an_adapter() {
     let source = shader_source();
     let module = naga::front::wgsl::parse_str(&source)

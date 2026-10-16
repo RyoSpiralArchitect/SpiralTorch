@@ -351,3 +351,11 @@ browser identical-gradient replays now pass, but a bounded width16/seed11
 language follow-up still fails on Key-bias components. This isolates the next
 Attention/VJP question; it does not qualify the earlier study or establish
 uniformly improved language accuracy.
+
+The next [Attention conservation repair](../benchmarks/results/2026-10-16-attention-shift-invariance/README.md)
+fixes a reproduced final-maximum normalization mismatch and passes native/browser
+shift controls with real Poincare pullbacks. Its one-shot, same-build-profile
+language follow-up still fails the unchanged Key-bias gate (nine components
+versus eight before). A saved-report diagnostic also finds invariant-direction
+drift in the independent float32 reference. These observations motivate a
+higher-precision gradient/reduction isolation, not a loosened gate or promotion.
