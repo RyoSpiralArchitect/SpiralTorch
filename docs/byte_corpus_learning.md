@@ -344,3 +344,10 @@ all saved-model generations and training-only baselines. It exactly reproduces
 the earlier256-step width16 states, but all six long-run studies fail the
 unchanged parameter-comparison gate. Lower observed loss is therefore retained
 as diagnostic evidence, not validated geometry efficacy or serving promotion.
+
+The subsequent [Rust/WGSL AdamW repair](../benchmarks/results/2026-10-16-attention-adamw-numerics/README.md)
+removes cancellation from bias correction without changing that gate. Native and
+browser identical-gradient replays now pass, but a bounded width16/seed11
+language follow-up still fails on Key-bias components. This isolates the next
+Attention/VJP question; it does not qualify the earlier study or establish
+uniformly improved language accuracy.

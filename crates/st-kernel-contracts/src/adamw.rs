@@ -126,8 +126,8 @@ impl AdamWStep {
             checked_mul(config.beta2, second)?,
             checked_mul(1.0 - config.beta2, square)?,
         )?;
-        let m_hat = checked_div(first, 1.0 - unit_powi(config.beta1, steps))?;
-        let v_hat = checked_div(second, 1.0 - unit_powi(config.beta2, steps))?;
+        let m_hat = checked_div(first, bias_correction(config.beta1, steps))?;
+        let v_hat = checked_div(second, bias_correction(config.beta2, steps))?;
         let denominator = checked_add(v_hat.sqrt(), config.epsilon)?;
         let decay = checked_mul(self.rate, self.weight_decay)?;
         let decayed = checked_mul(value, checked_add(1.0, -decay)?)?;
@@ -191,15 +191,19 @@ fn checked_div(a: f32, b: f32) -> Result<f32, AdamWError> {
         Err(arithmetic_error())
     }
 }
-fn unit_powi(mut base: f32, mut n: u32) -> f32 {
-    let mut value = 1.0;
+// Compose complements: 1 - (1-a)(1-b) = a + (1-a)b. Computing 1-beta^n
+// directly avoids cancellation and repeated squaring of a rounded near-one beta.
+// The integer clock stays exact, including beyond float32's consecutive integers.
+fn bias_correction(beta: f32, mut n: u32) -> f32 {
+    let mut power_complement = 1.0 - beta;
+    let mut value = 0.0;
     while n != 0 {
         if n & 1 != 0 {
-            value *= base;
+            value += (1.0 - value) * power_complement;
         }
         n >>= 1;
         if n != 0 {
-            base *= base;
+            power_complement += (1.0 - power_complement) * power_complement;
         }
     }
     value
@@ -270,6 +274,45 @@ impl AdamWState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bias_correction_tracks_f64_across_u32_clocks() {
+        let mut clocks: Vec<u32> = (0..=4096).collect();
+        for bit in 0..32 {
+            let power = 1u32 << bit;
+            clocks.extend([power - 1, power, power + 1]);
+        }
+        clocks.push(u32::MAX);
+        for beta in [
+            0.0,
+            f32::MIN_POSITIVE,
+            0.01,
+            0.1,
+            0.5,
+            0.9,
+            0.99,
+            0.999,
+            0.9999,
+            f32::from_bits(0x3f7fffff),
+        ] {
+            for &steps in &clocks {
+                let expected = if steps == 0 {
+                    0.0
+                } else if beta == 0.0 {
+                    1.0
+                } else {
+                    // Independent f64 oracle avoids subtracting nearly equal numbers.
+                    -(f64::from(steps) * f64::from(beta).ln()).exp_m1() as f32
+                };
+                let actual = bias_correction(beta, steps);
+                assert!((0.0..=1.0).contains(&actual));
+                assert!(
+                    actual.to_bits().abs_diff(expected.to_bits()) <= 4,
+                    "beta={beta:?}, steps={steps}: {actual:?} versus {expected:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn decoupled_decay_bias_correction_and_freeze() {

@@ -109,8 +109,11 @@ not inferred from moments. This is not a complete experiment replay or training
 attestation. Preserve the exact Rust JSON string through JavaScript; parsing and
 reserializing floats can lose negative zero.
 
-The shared Rust/WGSL rule uses integer exponentiation for bias correction and
-checks unsafe arithmetic before it executes. WGSL does not guarantee that an
+The shared Rust/WGSL rule computes the bias correction `1-beta^n` directly by
+composing complements, `a+(1-a)*b`, with an exact integer clock. This avoids
+subtracting a rounded near-one power from one; it does not change betas, epsilon,
+decay, moments, or the zero-rate policy. The implementation checks unsafe
+arithmetic before it executes. WGSL does not guarantee that an
 overflow becomes a detectable infinity, and may flush subnormals; see the
 [WGSL floating-point rules](https://www.w3.org/TR/WGSL/#floating-point-evaluation).
 Controls must be zero or normal finite float32 values; epsilon must be positive
@@ -123,11 +126,23 @@ rounding error. There is no promise of bitwise
 equality between different devices. A tensor clock at `u32::MAX` rejects an
 active update instead of wrapping; a frozen clock remains unchanged.
 
+The checkpoint update-rule name describes optimizer policy, not a bitwise kernel
+fingerprint. Older AdamW states remain loadable, but this numerical refinement
+changes rounding. Exact continuation evidence requires the same build and
+device; resuming an older state under a newer kernel is not proof of bitwise
+replay. Keep the source/binary identity alongside checkpoint provenance.
+
 ## Verification
 
 The [2026-10-15 validation record](../benchmarks/results/2026-10-15-resident-adamw/README.md)
 contains native, installed-wheel and actual browser results, source hashes and
 explicit scope limits.
+
+The [2026-10-16 numerical isolation](../benchmarks/results/2026-10-16-attention-adamw-numerics/README.md)
+also replays three identical-gradient streams for 1,024 updates each. The
+unchanged float32 PyTorch and Rust CPU gates are separate from scalar float64
+accuracy diagnostics. Passing this optimizer-only experiment does not repair
+or retroactively qualify the earlier full-language numerical failures.
 
 `tools/generate_resident_adamw_fixture.py` generates the independent CPU PyTorch
 oracle, with `foreach=False`, `fused=False` and `grad=None` for frozen tensors.
@@ -140,6 +155,7 @@ a corpus-quality benchmark.
 
 ```bash
 cargo test --locked -p st-kernel-contracts
+cargo run --locked -p st-backend-wgpu --example resident_adamw_numerics
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked -p st-backend-wgpu \
   --lib resident_training::parameters -- --test-threads=1
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked -p st-nn \

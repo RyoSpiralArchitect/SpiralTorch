@@ -1,0 +1,104 @@
+{
+  "schema": "spiraltorch.adamw_numerical_repair.verification.v1",
+  "parent_commit": "a8b0f930eb5f9343d18a8e11bc4e17a3116ecf95",
+  "rust": "1.99.0 (b940084d7 2026-09-28)",
+  "python": "3.12.6",
+  "torch": "2.12.1",
+  "wasm_bindgen": "0.2.129",
+  "native_adapter": "Apple M4 / Metal",
+  "baseline_regression": {
+    "log": "bias-correction-before.log",
+    "expected_exit": 101,
+    "failed_test": "adamw::tests::bias_correction_tracks_f64_across_u32_clocks",
+    "first_failure": {"beta": 0.99, "steps": 2}
+  },
+  "tests": [
+    {
+      "command": "cargo +1.99.0 test --locked -p st-kernel-contracts",
+      "log": "contracts-after.log",
+      "passed": 127
+    },
+    {
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo +1.99.0 test --locked -p st-backend-wgpu --lib resident_training::parameters -- --test-threads=1",
+      "log": "native-parameters-final.log",
+      "passed": 8
+    },
+    {
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo +1.99.0 test --locked -p st-nn --no-default-features --features wgpu --lib resident::byte_ -- --test-threads=1",
+      "log": "native-language-after.log",
+      "passed": 120
+    },
+    {
+      "command": "python3 -I -B benchmarks/results/2026-10-16-attention-adamw-numerics/test_language_probe.py -v",
+      "log": "probe-tests-final.log",
+      "passed": 6
+    }
+  ],
+  "strict_clippy": {
+    "native": "cargo +1.99.0 clippy --locked -p st-kernel-contracts -p st-backend-wgpu --all-targets -- -D warnings",
+    "wasm": "cargo +1.99.0 clippy --locked -p st-backend-wgpu --target wasm32-unknown-unknown --all-targets -- -D warnings",
+    "passed": true
+  },
+  "same_gradient": {
+    "cases": 3,
+    "updates_per_case": 1024,
+    "sampled_cursors_per_case": 9,
+    "atol": 3e-6,
+    "rtol": 5e-5,
+    "before_gate": "failed",
+    "after_native_gate": "passed",
+    "after_browser_gate": "passed",
+    "scalar_f64": "diagnostic only; constant-gradient trajectory still has one out-of-envelope component",
+    "fixture_regenerated_byte_equal": true
+  },
+  "browser": {
+    "client": "Chrome",
+    "backend": "BrowserWebGpu",
+    "hardware_execution": "unverified",
+    "record": "browser.json",
+    "actual_execution": true,
+    "large_clock_probes": 8,
+    "large_clock_max_observed_ulps": 1,
+    "large_clock_bound_ulps": 8,
+    "loopback_server_stopped": true
+  },
+  "language": {
+    "condition": "w16-seed11",
+    "cases": 3,
+    "updates_per_case": 1024,
+    "before_strict_gate": false,
+    "after_strict_gate": false,
+    "before_failed_components": [3, 5, 4],
+    "after_failed_components": [2, 3, 3],
+    "remaining_location": "block.0.qkv.bias Key slice",
+    "uniform_error_improvement": false,
+    "execution_modes_differ": "previous installed-wheel segmented run versus current native debug uninterrupted run",
+    "post_run_runner_hardening": true,
+    "executed_runner_sha256": "548b3b2597a402cfb3d65690f8b817ebe58dc1e7a64faa87a7ba1f4026d013da",
+    "comparison_helpers_binary_and_archived_runner_rechecked": true,
+    "new_generation": false,
+    "promotion": false
+  },
+  "latest_parent_ci": {
+    "run": 38739550458,
+    "head": "d487e367c1cc97112564a56cea2d9fccf6bce527",
+    "status": "completed",
+    "conclusion": "failure"
+  },
+  "independent_review": {
+    "mode": "read-only local sub-agent",
+    "open_code_findings": 0,
+    "resolved_findings": [
+      "BrowserWebGpu does not establish selected-adapter hardware identity",
+      "Reusable runner must set explicit private output permissions",
+      "Reusable runner must recheck drift after comparison before publication"
+    ],
+    "runtime_and_hash_checks": "executed by the parent agent, not the read-only reviewer"
+  },
+  "merge_performed": false,
+  "new_wheel_built": false,
+  "pypi_upload": false,
+  "existing_deletions_preserved": 8234,
+  "existing_deletion_list_sha256": "bc8917dfba59592756119508ad01d973e5062cebffbbc585d3aaa3b6c5adb04a",
+  "scope": "Numerical repair and bounded diagnostic follow-up, not quality, efficacy, speed, hardware portability or execution attestation"
+}
