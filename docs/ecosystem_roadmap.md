@@ -384,8 +384,9 @@ controls rather than choosing between them:
    geometry-off/detached controls and zero-Q/K isolation. Corpus-scale utility,
    conditional routing and decoder continuation remain separate open work.
    The [Python model guide](python/byte-language-models.md) covers the native
-   model API introduced in 0.4.30; the standalone WASM qualification module is
-   not a packaged `st-wasm` model facade. The original host Modules remain
+   model API introduced in 0.4.30. The [packaged WASM lifecycle](wasm_byte_language_mlops.md)
+   now exposes studies, artifacts, inference and measured serving, but not every
+   low-level model-building class. The original host Modules remain
    unchanged. Uncertainty outputs, KV-cache ownership and learning-quality
    gains remain separate open work.
 3. **Measure the complete language path.** Require numerical agreement before
@@ -434,7 +435,7 @@ source-companion validation. Hash integrity does not attest training or quality.
 The source-only [serving gate](python/byte-serving-gates.md) now fixes evaluation
 windows and explicit language/geometry limits at bootstrap. Rust measures both
 owners, issues process-local slot/generation-bound permits and supports exact
-one-step rollback; Python and the standalone WASM client share that path.
+one-step rollback; Python and the packaged WASM client share that path.
 Held-outness, threshold selection and model authenticity remain caller-owned.
 This is not yet a registry, durable deployment service or HF integration.
 
@@ -442,8 +443,15 @@ Named cohorts now carry separate explicit limits; every cohort must pass, and
 no global mean can override a failing group. The source-only
 [greedy generation loop](python/byte-generation.md) connects selected artifacts
 to actual byte output with model identity and serving-generation checks. Rust
-owns window movement and byte selection; Python and the standalone browser are
+owns window movement and byte selection; Python and the packaged browser are
 clients. Teacher-forced admission does not certify free-running quality.
+
+The [packaged language lifecycle](wasm_byte_language_mlops.md) connects those
+operations through `spiraltorch-wasm`, with CPU-only transport and explicit
+WebGPU execution. Actual byte-LM artifacts retain learned geometry/router state;
+browser AdamW checkpoints can resume on a fresh page. JS supplies orchestration,
+not another acceptance policy. Pending operations own their inputs, and live
+serving changes use Rust's typed, one-use permits rather than report JSON.
 
 Next, compare generated behavior alongside the fixed-window cohort measurements,
 and connect this lifecycle to orchestration without duplicating policy. Reuse the existing

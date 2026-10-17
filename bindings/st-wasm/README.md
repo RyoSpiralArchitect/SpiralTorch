@@ -37,6 +37,12 @@ target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invokin
 
 ## Examples
 
+- [Language MLOps](../../docs/wasm_byte_language_mlops.md): packaged
+  `ByteCorpusStudy` trains/resumes the Rust byte LM; `ByteCorpusModelArtifact`
+  retains learned geometry and routers. `ResidentByteServing` measures explicit
+  language/geometry cohort gates, activates typed candidates and rolls back the
+  actual resident owner. `nn` enables CPU transport; `webgpu` adds execution.
+
 - [Resident vision training](../../docs/resident_vision_training_clients.md):
   `ResidentConvNeXtClassifier` wraps the Rust backbone and classification head.
   Forward, explicit loss VJP and SGD remain resident; update acceptance and

@@ -96,7 +96,7 @@ These are host-tensor examples, not resident GPU graphs. Continue with the
 | Keep NN computation on the GPU | [Resident forward](docs/module_resident_forward.md), [resident training](docs/resident_nn_training.md) |
 | Train a byte LM with geometric attention | [Python byte-LM API](docs/python/byte-language-models.md), [runnable example](bindings/st-py/examples/resident_byte_geometry_lm.py) |
 | Evaluate and switch geometry-bearing models | [Source-only serving gates](docs/python/byte-serving-gates.md), [MLOps direction](docs/ecosystem_roadmap.md#language-first-mlops-with-learned-geometry) |
-| Use a browser as a real client | [WASM bindings](bindings/st-wasm/README.md), [browser demos](docs/reference/wasm.md) |
+| Use a browser as a real client | [Language MLOps](docs/wasm_byte_language_mlops.md), [WASM bindings](bindings/st-wasm/README.md) |
 | Work on vision or GNNs | [Vision clients](docs/resident_vision_training_clients.md), [GNN and geometry reference](docs/reference/geometry.md) |
 | Interoperate with PyTorch | [DLPack](docs/dlpack_interop.md), [migration guide](docs/pytorch-migration-guide.md) |
 | Inspect performance evidence | [Matched backend benchmarks](docs/backend_pytorch_benchmarks.md) |

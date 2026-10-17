@@ -9,6 +9,103 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Requires nn; GPU methods additionally require webgpu. Rust owns all study semantics. */
+    export class ByteCorpusStudy {
+        private constructor();
+        static fromJson(input: string): ByteCorpusStudy;
+        readonly requestSha256: string;
+        readonly totalUpdates: number;
+        readonly designSchema: string;
+        readonly optimizerRecipeJson: string;
+        checkpointSizeBound(): number;
+        checkpointFromJson(input: string): ByteCorpusStudyCheckpoint;
+        caseArtifact(checkpoint: ByteCorpusStudyCheckpoint, case_name: string, inference_policy: string): ByteCorpusModelArtifact;
+        validateArtifact(checkpoint: ByteCorpusStudyCheckpoint, artifact: ByteCorpusModelArtifact): void;
+        advanceWebGpu(stop_after: number): Promise<ByteCorpusStudySegment>;
+        resumeWebGpu(checkpoint: ByteCorpusStudyCheckpoint, stop_after: number): Promise<ByteCorpusStudySegment>;
+        free(): void;
+    }
+
+    export class ByteCorpusStudyCheckpoint {
+        private constructor();
+        readonly completedUpdates: number;
+        readonly requestSha256: string;
+        toJson(): string;
+        free(): void;
+    }
+
+    export class ByteCorpusStudySegment {
+        private constructor();
+        readonly checkpoint: ByteCorpusStudyCheckpoint;
+        readonly reportJson: string;
+        free(): void;
+    }
+
+    /** Immutable weights, learned geometry and routers; identity is not authentication. */
+    export class ByteCorpusModelArtifact {
+        private constructor();
+        static fromJson(input: string, expected_id: string): ByteCorpusModelArtifact;
+        readonly artifactId: string;
+        readonly attemptedRevision: string;
+        readonly caseName: string;
+        readonly policy: string;
+        readonly requestSha256: string;
+        readonly studyCheckpointSha256: string;
+        toJson(): string;
+        restoreWebGpu(): Promise<ResidentByteInference>;
+        free(): void;
+    }
+
+    export class ByteCorpusServingGate {
+        private constructor();
+        static fromJson(input: string): ByteCorpusServingGate;
+        readonly batchCount: number;
+        readonly batchShape: Uint32Array;
+        readonly cohortNames: string[];
+        readonly requestSha256: string;
+        readonly schemaVersion: number;
+        toJson(): string;
+        validateArtifact(artifact: ByteCorpusModelArtifact): void;
+        bootstrapWebGpu(artifact: ByteCorpusModelArtifact): Promise<ResidentByteServing>;
+        free(): void;
+    }
+
+    /** webgpu only. Pending operations retain ownership; concurrent work fails busy. */
+    export class ResidentByteInference {
+        private constructor();
+        readonly artifactId: string;
+        readonly windowShape: Uint32Array;
+        forward(windows: Uint8Array): Promise<string>;
+        generateGreedy(input: Uint8Array, max_new_bytes: number): Promise<string>;
+        free(): void;
+    }
+
+    /** Process-local, one-use permit; JSON reports cannot reconstruct this handle. */
+    export class ResidentByteCandidate {
+        private constructor();
+        readonly accepted: boolean;
+        readonly consumed: boolean;
+        readonly artifactId: string;
+        toJson(): string;
+        free(): void;
+    }
+
+    export class ResidentByteServing {
+        private constructor();
+        readonly artifactId: string;
+        readonly gateSha256: string;
+        readonly generation: string;
+        readonly previousArtifactId: string | undefined;
+        readonly windowShape: Uint32Array;
+        bootstrapJson(): string;
+        prepareCandidate(artifact: ByteCorpusModelArtifact): Promise<ResidentByteCandidate>;
+        activate(candidate: ResidentByteCandidate): string;
+        rollback(expected_generation: string): string;
+        forward(windows: Uint8Array): Promise<string>;
+        generateGreedy(input: Uint8Array, max_new_bytes: number, expected_generation: string): Promise<string>;
+        free(): void;
+    }
+
     /** Causal zero-padded GL, Rust f32 host execution; no WebGPU claim. */
     export class FractionalGlAngleChart {
         constructor(angle: number);

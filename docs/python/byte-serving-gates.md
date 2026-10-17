@@ -197,7 +197,12 @@ The gate exposes `schema_version`, ordered `cohort_names`, `batch_count` and
 `byte_serving_browser.html` runs positive, negative, stale, cross-slot and exact
 rollback checks using a private `target/resident-byte-learning-web/serving-input.json`.
 See the [browser build recipe](../byte_corpus_learning.md#browser-execution).
-These are **not yet packaged `st-wasm` exports**.
+The [packaged `st-wasm` API](../wasm_byte_language_mlops.md) now exposes the same
+Rust serving core through `ByteCorpusServingGate.bootstrapWebGpu(artifact)`,
+`prepareCandidate`, `activate` and `rollback`. Its typed artifact handles,
+camelCase metadata and owned promises differ from the standalone test adapter;
+admission semantics do not. Build with `webgpu` for execution or `nn` for gate
+and artifact transport only.
 
 Existing HF adapter lineage, promotion reports and PEFT execution are separate
 clients with different artifact types. This slice does not retrofit them or
