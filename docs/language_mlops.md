@@ -23,13 +23,13 @@ Keep these decisions separate:
 | --- | --- | --- |
 | Train and resume | Exact request, optimizer recipe and complete case state | [Rust study / Python](python/byte-corpus-studies.md), [WASM](wasm_byte_language_mlops.md) |
 | Survive process interruption | Explicit immutable segment and parent identity | [Python local store and CLI](python/byte-study-runs.md) |
-| Select saved weights | Minimum development CE among actual saved checkpoints | [Rust / Python selector](byte_corpus_checkpoint_selection.md) |
+| Select saved weights | Minimum development CE among actual saved checkpoints | [Rust / Python selector](byte_corpus_checkpoint_selection.md), [WASM](wasm_byte_language_mlops.md#select-actual-saved-checkpoints) |
 | Run the selected model | Geometry-bearing artifact and fixed-window inference | [Python artifacts](python/byte-model-artifacts.md), [WASM owners](wasm_byte_language_mlops.md) |
 | Admit or roll back | Fresh language/geometry measurements on every named cohort | [Rust / Python gates](python/byte-serving-gates.md), [WASM gates](wasm_byte_language_mlops.md) |
 
 The durable POSIX store is Python orchestration, not an alternative checkpoint
 validator. Browser callers own persistence of opaque request/checkpoint JSON;
-the packaged WASM API does not yet expose saved-checkpoint selection. A serving
+the packaged WASM selector uses the same Rust rule as Python. A serving
 permit is process-local and is never reconstructed from a report after restart.
 
 ## Start With One Explicit Run

@@ -52,13 +52,18 @@ The decision JSON contains hashes and metrics, not weights or corpus bytes.
 ## Same Choice From Rust And Browser
 
 Rust calls `study.select_checkpoint(&[&early, &later], case_name, policy)` and
-receives `ByteCorpusCheckpointSelection { artifact, report }`. The browser
-example exports `select_resident_byte_learning_checkpoint(requestJson,
+receives `ByteCorpusCheckpointSelection { artifact, report }`. The packaged
+[WASM client](wasm_byte_language_mlops.md#select-actual-saved-checkpoints) exposes
+`study.checkpointCandidates()` with incremental `appendJson` imports and
+`candidates.selectCheckpoint(caseName, policy)`. It returns an owned artifact and
+the same decision JSON without a device, including in an `nn`-only build.
+
+The standalone browser example also exports `select_resident_byte_learning_checkpoint(requestJson,
 checkpointJsonStrings, caseName, policy)`, returning JSON with `artifact_json`
 and `report`. Keep each checkpoint/model JSON as an opaque string through
 JavaScript so signed-zero float32 bits are not reconstructed differently.
 
-The browser wrapper bounds raw input strings before parsing; the shared Rust
+Both browser paths bound raw input strings before parsing; the shared Rust
 selector additionally bounds their canonical representation. Neither selection
 entry point requests an adapter. Actual inference is still an explicit GPU call.
 

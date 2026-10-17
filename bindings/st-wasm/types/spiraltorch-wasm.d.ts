@@ -20,6 +20,7 @@ declare module "spiraltorch-wasm" {
         checkpointSizeBound(): number;
         checkpointFromJson(input: string): ByteCorpusStudyCheckpoint;
         caseArtifact(checkpoint: ByteCorpusStudyCheckpoint, case_name: string, inference_policy: string): ByteCorpusModelArtifact;
+        checkpointCandidates(): ByteCorpusCheckpointCandidates;
         validateArtifact(checkpoint: ByteCorpusStudyCheckpoint, artifact: ByteCorpusModelArtifact): void;
         advanceWebGpu(stop_after: number): Promise<ByteCorpusStudySegment>;
         resumeWebGpu(checkpoint: ByteCorpusStudyCheckpoint, stop_after: number): Promise<ByteCorpusStudySegment>;
@@ -31,6 +32,24 @@ declare module "spiraltorch-wasm" {
         readonly completedUpdates: number;
         readonly requestSha256: string;
         toJson(): string;
+        free(): void;
+    }
+
+    /** Requires nn. Imports exact checkpoint JSON; owns its originating study. */
+    export class ByteCorpusCheckpointCandidates {
+        private constructor();
+        readonly length: number;
+        readonly capacity: number;
+        appendJson(input: string): void;
+        selectCheckpoint(case_name: string, inference_policy: string): ByteCorpusCheckpointSelection;
+        free(): void;
+    }
+
+    /** Development selection, not a serving permit. The artifact getter owns a new handle. */
+    export class ByteCorpusCheckpointSelection {
+        private constructor();
+        readonly artifact: ByteCorpusModelArtifact;
+        readonly reportJson: string;
         free(): void;
     }
 

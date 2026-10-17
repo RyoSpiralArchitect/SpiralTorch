@@ -3,6 +3,7 @@
 Reuses the portable Python contract fixtures. No package install, device, corpus
 download, or private validation artifact is needed by the WASM CI job.
 """
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -34,9 +35,31 @@ def fixture():
                 documents=[[1, 2, 3]], cohorts=[
                     dict(name=name, batches=[[[0, 0]]], limits=limits)
                     for name in ("synthetic-a", "synthetic-b")])
+    selection_request = copy.deepcopy(request)
+    selection_request["train_batches"] *= 2
+    selection_raw = study.encoded(selection_request)
+    snapshots = []
+    for cursor in (0, 1, 2, 4):
+        saved = copy.deepcopy(checkpoint)
+        saved["request_sha256"] = hashlib.sha256(selection_raw).hexdigest()
+        saved["completed_updates"] = cursor
+        for index, case in enumerate(saved["cases"]):
+            model = json.loads(case["model_json"])
+            model["attempted_revision"] = str(cursor)
+            case["model_json"] = study.encoded(model).decode()
+            case["training"] = [dict(revision=n, ce=2.0) for n in range(1, cursor + 1)]
+            case["validation"] = [
+                dict(revision=n, batch_losses=[(3.0, 1.0, 2.0)[n // 2] if index == 0 else 2.0])
+                for n in (0, 2, 4) if n <= cursor]
+        snapshots.append(study.encoded(saved).decode())
+    selection = dict(source="synthetic_contract", request_json=selection_raw.decode(),
+                     checkpoint_jsons=[snapshots[n] for n in (0, 2, 3)],
+                     non_boundary_json=snapshots[1],
+                     expected_indices={case["name"]: 1 if i == 0 else 0
+                                       for i, case in enumerate(request["cases"])})
     return dict(request_json=raw.decode(), checkpoint_json=study.encoded(checkpoint).decode(),
                 case_names=[case["name"] for case in request["cases"]],
-                serving=dict(gate_json=study.encoded(gate).decode()))
+                serving=dict(gate_json=study.encoded(gate).decode()), selection=selection)
 
 
 if __name__ == "__main__":
