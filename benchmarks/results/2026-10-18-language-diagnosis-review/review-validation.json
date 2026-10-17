@@ -1,0 +1,77 @@
+{
+  "schema": "spiraltorch.language_diagnosis.review_validation.v1",
+  "original_commit": "2308aaeee17b23a55100546b6ad4b8d8bffbc4d7",
+  "original_publication_manifests_sha256": {
+    "benchmarks/results/2026-10-15-language-budget-512/validation.json": "f2d445c8d6a1f1bdcb21e956bb438d42ecf1d8c09486755958c7472c0ce285f8",
+    "benchmarks/results/2026-10-15-language-learning-diagnosis/validation.json": "c1fec63b7436b7d3f5d5ae43b1afff7d04eb5bfa28bf0592c420a1be78d66cf3"
+  },
+  "public_files_sha256": {
+    "benchmarks/results/2026-10-15-language-budget-512/run_once.py": "043135752e72f724865e678402ebfa7e0b5290e29c8a6e21e842284e9d7a5c95",
+    "benchmarks/results/2026-10-15-language-budget-512/test_run_once.py": "e3e560828d8aef61f455e985da2b4c348593ac84a0e149f0edc213a7bb7b6efe",
+    "benchmarks/results/2026-10-15-language-budget-512/README.md": "c0b4c4a8c1c1ec7918b78c129ec38440ee8354fdee5e55d31dfa4124b72d75a0",
+    "benchmarks/results/2026-10-15-language-learning-diagnosis/diagnose.py": "34d34eaf01dbd75c2f4fc2a484f1eae889d3d54e6cefd8483fab39a9b9ed8dba",
+    "benchmarks/results/2026-10-15-language-learning-diagnosis/test_diagnose.py": "af40c60d1af6870f22a034b7cabf21cb0aa12687f7dead66b133845ffb9b97de",
+    "benchmarks/results/2026-10-15-language-learning-diagnosis/review_recheck.py": "949b5bc5407401877e7962d6ec2509f72b1ffd5b4b4533db70460690249a4347",
+    "benchmarks/results/2026-10-15-language-learning-diagnosis/README.md": "d4381184344cb121966015c5891390ab42a240dedfd72d98e7ef335ee8d3c7b9",
+    "benchmarks/results/2026-10-18-language-diagnosis-review/README.md": "d4c920e69ecd569b7a9d7813fd45e625bae720a85f10d1e8b5f48503e80defbb",
+    "benchmarks/results/2026-10-18-language-diagnosis-review/diagnosis-recheck.json": "014b05233ba23335b3e5e53a4ff801fcb643f3f9de89e533cc5d5d28497a3557",
+    ".github/workflows/ci.yml": "83477b06281a3520c85dcfc5b9f7a9b7808e54a6e065d04b9e37f8293ce0fbd0",
+    "benchmarks/results/2026-10-15-language-learning-diagnosis/test_review_recheck.py": "83679b4d7bf608741bfcb0e4ded4087445f1a7160880cf26002d16f957c42197"
+  },
+  "tests": [
+    {
+      "log": "launch-tests-fixed-final.log",
+      "passed": 15,
+      "sha256": "71a2d84d80cbfb2d9d84dbf06d99b7db4c1b706daf150bad7b89a206bb623912"
+    },
+    {
+      "log": "diagnose-tests-fixed-final.log",
+      "passed": 17,
+      "sha256": "9c8f4920b27c37a18c47a94e6be3b1291a3ad9488e3a5186ffa33e195525d2db"
+    },
+    {
+      "log": "qualify-tests-fixed-final.log",
+      "passed": 6,
+      "sha256": "dcd2147edfda2291b456dfb6d9f3021f0fed07760d5a1c8869fc5446f30e28fe"
+    },
+    {
+      "log": "recheck-source-tests.log",
+      "passed": 4,
+      "sha256": "d094b1bd2c8318c96097f80c50da282add5b2972970a77046de8db6c8935f6ca"
+    }
+  ],
+  "total_tests": 42,
+  "offline_budget_revalidation": {
+    "schema": "spiraltorch.language_diagnosis.offline_revalidation.v1",
+    "source_head": "2308aaeee17b23a55100546b6ad4b8d8bffbc4d7",
+    "input_hashes": 12,
+    "cases": 25,
+    "comparison_matches_published": true,
+    "all_checkpoint_weights_and_histories_bound": true,
+    "checkpoint_cursors": [
+      128,
+      256,
+      512
+    ],
+    "baseline_metrics_recomputed": true,
+    "retained_generation_records_equal": 9,
+    "new_training_updates": 0,
+    "new_gpu_executions": 0
+  },
+  "offline_budget_revalidation_sha256": "5c1c75813dd9b90c64a1961040e4663cfec3644adc7690bb69bd178173d2c9ef",
+  "live_synthetic_process_inspection": {
+    "schema": "spiraltorch.pilot_adoption.live_synthetic.v1",
+    "exact_process_adopted": true,
+    "prefix_process_rejected_before_claim": true,
+    "inspected_processes": 2,
+    "new_model_executions": 0,
+    "new_training_updates": 0
+  },
+  "live_synthetic_process_inspection_sha256": "fd19bd253d8c82d8b5da12972930e63f27bd03763b612e763d0f12156c3f4b40",
+  "live_probe_script_sha256": "6541ab1e33927832e86a199a1477bd1d398f1aa16cc7f406b093378c6c1d385c",
+  "new_model_executions": 0,
+  "new_training_updates": 0,
+  "original_results_rewritten": false,
+  "notes": "Original manifests and measurements remain bound to original_commit; current public source revisions are pinned separately. OS argv inspection is not package attestation. Local verification is not remote CI or merge approval.",
+  "recheck_source_drift_guards_passed": true
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "spiraltorch.byte_corpus.frozen_diagnosis_publication.v1",
+  "source_revision": "cb48096bf53df397a61567dad52b023050c75f96",
+  "private_plan_sha256": "b76aa34198f7285afb0e290b99461f69437e06fbff20b324c6dff4437d56957d",
+  "files": {
+    "README.md": "026e14cc0dac890684742dc03b06200cd3508eb8ede05a773c1638ed4b508b98",
+    "comparison.json": "099f359d7bbd4c3df75bab58e7760822459a20321617493b3a23d7d27c871890",
+    "diagnose.py": "82d3f64e57410af04c615322d4dc9ce266b49222319fb456dedbd99975af801f",
+    "native-result.json": "9c062376b69b2c0659419ac98097c3ef692858fadb0690d499e931f5868e1fe0",
+    "test_diagnose.py": "c9f142f929aa708ef3a51e5f0534e19470f2916801d019cdde727b26e6d95708",
+    "torch-result.json": "3a640ac5f7e2e51e0277415c2674937ce9b590be93e829208ed0bf65364da049"
+  },
+  "reference_sources": {
+    "tools/byte_corpus_study.py": "c0d12b21b702d2ceed77b179b03e92757d6a036f19ce877ce20bf5e5dc7e9808",
+    "tools/verify_byte_corpus_resume.py": "271ed6c5f5555974ac54a231d8dbd4ad3cc1d961c567dc2fc336ffcd99c35aef",
+    "tools/byte_corpus_query.py": "9840bd1de7720c08a28ce58de225440a16c185831f71dc0be2e05e947a9c06ea",
+    "tools/byte_corpus_mixture.py": "77e73760075fd8d25face94354bc1abb18d9ef56d7c0d17c418d44e9b813ca48",
+    "tools/generate_resident_byte_decoder_torch_fixture.py": "fa9df363e945592b850d33ef1c2eedfcb03c5f157592dd30ccbbef18037fa76a",
+    "tools/generate_causal_zspace_wave_torch_fixture.py": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa",
+    "tools/generate_poincare_bias_torch_fixture.py": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18"
+  },
+  "private_inputs": {
+    "input/request.json": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+    "browser-checkpoint-128.json": "a81e625c51788f9a3c4b9f4da495ff57a7e8980a05cc63af2cef65219daf9e2c",
+    "browser.json": "2af73a89a41e711d201e2a7272c4ea84bca13ee8848d4cfbb8e1fc642eccbd8d"
+  },
+  "gate_sha256": "668b98136318fc91325ad6af58c35bbb82d4aa99be284233ca36ab5773621298",
+  "tests": {
+    "passed": 10,
+    "log_sha256": "7b890dbd7ca44dad638e1a5fa14ef4f1cf1593f586592560e01edfdf37c9b8cf"
+  },
+  "numeric_comparison_passed": true,
+  "compared_logits": 8294400,
+  "max_logit_absolute_error": 0.0000019073486328125,
+  "new_training_updates": 0,
+  "review": "Read-only independent review; three diagnosis findings fixed and native/Torch evidence regenerated. Separate bounded pilot is not part of this numerical result.",
+  "scope": "Posthoc diagnosis of nine historical browser-trained checkpoints. Native WGPU vs CPU Torch evaluates identical weights. No unseen benchmark, broad quality, speed or geometry-superiority claim."
+}
