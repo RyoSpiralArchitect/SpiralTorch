@@ -2,6 +2,9 @@
 use super::*;
 use crate::resident::portable::GraphRecord;
 use serde::{Deserialize, Serialize};
+use st_kernel_contracts::adamw::AdamWState;
+mod optimizer;
+use optimizer::AdamWRecord;
 
 pub const BYTE_DECODER_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v1";
 pub const BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v2";
@@ -11,26 +14,47 @@ pub const BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA: &str =
     "spiraltorch.nn.byte_decoder_checkpoint.v4";
 pub const BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA: &str =
     "spiraltorch.nn.byte_decoder_checkpoint.v5";
+pub const BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA: &str = "spiraltorch.nn.byte_decoder_checkpoint.v6";
 
-/// A complete fixed-window byte model and its attempted SGD revision.
-/// Plain SGD has no momentum slots. Data cursors, learning-rate schedules,
+/// A complete fixed-window byte model and its attempted update revision.
+/// AdamW checkpoints also own moments and accepted per-tensor clocks.
+/// Data cursors, learning-rate/decay schedules,
 /// external biases, runtime/kernel options and acceptance history are caller
 /// state, not part of this model checkpoint. Restoring creates a fresh owner.
 #[derive(Clone, Debug)]
 pub struct ByteDecoderCheckpoint {
     plan: ByteDecoderPlan,
     attempted_revision: u64,
+    optimizer: Option<AdamWState>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CheckpointRecord {
     schema: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "explicit_model_schema"
+    )]
+    model_schema: Option<String>,
     update_rule: String,
     window_state: String,
     // A decimal string stays exact even after a browser parses the JSON.
     attempted_revision: String,
     model: ModelRecord,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optimizer::explicit_optimizer"
+    )]
+    optimizer: Option<AdamWRecord>,
+}
+
+fn explicit_model_schema<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -388,6 +412,7 @@ impl ByteDecoderPlan {
         ByteDecoderCheckpoint {
             plan: self.clone(),
             attempted_revision: 0,
+            optimizer: None,
         }
     }
 }
@@ -421,12 +446,32 @@ impl ByteDecoderCheckpoint {
                 .ok_or(InferenceError::PortableAddressSpace)?;
             values.clear();
         }
+        let mut optimizer = self
+            .optimizer
+            .as_ref()
+            .map(AdamWRecord::from_state)
+            .transpose()?;
+        if let Some(optimizer) = &mut optimizer {
+            for slot in &mut optimizer.slots {
+                count = count
+                    .checked_add(slot.first.len())
+                    .and_then(|n| n.checked_add(slot.second.len()))
+                    .ok_or(InferenceError::PortableAddressSpace)?;
+                slot.first.clear();
+                slot.second.clear();
+            }
+        }
         let empty = serde_json::to_string(&CheckpointRecord {
-            schema: model.checkpoint_schema().to_owned(),
-            update_rule: "stateless_sgd.v1".to_owned(),
+            schema: self.schema(&model).to_owned(),
+            model_schema: self
+                .optimizer
+                .as_ref()
+                .map(|_| model.checkpoint_schema().to_owned()),
+            update_rule: self.update_rule().to_owned(),
             window_state: "reset_positions_and_geometry.v1".to_owned(),
             attempted_revision: u64::MAX.to_string(),
             model,
+            optimizer,
         })?;
         // serde_json's finite-float formatter has a 24-byte buffer. Reserve 32
         // per value including separators; digits never need string escaping.
@@ -454,14 +499,43 @@ impl ByteDecoderCheckpoint {
         self.attempted_revision
     }
 
+    pub fn adamw_state(&self) -> Option<&AdamWState> {
+        self.optimizer.as_ref()
+    }
+
+    fn schema(&self, model: &ModelRecord) -> &'static str {
+        if self.optimizer.is_some() {
+            BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA
+        } else {
+            model.checkpoint_schema()
+        }
+    }
+
+    fn update_rule(&self) -> &'static str {
+        if self.optimizer.is_some() {
+            "adamw_zero_rate_freeze.v1"
+        } else {
+            "stateless_sgd.v1"
+        }
+    }
+
     pub fn to_json(&self) -> Result<String, InferenceError> {
         let model = ModelRecord::from_plan(&self.plan)?;
         Ok(serde_json::to_string(&CheckpointRecord {
-            schema: model.checkpoint_schema().to_owned(),
-            update_rule: "stateless_sgd.v1".to_owned(),
+            schema: self.schema(&model).to_owned(),
+            model_schema: self
+                .optimizer
+                .as_ref()
+                .map(|_| model.checkpoint_schema().to_owned()),
+            update_rule: self.update_rule().to_owned(),
             window_state: "reset_positions_and_geometry.v1".to_owned(),
             attempted_revision: self.attempted_revision.to_string(),
             model,
+            optimizer: self
+                .optimizer
+                .as_ref()
+                .map(AdamWRecord::from_state)
+                .transpose()?,
         })?)
     }
 
@@ -479,7 +553,20 @@ impl ByteDecoderCheckpoint {
             });
         }
         let record: CheckpointRecord = serde_json::from_str(payload)?;
-        if record.schema != record.model.checkpoint_schema()
+        if (record.optimizer.is_some()
+            && record.model_schema.as_deref() != Some(record.model.checkpoint_schema()))
+            || (record.optimizer.is_none() && record.model_schema.is_some())
+        {
+            return Err(InferenceError::ByteDecoder(
+                "checkpoint optimizer/model topology discriminator differs",
+            ));
+        }
+        let expected_schema = if record.optimizer.is_some() {
+            BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA
+        } else {
+            record.model.checkpoint_schema()
+        };
+        if record.schema != expected_schema
             || record
                 .model
                 .geometry
@@ -488,7 +575,12 @@ impl ByteDecoderCheckpoint {
         {
             return Err(InferenceError::Schema(record.schema));
         }
-        if record.update_rule != "stateless_sgd.v1"
+        let expected_rule = if record.optimizer.is_some() {
+            "adamw_zero_rate_freeze.v1"
+        } else {
+            "stateless_sgd.v1"
+        };
+        if record.update_rule != expected_rule
             || record.window_state != "reset_positions_and_geometry.v1"
         {
             return Err(InferenceError::ByteDecoder(
@@ -504,9 +596,15 @@ impl ByteDecoderCheckpoint {
                 "noncanonical attempted revision",
             ));
         }
+        let plan = record.model.into_plan()?;
+        let optimizer = record
+            .optimizer
+            .map(|o| o.into_state(&plan, attempted_revision))
+            .transpose()?;
         Ok(Self {
-            plan: record.model.into_plan()?,
+            plan,
             attempted_revision,
+            optimizer,
         })
     }
 }
@@ -532,5 +630,7 @@ mod gpu;
 #[cfg(feature = "wgpu")]
 pub use gpu::ByteDecoderCheckpointReadback;
 
+#[cfg(test)]
+mod optimizer_tests;
 #[cfg(test)]
 mod tests;

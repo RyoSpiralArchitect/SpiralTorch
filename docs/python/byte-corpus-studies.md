@@ -143,6 +143,11 @@ preparation receipt, not proof of a language-quality improvement.
 
 ## Compare Without Moving The Gate
 
+The current study request and its independent reference remain SGD-only. The
+new [resident byte-model AdamW API](../resident_adamw.md) is available separately
+for explicit training loops; its optimizer-bearing checkpoints cannot be resumed
+as an old SGD study. Do not compare it under an unchanged SGD request identity.
+
 Run the independent CPU-f32 PyTorch reference on the identical request, then
 use the existing comparator on `python-result.json`, exactly as for the native
 and browser reports. It checks the fixed numerical gates, frozen policies and

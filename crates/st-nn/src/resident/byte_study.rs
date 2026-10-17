@@ -652,6 +652,7 @@ impl ByteCorpusStudy {
                 let model = ByteDecoderCheckpoint::from_json(&saved.model_json)?;
                 let initial = plan(&self.request.config, case)?.initial_checkpoint();
                 if model.attempted_revision() != cursor as u64
+                    || model.adamw_state().is_some()
                     || model.topology_json()? != initial.topology_json()?
                     || (cursor == 0 && model.to_json()? != initial.to_json()?)
                     || (case.frozen() && !model.geometry_parameters_match(&initial)?)
@@ -659,7 +660,7 @@ impl ByteCorpusStudy {
                     || !query::frozen_projections_match(case, &model, &initial)?
                 {
                     return Err(
-                        "checkpoint model revision, topology or initial/frozen values differ"
+                        "checkpoint model revision, optimizer, topology or initial/frozen values differ"
                             .into(),
                     );
                 }
@@ -993,6 +994,40 @@ mod tests {
         }
         assert!(study.validate_segment(Some(&saved(&study, 1)), 0).is_err());
         assert!(study.validate_segment(None, 3).is_err());
+    }
+
+    #[test]
+    fn sgd_study_rejects_valid_adamw_model_without_discarding_history() {
+        let study = study();
+        for index in 0..study.request.cases.len() {
+            let mut checkpoint = saved(&study, 1);
+            let previous =
+                ByteDecoderCheckpoint::from_json(&checkpoint.cases[index].model_json).unwrap();
+            let mut record: Value =
+                serde_json::from_str(&checkpoint.cases[index].model_json).unwrap();
+            record["model_schema"] = record["schema"].clone();
+            record["schema"] = json!(crate::resident::BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA);
+            record["update_rule"] = json!("adamw_zero_rate_freeze.v1");
+            record["optimizer"] = json!({
+                "beta1":0.9, "beta2":0.999, "epsilon":1e-8,
+                "slots":study.request.cases[index].parameters.iter().map(|p| json!({
+                    "shape":p.shape, "first":vec![0.0;p.values.len()],
+                    "second":vec![0.0;p.values.len()], "steps":0
+                })).collect::<Vec<_>>()
+            });
+            let model = ByteDecoderCheckpoint::from_json(&record.to_string()).unwrap();
+            assert_eq!(
+                model.topology_json().unwrap(),
+                previous.topology_json().unwrap()
+            );
+            assert!(model.adamw_state().is_some());
+            checkpoint.cases[index].model_json = model.to_json().unwrap();
+            assert!(study.checked_models(&checkpoint).is_err());
+            assert!(study
+                .checkpoint_from_json(checkpoint.to_json().unwrap().as_bytes())
+                .is_err());
+            assert!(study.case_checkpoint(&checkpoint, "plain").is_err());
+        }
     }
 
     #[test]

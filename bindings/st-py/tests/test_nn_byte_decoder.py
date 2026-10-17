@@ -81,6 +81,7 @@ class BytePortable(unittest.TestCase):
                 checkpoint = plan.initial_checkpoint()
                 restored = st.nn.ByteDecoderCheckpoint.from_json(checkpoint.to_json())
                 self.assertEqual(restored.attempted_revision, 0)
+                self.assertIsNone(restored.adamw_config)
                 self.assertEqual(restored.to_json(), checkpoint.to_json())
                 self.assertEqual(restored.plan().parameter_layout(), plan.parameter_layout())
                 layout = plan.parameter_layout()
@@ -140,6 +141,62 @@ class BytePortable(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class ByteGpu(unittest.TestCase):
+    def test_adamw_geometry_history_and_exact_resume(self):
+        for mode in ("none", "query_mixture"):
+            with self.subTest(mode=mode):
+                model = example.make_plan(mode).compile_training_wgpu()
+                self.assertIsNone(model.adamw_config)
+                for config in ({"beta1": 1.0}, {"epsilon": 1e-50}, {"beta2": math.nan}):
+                    with self.assertRaises(ValueError):
+                        model.enable_adamw(**config)
+                model.enable_adamw()
+                with self.assertRaises(ValueError):
+                    model.enable_adamw()
+
+                def update(owner, frozen=False):
+                    data = owner.prepare_batch(batch())
+                    forward = owner.forward(data)
+                    loss = forward.next_byte_loss()
+                    gradients = owner.backward(forward, loss.prediction_gradient_tensor())
+                    layout = owner.parameter_layout()
+                    rates = [0.005] * layout["count"]
+                    decays = [0.01] * layout["count"]
+                    if layout["geometry"]:
+                        for i in range(*layout["geometry"]["all"]):
+                            rates[i] = 0.0 if frozen else 0.005
+                            decays[i] = 0.0
+                    owner.adamw_with_rates(gradients, rates, weight_decays=decays).read()
+                    return values(loss.loss_tensor())[0]
+
+                first = update(model)
+                capture = model.checkpoint_snapshot()
+                second = update(model, True)
+                saved = capture.read()
+                self.assertEqual(saved.attempted_revision, 1)
+                self.assertEqual(saved.adamw_config, model.adamw_config)
+                record = json.loads(saved.to_json())
+                self.assertEqual(record["schema"], "spiraltorch.nn.byte_decoder_checkpoint.v6")
+                self.assertEqual(record["update_rule"], "adamw_zero_rate_freeze.v1")
+                resumed = st.nn.ByteDecoderCheckpoint.from_json(saved.to_json()).restore_wgpu()
+                self.assertEqual(update(resumed, True), second)
+                for freeze in (False, True):
+                    self.assertEqual(update(model, freeze), update(resumed, freeze))
+                    self.assertEqual(model.checkpoint_snapshot().read().to_json(), resumed.checkpoint_snapshot().read().to_json())
+                self.assertLess(second, first)
+                data = model.prepare_batch(batch())
+                forward = model.forward(data)
+                gradient = model.backward(forward, forward.next_byte_loss().prediction_gradient_tensor())
+                before = model.attempted_updates
+                for bad in (1e-50, -0.1, math.nan, math.inf):
+                    with self.assertRaises(ValueError):
+                        model.adamw(gradient, bad)
+                with self.assertRaises(ValueError):
+                    model.adamw_with_rates(gradient, [])
+                with self.assertRaises(ValueError):
+                    model.sgd(gradient, 0.1)
+                self.assertEqual(model.attempted_updates, before)
+                self.assertEqual(model.adamw(gradient, 0.001).read(), before + 1)
+
     def test_all_modes_train_resume_and_retain(self):
         for mode in MODES:
             with self.subTest(mode=mode):

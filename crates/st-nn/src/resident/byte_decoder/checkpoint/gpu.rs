@@ -2,7 +2,7 @@ use super::*;
 use st_backend_wgpu::{
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulTile},
     resident_tensor::{TensorDevice, TensorReadbackBatch},
-    resident_training::parameters::ResidentParameterSnapshot,
+    resident_training::parameters::{ResidentAdamWReadback, ResidentParameterSnapshot},
     runtime::WgpuRuntime,
 };
 
@@ -12,6 +12,7 @@ pub struct ByteDecoderCheckpointReadback {
     model: ModelRecord,
     attempted_revision: u64,
     readback: TensorReadbackBatch,
+    optimizer: Option<ResidentAdamWReadback>,
 }
 
 impl CheckpointTemplate {
@@ -19,11 +20,13 @@ impl CheckpointTemplate {
         &self,
         device: &TensorDevice,
         parameters: ResidentParameterSnapshot,
+        optimizer: Option<ResidentAdamWReadback>,
     ) -> Result<ByteDecoderCheckpointReadback, InferenceError> {
         Ok(ByteDecoderCheckpointReadback {
             model: self.0.clone(),
             attempted_revision: parameters.revision(),
             readback: device.snapshot_many(&parameters.values().iter().collect::<Vec<_>>())?,
+            optimizer,
         })
     }
 }
@@ -32,6 +35,7 @@ fn finish(
     mut model: ModelRecord,
     attempted_revision: u64,
     values: Vec<Vec<f32>>,
+    optimizer: Option<AdamWState>,
 ) -> Result<ByteDecoderCheckpoint, InferenceError> {
     let mut values = values.into_iter();
     for destination in model.values_mut() {
@@ -42,24 +46,43 @@ fn finish(
     if values.next().is_some() {
         return Err(InferenceError::ByteDecoder("excess checkpoint parameter"));
     }
+    let plan = model.into_plan()?;
+    if let Some(state) = &optimizer {
+        state.validate(&plan.parameter_shapes()?, attempted_revision)?;
+    }
     Ok(ByteDecoderCheckpoint {
-        plan: model.into_plan()?,
+        plan,
         attempted_revision,
+        optimizer,
     })
 }
 
 impl ByteDecoderCheckpointReadback {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read(self) -> Result<ByteDecoderCheckpoint, InferenceError> {
-        finish(self.model, self.attempted_revision, self.readback.read()?)
+        let optimizer = self
+            .optimizer
+            .map(ResidentAdamWReadback::read)
+            .transpose()?;
+        finish(
+            self.model,
+            self.attempted_revision,
+            self.readback.read()?,
+            optimizer,
+        )
     }
 
     #[cfg(target_arch = "wasm32")]
     pub async fn read_async(self) -> Result<ByteDecoderCheckpoint, InferenceError> {
+        let optimizer = match self.optimizer {
+            Some(state) => Some(state.read_async().await?),
+            None => None,
+        };
         finish(
             self.model,
             self.attempted_revision,
             self.readback.read_async().await?,
+            optimizer,
         )
     }
 }
@@ -86,12 +109,16 @@ impl ByteDecoderCheckpoint {
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<ResidentByteDecoder, InferenceError> {
-        self.plan.compile_training_wgpu_at_revision(
+        let mut model = self.plan.compile_training_wgpu_at_revision(
             runtime,
             tile,
             kernel,
             accumulation,
             self.attempted_revision,
-        )
+        )?;
+        if let Some(state) = &self.optimizer {
+            model.restore_adamw(state)?;
+        }
+        Ok(model)
     }
 }

@@ -78,6 +78,16 @@ impl ResidualAttentionPlan {
             + 4
             + self.feed_forward.graph_definition()?.parameters().len())
     }
+
+    pub(crate) fn parameter_values(&self) -> Result<Vec<GraphParameter>, InferenceError> {
+        let pre = self.pre.graph_definition()?;
+        let [qkv, output] = self.attention.graph_parts()?;
+        let feed = self.feed_forward.graph_definition()?;
+        Ok([pre, qkv, output, feed]
+            .into_iter()
+            .flat_map(|graph| graph.parameters().to_vec())
+            .collect())
+    }
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ use st_backend_wgpu::{
     },
     runtime::WgpuRuntime,
 };
+use st_kernel_contracts::adamw::{AdamWConfig, AdamWState, AdamWStep};
 use st_kernel_contracts::classification::CrossEntropySpec;
 
 mod geometry;
@@ -135,7 +136,7 @@ impl ResidentByteDecoderVjp {
     }
 }
 
-/// One owner/revision and one SGD decision across tables, all blocks and head.
+/// One owner/revision and one update decision across tables, geometry, blocks and head.
 pub struct ResidentByteDecoder {
     checkpoint_template: super::checkpoint::CheckpointTemplate,
     parameters: ResidentParameters,
@@ -249,8 +250,51 @@ impl ResidentByteDecoder {
     /// Read it explicitly (asynchronously in a browser) to obtain a checkpoint.
     pub fn checkpoint_snapshot(&self) -> Result<ByteDecoderCheckpointReadback, InferenceError> {
         require_uncommitted_route()?;
-        self.checkpoint_template
-            .capture(self.tensor_device(), self.parameter_snapshot())
+        self.checkpoint_template.capture(
+            self.tensor_device(),
+            self.parameter_snapshot(),
+            self.parameters.adamw_snapshot()?,
+        )
+    }
+
+    pub fn adamw_config(&self) -> Option<AdamWConfig> {
+        self.parameters.adamw_config()
+    }
+
+    /// Start zero history once. Geometry and ordinary parameters share the same
+    /// owner; explicit per-tensor zero rates freeze moments and accepted clocks.
+    pub fn enable_adamw(&mut self, config: AdamWConfig) -> Result<(), InferenceError> {
+        require_uncommitted_route()?;
+        Ok(self.parameters.enable_adamw(config)?)
+    }
+
+    pub(in crate::resident::byte_decoder) fn restore_adamw(
+        &mut self,
+        state: &AdamWState,
+    ) -> Result<(), InferenceError> {
+        Ok(self.parameters.restore_adamw(state)?)
+    }
+
+    pub fn adamw(
+        &mut self,
+        gradients: &ResidentByteDecoderVjp,
+        step: AdamWStep,
+    ) -> Result<ResidentParameterUpdate, InferenceError> {
+        require_uncommitted_route()?;
+        let update = self.parameters.adamw(&gradients.bound, step)?;
+        self.latest = None;
+        Ok(update)
+    }
+
+    pub fn adamw_with_steps(
+        &mut self,
+        gradients: &ResidentByteDecoderVjp,
+        steps: &[AdamWStep],
+    ) -> Result<ResidentParameterUpdate, InferenceError> {
+        require_uncommitted_route()?;
+        let update = self.parameters.adamw_with_steps(&gradients.bound, steps)?;
+        self.latest = None;
+        Ok(update)
     }
 
     pub fn tensor_device(&self) -> &TensorDevice {

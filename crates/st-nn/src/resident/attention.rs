@@ -29,6 +29,13 @@ impl AttentionInferencePlan {
         [&self.qkv, &self.output]
     }
 
+    pub(crate) fn graph_parts(&self) -> Result<[GraphDefinition; 2], InferenceError> {
+        Ok([
+            self.qkv.graph_definition()?,
+            self.output.graph_definition()?,
+        ])
+    }
+
     /// Import the trained fused layout without splitting/repacking its values.
     /// Richer graph stages must not disappear behind the projection boundary.
     pub(crate) fn from_fused_projection_plans(

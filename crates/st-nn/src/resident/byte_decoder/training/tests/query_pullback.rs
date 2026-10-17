@@ -1,6 +1,6 @@
 use super::*;
 
-fn contextual_plan() -> ByteDecoderPlan {
+pub(super) fn contextual_plan() -> ByteDecoderPlan {
     let base =
         super::super::super::tests::plan(AttentionMask::Causal { query_offset: 0 }, 2).unwrap();
     let values = |n: usize, scale: f32, offset: f32| {

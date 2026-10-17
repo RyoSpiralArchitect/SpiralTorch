@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident AdamW contracts</title>
+<h1>Resident AdamW contracts</h1>
+<p>Run beside the generated resident_parameters_browser.js and .wasm files.</p>
+<a id="download" hidden>Download AdamW contract result</a>
+<pre id="result" data-status="running">Running Rust/WebGPU checks...</pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_adamw_checks} = await import("./resident_parameters_browser.js");
+  await init();
+  const raw = await run_adamw_checks();
+  const report = JSON.parse(raw);
+  if (report.status !== "passed" || report.torch_updates !== 12
+      || report.same_device_resume !== "bitwise"
+      || !report.atomic_rejection || !report.retained_snapshot
+      || !report.division_domain_rejection || !report.division_headroom_rejection
+      || !report.scalar_snapshot_restore || report.scalar_resume_updates !== 3
+      || report.frozen_gradient_poison !== "guarded_divide_by_zero"
+      || report.backend !== "BrowserWebGpu") {
+    throw Error("Incomplete AdamW controls");
+  }
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([raw], {type:"application/json"}));
+  link.download = "resident-adamw-contracts.json";
+  link.hidden = false;
+} catch (error) {
+  result.textContent = String(error.stack || error);
+  result.dataset.status = "error";
+}
+</script>

@@ -1,0 +1,58 @@
+{
+  "schema": "spiraltorch.adamw_pr_integration.validation.v1",
+  "parent_head": "d487e367c1cc97112564a56cea2d9fccf6bce527",
+  "copied_from": "e9054eee521e7aa380ca610f76e28c46e6a28939",
+  "source_tree_before_evidence": "b196a4745f9996749d8fca807b296ab9b0075d89",
+  "sources": {
+    "crates/st-backend-wgpu/examples/resident_adamw_numerics.rs": "080f5f2d47a24f7c4424c7b1b0cd3adf67d8fcee176c5f07dbafcfd56f522717",
+    "crates/st-backend-wgpu/examples/resident_parameters_browser.rs": "7ac4d26bdd4658623c13dcbf96c7c1b159cc9d7feddceca6b40287ffdd1bb31e",
+    "crates/st-backend-wgpu/examples/support/resident_adamw_checks.rs": "3dc050cad035318ac422ef79d54fd8fcbbc85831743fcb121fb74bcb53b93079",
+    "crates/st-backend-wgpu/examples/support/resident_adamw_numerics.rs": "ac46ef8b34f2894903a7161edf38d884f28549016216c110b4fa549d185dc11a",
+    "crates/st-backend-wgpu/src/resident_training/parameters/adamw/tests.rs": "0c7401b1dc988665fdd22367b156df325f3975c2d6f0234f033ceb94fabb841b",
+    "crates/st-backend-wgpu/tests/adamw_browser.html": "a8108f3cced5e94d2365968af165d52c611badbca3c3aeadb9247c7c9aeffaf1",
+    "crates/st-backend-wgpu/tests/adamw_numerics_browser.html": "29a04db435025b1d6324c075b98a78740104cc462459199b99fca33b2b3f930b",
+    "crates/st-backend-wgpu/tests/fixtures/resident_adamw_numerics.json": "21adb83c01b0511778137d76015e6ceafc0c72b15c920ec6d79f9a8398c2fc62",
+    "crates/st-kernel-contracts/src/adamw.rs": "15ecd2acdab72cd5b214ab2c6a72ebd04d35d61ee0fac250378327d3dc51a864",
+    "crates/st-kernel-contracts/src/adamw.wgsl": "0f88b3b0bd2e13c5fab44bf9f02960d3dfe656910a5dc81ed78f264c0b4b2322",
+    "tools/generate_resident_adamw_numerics_fixture.py": "36403ecd2d20ae8cd6187ac2cbea7255016800e20252ee18c84c774d7a6603b1"
+  },
+  "compiler": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: aarch64-apple-darwin\nrelease: 1.99.0\nLLVM version: 23.1.1\n",
+  "tests": {
+    "cpu_adamw": {
+      "passed": 5
+    },
+    "native_parameter_adamw": {
+      "passed": 8,
+      "gpu_opt_in": true
+    },
+    "native_byte_lm": {
+      "passed": 111,
+      "gpu_opt_in": true
+    },
+    "python_study": {
+      "run": 65,
+      "passed": 59,
+      "skipped": 6
+    }
+  },
+  "fixture_regeneration_byte_identical": true,
+  "native_backend": "Metal",
+  "browser_backend": "BrowserWebGpu",
+  "browser_hardware_execution": "unverified",
+  "logs_sha256": {
+    "cpu-adamw.log": "ea5e80d79a5490d8e0daf4f29c1130fde21128fe40d99e013e752873c7640629",
+    "native-adamw.log": "c3a60f25151222165e9d9f7d6a5279e68ac9bafb5b4a0c10108b88fd613ac92a",
+    "native-byte-lm.log": "9ad28194e48745a76dcbe87cd227adf6d04d732a0354efd360d49101e321e6a3",
+    "python-study-tests.log": "4d158e06599cccbd06c28a48b1cd0a44a73572f25f9d9dd223ccb0b735704d62",
+    "wasm-build.log": "5baeb62adcd06ad892178f4624ddb4c7433154fca36dbf62d426e491b0d0a20c",
+    "native-clippy.log": "5024b5f260b754f8fef91f3ccae0ed47828e294e157d9489626945e3cf9a7f0c",
+    "wasm-clippy.log": "df53528b9b78ad70d75c7d6a827b100ba31645f89b45689abddf32e41fc2d5c7",
+    "native-numerics.log": "424312f400324aeeac3a9c2ed3c5603d72e034f7896f507290aeac931d8c8ee7"
+  },
+  "native_report_sha256": "ffcf55d553690e342c1630416a6b95bb3c63571195693dcb4f00a04b42435d92",
+  "browser_report_sha256": "d95701f164601c182348a9ec3092c8d727d732bdcf10ccd0a95184378c997774",
+  "wasm_sha256": "d046a090d4eb9d3a8a028f15a5f5ac4dad04042b39f4274a8ecc078e8d6e0a65",
+  "fixture_sha256": "21adb83c01b0511778137d76015e6ceafc0c72b15c920ec6d79f9a8398c2fc62",
+  "native_example_sha256": "a7d3fc1fd5cea31d9eca506966bd49637f9f8f3b6f24f1de0208edf8c53e1832",
+  "scope": "Exact parent candidate; local mechanics/numerics only, not full-language equivalence, quality, attestation or remote CI"
+}

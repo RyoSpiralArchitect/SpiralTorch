@@ -1,0 +1,1 @@
+{"adapter":"AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }","atomic_rejection":true,"backend":"BrowserWebGpu","division_domain_rejection":true,"division_headroom_rejection":true,"retained_snapshot":true,"same_device_resume":"bitwise","status":"passed","torch":"2.12.1","torch_updates":12}
