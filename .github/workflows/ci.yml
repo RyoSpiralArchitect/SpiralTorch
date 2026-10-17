@@ -28,6 +28,7 @@ jobs:
           python3 -I -S -B -m unittest discover -s tools -p 'test_byte_corpus*.py'
           python3 -I -S -B -m unittest discover -s tools -p 'test_verify_byte_corpus*.py'
           python3 -I -S -B benchmarks/results/2026-10-15-language-learning-diagnosis/test_diagnose.py
+          python3 -I -S -B benchmarks/results/2026-10-15-language-learning-diagnosis/test_review_recheck.py
           python3 -I -S -B benchmarks/results/2026-10-15-language-budget-512/test_run_once.py
           python3 -I -S -B benchmarks/results/2026-10-15-language-budget-512/test_qualify.py
           python3 -I -S -B tools/test_verify_byte_parameter_rates.py

@@ -6,6 +6,12 @@ an independent CPU-float32 PyTorch run used the identical request. No thresholds
 were relaxed. This is not pretrained-model FT, a speed benchmark, or a production
 promotion. It follows the [nine-model frozen diagnosis](../2026-10-15-language-learning-diagnosis/README.md).
 
+The [2026-10-18 review follow-up](../2026-10-18-language-diagnosis-review/README.md)
+hardens existing-process adoption and rechecks the retained data without new
+training. Original results and `validation.json` still identify the historical
+publication at commit `2308aaeee17b23a55100546b6ad4b8d8bffbc4d7`; revised
+script hashes and additional tests have a separate follow-up record.
+
 ## What Changed
 
 The within-run variable is training budget, not architecture, sampling or prompt
@@ -86,6 +92,13 @@ It was adopted into an atomic claim after process verification, without restart
 or repeated updates. The record explicitly says `before_gpu_launch=false`.
 Future launches use `run_once.py`; a failed run keeps its claim and requires an
 explicit recovery decision, not an automatic second budget consumption.
+
+Only explicit `--adopt-pid` needs the optional `psutil` package in that Python
+environment. Adoption checks the interpreter image and complete canonical
+argument list before creating a claim, including literal virtualenv invocation
+identity. Normal launches and the offline unit tests remain standard-library
+only. This is a point-in-time process check, not loaded-wheel attestation or a
+guarantee that the process will remain alive.
 
 ## Reproduce With Retained Private Inputs
 

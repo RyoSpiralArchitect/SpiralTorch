@@ -5,6 +5,12 @@ It measures historical checkpoints, not new training or a serving promotion.
 Raw corpus, checkpoints, weights and logit arrays remain private; the scripts,
 complete result summaries and hashes are public.
 
+The [2026-10-18 review follow-up](../2026-10-18-language-diagnosis-review/README.md)
+hardens coverage, baseline-cursor and CE checks. Original reports and
+`validation.json` remain the historical publication at commit
+`2308aaeee17b23a55100546b6ad4b8d8bffbc4d7`; the follow-up separately pins
+the revised scripts and recomputed derived metrics.
+
 ## Recipe
 
 Nine browser-origin checkpoints at update 128: seeds 11/23/37, each with ordinary
