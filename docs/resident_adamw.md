@@ -108,9 +108,10 @@ not inferred from moments. This is not a complete experiment replay or training
 attestation. Preserve the exact Rust JSON string through JavaScript; parsing and
 reserializing floats can lose negative zero.
 
-The shared Rust/WGSL rule uses integer exponentiation for bias correction and
-checks unsafe arithmetic before it executes. WGSL does not guarantee that an
-overflow becomes a detectable infinity, and may flush subnormals; see the
+The shared Rust/WGSL rule composes complements to compute `1-beta^steps` without
+subtracting a rounded near-one power from one. The accepted-update clock remains
+an exact integer. It checks unsafe arithmetic before it executes. WGSL does not
+guarantee that an overflow becomes a detectable infinity, and may flush subnormals; see the
 [WGSL floating-point rules](https://www.w3.org/TR/WGSL/#floating-point-evaluation).
 Controls must be zero or normal finite float32 values; epsilon must be positive
 and normal. Conservative preflight bounds reserve 15 ULPs below float32 MAX, so
@@ -121,6 +122,10 @@ when the denominator is at least one, retaining quotient headroom for its allowe
 rounding error. There is no promise of bitwise
 equality between different devices. A tensor clock at `u32::MAX` rejects an
 active update instead of wrapping; a frozen clock remains unchanged.
+
+Scalar parameters retain rank zero: `shape=[]` has one value and one entry in
+each moment vector. Snapshot/readback and restore use this same convention;
+zero-length dimensions and missing/extra moments remain invalid.
 
 ## Verification
 
@@ -136,6 +141,19 @@ snapshots, frozen bits, late whole-model rejection, clock overflow and near-one
 betas. The NN test exercises real CE/backward with contextual geometric mixtures,
 freezing, rejection and full checkpoint resume. These are mechanics tests, not
 a corpus-quality benchmark.
+
+The shared suite also checks scalar state immediately after restoration and
+after three updates, including exact shape, value/moment bits and accepted
+clocks. The frozen-gradient rejection case uses explicitly guarded divide by
+zero, not driver-dependent overflow as a source of invalidity.
+
+`tools/generate_resident_adamw_numerics_fixture.py` supplies a separate fixed-gradient
+CPU Torch oracle with three 1,024-update trajectories. Eight additional
+restored-clock probes are constructed in Rust and checked against analytic
+`f64` results, not Torch. `resident_adamw_numerics` and
+`adamw_numerics_browser.html` exercise the same Rust/WGSL recurrence against
+these distinct references. Passing this optimizer-local
+comparison does not establish full-language-training equivalence or quality.
 
 ```bash
 cargo test --locked -p st-kernel-contracts

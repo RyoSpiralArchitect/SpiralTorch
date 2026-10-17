@@ -17,6 +17,8 @@ try {
       || report.same_device_resume !== "bitwise"
       || !report.atomic_rejection || !report.retained_snapshot
       || !report.division_domain_rejection || !report.division_headroom_rejection
+      || !report.scalar_snapshot_restore || report.scalar_resume_updates !== 3
+      || report.frozen_gradient_poison !== "guarded_divide_by_zero"
       || report.backend !== "BrowserWebGpu") {
     throw Error("Incomplete AdamW controls");
   }

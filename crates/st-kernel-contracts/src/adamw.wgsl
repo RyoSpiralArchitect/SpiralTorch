@@ -41,15 +41,17 @@ fn adamw_div(a: f32, b: f32, valid: ptr<function, bool>) -> f32 {
     }
     return a/b;
 }
-fn adamw_unit_powi(base: f32, exponent: u32) -> f32 {
-    var b = base;
+// Compose complements instead of subtracting a rounded near-one power from one.
+// Keep this recurrence and its exact integer clock aligned with Rust.
+fn adamw_bias_correction(beta: f32, exponent: u32) -> f32 {
+    var power_complement = 1.0 - beta;
     var n = exponent;
-    var value = 1.0;
+    var value = 0.0;
     loop {
         if (n == 0u) { break; }
-        if ((n & 1u) != 0u) { value *= b; }
+        if ((n & 1u) != 0u) { value += (1.0 - value) * power_complement; }
         n >>= 1u;
-        if (n != 0u) { b *= b; }
+        if (n != 0u) { power_complement += (1.0 - power_complement) * power_complement; }
     }
     return value;
 }
@@ -72,8 +74,8 @@ fn adamw_candidate(value: f32, gradient: f32, first: f32, second: f32, steps: u3
     let second_old = adamw_mul(beta2, second, &valid);
     let second_new = adamw_mul(1.0-beta2, square, &valid);
     out.second = adamw_add(second_old, second_new, &valid);
-    let m_hat = adamw_div(out.first, 1.0-adamw_unit_powi(beta1, out.steps), &valid);
-    let v_hat = adamw_div(out.second, 1.0-adamw_unit_powi(beta2, out.steps), &valid);
+    let m_hat = adamw_div(out.first, adamw_bias_correction(beta1, out.steps), &valid);
+    let v_hat = adamw_div(out.second, adamw_bias_correction(beta2, out.steps), &valid);
     let denominator = adamw_add(sqrt(v_hat), epsilon, &valid);
     let decay_amount = adamw_mul(rate, decay, &valid);
     let factor = adamw_add(1.0, -decay_amount, &valid);
