@@ -75,16 +75,19 @@ evaluation, geometry safety and rollback policy. A good CE or artifact hash
 does not establish coherent free-running text, production readiness, or a
 geometric advantage over ordinary attention.
 
-`tools/run_byte_corpus_segments.py` is a small fresh-run orchestrator. It claims
-a new owner-only output directory before GPU execution, retains each segment's
-report/checkpoint and hashes, and never retries a failed directory automatically.
-It is not a distributed scheduler or a recovery policy:
+The installed `spiral-byte-corpus-run` command and
+`spiraltorch.run_byte_corpus_segments` retain opaque checkpoints in a
+[durable local store](python/byte-study-runs.md). Each run claims a new
+owner-only output directory before GPU execution. The historical
+`tools/run_byte_corpus_segments.py` is a compatibility wrapper, not a second
+trainer. Neither entry point retries a failed directory automatically:
 
 ```bash
-python -I -B tools/run_byte_corpus_segments.py request.json private-run \
+spiral-byte-corpus-run request.json private-run \
   --stop 0 --stop 64 --stop 128 --stop 256
 ```
 
 The last cursor must equal the request's total update budget. Parent directories
 must exist. Checkpoint validation/training remain Rust-owned. If a process is
-interrupted, retain its claim and partial files and decide recovery explicitly.
+interrupted, retain its claim and partial files. Recovery explicitly selects a
+sealed segment and forks into a new directory; it never adopts unsealed files.
