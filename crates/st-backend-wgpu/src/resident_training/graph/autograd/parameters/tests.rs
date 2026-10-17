@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn dense_bias_reduction_retains_cancellation_residuals() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) = runtime::ensure_default_runtime_blocking("graph.bias.cancellation").unwrap();
+    let definition = GraphDefinition::new(
+        NdLayout::contiguous(&[3, 1]).unwrap(),
+        vec![GraphStage::Linear {
+            weight: 0,
+            bias: 1,
+            gelu: false,
+        }],
+        vec![
+            GraphParameter {
+                role: ParameterRole::Weight,
+                shape: vec![1, 3],
+                values: vec![0.; 3],
+            },
+            GraphParameter {
+                role: ParameterRole::Bias,
+                shape: vec![3],
+                values: vec![0.; 3],
+            },
+        ],
+    )
+    .unwrap();
+    let mut graph = ResidentGraphAutograd::new(
+        runtime,
+        definition,
+        Default::default(),
+        MatmulKernel::Scalar,
+        Default::default(),
+    )
+    .unwrap();
+    graph.upload(&[0.; 3]).unwrap();
+    let tiny = 2f32.powi(-25);
+    let large = 2f32.powi(24);
+    let seed = graph
+        .tensor_device()
+        .upload(&[3, 3], &[1., large, 1., tiny, 1., -1., -1., -large, tiny])
+        .unwrap();
+    let forward = graph.forward().unwrap();
+    let gradients = graph.backward(&forward, &seed).unwrap();
+    let actual = gradients.parameter_gradients()[1]
+        .snapshot()
+        .unwrap()
+        .read()
+        .unwrap();
+    assert_eq!(actual, vec![tiny, 1., tiny]);
+}
+
+#[test]
 fn resident_parameter_rebinding_invalidates_tape_and_preserves_guards() {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
         return;

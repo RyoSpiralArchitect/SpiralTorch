@@ -1,0 +1,33 @@
+{
+  "request_sha256": "208975bab0905a1ee968d5940975259491163680ce7bd2c0132bce23a637e523",
+  "completed_updates": 12,
+  "design_schema": "spiraltorch.byte_corpus.request.v2",
+  "optimizer": {
+    "beta1": 0.8999999761581421,
+    "beta2": 0.9990000128746033,
+    "epsilon": 0.000009999999747378752,
+    "geometry_weight_decay": 0,
+    "kind": "adamw_zero_rate_freeze.v1",
+    "weight_decay": 0.009999999776482582
+  },
+  "case_count": 9,
+  "evaluation_revisions": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "selected_case": "seed11_geometry",
+  "model_handoff": "exact opaque JSON",
+  "foreign_request_rejected": true,
+  "artifact_id": "sha256:b526341569c6430ffea78cc571dd633e525c9e50c95e3cff83a9afa3f4adec9d",
+  "altered_artifact_rejected": true,
+  "artifact_adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "artifact_inference_loss": 5.474123001098633,
+  "artifact_logits_count": 4096,
+  "source_loss_comparison": "exact f32"
+}

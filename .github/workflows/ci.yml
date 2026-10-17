@@ -31,6 +31,14 @@ jobs:
           python3 -I -S -B benchmarks/results/2026-10-15-language-learning-diagnosis/test_review_recheck.py
           python3 -I -S -B benchmarks/results/2026-10-15-language-budget-512/test_run_once.py
           python3 -I -S -B benchmarks/results/2026-10-15-language-budget-512/test_qualify.py
+          python3 -I -S -B tools/test_run_byte_corpus_segments.py
+          python3 -I -S -B bindings/st-py/tests/test_byte_corpus_runs.py
+          python3 -I -S -B tools/test_qualify_byte_corpus_runs.py
+          python3 -I -S -B tools/test_generate_wide_rounding_fixture.py
+          python3 -I -S -B benchmarks/results/2026-10-18-wide-rounding/test_publish.py
+          python3 -I -S -B tools/generate_wide_rounding_fixture.py > "$RUNNER_TEMP/wide_rounding.json"
+          cmp "$RUNNER_TEMP/wide_rounding.json" crates/st-backend-wgpu/tests/fixtures/wide_rounding.json
+          python3 -I -S -B benchmarks/results/2026-10-15-language-adamw-256/test_qualify.py
           python3 -I -S -B tools/test_verify_byte_parameter_rates.py
           python3 -I -S -B tools/test_verify_byte_flat_metric.py
           python3 -I -S -B tools/test_verify_byte_fisher_rao.py
@@ -288,6 +296,7 @@ jobs:
           cargo test --locked --release -p st-backend-wgpu resident_training -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu --test resident_attention_vjp -- --test-threads=1
+          cargo test --locked --release -p st-backend-wgpu --test resident_wide_rounding -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu --test resident_embedding -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu --test causal_zspace_wave -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu --test poincare_bias -- --test-threads=1
@@ -428,6 +437,9 @@ jobs:
             --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu"
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/residual_attention_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+          python3 -I -S -B bindings/st-wasm/tests/byte_lm_fixture.py > "$RUNNER_TEMP/byte-corpus-transport.json"
+          node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js" \
+            "$RUNNER_TEMP/byte-corpus-transport.json" nn
       - name: Host NN forward tapes compiled to scalar WASM
         run: |
           cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --example sequential_forward_tape_contract
@@ -459,6 +471,8 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
           node bindings/st-wasm/tests/topos_graph_contract.cjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
+            "$RUNNER_TEMP/byte-corpus-transport.json" webgpu
       - name: Share the public WebGPU client for browser validation
         uses: actions/upload-artifact@v7
         with:

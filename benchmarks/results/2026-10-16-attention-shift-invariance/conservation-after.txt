@@ -1,0 +1,16 @@
+K=8 value: sum=1e0, expected=1e0, bound=8.940896716308594e-8
+K=8 key: sum=0e0, expected=0e0, bound=2.0025435354232787e-8
+K=8 pair: sum=0e0, expected=0e0, bound=2.0025435354232787e-8
+K=16 value: sum=1.0000000037252903e0, expected=1e0, bound=8.940896716308594e-8
+K=16 key: sum=1.1641532182693481e-10, expected=0e0, bound=4.342491504144669e-8
+K=16 pair: sum=1.1641532182693481e-10, expected=0e0, bound=4.342491504144669e-8
+K=32 value: sum=9.999999981373549e-1, expected=1e0, bound=8.754632201385498e-8
+K=32 key: sum=9.080395102500916e-9, expected=0e0, bound=8.550905388188362e-8
+K=32 pair: sum=9.080395102500916e-9, expected=0e0, bound=8.550905388188362e-8
+K=64 value: sum=1.0000000018626451e0, expected=1e0, bound=8.708066072654724e-8
+K=64 key: sum=2.7939677238464355e-9, expected=0e0, bound=1.4552115228366852e-7
+K=64 pair: sum=2.7939677238464355e-9, expected=0e0, bound=1.4552115228366852e-7
+K=257 value: sum=1.0000000041754902e0, expected=1e0, bound=8.240312947532907e-8
+K=257 key: sum=4.627509042620659e-9, expected=0e0, bound=2.505859802324772e-7
+K=257 pair: sum=4.627509042620659e-9, expected=0e0, bound=2.505859802324772e-7
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 344 filtered out; finished in 1.37s

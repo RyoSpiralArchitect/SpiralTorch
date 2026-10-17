@@ -27,6 +27,10 @@ pub use readback::{
 #[derive(Debug, Error)]
 pub enum TrainingError {
     #[error(transparent)]
+    AdamW(#[from] st_kernel_contracts::adamw::AdamWError),
+    #[error("invalid optimizer state: {0}")]
+    OptimizerState(&'static str),
+    #[error(transparent)]
     Momentum(#[from] st_kernel_contracts::momentum::MomentumError),
     #[error("enable momentum before resetting or observing its state")]
     MissingMomentum,
@@ -263,6 +267,8 @@ pub struct ResidentDenseTraining {
 
 pub(crate) fn training_scalar_source() -> String {
     [
+        crate::shader_sources::ROUNDED_ADD_WGSL.to_owned(),
+        st_kernel_contracts::f32_sum::WGSL.to_owned(),
         crate::shader_sources::GELU_DERIVATIVE_WGSL.to_owned(),
         st_kernel_contracts::sgd::sgd_candidate_wgsl(),
         include_str!("shaders/dense_training.wgsl").to_owned(),

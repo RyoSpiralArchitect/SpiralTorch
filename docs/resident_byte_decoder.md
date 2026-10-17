@@ -17,10 +17,14 @@ within-document bytes [B,T+1]
                                            |
                             exact VJP through every parameter
                                            |
-                         ONE owner/revision and all-or-none SGD
+                       ONE owner/revision and all-or-none update
 ```
 
 ## Rust ownership and data contract
+
+SGD remains the default. The opt-in [resident AdamW path](resident_adamw.md)
+adds GPU-owned moments, geometry-aware freeze controls and a versioned training
+checkpoint without creating a second parameter owner or Python update rule.
 
 `ByteDecoderPlan::from_plans(token_table, position_table, blocks, head)` freezes
 the host parameters. Each block must preserve `[B,T,C]` and use
@@ -167,7 +171,9 @@ Restoration creates a fresh owner: old tapes and gradients cannot be reused,
 even when their shapes and numeric revision match. The checkpoint template added
 to the live owner retains topology/roles/shapes but no extra host weight arrays.
 
-Plain SGD has no momentum/optimizer slots. This is a **model checkpoint**, not an
+Plain SGD has no momentum/optimizer slots; opt-in AdamW uses the
+[v6 optimizer-bearing checkpoint](resident_adamw.md#resume-and-portability).
+This is a **model checkpoint**, not an
 entire application replay: document/corpus identity, sampler cursor, RNG,
 learning-rate schedule, external biases/producers, accepted-update history and
 runtime/kernel choices remain caller-owned. `restore_wgpu_with_options` selects

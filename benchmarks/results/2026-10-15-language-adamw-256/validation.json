@@ -1,0 +1,318 @@
+{
+  "schema": "spiraltorch.byte_corpus.language_budget_validation.v1",
+  "parent_commit": "02f211f72a029ce6455aed2c706ca35989490c03",
+  "branch": "spiralreality/byte-language-checkpoint-selection",
+  "source_files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "1788fd5bbbb18857162508701b4a51b094b6ac5d14eeaaee39a4573bf67f351d",
+      "bytes": 55595
+    },
+    {
+      "path": "bindings/st-py/spiraltorch/__init__.pyi",
+      "sha256": "73f4e0ef36363fd382d77161f6a0234b4dc9eb7d2e6f8564a2388ebd6a307847",
+      "bytes": 448449
+    },
+    {
+      "path": "bindings/st-py/src/nn_resident/byte_study.rs",
+      "sha256": "b90d353de829189dc540b37616cb9b573926c1297879c34851c98e57f856349e",
+      "bytes": 11004
+    },
+    {
+      "path": "bindings/st-py/tests/test_nn_byte_study.py",
+      "sha256": "42e00c86767920c78fb4bbb8b7db3953d03690d1c5140c0d801643920c773edb",
+      "bytes": 30387
+    },
+    {
+      "path": "crates/st-nn/examples/resident_byte_learning_browser.rs",
+      "sha256": "47c8f2d70fa9fdbbd4bb07334444e00c5c7b1f2e47593989f8959fd2e3f08c7f",
+      "bytes": 14419
+    },
+    {
+      "path": "crates/st-nn/src/resident.rs",
+      "sha256": "aeafa6767cddfc82d566832381e4916e944efa087960cc16e3ac4492328dc320",
+      "bytes": 24419
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study.rs",
+      "sha256": "6fcbb4d8a24df93d8b4c79492c145b61e6aa8eeebf1080e8c086bf490b38c056",
+      "bytes": 56969
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study/selection.rs",
+      "sha256": "4d7a5ecf45389ef2ffa97c1e9568e4e2cc0c763079163a3fb20638d50f02fd67",
+      "bytes": 5269
+    },
+    {
+      "path": "crates/st-nn/src/resident/byte_study/selection/tests.rs",
+      "sha256": "7ea2c65b452aeb40bbf2a0bf8bdf6d1a61a69dda9bb4f40870ce8ae036382e95",
+      "bytes": 4420
+    },
+    {
+      "path": "crates/st-nn/tests/byte_selection_browser.html",
+      "sha256": "c72212b4d8955c5b0fa0ae80ba9d0dc2ef009058e3f9839c1b860b7081633132",
+      "bytes": 5656
+    },
+    {
+      "path": "docs/byte_corpus_optimizers.md",
+      "sha256": "c49de2562222440c8f58634113a01a7720bc0612ead14581f6539e5859419898",
+      "bytes": 6553
+    },
+    {
+      "path": "docs/byte_corpus_checkpoint_selection.md",
+      "sha256": "95d00287605c9d6c28659ec26c11e7a7d73ed1ee7fcbe1c24bb31dbcde8a43c6",
+      "bytes": 4728
+    },
+    {
+      "path": "docs/python/byte-corpus-studies.md",
+      "sha256": "c42c713b27f72cd3d43942947b57e519a4575babdd990b10bb6f543d8a0ff641",
+      "bytes": 9467
+    },
+    {
+      "path": "tools/run_byte_corpus_segments.py",
+      "sha256": "1d1c6ea4c4cd2860272e5a33026af2f3414af6803770eac06710021799162886",
+      "bytes": 3519
+    },
+    {
+      "path": "tools/test_run_byte_corpus_segments.py",
+      "sha256": "60f015880c8301473363bcaf07738445133ec2d0df7cc49265e9043fe4ac6217",
+      "bytes": 3294
+    },
+    {
+      "path": "benchmarks/results/2026-10-15-language-adamw-256/PLAN.md",
+      "sha256": "6ad1ae12338aab442b874772893177da974a3006d9a65b163e133890d7440033",
+      "bytes": 2813
+    },
+    {
+      "path": "benchmarks/results/2026-10-15-language-adamw-256/README.md",
+      "sha256": "c50e89b7de1d84aa2eb892f8f6442f255358f1dd93ad735c7ce152769516137d",
+      "bytes": 8614
+    },
+    {
+      "path": "benchmarks/results/2026-10-15-language-adamw-256/qualify.py",
+      "sha256": "e8aa7063a2380c68c7d29ba81fca6560da3dabedd758dbc19e1336ba652894be",
+      "bytes": 15580
+    },
+    {
+      "path": "benchmarks/results/2026-10-15-language-adamw-256/test_qualify.py",
+      "sha256": "f84762aa4743d0d47c6e77351e5ea588e44513e2482bf666909b449dc914c691",
+      "bytes": 4737
+    },
+    {
+      "path": "benchmarks/results/2026-10-15-language-adamw-256/publish.py",
+      "sha256": "3c67fb0dd61b22a4679c94616de981dd60730bad270b70af93429f2550db970d",
+      "bytes": 3886
+    }
+  ],
+  "validation_receipts": [
+    {
+      "path": "python-portable.log",
+      "sha256": "884f303b6b5cea0030474736e69657724985e688b2ed0a25840401398cac4333",
+      "bytes": 3187
+    },
+    {
+      "path": "python-portable-fixed.log",
+      "sha256": "31e7489e26243b41d7d1bb7955e75035e9eb9c60d6c595fce92709318b9d871e",
+      "bytes": 2383
+    },
+    {
+      "path": "python-wgpu.log",
+      "sha256": "f9d5c1538de39d7c34542814ff6d8f71eda0cbc424cbeea53cb713c91a34d31e",
+      "bytes": 5583
+    },
+    {
+      "path": "python-cpu.log",
+      "sha256": "d76b72c5f3222e6106ae7163000c406b1a2c27f22cb2b1227d08f2ecb1ce50f6",
+      "bytes": 5959
+    },
+    {
+      "path": "oracle-tests.log",
+      "sha256": "28f0accb896b19338c438e5aa695560d2f626e4dbd09c9c1a16c849517d809d6",
+      "bytes": 184
+    },
+    {
+      "path": "oracle-tests-torch.log",
+      "sha256": "571f9c89f6942951ee94fb6142f5796dd90927794eda31f202dccda9b6ae02cc",
+      "bytes": 172
+    },
+    {
+      "path": "resume-tests.log",
+      "sha256": "03e42efc543d80e942a9e46eaa46dcb0e97af868f89875b00a0272e8ab633fff",
+      "bytes": 121
+    },
+    {
+      "path": "runner-tests.log",
+      "sha256": "07e3b9b12d31ad063cf64e0c8549c8dfbf26080d5671937f5daa79651124936e",
+      "bytes": 1416
+    },
+    {
+      "path": "qualification-tests.log",
+      "sha256": "a55b6a206baa09760dd8549af23cdaabbdc3f77463436247f2bb444969fef95c",
+      "bytes": 346
+    },
+    {
+      "path": "qualification-tests-fixed.log",
+      "sha256": "cb8edfa1135da3ed51980e113a27cd5ed883d8af631be91117ee9212c867261c",
+      "bytes": 801
+    },
+    {
+      "path": "wasm-build.log",
+      "sha256": "e3a9d4adfd9f21d68578fdbf35a69867cbec0827c15bf18f38beca94ca5c3d12",
+      "bytes": 119154
+    },
+    {
+      "path": "cpu-wheel-build.log",
+      "sha256": "e13d2ce65098c2d8e717c659f82227ad9b6ff2dd751363403697530e631c7e92",
+      "bytes": 3155
+    },
+    {
+      "path": "requalified-selection.log",
+      "sha256": "94e92a82215130ecc738a427d858970845e21e3c7e97310bed7aa03a8970f06b",
+      "bytes": 68
+    },
+    {
+      "path": "requalified-evaluation.log",
+      "sha256": "60a418bd13d537f321e5708295c5b820616919b4fdbae42601d13e5a7f0c2a2d",
+      "bytes": 3066
+    },
+    {
+      "path": "requalified/selection.json",
+      "sha256": "8b37281b8de84bda35f6c146ee6cd0871af564cc15a369ee17e85f717c8403d0",
+      "bytes": 25108
+    },
+    {
+      "path": "requalified/qualification.json",
+      "sha256": "5c3d93c0994cfd3ac6f7a8364b4b0a5fd9cd051ef32665872756b40ff17b247d",
+      "bytes": 225877
+    },
+    {
+      "path": "requalified/evaluation/claim.json",
+      "sha256": "26fc6b6afec0a0b041d7fa9d7837aa64e30ba4ebcf4fc4cee272880977d91f9b",
+      "bytes": 122
+    },
+    {
+      "path": "browser-selection.jpg",
+      "sha256": "05822db9645bf5b0aa14e6bbcd7cdb680f93e221cd42146509ea7839e9f85529",
+      "bytes": 87888
+    },
+    {
+      "path": "wheels-wgpu/spiraltorch-0.4.31-cp38-abi3-macosx_11_0_arm64.whl",
+      "sha256": "e38997c74d29cc43cdd448849a65692881ef3fb6cf63116798c251bed448c39e",
+      "bytes": 12062750
+    },
+    {
+      "path": "wheels-cpu/spiraltorch-0.4.31-cp38-abi3-macosx_11_0_arm64.whl",
+      "sha256": "1f46de8068ee33f492a375635c59948ea4b6f1da4c6ad8e78c2584079fc902e8",
+      "bytes": 9055533
+    }
+  ],
+  "checks": {
+    "rust_portable_study": {
+      "passed": 71,
+      "command": "cargo +1.99.0 test --locked -p st-nn --no-default-features --lib resident::byte_study"
+    },
+    "python_wgpu": {
+      "passed": 35,
+      "skipped_cpu_only": 2,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 WGPU_PYTHON -I -B -m unittest discover -s bindings/st-py/tests -p 'test_nn_byte*.py' -v"
+    },
+    "python_cpu": {
+      "passed": 22,
+      "skipped_gpu": 15,
+      "command": "CPU_PYTHON -I -B -m unittest discover -s bindings/st-py/tests -p 'test_nn_byte*.py' -v"
+    },
+    "independent_oracle_tests": {
+      "passed": 72,
+      "command": "python3 -I -B -m unittest discover -s tools -p 'test_byte_corpus*.py'"
+    },
+    "resume_verifier_tests": {
+      "passed": 22
+    },
+    "launch_tests": {
+      "passed": 3
+    },
+    "qualification_tests": {
+      "passed": 5
+    },
+    "native_independent_pytorch": {
+      "adapter": "Apple M4 / Metal / IntegratedGpu",
+      "training_wheel_source_commit": "02f211f72a029ce6455aed2c706ca35989490c03",
+      "training_wheel_sha256": "824d3cfe172efd569a5784fb3b8d0de7317847e0f85f4477c713f30f25b080b4",
+      "cases": 9,
+      "updates": 256,
+      "strict_comparison": true,
+      "train_ce_max_absolute_error": 0.0000057220458984375,
+      "heldout_ce_max_absolute_error": 0.0000057220458984375,
+      "parameter_max_absolute_error": 0.0000027865171432495117,
+      "first_moment_max_relative_l2_error": 0.00010324013987231518,
+      "second_moment_max_relative_l2_error": 0.00000776893615485558
+    },
+    "artifacts": {
+      "saved_models": 36,
+      "fresh_loss_exact_f32": 36,
+      "generation_full_forward_oracle": 36,
+      "selected_final": 9,
+      "selected_earlier": 0,
+      "byte_identical_after_review_requalification": true,
+      "cpu_only_selected_artifacts_equal": true
+    },
+    "browser": {
+      "matched_native_decisions": 9,
+      "matched_artifact_identities": 9,
+      "invalid_inputs_rejected": 3,
+      "selected_artifact_inferences": 1,
+      "backend": "BrowserWebGpu",
+      "first_selected_loss_exact_f32": 3.3777379989624023
+    },
+    "builds": {
+      "wgpu_wheel": true,
+      "cpu_wheel": true,
+      "wasm_release_example": true,
+      "python": "3.12.6",
+      "pytorch": "2.12.1",
+      "wheel_rust": "1.97.0",
+      "wasm_test_rust": "1.99.0",
+      "wheel_metadata": "0.4.31",
+      "published": false
+    },
+    "formatting": {
+      "pinned_rustfmt": true,
+      "diff_check": true,
+      "whole_crate_clippy_run": false
+    }
+  },
+  "reviews": [
+    {
+      "scope": "Rust selection and necessary validation/artifact paths",
+      "read_only": true,
+      "actionable_findings": 0
+    },
+    {
+      "scope": "Python/WASM clients, launcher and experiment qualification",
+      "read_only": true,
+      "initial_findings": 3,
+      "fixes": [
+        "Recompute comparison from actual and reference outputs",
+        "Verify ordered corpus bytes at declared source revision",
+        "Recompute all decisions and validate complete artifacts before probe read"
+      ],
+      "re_review_remaining_findings": 0,
+      "additional_malformed_input_checks": 7
+    }
+  ],
+  "known_limits": [
+    "Related repository prose and previously inspected development data, not broad language-quality evidence",
+    "All arms remain worse than seen-training-only bigram; generated output is repetitive",
+    "Selected cursor equals final cursor for every measured arm; no model-selection uplift shown",
+    "Segment checkpoint binding is not a second uninterrupted/resumed training experiment",
+    "No matched tuned optimizer, parameter-count, elapsed-time or equal-compute claim",
+    "Initial portable-test fixture mismatch retained in failed log; corrected fixture, not weakened guard",
+    "Existing vendor/dead-code warnings remain; not a clean whole-crate lint result",
+    "Parent PR2270 latest CI38739550458 did not start due to account billing lock; no merge bypass",
+    "Raw requests, weights, moments, artifacts, private wheels and logs not published"
+  ],
+  "preserved_deletions": {
+    "count": 8234,
+    "git_ls_files_deleted_sha256": "bc8917dfba59592756119508ad01d973e5062cebffbbc585d3aaa3b6c5adb04a"
+  }
+}

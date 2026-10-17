@@ -1,0 +1,26 @@
+{
+  "schema": "spiraltorch.adamw_scalar_resume.validation.v1",
+  "base": "0e8dba67a3e68a766a764362cad794f5fcff2b7a",
+  "sources": {
+    "crates/st-kernel-contracts/src/adamw.rs": "15ecd2acdab72cd5b214ab2c6a72ebd04d35d61ee0fac250378327d3dc51a864",
+    "crates/st-backend-wgpu/examples/support/resident_adamw_checks.rs": "3dc050cad035318ac422ef79d54fd8fcbbc85831743fcb121fb74bcb53b93079",
+    "crates/st-backend-wgpu/tests/adamw_browser.html": "a8108f3cced5e94d2365968af165d52c611badbca3c3aeadb9247c7c9aeffaf1"
+  },
+  "receipts": {
+    "scalar-resume-native.log": "9a9c0f44824c08dec2435e1e279f6efbcc4679d72eb70c45f05ee5af47f02dc3",
+    "scalar-resume-native-reviewed.log": "603753ecd8f6836cbe7b8a61db51b6dab1821a2fa159e879ab3ff5868659a643",
+    "scalar-resume-wasm-build.log": "194b7a5dc3f608745e789c59d7fc4bcb47b3cbee3d3bf0feaf58831453693849",
+    "scalar-resume-wasm-build-reviewed.log": "b0e92aed9763406c62af4621894ea7e0cfd60d2fe2625df493b62fefb4777059",
+    "scalar-resume-browser.json": "2c69210f6de003f222562c9c13b19d7377a42aff17a41943dd8129da6055f39b",
+    "scalar-resume-native-final.log": "898acff8c7aaf5530e6aa882a4a6ef4b0905b7634d10a538110b45417ff9d589",
+    "scalar-resume-wasm-build-final.log": "22b39227bb66458d8ec31c73e143dd7f1936aac16f6a55bef0c171cc480b3c4e",
+    "scalar-resume-browser-final.json": "2c69210f6de003f222562c9c13b19d7377a42aff17a41943dd8129da6055f39b"
+  },
+  "wasm_sha256": "97cd88994e3b7e67ab4150a83886ac2b631f2329db688a7c6634d14a6ecd4036",
+  "cpu_adamw_tests_passed": 5,
+  "native_transactional_suite_passed": true,
+  "browser_shared_suite_passed": true,
+  "browser_hardware_execution": "unverified",
+  "scope": "Synthetic same-device scalar recovery and deterministic invalid-gradient test; not full language qualification or attestation",
+  "pre_update_restore_bits_checked": true
+}

@@ -21,15 +21,6 @@ try {
   };
   const input = await read("request.json");
   const request = JSON.parse(input);
-  const version = request.schema === "spiraltorch.byte_corpus.request.v1" ? 1
-    : request.schema === "spiraltorch.byte_corpus.request.v2" ? 2
-    : request.schema === "spiraltorch.byte_corpus.request.v3" ? 3
-    : request.schema === "spiraltorch.byte_corpus.request.v4" ? 4
-    : request.schema === "spiraltorch.byte_corpus.request.v5" ? 5
-    : request.schema === "spiraltorch.byte_corpus.request.v6" ? 6
-    : request.schema === "spiraltorch.byte_corpus.request.v7" ? 7
-    : request.schema === "spiraltorch.byte_corpus.request.v8" ? 8 : null;
-  if (!version) throw Error("Unsupported study version");
   const query = new URLSearchParams(location.search);
   const stop = Number(query.get("stop") ?? request.train_batches.length);
   if (!Number.isInteger(stop) || stop < 0 || stop > request.train_batches.length) throw Error("Invalid stop cursor");
@@ -38,8 +29,12 @@ try {
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), x => x.toString(16).padStart(2,"0")).join("");
   const {default:init, advance_resident_byte_learning, extract_resident_byte_learning_case,
     pack_resident_byte_learning_case_artifact, verify_resident_byte_learning_artifact,
-    infer_resident_byte_artifact} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+    infer_resident_byte_artifact, inspect_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
   await init();
+  const inspection = JSON.parse(inspect_resident_byte_learning(input));
+  const version = Number(inspection.design_schema.split(".v").at(-1));
+  const wireVersion = Number(request.schema.split(".v").at(-1));
+  if (inspection.request_sha256 !== hash) throw Error("Rust inspection identity mismatch");
   document.querySelector("#summary").textContent = `Advancing ${request.cases.length} cases to update ${stop}. Request ${hash}`;
   const segment = JSON.parse(await advance_resident_byte_learning(input, checkpoint, stop));
   const reportJson = segment.report_json;
@@ -53,11 +48,15 @@ try {
   for (let i = 1; i <= stop; ++i) {
     if (i % request.checkpoint_every === 0 || i === request.train_batches.length) revisions.push(i);
   }
+  const sameOptimizer = wireVersion !== 9 || (report.design_schema === inspection.design_schema
+    && Object.keys(report.optimizer ?? {}).length === Object.keys(inspection.optimizer).length
+    && Object.entries(inspection.optimizer).every(([k,v]) => report.optimizer?.[k] === v)
+    && report.cases.every(c => Object.hasOwn(c, "optimizer_state")));
   if (segment.schema !== "spiraltorch.byte_corpus.segment.v1" || segment.completed_updates !== stop
       || typeof segment.checkpoint_json !== "string" || !segment.checkpoint_json.length
-      || report.schema !== `spiraltorch.byte_corpus.${complete ? "result" : "partial"}.v${version}`
+      || report.schema !== `spiraltorch.byte_corpus.${complete ? "result" : "partial"}.v${wireVersion}`
       || report.engine !== "spiraltorch" || report.request_sha256 !== hash
-      || !sameCalibration
+      || !sameCalibration || !sameOptimizer
       || report.cases.length !== request.cases.length
       || report.cases.some((c, i) => c.name !== request.cases[i].name
         || c.seed !== request.cases[i].seed || c.geometry !== request.cases[i].geometry
@@ -124,6 +123,7 @@ try {
   }
   target.dataset.status = complete ? "completed" : "paused";
   target.textContent = JSON.stringify({request_sha256:hash, completed_updates:stop,
+    design_schema:inspection.design_schema, optimizer:inspection.optimizer,
     case_count:report.cases.length, evaluation_revisions:revisions,
     selected_case:selectedName, model_handoff:"exact opaque JSON", foreign_request_rejected:rejectedForeign,
     artifact_id:artifactId, altered_artifact_rejected:rejectedArtifact,

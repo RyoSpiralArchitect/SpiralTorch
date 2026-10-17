@@ -384,8 +384,9 @@ controls rather than choosing between them:
    geometry-off/detached controls and zero-Q/K isolation. Corpus-scale utility,
    conditional routing and decoder continuation remain separate open work.
    The [Python model guide](python/byte-language-models.md) covers the native
-   model API introduced in 0.4.30; the standalone WASM qualification module is
-   not a packaged `st-wasm` model facade. The original host Modules remain
+   model API introduced in 0.4.30. The [packaged WASM lifecycle](wasm_byte_language_mlops.md)
+   now exposes studies, artifacts, inference and measured serving, but not every
+   low-level model-building class. The original host Modules remain
    unchanged. Uncertainty outputs, KV-cache ownership and learning-quality
    gains remain separate open work.
 3. **Measure the complete language path.** Require numerical agreement before
@@ -434,7 +435,7 @@ source-companion validation. Hash integrity does not attest training or quality.
 The source-only [serving gate](python/byte-serving-gates.md) now fixes evaluation
 windows and explicit language/geometry limits at bootstrap. Rust measures both
 owners, issues process-local slot/generation-bound permits and supports exact
-one-step rollback; Python and the standalone WASM client share that path.
+one-step rollback; Python and the packaged WASM client share that path.
 Held-outness, threshold selection and model authenticity remain caller-owned.
 This is not yet a registry, durable deployment service or HF integration.
 
@@ -442,7 +443,7 @@ Named cohorts now carry separate explicit limits; every cohort must pass, and
 no global mean can override a failing group. The source-only
 [greedy generation loop](python/byte-generation.md) connects selected artifacts
 to actual byte output with model identity and serving-generation checks. Rust
-owns window movement and byte selection; Python and the standalone browser are
+owns window movement and byte selection; Python and the packaged browser are
 clients. Teacher-forced admission does not certify free-running quality.
 
 The [fresh 25-arm, 512-update study](../benchmarks/results/2026-10-15-language-budget-512/README.md)
@@ -454,12 +455,50 @@ the resident model-parameter learning path next, including optimizer-state
 ownership and exact resume; do not mistake host-side Z-space meta-Adam for a
 resident model optimizer or add geometry search to compensate for a weak baseline.
 
+The [packaged language lifecycle](wasm_byte_language_mlops.md) connects those
+operations through `spiraltorch-wasm`, with CPU-only transport and explicit
+WebGPU execution. Actual byte-LM artifacts retain learned geometry/router state;
+browser AdamW checkpoints can resume on a fresh page. JS supplies orchestration,
+not another acceptance policy. Pending operations own their inputs, and live
+serving changes use Rust's typed, one-use permits rather than report JSON.
+
+The Python [durable segment primitive](python/byte-study-runs.md) exposes the
+same study owner as an importable/installed-CLI operation, with exclusive
+private runs and explicit recovery from a sealed checkpoint into a new lineage.
+It preserves the Rust geometry/optimizer contract rather than rebuilding it in
+Python. This is local storage/execution, not a second scheduler or promotion gate.
+
 Connect this lifecycle to orchestration without duplicating policy. Reuse the existing
 [HF lineage, promotion and experiment executor](python/build-and-validation.md)
 rather than adding a second scheduler or independently interpreted client gate.
 Geometry must affect the executable model, not just its report. Its benefit
 still needs matched-budget language evaluation; backend speed comparisons use
 the same PyTorch-equivalent operation, not extra geometric work hidden in one arm.
+
+The [saved-model selector](byte_corpus_checkpoint_selection.md) now keeps actual
+weights, geometry and optimizer history together through development selection.
+The [width/budget diagnostic](../benchmarks/results/2026-10-16-language-capacity-budget/README.md)
+completed 18 models and 72 restored generations. Its long-run numerical gate still
+fails, despite lower observed loss, so the next language rail is focused Rust
+Attention/AdamW numerical work rather than model promotion or more audit layers.
+
+The first [shared optimizer repair](../benchmarks/results/2026-10-16-attention-adamw-numerics/README.md)
+has now passed native/browser same-gradient replays and large-clock restoration.
+The bounded full-language follow-up still fails on Key-bias. The subsequent
+[Attention shift-conservation repair](../benchmarks/results/2026-10-16-attention-shift-invariance/README.md)
+passes native/browser isolated controls, including causal Poincare pullbacks,
+but its 1,024-update language follow-up still fails and does not uniformly
+reduce parameter differences. Float32 reference drift is also visible along
+the exact-arithmetic Key-shift invariant direction. The subsequent
+[dense-bias isolation](../benchmarks/results/2026-10-16-dense-bias-reduction/README.md)
+fixes reproduced cancellation and boundary defects in a Rust-owned exact-sum
+contract shared with WGSL. Twelve saved-state probes reduce Key residuals but
+retain 17 worsened parameter-L2 comparisons against float64 Torch. No new
+training run or promotion is included. Next, localize the remaining projection
+gradient error and optimizer amplification before repeating the fixed long-run
+gate, then return to matched-budget language/cohort quality evaluation.
+Do not drop coordinates or relax the gate to turn diagnostic loss reductions
+into geometry-efficacy claims.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

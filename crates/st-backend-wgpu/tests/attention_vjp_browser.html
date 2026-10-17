@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <link rel="icon" href="data:,">
 <title>Resident Attention Gradients and SGD vs PyTorch</title>
+<p>WebGPU numerical validation. Selected-adapter hardware execution is unverified.</p>
 <pre id="result" data-status="running">Checking WebGPU gradients and resident SGD...</pre>
 <a id="download" hidden download="resident-attention-vjp-browser.json">Download verification result</a>
 <script type="module">
@@ -10,15 +11,18 @@ const result = document.querySelector("#result");
 try {
   await init();
   const report = JSON.parse(await run_resident_attention_vjp_checks());
-  if (report.schema !== "spiraltorch.resident_attention_vjp.validation.v1" || !report.passed ||
+  if (report.schema !== "spiraltorch.resident_attention_vjp.validation.v1" || typeof report.passed !== "boolean" ||
       report.checks.length !== 36 || report.learning.steps !== 16 || report.learning.trace.length !== 16 ||
       report.edge_checks.inherited_guard_cases !== 12 || report.edge_checks.range_cases.length !== 2 ||
       report.edge_checks.forward_reduction_cases !== 3 ||
+      report.shift_checks.cases.length !== 13 || report.range_checks.cases.length !== 46 ||
+      report.range_checks.schema !== "spiraltorch.attention_range.v1" ||
+      report.backend !== "BrowserWebGpu" || report.browser_hardware_execution !== "unverified" ||
       [false, true].some(strided => report.checks.filter(c => c.strided === strided).length !== 18)) {
     throw Error("Incomplete attention VJP fixture");
   }
   result.textContent = JSON.stringify(report, null, 2);
-  result.dataset.status = "passed";
+  result.dataset.status = report.passed ? "passed" : "failed";
   const download = document.querySelector("#download");
   download.href = URL.createObjectURL(new Blob([result.textContent + "\n"], {type: "application/json"}));
   download.hidden = false;

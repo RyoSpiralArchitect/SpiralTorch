@@ -2,6 +2,67 @@
 #[path = "resident_byte_learning_browser/serving.rs"]
 mod serving;
 
+/// CPU-only selection. Transport an array of opaque checkpoint JSON strings;
+/// never parse/reconstruct their inner model numbers in JavaScript.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn select_resident_byte_learning_checkpoint(
+    input: &str,
+    checkpoints: Vec<String>,
+    case_name: &str,
+    policy: &str,
+) -> Result<String, wasm_bindgen::JsValue> {
+    use st_nn::resident::{ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES};
+    let error = |e: Box<dyn std::error::Error>| wasm_bindgen::JsValue::from_str(&e.to_string());
+    if !(1..=32).contains(&checkpoints.len())
+        || checkpoints
+            .iter()
+            .try_fold(0usize, |n, s| n.checked_add(s.len()))
+            .is_none_or(|n| n > BYTE_CORPUS_STUDY_MAX_BYTES)
+    {
+        return Err(wasm_bindgen::JsValue::from_str(
+            "selection needs 1..32 checkpoints, at most 64 MiB combined",
+        ));
+    }
+    let study = ByteCorpusStudy::from_json(input.as_bytes()).map_err(error)?;
+    let policy = serde_json::from_value(serde_json::Value::String(policy.to_owned()))
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let saved = checkpoints
+        .iter()
+        .map(|s| study.checkpoint_from_json(s.as_bytes()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(error)?;
+    let refs: Vec<_> = saved.iter().collect();
+    let selected = study
+        .select_checkpoint(&refs, case_name, policy)
+        .map_err(error)?;
+    Ok(
+        serde_json::json!({"artifact_json":selected.artifact.to_json(),
+        "report":selected.report})
+        .to_string(),
+    )
+}
+
+/// CPU-only metadata inspection uses the same parser as execution.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn inspect_resident_byte_learning(input: &str) -> Result<String, wasm_bindgen::JsValue> {
+    let error = |e: Box<dyn std::error::Error>| wasm_bindgen::JsValue::from_str(&e.to_string());
+    let study = st_nn::resident::ByteCorpusStudy::from_json(input.as_bytes()).map_err(error)?;
+    let optimizer: serde_json::Value =
+        serde_json::from_str(&study.optimizer_recipe_json().map_err(error)?)
+            .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    Ok(serde_json::json!({
+        "schema":"spiraltorch.byte_corpus.inspection.v1",
+        "request_sha256":study.request_sha256(),
+        "design_schema":study.design_schema(),
+        "optimizer":optimizer,
+        "total_updates":study.total_updates(),
+        "checkpoint_size_bound":study.checkpoint_size_bound().map_err(error)?
+    })
+    .to_string())
+}
+
 /// CPU-only, all-case source binding; keep this opaque JSON intact in transport.
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 #[wasm_bindgen::prelude::wasm_bindgen]

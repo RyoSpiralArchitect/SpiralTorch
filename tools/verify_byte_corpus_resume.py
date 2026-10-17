@@ -37,21 +37,28 @@ def exact(left, right):
     return left == right
 
 
-def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None, mixture=None):
+def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None, mixture=None, optimizer=None):
     """Extract tensors in Rust's documented owner order; no model mathematics.
 
     Full topology/operation validation remains ByteCorpusStudy's Rust preflight.
     This verifier binds the saved parameter artifact to the paused readback.
     """
-    require(set(record) == {"schema", "update_rule", "window_state", "attempted_revision", "model"},
+    adamw = optimizer is not None and optimizer["kind"] == "adamw_zero_rate_freeze.v1"
+    require(set(record) == ({"schema", "update_rule", "window_state", "attempted_revision", "model"}
+                            | ({"model_schema", "optimizer"} if adamw else set())),
             "incomplete model envelope")
     metric_aware = pair_metric in (STUDY.FLAT, STUDY.FISHER)
     require(pair_metric in (None, STUDY.POINCARE, STUDY.FLAT, STUDY.FISHER), "saved metric identity")
     require(head_pair_metrics is None or pair_metric is None, "conflicting saved metric selectors")
     require(mixture is None or (head_pair_metrics is None and pair_metric is None), "conflicting saved mixture selector")
     query = mixture is not None and "query_projection" in mixture
-    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{5 if query else 4 if mixture is not None else 3 if head_pair_metrics is not None else 2 if metric_aware else 1}", "model schema")
-    require(record["update_rule"] == "stateless_sgd.v1", "model update rule")
+    topology = f"spiraltorch.nn.byte_decoder_checkpoint.v{5 if query else 4 if mixture is not None else 3 if head_pair_metrics is not None else 2 if metric_aware else 1}"
+    require(record["schema"] == ("spiraltorch.nn.byte_decoder_checkpoint.v6" if adamw else topology),
+            "model schema")
+    if adamw:
+        require(record["model_schema"] == topology, "optimizer-wrapped topology")
+    require(record["update_rule"] == ("adamw_zero_rate_freeze.v1" if adamw else "stateless_sgd.v1"),
+            "model update rule")
     require(record["window_state"] == "reset_positions_and_geometry.v1", "model window state")
     require(record["attempted_revision"] == str(cursor), "model clock")
     model = record["model"]
@@ -105,18 +112,24 @@ def stored_parameters(record, cursor, pair_metric=None, head_pair_metrics=None, 
 
 
 def verify(request, request_hash, baseline, partial, resumed, checkpoint):
-    version = STUDY.request_version(request)
+    wire_version = STUDY.request_version(request)
+    optimizer = STUDY.load_reference("byte_corpus_optimizer")
+    controls = optimizer.recipe(request)
+    version = STUDY.request_version(optimizer.design(request))
     total = len(request["train_batches"])
     cursor = checkpoint["completed_updates"]
     require(type(cursor) is int and 0 <= cursor <= total, "invalid saved cursor")
-    require(checkpoint["schema"] == f"spiraltorch.byte_corpus.checkpoint.v{version}", "checkpoint schema")
+    require(checkpoint["schema"] == f"spiraltorch.byte_corpus.checkpoint.v{wire_version}", "checkpoint schema")
     require(checkpoint["request_sha256"] == request_hash, "checkpoint request identity")
     require(exact(resumed, baseline), "resumed report differs from uninterrupted report")
-    require(baseline["schema"] == f"spiraltorch.byte_corpus.result.v{version}", "baseline is not complete")
+    if cursor == total:
+        require(exact(partial, resumed), "completed checkpoint report differs from no-op resume")
+    require(baseline["schema"] == f"spiraltorch.byte_corpus.result.v{wire_version}", "baseline is not complete")
     require(partial["adapter"] == baseline["adapter"], "partial runtime differs")
-    require(partial["schema"] == (f"spiraltorch.byte_corpus.result.v{version}" if cursor == total
-                                 else f"spiraltorch.byte_corpus.partial.v{version}"), "partial schema")
+    require(partial["schema"] == (f"spiraltorch.byte_corpus.result.v{wire_version}" if cursor == total
+                                 else f"spiraltorch.byte_corpus.partial.v{wire_version}"), "partial schema")
     for report in (baseline, partial, resumed):
+        optimizer.metadata(request, report)
         require(report["engine"] == "spiraltorch", "foreign engine")
         require(report["request_sha256"] == request_hash, "report request identity")
         require(len(report["cases"]) == len(request["cases"]), "missing report cases")
@@ -127,6 +140,12 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
     for case, full, prefix, resumed_case, saved in zip(request["cases"], baseline["cases"],
                                                     partial["cases"], resumed["cases"], checkpoint["cases"]):
         for report in (full, prefix, resumed_case):
+            if wire_version == 9:
+                require("optimizer_state" in report, "missing optimizer state")
+                optimizer.validate_state(case, report["optimizer_state"], controls,
+                                         cursor if report is prefix else total, STUDY.parameter_frozen)
+            else:
+                require("optimizer_state" not in report, "foreign optimizer state")
             require(all(exact(report[key], case[key]) for key in ("name", "seed", "geometry")),
                     "case identity/order differs")
             if version >= 2:
@@ -176,7 +195,15 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 "evaluation prefix differs or extra pause evaluation")
         require(saved["name"] == case["name"], "saved case identity")
         model = STUDY.decode_json(saved["model_json"])
-        stored = stored_parameters(model, cursor, case.get("pair_metric"), case.get("head_pair_metrics"),case.get("mixture"))
+        stored = stored_parameters(model, cursor, case.get("pair_metric"), case.get("head_pair_metrics"),
+                                   case.get("mixture"), controls)
+        if wire_version == 9:
+            optimizer.validate_state(case, model.get("optimizer"), controls, cursor, STUDY.parameter_frozen)
+            if controls["kind"] == optimizer.ADAMW:
+                for a, b in zip(model["optimizer"]["slots"], prefix["optimizer_state"]["slots"]):
+                    for field in ("first", "second"):
+                        require(list(map(f32, a[field])) == list(map(f32, b[field])),
+                                "saved optimizer moment bits differ from paused report")
         require((model["model"]["geometry"] is not None) is case["geometry"], "saved geometry mode")
         require(len(stored) == len(case["parameters"]), "saved tensor count")
         for parameter, expected, readback in zip(stored, case["parameters"], prefix["final_parameters"]):
@@ -201,11 +228,15 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
             summaries[-1][field] = case.get(field)
         if version >= 4:
             summaries[-1]["bias_initialization"] = case["bias_initialization"]
-    return {"schema": f"spiraltorch.byte_corpus.resume_verification.v{version}", "passed": True,
+    result = {"schema": f"spiraltorch.byte_corpus.resume_verification.v{wire_version}", "passed": True,
             "request_sha256": request_hash, "exact_resumed_report_equal": True,
             "exact_training_and_evaluation_prefixes": True,
             "saved_parameter_bits_match_paused_report": True, "cases": summaries,
             "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence"}
+    if wire_version == 9:
+        result.update(design_schema=request["design_schema"], optimizer=controls,
+                      saved_optimizer_bits_and_clocks_match=True)
+    return result
 
 
 def main():

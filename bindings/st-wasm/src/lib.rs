@@ -42,6 +42,8 @@ mod zspace_posterior;
 mod zspace_schrodinger_complex;
 mod zspace_stochastic_schrodinger;
 
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+mod byte_lm;
 #[cfg(target_arch = "wasm32")]
 mod canvas;
 #[cfg(target_arch = "wasm32")]
@@ -50,6 +52,8 @@ mod cobol_bridge;
 mod fft;
 #[cfg(target_arch = "wasm32")]
 mod mellin;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+pub use byte_lm::*;
 #[cfg(all(target_arch = "wasm32", feature = "nn"))]
 mod nn_resident;
 #[cfg(target_arch = "wasm32")]

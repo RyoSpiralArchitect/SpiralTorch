@@ -12,8 +12,9 @@ Python handles call `st_nn::resident::ByteDecoderPlan` and
 `ResidentByteDecoder` directly. The same Rust model and checkpoint schemas are
 used by the native and WASM qualification examples. Python does not implement
 another attention rule, geometric derivative, optimizer or resume validator.
-The standalone WASM qualification is not a claim that every Python class has
-a corresponding JavaScript binding in the packaged `st-wasm` client.
+The [packaged WASM client](../wasm_byte_language_mlops.md) exposes studies,
+checkpoints, immutable artifacts, inference and measured serving. This does not
+imply one-to-one JavaScript coverage of every low-level Python model class.
 
 The nine new `spiraltorch.nn` exports are `ByteLmBatch`,
 `ByteDecoderGeometryPlan`, `ByteDecoderPlan`, `ByteDecoderCheckpoint`,

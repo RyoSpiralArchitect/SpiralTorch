@@ -1,0 +1,121 @@
+# Durable Byte-LM Segments
+
+**Source-only addition after 0.4.31; not a claim of a new PyPI release.**
+
+`spiraltorch.run_byte_corpus_segments` is a synchronous, importable execution
+primitive for the [Rust-owned paired study](byte-corpus-studies.md). It retains
+ordinary weights **and** geometric coordinates, mixture/query routers, frozen
+case policy, data cursor, scalar histories and any AdamW state carried by the
+study checkpoint. Python does not rebuild those semantics or alter their rates.
+
+This closes the gap between a validated in-memory checkpoint and an explicitly
+recoverable local run. It is not a new scheduler, HF executor, registry, automatic
+retry service or model promotion policy. Existing HF lineage/promotion/executor
+APIs remain separate: a native byte-LM checkpoint is not an HF adapter.
+
+## Run And Recover
+
+Use a pinned request from the [corpus protocol](../byte_corpus_learning.md).
+This example assumes it declares 12 accepted updates:
+
+```python
+import spiraltorch as st
+
+st.run_byte_corpus_segments("request.json", "run-a", [0, 5, 12])
+```
+
+The output directory must not already exist; its parent must exist. Stops are
+1..32 explicitly increasing absolute cursors ending at the study's total. The
+zero cursor is optional and saves the initial state. Request/checkpoint and stop
+validation happen before the first device request. GPU execution requires a
+WGPU source wheel; CPU-only builds do not silently execute a different trainer.
+
+If the process stops after the step-5 segment has been sealed:
+
+```python
+saved = st.load_byte_corpus_segment("run-a", 5)  # CPU-only; Rust validates all cases.
+print(saved.receipt_sha256)
+
+st.run_byte_corpus_segments(
+    "request.json", "run-b", [12],
+    resume_from="run-a", resume_after=5,
+    expected_resume_sha256=saved.receipt_sha256,
+)
+```
+
+Recovery always uses a new directory, the **exact original request bytes**, and
+an explicit saved cursor. It never chooses the newest file, steals an active
+run, erases a failure, retunes rates or resumes an unsealed checkpoint. The
+parent claim/receipt/checkpoint hashes are recorded in the child claim. All new
+cursors must advance beyond the selected checkpoint. Loading a final checkpoint
+for inference is valid; running further than the declared study is not.
+
+`expected_resume_sha256` optionally pins a previously retained receipt hash.
+Reading that hash from the same store immediately before use prevents later
+substitution, but is **not** independent authentication of its author or history.
+The source can remain live: recovery explicitly forks the immutable selected
+segment rather than claiming to take over its process. Callers own scheduling
+and GPU resource coordination.
+
+The installed CLI exposes the same primitive, without a repository checkout:
+
+```bash
+spiral-byte-corpus-run request.json run-a --stop 0 --stop 5 --stop 12
+spiral-byte-corpus-run request.json run-b --stop 12 \
+  --resume-from run-a --resume-after 5
+```
+
+The historical `tools/run_byte_corpus_segments.py` is now only a compatibility
+wrapper around the installed package. It requires this source candidate.
+
+## Saved Models Remain Useful
+
+`ByteCorpusSavedSegment` contains the Rust study and checkpoint plus the opaque
+report string and content digests. No device is opened when loading. The saved
+owner feeds the same model-selection and serving lifecycle as any other study
+checkpoint:
+
+```python
+artifact = saved.study.case_artifact(
+    saved.checkpoint, "my-explicit-case-name", policy="fixed_window_frozen.v1",
+)
+# Or select among actual saved evaluation-boundary checkpoints using
+# study.select_checkpoint(...), then apply a separate held-out serving gate.
+```
+
+See [model artifacts](byte-model-artifacts.md),
+[saved-checkpoint selection](../byte_corpus_checkpoint_selection.md) and
+[serving gates](byte-serving-gates.md). A successful resume does not establish
+geometric quality benefit, held-outness, or deployment readiness.
+
+## Storage Contract
+
+- The store currently supports trusted local POSIX filesystems with hard links
+  and directory `fsync`. Windows, network/object stores and hostile concurrent
+  writers are outside this contract. Parent directories must be trusted.
+- The exclusive directory claim is mode `0700`; files are created mode `0600`.
+  Report/checkpoint bytes are flushed before their receipt is published via an
+  atomic no-replace hard link. The directory is flushed after publication.
+- `segment-N.json` is the seal for `report-N.json` and `checkpoint-N.json`. Only
+  that segment's complete claim, request, receipt and payload are needed to
+  load it. Other segments, terminal summaries and older ancestors are not
+  required. Ancestor digests are references, not an authenticated chain.
+- `completed.json` means all declared segments reached the original total;
+  `failed.json` is best-effort diagnostic context. Abrupt death may produce
+  neither. A terminal-summary write failure can leave a valid final segment;
+  inspect the explicit seal instead of automatically rerunning completed work.
+- Interrupted writes can leave `.pending-*` or unsealed payload files. They are
+  never adopted. Keep the source unchanged; recover into a new run. A malformed
+  or corrupt selected seal fails closed, without silently falling back.
+- Loading uses bounded regular-file reads, rejects symlinks at the store/file
+  entry, verifies hashes and calls Rust's full checkpoint validator. JSON
+  payloads are bounded to 64 MiB each; metadata to 64 KiB. Exact opaque model
+  bytes are never passed through a Python float/JSON round trip for storage.
+- Legacy `segment_launch.v1` directories are not automatically upgraded. Their
+  exact checkpoints can still be independently validated through the lower-level
+  Rust API; this store does not manufacture new historical execution receipts.
+
+The filesystem must honor these operations. File/directory `fsync` calls do not
+by themselves prove power-loss resilience on every disk or platform. Requests,
+weights and failure messages may be private: publish selected results/hashes,
+not an entire run directory.

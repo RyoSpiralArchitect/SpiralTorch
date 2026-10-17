@@ -17,8 +17,10 @@ older installed wheel.
 
 ## Language and Geometric Learning
 
+- [Language MLOps](language_mlops.md): train, retain geometry, recover, select saved models and measure serving changes.
 - [HF/Z-space optimizer experiments](hf_zspace_optimizer_ablation.md): matched learning studies and their limits.
 - [Geometric learning bridge](geometric_learning_bridge.md): connect mechanisms to an actual learning path.
+- [Durable byte-LM runs](python/byte-study-runs.md): sealed geometric checkpoints and explicit recovery through the Rust owner.
 - [Geometry adapter stack](geometry_adapter_stack.md): composing geometric interventions.
 - [Training reference](reference/learning.md): language models, GoldenRetriever, RL, Rec, coherence, and Rust training examples.
 - [Geometric toolkits](reference/geometry.md): topos, GNNs, desire, quantum overlays, and telemetry.

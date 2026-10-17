@@ -5,10 +5,23 @@ use super::*;
 #[cfg(feature = "wgpu")]
 use crate::wgpu_tensor::{PyWgpuTensor, PyWgpuTensorDevice};
 #[cfg(feature = "wgpu")]
+use st_nn::resident::{AdamWConfig, AdamWStep};
+#[cfg(feature = "wgpu")]
 use st_nn::resident::{
     ByteDecoderBias, ByteDecoderCheckpointReadback, ByteDecoderQueryPullback, ResidentByteBatch,
     ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
+
+#[cfg(feature = "wgpu")]
+fn adamw_control(value: f64) -> PyResult<f32> {
+    let narrowed = value as f32;
+    if !value.is_finite() || !narrowed.is_finite() || (value != 0.0 && !narrowed.is_normal()) {
+        return Err(PyValueError::new_err(
+            "AdamW controls must be zero or representable normal float32 values",
+        ));
+    }
+    Ok(narrowed)
+}
 
 #[pyclass(name = "ResidentByteBatch", module = "spiraltorch.nn", frozen)]
 pub(super) struct PyResidentByteBatch {
@@ -64,6 +77,75 @@ impl PyResidentByteDecoder {
     #[getter]
     fn attempted_updates(&self) -> u64 {
         self.inner.parameter_snapshot().revision()
+    }
+    #[getter]
+    fn adamw_config(&self) -> Option<(f32, f32, f32)> {
+        self.inner
+            .adamw_config()
+            .map(|c| (c.beta1(), c.beta2(), c.epsilon()))
+    }
+    #[pyo3(signature = (*, beta1=0.9, beta2=0.999, epsilon=1e-8))]
+    fn enable_adamw(
+        &mut self,
+        py: Python<'_>,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+    ) -> PyResult<()> {
+        let config = AdamWConfig::new(
+            adamw_control(beta1)?,
+            adamw_control(beta2)?,
+            adamw_control(epsilon)?,
+        )
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        py.detach(|| self.inner.enable_adamw(config))
+            .map_err(plan_error)
+    }
+    #[pyo3(signature = (gradients, rate, *, weight_decay=0.0))]
+    fn adamw(
+        &mut self,
+        py: Python<'_>,
+        gradients: &PyByteDecoderGradients,
+        rate: f64,
+        weight_decay: f64,
+    ) -> PyResult<PyResidentParameterUpdate> {
+        let step = AdamWStep::new(adamw_control(rate)?, adamw_control(weight_decay)?)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(PyResidentParameterUpdate {
+            inner: py
+                .detach(|| self.inner.adamw(&gradients.inner, step))
+                .map_err(plan_error)?,
+        })
+    }
+    /// Zero freezes weights, both moments and the accepted clock, not the VJP.
+    #[pyo3(signature = (gradients, rates, *, weight_decays=None))]
+    fn adamw_with_rates(
+        &mut self,
+        py: Python<'_>,
+        gradients: &PyByteDecoderGradients,
+        rates: Vec<f64>,
+        weight_decays: Option<Vec<f64>>,
+    ) -> PyResult<PyResidentParameterUpdate> {
+        let count = self.inner.parameter_layout().len();
+        let decays = weight_decays.unwrap_or_else(|| vec![0.0; count]);
+        if rates.len() != count || decays.len() != count {
+            return Err(PyValueError::new_err(
+                "AdamW rates and decays must cover every parameter tensor",
+            ));
+        }
+        let steps = rates
+            .into_iter()
+            .zip(decays)
+            .map(|(r, d)| {
+                AdamWStep::new(adamw_control(r)?, adamw_control(d)?)
+                    .map_err(|e| PyValueError::new_err(e.to_string()))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(PyResidentParameterUpdate {
+            inner: py
+                .detach(|| self.inner.adamw_with_steps(&gradients.inner, &steps))
+                .map_err(plan_error)?,
+        })
     }
     fn parameter_layout(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         parameter_layout(py, self.inner.parameter_layout())

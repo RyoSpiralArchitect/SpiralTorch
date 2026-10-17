@@ -1,0 +1,202 @@
+{
+  "schema": "spiraltorch.resident_adamw.validation.v1",
+  "recorded_utc": "2026-10-15T12:57:44Z",
+  "scope": "Optimizer/state correctness on synthetic fixtures; not language-quality, speed, Riemannian-optimizer, or training-attestation evidence.",
+  "base_commit": "631383c4aeae5f025fca53c5dad8b361d6bee2a2",
+  "host": {
+    "os": "macOS 26.4.1 (25E253)",
+    "native_adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    },
+    "browser_backend": "BrowserWebGpu"
+  },
+  "tools": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "backend_clippy": "1.99.0 (b940084d7e 2026-09-28)",
+    "rustfmt": "nightly-2026-04-15",
+    "torch": "2.12.1",
+    "wasm_bindgen": "0.2.129",
+    "maturin": "1.11.5"
+  },
+  "tests": [
+    {
+      "suite": "kernel",
+      "passed": 126,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "kernel-qualified.log",
+      "command": "cargo test --locked -p st-kernel-contracts --lib"
+    },
+    {
+      "suite": "native_parameters",
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "backend-qualified.log",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked -p st-backend-wgpu --lib resident_training::parameters -- --test-threads=1"
+    },
+    {
+      "suite": "native_byte_language",
+      "passed": 111,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "nn-qualified.log",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked -p st-nn --no-default-features --features wgpu --lib resident::byte_ -- --test-threads=1"
+    },
+    {
+      "suite": "portable_checkpoint",
+      "passed": 15,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "portable-qualified.log",
+      "command": "cargo test --locked -p st-nn --no-default-features --lib resident::byte_decoder::checkpoint"
+    },
+    {
+      "suite": "python_wgpu_language",
+      "passed": 32,
+      "skipped": 2,
+      "failed": 0,
+      "receipt": "python-language-qualified.log",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I -B -m unittest discover -s bindings/st-py/tests -p 'test_nn_byte_*.py' -v"
+    },
+    {
+      "suite": "python_cpu_language",
+      "passed": 20,
+      "skipped": 14,
+      "failed": 0,
+      "receipt": "python-cpu-language-qualified.log",
+      "command": "python -I -B -m unittest discover -s bindings/st-py/tests -p 'test_nn_byte_*.py' -v"
+    },
+    {
+      "suite": "python_wgpu_release_smoke",
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "python-smoke-qualified.log",
+      "command": "python -I -B tests/test_release_learning_smoke.py -v"
+    },
+    {
+      "suite": "python_cpu_release_smoke",
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "python-cpu-smoke-qualified.log",
+      "command": "python -I -B tests/test_release_learning_smoke.py -v"
+    }
+  ],
+  "browser": {
+    "receipt": "browser.json",
+    "torch_updates": 12,
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "same_device_resume": "bitwise",
+    "zero_rate_policy": "grad_none_equivalent",
+    "atomic_rejection": true,
+    "division_domain_rejection": true,
+    "division_headroom_rejection": true
+  },
+  "cross_wheel": {
+    "from": "WGPU source wheel",
+    "to": "CPU-only source wheel",
+    "model_schema": "spiraltorch.nn.byte_decoder_checkpoint.v5",
+    "checkpoint_schema": "spiraltorch.nn.byte_decoder_checkpoint.v6",
+    "attempted_revision": 1,
+    "optimizer_slots": 25,
+    "checkpoint_sha256": "8444d6afd4c177b8fb6eb281953da8d3e76f351269eeb2fb7e7d1ef1644ff384",
+    "roundtrip": "exact_json",
+    "cpu_only_execution": "explicit NotImplementedError, not fallback",
+    "checkpoint_visibility": "private"
+  },
+  "additional_checks": {
+    "native_backend_clippy": "cargo +1.99.0 clippy --locked -p st-backend-wgpu --all-targets -- -D warnings",
+    "wasm_backend_clippy": "cargo +1.99.0 clippy --locked -p st-backend-wgpu --target wasm32-unknown-unknown --all-targets -- -D warnings",
+    "kernel_clippy": "cargo clippy --locked -p st-kernel-contracts --all-targets -- -D warnings",
+    "nn_wasm": "cargo check --locked -p st-nn --no-default-features --features wgpu --target wasm32-unknown-unknown --lib",
+    "format": "nightly-2026-04-15 rustfmt --check --config skip_children=true on changed Rust files",
+    "result": "passed"
+  },
+  "review": {
+    "mode": "two independent read-only local source reviews",
+    "scopes": [
+      "backend arithmetic and transactional state",
+      "checkpoint, resume, callers and Python API"
+    ],
+    "final_actionable_findings": 0,
+    "execution_evidence": "separate parent-run tests, not independently rerun by reviewers"
+  },
+  "limitations": [
+    "The older Rust 1.97 backend Clippy run failed on seven existing uses of the unknown chunks_exact_to_as_chunks lint. Strict native/WASM Clippy passed on installed Rust 1.99 without suppressions.",
+    "Same-device exact resume is tested; no cross-device bitwise promise.",
+    "ByteCorpusStudy v1-v8 remain SGD-only and explicitly reject AdamW checkpoints.",
+    "Data cursors, rate/decay schedules, external biases and kernel options remain caller-owned.",
+    "This is raw-coordinate AdamW, not manifold momentum transport.",
+    "Private CPU/WGPU wheels retain 0.4.31 metadata for validation only and must not be uploaded to PyPI.",
+    "Local validation is not a passing remote CI result."
+  ],
+  "source_sha256": {
+    "bindings/st-py/spiraltorch/__init__.pyi": "5104da034659614c7e1fbf3e8015e5aee4a70d05fc1a44c241436a1cb29d6c6e",
+    "bindings/st-py/src/nn_resident/byte_decoder.rs": "3502a7657023c44ea273bf0e476288715eadf829df5c1a95bb0014902971f43a",
+    "bindings/st-py/src/nn_resident/byte_decoder/training.rs": "2344d935ae648dacb0351543c156ef31e153ef2a9745e84386e8e2fc8d8acfb7",
+    "bindings/st-py/tests/test_nn_byte_decoder.py": "1fcef2c740d0452ade2ce25b47909f54aaa8a904041458b531772794436ca3f0",
+    "crates/st-backend-wgpu/examples/resident_parameters_browser.rs": "a1327e96e6f29bc1c3c8a9dfb8e15f32c6a69b6823f7e063b64bd457ae35b125",
+    "crates/st-backend-wgpu/examples/support/resident_adamw_checks.rs": "eeb4f26e32960dd549b4d6fd0489c73688a3cae8e2c9baaeb028635df0e5f634",
+    "crates/st-backend-wgpu/src/resident_training.rs": "2486f1738d575e39257c66ba2ae204e664ad251ffd9315bd3378c8bd152eca94",
+    "crates/st-backend-wgpu/src/resident_training/parameters.rs": "5db554ab1d0ac816000cf1805655ff01563655ab5b66be48e6bba080a01c535d",
+    "crates/st-backend-wgpu/src/resident_training/parameters/adamw.rs": "b4ba6136a0760491fa1640058fd80fe072368f39638d3b370f590fa74467dcfb",
+    "crates/st-backend-wgpu/src/resident_training/parameters/adamw/tests.rs": "0aed23ff6b5ae87d33027c1f928e560288f7a7299051bf141cd497a8ade1208d",
+    "crates/st-backend-wgpu/src/resident_training/shaders/adamw_commit.wgsl": "4d67b0b506cc07c56700c4552e2d1c5f54f62a2edfeeda4f30ba94030c8ca683",
+    "crates/st-backend-wgpu/src/resident_training/shaders/adamw_params.wgsl": "1e29e4c4f023cbac1c8c11fe288e6c00b72b3345e4e4ba559bd3e4d52c46a08d",
+    "crates/st-backend-wgpu/src/resident_training/shaders/adamw_prepare.wgsl": "b234b69f3b4120afc376f9e93fbcf8bd518ff91d829319650d5767051f460236",
+    "crates/st-backend-wgpu/tests/adamw_browser.html": "ff982b18f43126689c5ed0c8c07eed6d3ef4e127ca972e78c28894c57fe2398c",
+    "crates/st-backend-wgpu/tests/fixtures/resident_adamw_torch.json": "1780b918b92bb86e322cd8adaebff487a1844c4770facdaff09afab77ca0eb6e",
+    "crates/st-kernel-contracts/src/adamw.rs": "0c5c5dcf7ad8516a33a5b81214741b3dccb89f587d6d660a65a754ebf4b227c2",
+    "crates/st-kernel-contracts/src/adamw.wgsl": "d08d29b50c8c23e0f6d9ad1b9c81323f893b14615a8c97f015436f7fdbbb344f",
+    "crates/st-kernel-contracts/src/lib.rs": "668d01a432cae7cf07db1e5e6598091f43bae6548ae7b30ab45330a3c39a82ea",
+    "crates/st-nn/src/resident.rs": "3d243cf42d0b2c2165dcaf75e0defb68561d8a4fc9f8cfacd790f99198e3e68f",
+    "crates/st-nn/src/resident/attention.rs": "195634bf5b6ca1e22c4e0b8e6072a7897ac05af701f2b98b45d875334529de1c",
+    "crates/st-nn/src/resident/attention/autograd.rs": "e30a5a577f4e9a04a9a669151f95c9175b9af5382af2ffe18c46cfe0ed6031a8",
+    "crates/st-nn/src/resident/byte_decoder.rs": "207ab7e7283ab1b9677141ded29356aac29e5b50d6d0b37cb6d1793ed86101d2",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint.rs": "e732cb36bba7ee6fa233e43585251da816cca0dc46c05d9c6183384991768fcf",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/gpu.rs": "d64be0ab840d42f0e2ebbd7b8f8d449765d11e49c3d4da68b1a647403261b731",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/optimizer.rs": "193e26eb9cede6f1aedebdc4b03cebabb57716356e382cdaa86870dba5ab1c76",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/optimizer_tests.rs": "a682bb5245913103a3ef8ad0960975d8cb9e36d8eae5d0b23eda35def2207d63",
+    "crates/st-nn/src/resident/byte_decoder/training.rs": "5c472cadddcbcbd6272bfb1ae3593da52499e45c5eda6321ae487dac27a3cc33",
+    "crates/st-nn/src/resident/byte_decoder/training/tests.rs": "ab606f09e426fac336ad59d899ef4b72dec4627211082e12e707c51875759e35",
+    "crates/st-nn/src/resident/byte_decoder/training/tests/adamw.rs": "c6da548d9e2b96043186198a7a1964219a12b418ae346ea747ea5708d4aeb53e",
+    "crates/st-nn/src/resident/byte_decoder/training/tests/query_pullback.rs": "09e051a5632f694466c3d2ff2f8d454f3cc938ff406e43dcc26a9022415f5c0f",
+    "crates/st-nn/src/resident/byte_study.rs": "19ede297d13d6a1e27bf124d15c35c0d481491a87ad6f5b3f626d69d0421c9a9",
+    "crates/st-nn/src/resident/residual_attention.rs": "6535a38afd50e2685b27f84192324bc200068567fdee5985ed4c189bf4f0ef1d",
+    "crates/st-nn/src/resident/residual_attention/autograd.rs": "96bfb6385d5ddd177858c4f01a37edcfe81147b880119196abe259e465c929c4",
+    "tools/generate_resident_adamw_fixture.py": "1e725bb6859178614c47157f57e15aeb4dda3c3667de9bbb7ddcb2998cc429f5"
+  },
+  "private_receipts_sha256": {
+    "kernel-qualified.log": "c064ee8766a623530c542cfea68fb8332d3db13a1e580cd68416c07ab2da75bd",
+    "backend-qualified.log": "0498eb0e21d0d6ff61bede9c2ff0074a22a826b547e0dd86d06176e934efe12d",
+    "nn-qualified.log": "949f89b2f50eadedc11d61ecc30cf16bdd1d8fa318640b8365efaad4b80a71de",
+    "portable-qualified.log": "128645b413f0a072f09295d0c011a5f6603c0e79513966d68a61144ca795f149",
+    "python-language-qualified.log": "e4f9838eb7e87eaa94db93c1749a788971613d040f27612794ce1677d3ea96e8",
+    "python-cpu-language-qualified.log": "49f751c9693eccbf7ff26f930921cd81b85e11f0a92b23ad279e6737b9df980e",
+    "python-smoke-qualified.log": "d989be2e738cfbf78107b4a81c05183c21ddf883924d0f693f3a1a490a287169",
+    "python-cpu-smoke-qualified.log": "d989be2e738cfbf78107b4a81c05183c21ddf883924d0f693f3a1a490a287169",
+    "format-qualified.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "kernel-clippy-qualified.log": "3224cdd2b03b8255b9d13b6419d1a9143523de333cd70438056030379873eec8",
+    "backend-clippy-199.log": "9dc1ac4c71f63377b45458e6c173580464644db4b85d580e230d6f85cd00702c",
+    "wasm-clippy-199.log": "b911eeb4c99c946fcfcfaed204222c7ff3f469b8e78a27114751166ce3c46a80",
+    "nn-wasm-qualified.log": "abaea82090f867623ee027b89057c8416ce5da7c71d3b0cd58e829e4f424232f",
+    "wasm-qualified.log": "13083ea0dc513be545d4dbb446a89903964cc2e576fdd3f85d2ec60103ad2b52",
+    "wheel-qualified.log": "2fcf15460bbe14e689fbecf4391704088742c20f039803721a665e419d8498fe",
+    "wheel-cpu-qualified.log": "d899014df505d11816e4b52c86848f16127f7dff323ac1cd248c964e434bb53a",
+    "browser-qualified.json": "ce5577c10eb9384437383d6b38a6f68c5a42853266dde0dd92109b55fac9fe7c",
+    "cross-wheel-producer.json": "4e5ec45a242ab027e81e2fc821a374fa3cd4262f2dd67e72f8956f024a162829",
+    "cross-wheel-consumer.json": "6cadf8c08eca9ad0bc7ffd8d89e8731cf0fcf484a513bb9129c0cd6f7ccd0923",
+    "cross-wheel-checkpoint.json": "8444d6afd4c177b8fb6eb281953da8d3e76f351269eeb2fb7e7d1ef1644ff384",
+    "wheels-wgpu-qualified/spiraltorch-0.4.31-cp38-abi3-macosx_11_0_arm64.whl": "1ac28e34f1f777a6e0e16f18293157eee75b1f44e333b965436e7b78a00a6126",
+    "wheels-cpu-qualified/spiraltorch-0.4.31-cp38-abi3-macosx_11_0_arm64.whl": "2c5f54555f7331f0ca67b8bae7ddd0e03e15bd01791855a22d62c6098c3ca9f3",
+    "web-qualified/resident_parameters_browser_bg.wasm": "77ce479e0424061cf56eac52f0d4ff8fe98063a31911b106985ca8b3f670bf70",
+    "web-qualified/resident_parameters_browser.js": "f411e52d7526e004d47ec7bf1d90dbaefaa28e8ab067bb294b5d45cd3a8dbfd7",
+    "venv-wgpu/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so": "f8e77b8d23161c58428700318f36d17e26827c7c42ea471a2b0a6f82f4e61ff3",
+    "venv-cpu/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so": "9dadc7bbc4930afedaa435cd5af7b3cc04f59d43e9b0866a1042e9b9066480f8"
+  }
+}

@@ -1,5 +1,6 @@
 use super::*;
 
+mod adamw;
 mod query_pullback;
 
 fn read(t: &ResidentTensor) -> Result<Vec<f32>, GpuTensorError> {

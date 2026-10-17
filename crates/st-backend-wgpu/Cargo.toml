@@ -19,6 +19,7 @@ futures-channel = "0.3"
 
 [dev-dependencies]
 naga = { version = "0.20", default-features = false, features = ["wgsl-in"] }
+sha2 = "0.10"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen = "0.2"
@@ -66,6 +67,14 @@ crate-type = ["cdylib"]
 
 [[example]]
 name = "resident_attention_vjp_browser"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "resident_bias_reduction_browser"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "resident_wide_rounding_browser"
 crate-type = ["cdylib"]
 
 [[example]]

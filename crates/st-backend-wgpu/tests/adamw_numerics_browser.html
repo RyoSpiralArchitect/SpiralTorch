@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident AdamW numerical checks</title>
+<h1>Resident AdamW numerical checks</h1>
+<p>Three fixed-gradient streams, 1,024 updates each. No Attention or model-quality claim.</p>
+<p>This validates the WebGPU API path. Selected-adapter hardware execution is unverified.</p>
+<a id="download" hidden>Download all AdamW numerical results</a>
+<pre id="result" data-status="running">Running Rust/WebGPU checks...</pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_adamw_checks, run_adamw_numerics} = await import("./resident_parameters_browser.js");
+  await init();
+  const controls = JSON.parse(await run_adamw_checks());
+  const numerics = JSON.parse(await run_adamw_numerics());
+  const passed = controls.status === "passed" && controls.torch_updates === 12
+    && controls.same_device_resume === "bitwise"
+    && controls.atomic_rejection && controls.retained_snapshot
+    && controls.division_domain_rejection && controls.division_headroom_rejection
+    && controls.backend === "BrowserWebGpu"
+    && numerics.backend === "BrowserWebGpu" && numerics.status === "passed"
+    && numerics.hardware_execution === "unverified"
+    && numerics.updates_per_case === 1024 && numerics.cases.length === 3
+    && numerics.restored_clock_probes.length === 8
+    && numerics.restored_clock_probes.every(probe => probe.passed);
+  const report = {status: passed ? "passed" : "failed",
+    scope: "WebGPU numerical validation; not hardware identification",
+    hardware_execution: "unverified", controls, numerics};
+  const raw = JSON.stringify(report, null, 2);
+  result.textContent = raw;
+  result.dataset.status = report.status;
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([raw], {type: "application/json"}));
+  link.download = "resident-adamw-numerics.json";
+  link.hidden = false;
+} catch (error) {
+  result.textContent = String(error.stack || error);
+  result.dataset.status = "error";
+}
+</script>

@@ -1,0 +1,106 @@
+{
+  "schema": "spiraltorch.byte_corpus.capacity_preparation.v1",
+  "plan_sha256": "2e80dd5f378b5887ed9c6cebde3b22b7c59a613457aa8ec728139f3583654e02",
+  "corpus_revision": "02f211f72a029ce6455aed2c706ca35989490c03",
+  "historical_request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+  "stops": [
+    0,
+    256,
+    512,
+    1024
+  ],
+  "all_data_prefixes_and_width16_initial_bits_equal": true,
+  "entries": [
+    {
+      "name": "w16-seed11",
+      "width": 16,
+      "seed": 11,
+      "request_sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+      "checkpoint_size_bound": 3508462,
+      "parameter_scalars": [
+        11216,
+        11290,
+        11290
+      ]
+    },
+    {
+      "name": "w16-seed29",
+      "width": 16,
+      "seed": 29,
+      "request_sha256": "c3f609588d4f456e7836ab1ddcf7ceac13210659724f7be713f0f0b3d287cb3a",
+      "checkpoint_size_bound": 3508462,
+      "parameter_scalars": [
+        11216,
+        11290,
+        11290
+      ]
+    },
+    {
+      "name": "w16-seed47",
+      "width": 16,
+      "seed": 47,
+      "request_sha256": "66e5569e145750378b238e8ad5629376f2fdf23f4470360ae6f7c212f01044a3",
+      "checkpoint_size_bound": 3508462,
+      "parameter_scalars": [
+        11216,
+        11290,
+        11290
+      ]
+    },
+    {
+      "name": "w32-seed11",
+      "width": 32,
+      "seed": 11,
+      "request_sha256": "ec4d9907e1e709ceb262ac2c1a51cc9ab494a95d411a232553ae0479d8b7df42",
+      "checkpoint_size_bound": 7856878,
+      "parameter_scalars": [
+        26272,
+        26410,
+        26410
+      ]
+    },
+    {
+      "name": "w32-seed29",
+      "width": 32,
+      "seed": 29,
+      "request_sha256": "38dfafaaf21f16c8284d79cb82815c442cd55ae3a2e45c3df2fe74bb4ec5ae97",
+      "checkpoint_size_bound": 7856878,
+      "parameter_scalars": [
+        26272,
+        26410,
+        26410
+      ]
+    },
+    {
+      "name": "w32-seed47",
+      "width": 32,
+      "seed": 47,
+      "request_sha256": "d189c56cda79a42756e1df748f79d053034f4a56274812c6ab55cb2c0e29bd31",
+      "checkpoint_size_bound": 7856878,
+      "parameter_scalars": [
+        26272,
+        26410,
+        26410
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "path": "benchmarks/results/2026-10-16-language-capacity-budget/launch.py",
+      "sha256": "c05a4ab461139ba2df9c9e4ac035fb5ca14ff6b6f6246f32f962d54a7b41dad5"
+    },
+    {
+      "path": "tools/byte_corpus_study.py",
+      "sha256": "3f55ab2b2f901e0f6f095374035487eab2dc0213165bc6fdb46c1c9df3e2bfaa"
+    },
+    {
+      "path": "tools/byte_corpus_optimizer.py",
+      "sha256": "1a680a251f2e5bbdc20b8146883aca1122fa5dc64b73b96f054333e2c9056a1a"
+    },
+    {
+      "path": "tools/run_byte_corpus_segments.py",
+      "sha256": "1d1c6ea4c4cd2860272e5a33026af2f3414af6803770eac06710021799162886"
+    }
+  ],
+  "native_extension_sha256": "ac92d86e83bf8baa3c02c7db0ea85c70d650da970aadfecb7b07d0d706260d21"
+}

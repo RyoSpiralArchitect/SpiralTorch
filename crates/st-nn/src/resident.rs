@@ -6,6 +6,7 @@
 //! unsupported modules fail before GPU allocation, never fall back to CPU.
 
 use crate::{module::Module, Tensor, TensorError};
+pub use st_kernel_contracts::adamw::{AdamWConfig, AdamWState, AdamWStep};
 pub use st_kernel_contracts::graph::{
     GraphDefinition, GraphGradientPolicy, GraphParameter, GraphStage, ParameterRole,
 };
@@ -31,19 +32,20 @@ pub use byte_decoder::{
 pub use byte_decoder::{
     ByteDecoderCheckpoint, ByteDecoderGeometryMixture, ByteDecoderGeometryParameterLayout,
     ByteDecoderGeometryPlan, ByteDecoderPairMetric, ByteDecoderParameterLayout, ByteDecoderPlan,
-    ByteLmBatch, BYTE_DECODER_CHECKPOINT_SCHEMA, BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA,
-    BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
-    BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
+    ByteLmBatch, BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA, BYTE_DECODER_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA, BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA, BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA,
+    BYTE_LM_VOCAB,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::ByteCorpusGeneration;
 pub use byte_study::ByteCorpusServingGate;
 pub use byte_study::{
-    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusInferencePolicy,
-    ByteCorpusMixtureControls, ByteCorpusModelArtifact, ByteCorpusPreparedBiasStudy,
-    ByteCorpusQueryMixtureControls, ByteCorpusStudy, ByteCorpusStudyCheckpoint,
-    ByteCorpusStudyResult, ByteCorpusStudySegment, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
-    BYTE_CORPUS_STUDY_MAX_BYTES,
+    ByteCorpusBiasCalibration, ByteCorpusCheckpointSelection, ByteCorpusHeadwiseControls,
+    ByteCorpusInferencePolicy, ByteCorpusMixtureControls, ByteCorpusModelArtifact,
+    ByteCorpusPreparedBiasStudy, ByteCorpusQueryMixtureControls, ByteCorpusStudy,
+    ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment,
+    BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{ResidentByteCandidate, ResidentByteServing};
@@ -179,6 +181,8 @@ pub enum InferenceError {
     RequiresGraph,
     #[error(transparent)]
     Graph(#[from] st_kernel_contracts::graph::GraphError),
+    #[error(transparent)]
+    AdamW(#[from] st_kernel_contracts::adamw::AdamWError),
     #[error("GELU must directly follow an unfused Linear in this lowering")]
     UnsupportedGelu,
     #[error("linear parameter or input dimensions differ at stage {0}")]

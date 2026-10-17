@@ -1,0 +1,417 @@
+{
+  "schema": "spiraltorch.byte_corpus.optimizer_qualification.v1",
+  "recorded_utc": "2026-10-15 14:04:34 UTC",
+  "parent_commit": "d487e367c1cc97112564a56cea2d9fccf6bce527",
+  "scope": "v9 optimizer-aware language-study mechanics, matched small repository-prose pilot, same-device resume and immutable inference. Not broad language quality, speed, optimizer tuning or training attestation.",
+  "tools": {
+    "rustc": "1.97.0",
+    "strict_clippy": "1.99.0",
+    "rustfmt": "nightly-2026-04-15",
+    "torch": "2.12.1",
+    "wasm_bindgen": "0.2.129",
+    "python": "3.12.6"
+  },
+  "native_adapter": "Apple M4 / Metal",
+  "browser_backend": "BrowserWebGpu",
+  "wire_schema": "spiraltorch.byte_corpus.request.v9",
+  "design_schema": "spiraltorch.byte_corpus.request.v2",
+  "paired_conditions": {
+    "seeds": [
+      11,
+      29,
+      47
+    ],
+    "arms": [
+      "ordinary",
+      "geometry train",
+      "geometry frozen"
+    ],
+    "optimizers": [
+      "stateless_sgd.v1",
+      "adamw_zero_rate_freeze.v1"
+    ],
+    "rate": 0.001,
+    "updates": 12,
+    "training_target_bytes_per_case": 192,
+    "validation_target_bytes_per_case": 64,
+    "matched": [
+      "documents",
+      "windows",
+      "initial parameter bits",
+      "data order",
+      "learning rate",
+      "update count"
+    ],
+    "not_matched": [
+      "parameter count across ordinary versus geometry",
+      "compute",
+      "optimizer-specific tuning",
+      "decay policy across optimizers"
+    ]
+  },
+  "numerical_criteria": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_delta_relative_l2": 0.002,
+    "optimizer_moment_relative_l2": 0.002,
+    "moment_absolute_floor": 0
+  },
+  "baseline_results": [
+    {
+      "optimizer": "stateless_sgd.v1",
+      "cases": [
+        {
+          "name": "seed11_ordinary",
+          "seed": 11,
+          "geometry": false,
+          "geometry_update": "train",
+          "initial_bpb": 8.04269574695528,
+          "final_bpb": 8.037612971691681
+        },
+        {
+          "name": "seed11_geometry",
+          "seed": 11,
+          "geometry": true,
+          "geometry_update": "train",
+          "initial_bpb": 8.042643292246767,
+          "final_bpb": 8.037978606807416
+        },
+        {
+          "name": "seed11_geometry_frozen",
+          "seed": 11,
+          "geometry": true,
+          "geometry_update": "frozen",
+          "initial_bpb": 8.042643292246767,
+          "final_bpb": 8.037980326633924
+        },
+        {
+          "name": "seed29_ordinary",
+          "seed": 29,
+          "geometry": false,
+          "geometry_update": "train",
+          "initial_bpb": 8.119756357292681,
+          "final_bpb": 8.114225567223583
+        },
+        {
+          "name": "seed29_geometry",
+          "seed": 29,
+          "geometry": true,
+          "geometry_update": "train",
+          "initial_bpb": 8.121285455041502,
+          "final_bpb": 8.115854414909904
+        },
+        {
+          "name": "seed29_geometry_frozen",
+          "seed": 29,
+          "geometry": true,
+          "geometry_update": "frozen",
+          "initial_bpb": 8.121285455041502,
+          "final_bpb": 8.11585527482316
+        },
+        {
+          "name": "seed47_ordinary",
+          "seed": 47,
+          "geometry": false,
+          "geometry_update": "train",
+          "initial_bpb": 8.014046704991904,
+          "final_bpb": 8.010473765420228
+        },
+        {
+          "name": "seed47_geometry",
+          "seed": 47,
+          "geometry": true,
+          "geometry_update": "train",
+          "initial_bpb": 8.014651224009686,
+          "final_bpb": 8.011150861116676
+        },
+        {
+          "name": "seed47_geometry_frozen",
+          "seed": 47,
+          "geometry": true,
+          "geometry_update": "frozen",
+          "initial_bpb": 8.014651224009686,
+          "final_bpb": 8.01115017318607
+        }
+      ]
+    },
+    {
+      "optimizer": "adamw_zero_rate_freeze.v1",
+      "cases": [
+        {
+          "name": "seed11_ordinary",
+          "seed": 11,
+          "geometry": false,
+          "geometry_update": "train",
+          "initial_bpb": 8.04269574695528,
+          "final_bpb": 7.915347581488246
+        },
+        {
+          "name": "seed11_geometry",
+          "seed": 11,
+          "geometry": true,
+          "geometry_update": "train",
+          "initial_bpb": 8.042643292246767,
+          "final_bpb": 7.917798506245691
+        },
+        {
+          "name": "seed11_geometry_frozen",
+          "seed": 11,
+          "geometry": true,
+          "geometry_update": "frozen",
+          "initial_bpb": 8.042643292246767,
+          "final_bpb": 7.917886733345584
+        },
+        {
+          "name": "seed29_ordinary",
+          "seed": 29,
+          "geometry": false,
+          "geometry_update": "train",
+          "initial_bpb": 8.119756357292681,
+          "final_bpb": 7.964627318283823
+        },
+        {
+          "name": "seed29_geometry",
+          "seed": 29,
+          "geometry": true,
+          "geometry_update": "train",
+          "initial_bpb": 8.121285455041502,
+          "final_bpb": 7.967691361191595
+        },
+        {
+          "name": "seed29_geometry_frozen",
+          "seed": 29,
+          "geometry": true,
+          "geometry_update": "frozen",
+          "initial_bpb": 8.121285455041502,
+          "final_bpb": 7.967835310670368
+        },
+        {
+          "name": "seed47_ordinary",
+          "seed": 47,
+          "geometry": false,
+          "geometry_update": "train",
+          "initial_bpb": 8.014046704991904,
+          "final_bpb": 7.89566279123579
+        },
+        {
+          "name": "seed47_geometry",
+          "seed": 47,
+          "geometry": true,
+          "geometry_update": "train",
+          "initial_bpb": 8.014651224009686,
+          "final_bpb": 7.897397408252393
+        },
+        {
+          "name": "seed47_geometry_frozen",
+          "seed": 47,
+          "geometry": true,
+          "geometry_update": "frozen",
+          "initial_bpb": 8.014651224009686,
+          "final_bpb": 7.897334806567478
+        }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "suite": "portable_study",
+      "passed": 67,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "cpu-2.log",
+      "command": "cargo test --locked -p st-nn --no-default-features --lib resident::byte_study"
+    },
+    {
+      "suite": "native_byte_language",
+      "passed": 116,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "native-2.log",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked -p st-nn --no-default-features --features wgpu --lib resident::byte_ -- --test-threads=1"
+    },
+    {
+      "suite": "independent_study_tools",
+      "passed": 72,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "python-all-reviewed.log",
+      "command": "python -I -B -m unittest discover -s tools -p 'test_byte_corpus*.py'"
+    },
+    {
+      "suite": "resume_tools",
+      "passed": 22,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "python-resume-reviewed.log",
+      "command": "python -I -B -m unittest discover -s tools -p 'test_verify_byte_corpus*.py'"
+    },
+    {
+      "suite": "installed_wgpu_language",
+      "passed": 34,
+      "skipped": 2,
+      "failed": 0,
+      "receipt": "python-wgpu.log",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I -B -m unittest discover -s bindings/st-py/tests -p 'test_nn_byte_*.py' -v"
+    },
+    {
+      "suite": "installed_cpu_language",
+      "passed": 21,
+      "skipped": 15,
+      "failed": 0,
+      "receipt": "python-cpu.log",
+      "command": "python -I -B -m unittest discover -s bindings/st-py/tests -p 'test_nn_byte_*.py' -v"
+    },
+    {
+      "suite": "installed_wgpu_release_smoke",
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "release-wgpu.log",
+      "command": "python -I -B tests/test_release_learning_smoke.py -v"
+    },
+    {
+      "suite": "installed_cpu_release_smoke",
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0,
+      "receipt": "release-cpu.log",
+      "command": "python -I -B tests/test_release_learning_smoke.py -v"
+    }
+  ],
+  "builds": [
+    {
+      "result": "passed",
+      "receipt": "native-build.log",
+      "command": "cargo build --locked --release -p st-nn --no-default-features --features wgpu --example resident_byte_learning"
+    },
+    {
+      "result": "passed",
+      "receipt": "wasm-build.log",
+      "command": "cargo build --locked --release -p st-nn --no-default-features --features wgpu --target wasm32-unknown-unknown --example resident_byte_learning_browser"
+    },
+    {
+      "result": "passed",
+      "receipt": "wheel-wgpu.log",
+      "command": "maturin build --locked --release --manifest-path bindings/st-py/Cargo.toml --out PRIVATE/wheels-wgpu"
+    },
+    {
+      "result": "passed",
+      "receipt": "wheel-cpu.log",
+      "command": "maturin build --locked --release --manifest-path bindings/st-py/Cargo.toml --no-default-features --features python-default --out PRIVATE/wheels-cpu"
+    }
+  ],
+  "review": {
+    "mode": "two independent read-only local source reviews",
+    "scopes": [
+      "Rust recipe, freeze/resume and serving state",
+      "Python independent oracle, receipt and resume verification"
+    ],
+    "initial_verifier_findings": 2,
+    "fixes": [
+      "No absolute tolerance floor for per-tensor moment qualification",
+      "Exact terminal paused/no-op-resumed report identity"
+    ],
+    "final_actionable_findings": 0,
+    "reviewer_checks": "11 bounded in-memory CPU checks on the verifier fixes; Cargo/GPU/wheel runs performed by parent"
+  },
+  "lint": {
+    "rustfmt": "passed on all changed Rust files with pinned formatter and skip_children=true",
+    "strict_clippy": "failed",
+    "command": "cargo +1.99.0 clippy --locked -p st-nn --no-default-features --features wgpu --lib -- -D warnings",
+    "receipt": "nn-clippy.log",
+    "diagnostics": 24,
+    "source_diff_check": "All diagnostic files unchanged from parent d487e367; no patch-file diagnostics. No whole-crate clean-lint claim or blanket suppressions."
+  },
+  "integration": {
+    "native_torch_cases": 18,
+    "browser_torch_cases": 9,
+    "native_exact_resume_cases": 9,
+    "browser_exact_resume_cases": 9,
+    "pause_update": 5,
+    "final_update": 12,
+    "cpu_transport_cases": 9,
+    "python_contextual_geometry_cases": 25,
+    "immutable_inference": "Artifact retains optimizer history, serving owner omits GPU moment buffers; native test checks absence and unchanged logits."
+  },
+  "privacy": {
+    "publish": "condition summaries, verification records, input/source hashes and reproduction",
+    "retain_privately": "corpus requests, weights, moments, complete raw receipts, screenshots and local wheels",
+    "pypi_upload": false,
+    "validation_wheel_version": "0.4.31 (private validation only; immutable published version must not be replaced)"
+  },
+  "remote_state": {
+    "parent_pr": "https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2270",
+    "parent_head": "d487e367c1cc97112564a56cea2d9fccf6bce527",
+    "last_ci_run": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/38739550458",
+    "last_ci_outcome": "Jobs not started: account billing lock; not a code-test result",
+    "parent_remote_review": "Completed at parent head; no inline findings at latest check",
+    "merge": "held pending latest-head green CI; no bypass"
+  },
+  "preserved_deleted_paths": {
+    "count": 8234,
+    "nul_list_sha256": "bc8917dfba59592756119508ad01d973e5062cebffbbc585d3aaa3b6c5adb04a"
+  },
+  "source_sha256": {
+    "bindings/st-py/spiraltorch/__init__.pyi": "f64e753fab2f9a4cfd2f8f1eab98ef8b6335ece4dcb7b3a3d90e938afd4b7aaf",
+    "bindings/st-py/src/nn_resident/byte_study.rs": "3d874eb301bccc3fa00ff16cf39ac835f5acab9e109eebec0a5a17e984b3075a",
+    "bindings/st-py/tests/test_nn_byte_study.py": "3880308ace45eb1c54559710f3dcc5ac8788a4abe21fd9357b203b6910501493",
+    "crates/st-nn/examples/resident_byte_learning_browser.rs": "7136e3f1a994c52beefb19f779f0755a5ee839f11e8bcd25f6f1bbb087bff52a",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint.rs": "727bf0e51dec3a3d0443ef23dec2f1d03eb763f6ebceaaf0616e376feeab5e7f",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/gpu.rs": "6ac62b88248bdcd8f65f71abdaa211d34b4786e54484db1bfa9f56382b9ccfbd",
+    "crates/st-nn/src/resident/byte_study.rs": "f2a3c55c653a5566b83cb0bf656595addb665aaf73e267e95150a45bb24e62ca",
+    "crates/st-nn/src/resident/byte_study/artifact.rs": "a5c25ccc74a001b389107b6ef596539dd9fe5ac5dc86b4e65bfb65b213968167",
+    "crates/st-nn/src/resident/byte_study/artifact/tests.rs": "dfa3973bf10155eaa90887f37d6924e126bb722be419b8ce4f63f0961c2d138f",
+    "crates/st-nn/src/resident/byte_study/headwise/tests.rs": "e8988bd309618d63d0c170c44ebb99322fe51f76b323f3113f94f69331a88303",
+    "crates/st-nn/src/resident/byte_study/policy.rs": "4ce9fad42afcf299e6a896898f51c27219997177f65d86178184b0484374f875",
+    "crates/st-nn/tests/byte_learning_browser.html": "6ee79f0619626de90867c64ab4958899d07b970068c8945fc948ac61a4d93384",
+    "crates/st-nn/tests/byte_learning_resume_browser.html": "3cd6e69bc1e4707f43de50f4766fec45764f33cfc87d90ea6668cd6811849353",
+    "docs/byte_corpus_learning.md": "7e0d7a724de3cf4ee4b387041ddfbc96f21117b9d680b396dde0d1e357195bc8",
+    "docs/resident_adamw.md": "9efe2bbb3191eec7bb02640ffd19221dac0b5b1ebb379e58e9e1e23f73cadd2f",
+    "tools/byte_corpus_study.py": "3f55ab2b2f901e0f6f095374035487eab2dc0213165bc6fdb46c1c9df3e2bfaa",
+    "tools/verify_byte_corpus_resume.py": "2160bff24f6406298d9cd5323b4d25092773781becf96c88f006e36eb194d1b9",
+    "crates/st-nn/src/resident/byte_study/optimizer.rs": "b23b8643aea7733b406e0ad9556f29f6ca3b8e61e5cae1bef66fc9fc455eaa7c",
+    "crates/st-nn/src/resident/byte_study/optimizer/tests.rs": "d4d79ddfb099146577d29460c31e9e27904d303a35e39b4bf926fa71de175b3b",
+    "docs/byte_corpus_optimizers.md": "c5acca0a9e57ad4295c890c80b1274e5a2b45394ae009b4a9102b60cd9dbbace",
+    "examples/configs/byte_corpus/adamw.json": "66e63164034e7b8c84fd886e83a097e4ab8e5ad6d6ba873133f3c4a21dc50ebf",
+    "examples/configs/byte_corpus/sgd.json": "36331021eb83d0dc76ea13a8cf8150cc0d67a68acbea3946e9bbced795eb8e57",
+    "tools/byte_corpus_optimizer.py": "1a680a251f2e5bbdc20b8146883aca1122fa5dc64b73b96f054333e2c9056a1a",
+    "tools/test_byte_corpus_optimizer.py": "84aa87312959e5b8dcb8b38bff51d83b4c55a581a1a622c3862122c0440b8123"
+  },
+  "private_receipt_sha256": {
+    "cpu-2.log": "a12df1e84f858defbef5957786b253301b28996f1d6f135642776c76c9fea495",
+    "native-2.log": "8679eb1d9e44fe702719be4178f53d6b6bd121f5f07736d3207fdbd1328af7a6",
+    "python-all-reviewed.log": "df40151a84ca6ce70063319ff6f444fcdcea841c3b1223c03ac8d1f3ee61cabe",
+    "python-resume-reviewed.log": "6be4d94b6e7b9f15589fcda09b244aad7e8f3ac0018a985752e1412180897ba4",
+    "python-wgpu.log": "0ee6b4b353ce26884b5fff01db495b9428a300140eefe474756246d172ec2672",
+    "python-cpu.log": "d2b6bd2928d84b3d8a0aa02e528d3cf21a83ab5e86323dbb09101a27cf14f7cd",
+    "release-wgpu.log": "fc94be711231c455cad2be7551ec15a6917674c19f562137870a3fd2c38a29f5",
+    "release-cpu.log": "4f995a033d4975157256aec03054a7dd56d941c13fa82fa384ce85c67aeac9cc",
+    "nn-clippy.log": "b57d092ca2cf4a8fd6cfc000e6a141dcceb88b7d1ce0286c7c2f516e65660508",
+    "native-build.log": "390b5e3ff338164edf2377c1c517244ba015c64a2c7180a91f19391269554092",
+    "wasm-build.log": "e104a7a4c8d992f57359f757782e22ef61ff61b5412d36f713d5aded8258523d",
+    "wheel-wgpu.log": "644f5d2d0ebdfb722490083e43eabf7b73ed74d28b90309a6dec125fc8af6e63",
+    "wheel-cpu.log": "ec8513a690ec46363ac2f12f154d0d74a24eae165b26a46b4269513762eeb7f1",
+    "adamw-request.json": "208975bab0905a1ee968d5940975259491163680ce7bd2c0132bce23a637e523",
+    "sgd-request.json": "e63433d40e3598375e9979fe53fa8fcfe9f5707fd87eb3d6d2e8e25de364750c",
+    "adamw-torch.json": "cec0bde4d5a6f8f57e5a9a5d5d3960e692f4fdf6c6c15672a5f57851d703385c",
+    "sgd-torch.json": "5e6b59196a53da397c90500cdf4ea4adc4f431446be9db2265b6bd79e383612d",
+    "adamw-native.json": "6ec0585ce14c0f872544314cae039d050bea8dc456275f186003d934dbef2076",
+    "sgd-native.json": "7f164ec8b8a015ff3662db6ee6b48e42f45461ad37f3d6333d0499707a2a5def",
+    "adamw-checkpoint.json": "3281610aa1cebe088b12ebf99a43205c4aafec726765245226bb3be07fcbfaea",
+    "adamw-partial.json": "839a9401af8f1c82b11bd590fe2d99296b2437dd6ce7d0874dde71bc1e370441",
+    "adamw-partial-checkpoint.json": "5b3fbf0ac25a86744f95c23b3fbae119de06ed30a9a4bd6ae8913254501c91a4",
+    "adamw-resumed.json": "6ec0585ce14c0f872544314cae039d050bea8dc456275f186003d934dbef2076",
+    "adamw-resumed-checkpoint.json": "3281610aa1cebe088b12ebf99a43205c4aafec726765245226bb3be07fcbfaea",
+    "adamw-browser.json": "2edf8a2bd7f14f2b2348d11bf1b9db9b14df7639eb279f9c95b6f132c42a9374",
+    "adamw-browser-partial.json": "c822ce1a2c97014bce0f8836784c86a59487463a779f2de21f88738fb05a7beb",
+    "adamw-browser-partial-checkpoint.json": "0c800eca56127eea6dfb7c41d400717a97b4992a9dc80087db2b43e49601ba91",
+    "adamw-browser-resumed.json": "2edf8a2bd7f14f2b2348d11bf1b9db9b14df7639eb279f9c95b6f132c42a9374",
+    "adamw-browser-resumed-checkpoint.json": "e79cbe5ba651353ec7d759335e00b77c534f260400aafeb6a800167bd7fa76ad",
+    "cpu-transport.json": "8f5551b0334a9d00084c7a755ae15b43349db85496b18fe57d17de15ad93ca05",
+    "browser-visible-receipt.json": "ccfa645f35491985d99e6a4f9bacaeec3e8b48b0e624ca71c979e3f322280394",
+    "browser-resumed.jpg": "07974da7e258109849223cd9e8ac4c18f7c19dce21dcc9a9246806cd393f1d3a",
+    "wheels-wgpu/spiraltorch-0.4.31-cp38-abi3-macosx_11_0_arm64.whl": "824d3cfe172efd569a5784fb3b8d0de7317847e0f85f4477c713f30f25b080b4",
+    "wheels-cpu/spiraltorch-0.4.31-cp38-abi3-macosx_11_0_arm64.whl": "a3b979e68ed789c49d78f414c99e741b73c30a19dced7a12a2ee75fa5b796cc8",
+    "web/target/resident-byte-learning-web/resident_byte_learning_browser_bg.wasm": "0b2400746853a9d5559d60bee39e88e462d7dfdcaa6350cf898b779cf6a6efc1"
+  }
+}

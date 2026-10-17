@@ -35,8 +35,10 @@ mod calibration;
 mod generation;
 mod headwise;
 mod mixture;
+mod optimizer;
 mod policy;
 mod query;
+mod selection;
 mod serving;
 pub use artifact::{
     ByteCorpusInferencePolicy, ByteCorpusModelArtifact, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
@@ -50,11 +52,12 @@ pub use headwise::ByteCorpusHeadwiseControls;
 pub use mixture::ByteCorpusMixtureControls;
 use policy::{BiasInitialization, GeometryUpdate};
 pub use query::ByteCorpusQueryMixtureControls;
+pub use selection::ByteCorpusCheckpointSelection;
 pub use serving::ByteCorpusServingGate;
 #[cfg(feature = "wgpu")]
 pub use serving::{ResidentByteCandidate, ResidentByteServing};
 
-/// A fixed request: documents, initial models, SGD rate and all selected windows.
+/// A fixed request: documents, initial models, optimizer/rate and selected windows.
 /// v1 pairs ordinary/learned geometry; v2 adds identical-initialization frozen
 /// geometry; v3 crosses learned/frozen with Poincare/flat pair distance.
 /// v4 adds a prepared, gain-only RMS-matched flat learned/frozen pair.
@@ -64,6 +67,7 @@ pub use serving::{ResidentByteCandidate, ResidentByteServing};
 /// routers with fixed routers while both coordinate encoders continue learning.
 /// v8 retains v7 and adds zero-initialized contextual projections, trained/frozen,
 /// with a frozen zero projection bias and the same trainable shared intercept.
+/// v9 binds an explicit optimizer to any unchanged v1-v8 geometry design.
 /// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
@@ -185,6 +189,10 @@ struct Case {
 #[serde(deny_unknown_fields)]
 struct Request {
     schema: String,
+    #[serde(default, deserialize_with = "optimizer::explicit_design")]
+    design_schema: Option<String>,
+    #[serde(default, deserialize_with = "optimizer::explicit_optimizer")]
+    optimizer: Option<optimizer::Optimizer>,
     config: Config,
     train_documents: Vec<Vec<u8>>,
     validation_documents: Vec<Vec<u8>>,
@@ -220,6 +228,7 @@ fn parse(input: &[u8]) -> Result<Request> {
             | "spiraltorch.byte_corpus.request.v6"
             | "spiraltorch.byte_corpus.request.v7"
             | "spiraltorch.byte_corpus.request.v8"
+            | "spiraltorch.byte_corpus.request.v9"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
@@ -254,6 +263,7 @@ fn parse(input: &[u8]) -> Result<Request> {
     {
         return Err("invalid study configuration".into());
     }
+    optimizer::validate_spec(&r)?;
     calibration::validate_spec(&r)?;
     headwise::validate_spec(&r)?;
     mixture::validate_spec(&r)?;
@@ -535,6 +545,16 @@ impl ByteCorpusStudy {
         self.request.train_batches.len()
     }
 
+    /// Geometry design, independent of an explicit v9 optimizer recipe.
+    pub fn design_schema(&self) -> &str {
+        self.request.design_schema()
+    }
+
+    /// Canonical float32 controls. Legacy requests report stateless SGD.
+    pub fn optimizer_recipe_json(&self) -> Result<String> {
+        Ok(serde_json::to_string(&json!(self.request.optimizer()))?)
+    }
+
     pub fn request_sha256(&self) -> &str {
         &self.request_sha256
     }
@@ -594,8 +614,9 @@ impl ByteCorpusStudy {
             .filter(|&n| self.evaluation_boundary(n))
             .count();
         for case in &self.request.cases {
-            let model_bytes = plan(&self.request.config, case)?
-                .initial_checkpoint()
+            let model_bytes = self
+                .request
+                .initial_checkpoint(case)?
                 .escaped_json_size_bound()?;
             let history_bytes = self.total_updates() * 64
                 + evaluations * (64 + self.request.validation_batches.len() * 32);
@@ -650,7 +671,8 @@ impl ByteCorpusStudy {
                     return Err("checkpoint case identity or history differs".into());
                 }
                 let model = ByteDecoderCheckpoint::from_json(&saved.model_json)?;
-                let initial = plan(&self.request.config, case)?.initial_checkpoint();
+                self.request.optimizer().validate_model(case, &model, checkpoint.completed_updates)?;
+                let initial = self.request.initial_checkpoint(case)?;
                 if model.attempted_revision() != cursor as u64
                     || model.topology_json()? != initial.topology_json()?
                     || (cursor == 0 && model.to_json()? != initial.to_json()?)
@@ -659,7 +681,7 @@ impl ByteCorpusStudy {
                     || !query::frozen_projections_match(case, &model, &initial)?
                 {
                     return Err(
-                        "checkpoint model revision, topology or initial/frozen values differ"
+                        "checkpoint model revision, optimizer, topology or initial/frozen values differ"
                             .into(),
                     );
                 }
@@ -723,7 +745,7 @@ impl ByteCorpusStudy {
         stop_after: usize,
         capture: bool,
     ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)> {
-        if capture {
+        if capture || self.request.optimizer.is_some() {
             self.validate_segment(resume, stop_after)?;
         }
         let restored = resume.map(|c| self.checked_models(c)).transpose()?;
@@ -743,6 +765,11 @@ impl ByteCorpusStudy {
                 Some(models) => models[index].restore_wgpu(runtime.clone())?,
                 None => plan(&r.config, case)?.compile_training_wgpu(runtime.clone())?,
             };
+            if restored.is_none() {
+                if let Some(config) = r.optimizer().config()? {
+                    model.enable_adamw(config)?;
+                }
+            }
             // The request order is the validated model owner order. A single
             // policy drives rates, frozen checkpoint guards and reported counts.
             if model.parameter_layout().len() != case.parameters.len() {
@@ -759,6 +786,11 @@ impl ByteCorpusStudy {
                     }
                 })
                 .collect();
+            let adamw_steps = r
+                .optimizer()
+                .config()?
+                .map(|_| r.optimizer().steps(case, r.rate))
+                .transpose()?;
             let (mut training, mut evaluations) = if let Some(checkpoint) = resume {
                 let saved = &checkpoint.cases[index];
                 (saved.training.clone(), saved.validation.clone())
@@ -790,7 +822,10 @@ impl ByteCorpusStudy {
                 let loss =
                     tape.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
                 let gradients = model.backward(&tape, loss.prediction_gradient())?;
-                let update = model.sgd_with_rates(&gradients, &rates)?;
+                let update = match &adamw_steps {
+                    Some(steps) => model.adamw_with_steps(&gradients, steps)?,
+                    None => model.sgd_with_rates(&gradients, &rates)?,
+                };
                 pending.push((update, loss.value().clone()));
                 if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
                     // Bounded bursts; all receipts are drained even at a pause
@@ -849,16 +884,28 @@ impl ByteCorpusStudy {
             if r.calibration_controls() {
                 report["bias_initialization"] = json!(case.bias_initialization);
             }
-            reports.push(report);
-            if capture {
+            let checkpoint = if capture || adamw_steps.is_some() {
                 let readback = model.checkpoint_snapshot()?;
                 #[cfg(not(target_arch = "wasm32"))]
                 let checkpoint = readback.read()?;
                 #[cfg(target_arch = "wasm32")]
                 let checkpoint = readback.read_async().await?;
+                Some(checkpoint)
+            } else {
+                None
+            };
+            if r.optimizer.is_some() {
+                report["optimizer_state"] = checkpoint
+                    .as_ref()
+                    .map(|c| c.adamw_json())
+                    .transpose()?
+                    .unwrap_or(Value::Null);
+            }
+            reports.push(report);
+            if capture {
                 saved_cases.push(CaseCheckpoint {
                     name: case.name.clone(),
-                    model_json: checkpoint.to_json()?,
+                    model_json: checkpoint.ok_or("missing model checkpoint")?.to_json()?,
                     training,
                     validation: evaluations,
                 });
@@ -870,6 +917,10 @@ impl ByteCorpusStudy {
             "scope":"Document-held-out byte corpus pilot; no language-quality superiority or speed claim"});
         if r.calibration_controls() {
             report["bias_calibration"] = json!(r.bias_calibration);
+        }
+        if r.optimizer.is_some() {
+            report["design_schema"] = json!(r.design_schema());
+            report["optimizer"] = json!(r.optimizer());
         }
         let checkpoint = capture.then(|| ByteCorpusStudyCheckpoint {
             schema: r.checkpoint_schema().to_owned(),
@@ -993,6 +1044,40 @@ mod tests {
         }
         assert!(study.validate_segment(Some(&saved(&study, 1)), 0).is_err());
         assert!(study.validate_segment(None, 3).is_err());
+    }
+
+    #[test]
+    fn sgd_study_rejects_valid_adamw_model_without_discarding_history() {
+        let study = study();
+        for index in 0..study.request.cases.len() {
+            let mut checkpoint = saved(&study, 1);
+            let previous =
+                ByteDecoderCheckpoint::from_json(&checkpoint.cases[index].model_json).unwrap();
+            let mut record: Value =
+                serde_json::from_str(&checkpoint.cases[index].model_json).unwrap();
+            record["model_schema"] = record["schema"].clone();
+            record["schema"] = json!(crate::resident::BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA);
+            record["update_rule"] = json!("adamw_zero_rate_freeze.v1");
+            record["optimizer"] = json!({
+                "beta1":0.9, "beta2":0.999, "epsilon":1e-8,
+                "slots":study.request.cases[index].parameters.iter().map(|p| json!({
+                    "shape":p.shape, "first":vec![0.0;p.values.len()],
+                    "second":vec![0.0;p.values.len()], "steps":0
+                })).collect::<Vec<_>>()
+            });
+            let model = ByteDecoderCheckpoint::from_json(&record.to_string()).unwrap();
+            assert_eq!(
+                model.topology_json().unwrap(),
+                previous.topology_json().unwrap()
+            );
+            assert!(model.adamw_state().is_some());
+            checkpoint.cases[index].model_json = model.to_json().unwrap();
+            assert!(study.checked_models(&checkpoint).is_err());
+            assert!(study
+                .checkpoint_from_json(checkpoint.to_json().unwrap().as_bytes())
+                .is_err());
+            assert!(study.case_checkpoint(&checkpoint, "plain").is_err());
+        }
     }
 
     #[test]

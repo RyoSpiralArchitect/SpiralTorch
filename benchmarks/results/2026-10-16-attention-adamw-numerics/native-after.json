@@ -1,0 +1,1854 @@
+{
+  "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "atol": 3e-6,
+  "backend": "Metal",
+  "cases": [
+    {
+      "name": "default_constant",
+      "trajectory": [
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.7730291941050496e-12
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.4642439194074354e-17
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.610721592359425e-8
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1641532161009438e-10
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.7730291941050496e-12
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.4642439194074354e-17
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.610721592359425e-8
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1102230246251565e-16
+            }
+          },
+          "steps": 1
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.980229396598588e-10
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.340883539403876e-12
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.2231463109024787e-7
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 2.3283064365386963e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 2.9103830456733704e-11
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 5.169878828456423e-26
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 2.3283064365386963e-10
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.980229396598588e-10
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.340883539403876e-12
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.2231463109024787e-7
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 2.9103830456733704e-11
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 5.169878828456423e-26
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.0587911840678754e-22
+            }
+          },
+          "steps": 2
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.481154864897306e-8
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.2849643224455143e-11
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.7087814042102707e-7
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 9.313225746154785e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 2.842170943040401e-14
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 8.077935669463161e-28
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.3877787807814457e-17
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.481154864897306e-8
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.2849643224455143e-11
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.7087814042102707e-7
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 2.842170943040401e-14
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 8.077935669463161e-28
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 9.313225746154785e-10
+            }
+          },
+          "steps": 8
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.8758053998979562e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.1473519911930907e-9
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.8547830369364249e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 2.842170943040401e-14
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.6155871338926322e-27
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.3877787807814457e-17
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.8758053998979562e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.1473519911930907e-9
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.8547830369364249e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.6155871338926322e-27
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 2.8421709403934228e-14
+            }
+          },
+          "steps": 32
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.586490212765142e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 6.762736818460846e-9
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 8.019361618094578e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 6.984919309616089e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 6.462348535570529e-27
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 2.3283064365115912e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.586490212765142e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 6.762736818460846e-9
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 8.019361618094578e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 6.462348535570529e-27
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.6298145055499823e-9
+            }
+          },
+          "steps": 128
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920832343470522e-7
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.728025152830659e-8
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.000017005327020758187
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.6940658945086007e-21
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.4901161207725444e-8
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920832343470522e-7
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.728025152830659e-8
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.000017005327020758187
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.6940658945086007e-21
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.4901161207725444e-8
+            }
+          },
+          "steps": 256
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920928932873665e-7
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.0973622563414942e-7
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.00003501019128004934
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3877787807814457e-17
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 2.9802322387695312e-8
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920928932873665e-7
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.0973622563414942e-7
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.00003501019128004934
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3877787807814457e-17
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 2.9802322387695312e-8
+            }
+          },
+          "steps": 512
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920928932873665e-7
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.4341529527839292e-7
+            },
+            "gpu_f64_values": {
+              "failures": 1,
+              "max_abs": 0.000054000234194218066
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.7755575615628914e-17
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.960464477539063e-8
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920928932873665e-7
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.4341529527839292e-7
+            },
+            "rust_cpu_f64_values": {
+              "failures": 1,
+              "max_abs": 0.000054000234194218066
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.7755575615628914e-17
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.960464477539063e-8
+            }
+          },
+          "steps": 768
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920928932873665e-7
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.5655424628890913e-7
+            },
+            "gpu_f64_values": {
+              "failures": 1,
+              "max_abs": 0.00007371844828440999
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 5.587935447692871e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.960464477539063e-8
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1920928932873665e-7
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.5655424628890913e-7
+            },
+            "rust_cpu_f64_values": {
+              "failures": 1,
+              "max_abs": 0.00007371844828440999
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.960464477539063e-8
+            }
+          },
+          "steps": 1024
+        }
+      ]
+    },
+    {
+      "name": "default_periodic",
+      "trajectory": [
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.7730291941050496e-12
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.4642439194074354e-17
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.610721592359425e-8
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1641532161009438e-10
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.7730291941050496e-12
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.4642439194074354e-17
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.610721592359425e-8
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1102230246251565e-16
+            }
+          },
+          "steps": 1
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.980229396598588e-10
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.340883539403876e-12
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 9.590453742269744e-8
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-11
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-11
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 6.617444900424222e-24
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-11
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.980229396598588e-10
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.340883539403876e-12
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 9.590453742269744e-8
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-11
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 6.617444900424222e-24
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1102230246251565e-16
+            }
+          },
+          "steps": 2
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 5.790142879047444e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 4.289513102356812e-11
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 2.109999963639808e-7
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 1.4551915228366852e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 6.984919309616089e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.6469779601696886e-23
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 8.731149137020111e-11
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 5.790142879047444e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 4.289513102356812e-11
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 2.109999963639808e-7
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 6.984919309616089e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.6469779601696886e-23
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-11
+            }
+          },
+          "steps": 8
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 6.968449921262998e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 9.448256135802247e-10
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.459152022600165e-7
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.30385160446167e-8
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.117582368135751e-22
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 6.968449921262998e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 9.448256135802247e-10
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.459152022600165e-7
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.30385160446167e-8
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.117582368135751e-22
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            }
+          },
+          "steps": 32
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1398092261694082e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 5.664578597852632e-10
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.4099326413052893e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.3969838619232178e-9
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 6.938893903907228e-18
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.45058058304604e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 1.1398092261694082e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 5.664578597852632e-10
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.4099326413052893e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.3969838619232178e-9
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 6.938893903907228e-18
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.45058058304604e-9
+            }
+          },
+          "steps": 128
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 7.911408583805013e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.8114353170228803e-8
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.364065621513923e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.262177448353619e-29
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.45058058304604e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 7.911408583805013e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.8114353170228803e-8
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.364065621513923e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.262177448353619e-29
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.4901161179969868e-8
+            }
+          },
+          "steps": 256
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.253605645631602e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.077246051174658e-8
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 9.16030726694217e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3877787807814457e-17
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.45058058304604e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.253605645631602e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.077246051174658e-8
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 9.16030726694217e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3877787807814457e-17
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.4901161179969868e-8
+            }
+          },
+          "steps": 512
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.5069080145101452e-9
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.524751948895787e-7
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 9.8062661901821e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 9.313225746154785e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.524354896707238e-29
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.5069080145101452e-9
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.524751948895787e-7
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 9.8062661901821e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 9.313225746154785e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.524354896707238e-29
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.4901161193847656e-8
+            }
+          },
+          "steps": 768
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 6.744452461793227e-10
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.0632576741563824e-7
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.00001734125363272998
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 1.4901161193847656e-8
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 9.313225746154785e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.960464477539063e-8
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 6.744452461793227e-10
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.0632576741563824e-7
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.00001734125363272998
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 9.313225746154785e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.960464477539063e-8
+            }
+          },
+          "steps": 1024
+        }
+      ]
+    },
+    {
+      "name": "near_one_periodic",
+      "trajectory": [
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.760081218080359e-15
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 5.767955452932837e-21
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.610721592359425e-8
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 2.6469779601696886e-23
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1641532161009438e-10
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.760081218080359e-15
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 5.767955452932837e-21
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.610721592359425e-8
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 2.6469779601696886e-23
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.1641532161009438e-10
+            }
+          },
+          "steps": 1
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.199307568342192e-12
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.881784197001252e-16
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.093803794205428e-7
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-11
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.275957614183426e-12
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 4.0389678347315804e-28
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.7462298274040222e-10
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.199307568342192e-12
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 8.881784197001252e-16
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.093803794205428e-7
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.275957614183426e-12
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 4.0389678347315804e-28
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 2.3283064365386963e-10
+            }
+          },
+          "steps": 2
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 5.6586880092714814e-12
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.0108916545226398e-14
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.5525751262401855e-7
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 8.731149137020111e-11
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.4551915228366852e-11
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.6469779601696886e-23
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 2.9103830456733704e-11
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 5.6586880092714814e-12
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.0108916545226398e-14
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 1.5525751262401855e-7
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.4551915228366852e-11
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 2.6469779601696886e-23
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-11
+            }
+          },
+          "steps": 8
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.9934766471173546e-11
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.834263528371197e-13
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 5.950634960338874e-7
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 1.1641532182693481e-10
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.275957614183426e-12
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 9.62964972193618e-35
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 6.984919309616089e-10
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 2.9934766471173546e-11
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.834263528371197e-13
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 5.950634960338874e-7
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.275957614183426e-12
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 9.62964972193618e-35
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 5.820766091346741e-10
+            }
+          },
+          "steps": 32
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.015262076076235e-12
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 4.093275509242932e-12
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.692552679401828e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 3.9108272176235914e-11
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.7462298271871818e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.015262076076235e-12
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 4.093275509242932e-12
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 3.692552679401828e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 3.9108272176235914e-11
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.450580610801616e-9
+            }
+          },
+          "steps": 128
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 5.736257443437337e-12
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.7737561484025164e-11
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.929445098169396e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.4551915228366852e-11
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.3969838619232178e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 5.736257443437337e-12
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.7737561484025164e-11
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 6.929445098169396e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.4551915228366852e-11
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.3234889800848443e-23
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            }
+          },
+          "steps": 256
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.127656120625112e-11
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 7.185824641754452e-11
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.000011971639898300523
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.0186340659856796e-10
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.6155871338926322e-27
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.862645149230957e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.127656120625112e-11
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 7.185824641754452e-11
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.000011971639898300523
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 1.0186340659856796e-10
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 1.6155871338926322e-27
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            }
+          },
+          "steps": 512
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.928001305716146e-11
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.2325292217776115e-10
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.000012343807812786878
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.275957614183426e-11
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.862645149230957e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 9.928001305716146e-11
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 1.2325292217776115e-10
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 0.000012343807812786878
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 7.275957614183426e-11
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            }
+          },
+          "steps": 768
+        },
+        {
+          "comparisons": {
+            "gpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.701302287599867e-11
+            },
+            "gpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.8742507049626356e-10
+            },
+            "gpu_f64_values": {
+              "failures": 0,
+              "max_abs": 8.631466455355508e-6
+            },
+            "gpu_rust_cpu_first": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_rust_cpu_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            },
+            "gpu_torch_first": {
+              "failures": 0,
+              "max_abs": 6.184563972055912e-11
+            },
+            "gpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "gpu_torch_values": {
+              "failures": 0,
+              "max_abs": 1.862645149230957e-9
+            },
+            "rust_cpu_f64_first": {
+              "failures": 0,
+              "max_abs": 4.701302287599867e-11
+            },
+            "rust_cpu_f64_second": {
+              "failures": 0,
+              "max_abs": 2.8742507049626356e-10
+            },
+            "rust_cpu_f64_values": {
+              "failures": 0,
+              "max_abs": 8.631466455355508e-6
+            },
+            "rust_cpu_torch_first": {
+              "failures": 0,
+              "max_abs": 6.184563972055912e-11
+            },
+            "rust_cpu_torch_second": {
+              "failures": 0,
+              "max_abs": 0.0
+            },
+            "rust_cpu_torch_values": {
+              "failures": 0,
+              "max_abs": 7.450580596923828e-9
+            }
+          },
+          "steps": 1024
+        }
+      ]
+    }
+  ],
+  "diagnostic_oracle": "scalar_f64",
+  "required_oracles": [
+    "torch_float32",
+    "rust_cpu_float32"
+  ],
+  "restored_clock_max_ulps": 8,
+  "restored_clock_probes": [
+    {
+      "actual": -7.926426887512207,
+      "beta_bits": 1065336439,
+      "expected": -7.926426410675049,
+      "passed": true,
+      "steps": 32,
+      "ulps": 1
+    },
+    {
+      "actual": -0.389611154794693,
+      "beta_bits": 1065336439,
+      "expected": -0.3896111249923706,
+      "passed": true,
+      "steps": 1024,
+      "ulps": 1
+    },
+    {
+      "actual": -0.24975000321865082,
+      "beta_bits": 1065336439,
+      "expected": -0.24975000321865082,
+      "passed": true,
+      "steps": 16777216,
+      "ulps": 0
+    },
+    {
+      "actual": -0.24975000321865082,
+      "beta_bits": 1065336439,
+      "expected": -0.24975000321865082,
+      "passed": true,
+      "steps": 4294967295,
+      "ulps": 0
+    },
+    {
+      "actual": -131072.109375,
+      "beta_bits": 1065353215,
+      "expected": -131072.109375,
+      "passed": true,
+      "steps": 32,
+      "ulps": 0
+    },
+    {
+      "actual": -4096.12451171875,
+      "beta_bits": 1065353215,
+      "expected": -4096.12451171875,
+      "passed": true,
+      "steps": 1024,
+      "ulps": 0
+    },
+    {
+      "actual": -0.39549416303634644,
+      "beta_bits": 1065353215,
+      "expected": -0.39549413323402405,
+      "passed": true,
+      "steps": 16777216,
+      "ulps": 1
+    },
+    {
+      "actual": -0.2499999850988388,
+      "beta_bits": 1065353215,
+      "expected": -0.2499999850988388,
+      "passed": true,
+      "steps": 4294967295,
+      "ulps": 0
+    }
+  ],
+  "rtol": 0.00005,
+  "schema": "spiraltorch.resident_adamw.numerics_report.v1",
+  "status": "passed",
+  "torch": "2.12.1",
+  "updates_per_case": 1024
+}

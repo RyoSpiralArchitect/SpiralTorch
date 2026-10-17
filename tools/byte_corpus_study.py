@@ -23,6 +23,7 @@ REQUEST_V5 = "spiraltorch.byte_corpus.request.v5"
 REQUEST_V6 = "spiraltorch.byte_corpus.request.v6"
 REQUEST_V7 = "spiraltorch.byte_corpus.request.v7"
 REQUEST_V8 = "spiraltorch.byte_corpus.request.v8"
+REQUEST_V9 = "spiraltorch.byte_corpus.request.v9"
 POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
 FISHER = "categorical_fisher_rao_squared.v1"
 ORIGINAL, MATCHED = "original", "matched_poincare_rms"
@@ -89,6 +90,11 @@ def parameter_frozen(case, name):
 
 
 def request_version(request):
+    optimizer = load_reference("byte_corpus_optimizer")
+    optimizer.recipe(request)
+    if request["schema"] == REQUEST_V9:
+        request_version(optimizer.design(request))
+        return 9
     if request["schema"] == REQUEST_V8:
         load_reference("byte_corpus_query").validate_request(request)
         return 8
@@ -356,7 +362,10 @@ def reference(args):
     metric = load_reference("generate_poincare_bias_torch_fixture").metric
     raw = args.request.read_bytes()
     request = decode_json(raw)
-    version = request_version(request)
+    wire_version = request_version(request)
+    optimizer_module = load_reference("byte_corpus_optimizer")
+    controls = optimizer_module.recipe(request)
+    version = request_version(optimizer_module.design(request))
     config = request["config"]
     headwise_pair = load_reference("byte_corpus_headwise").pair_bias if version == 6 else None
     mixture_pair = load_reference("byte_corpus_mixture").pair_bias if version in (7, 8) else None
@@ -373,12 +382,14 @@ def reference(args):
     calibration = None
     if version >= 4:
         fisher_metric = load_reference("fisher_rao_reference").metric if version >= 5 else None
-        calibration = load_reference("byte_corpus_calibration").verify_initial_rms(request, wave, metric, fisher_metric)
+        calibration = load_reference("byte_corpus_calibration").verify_initial_rms(
+            optimizer_module.design(request), wave, metric, fisher_metric)
     valid = [batch(request["validation_documents"], s) for s in request["validation_batches"]]
     reports = []
     for case in request["cases"]:
         p = [torch.tensor(v["values"], device="cpu", dtype=torch.float32).reshape(v["shape"]).requires_grad_()
              for v in case["parameters"]]
+        optimizer = optimizer_module.torch_optimizer(torch, controls, request["rate"], case["parameters"], p)
 
         def forward(ids):
             pos = torch.arange(t, device="cpu").expand(b, t)
@@ -431,10 +442,16 @@ def reference(args):
         for step, (ids, targets) in enumerate(train, 1):
             loss = functional.cross_entropy(forward(ids).reshape(-1, 256), targets.reshape(-1))
             gradients = torch.autograd.grad(loss, p)
-            with torch.no_grad():
+            if optimizer is None:
+                with torch.no_grad():
+                    for descriptor, value, gradient in zip(case["parameters"], p, gradients):
+                        if not parameter_frozen(case,descriptor["name"]):
+                            value -= request["rate"] * gradient
+            else:
                 for descriptor, value, gradient in zip(case["parameters"], p, gradients):
-                    if not parameter_frozen(case,descriptor["name"]):
-                        value -= request["rate"] * gradient
+                    # None skips moments/clock/decay too; lr=0 would not.
+                    value.grad = None if parameter_frozen(case, descriptor["name"]) else gradient
+                optimizer.step()
             training.append(dict(revision=step, ce=loss.item()))
             if step % request["checkpoint_every"] == 0 or step == len(train):
                 evaluation.append(evaluate(step))
@@ -452,10 +469,14 @@ def reference(args):
             reports[-1]["pair_metric"] = case.get("pair_metric")
         if version >= 4:
             reports[-1]["bias_initialization"] = case["bias_initialization"]
-    report = dict(schema=f"spiraltorch.byte_corpus.result.v{version}", engine="independent_pytorch", torch_version=torch.__version__,
+        if wire_version == 9:
+            reports[-1]["optimizer_state"] = optimizer_module.torch_state(optimizer, controls, case["parameters"], p)
+    report = dict(schema=f"spiraltorch.byte_corpus.result.v{wire_version}", engine="independent_pytorch", torch_version=torch.__version__,
                   dtype="float32", device="cpu", threads=1, request_sha256=digest(raw), cases=reports)
     if version >= 4:
         report.update(bias_calibration=request["bias_calibration"], calibration_verification=calibration)
+    if wire_version == 9:
+        report.update(design_schema=request["design_schema"], optimizer=controls)
     write_new(args.output, report)
 
 
@@ -480,9 +501,13 @@ def heldout_bpb(point):
 
 def compare(request_raw, reference_report, actual):
     request = decode_json(request_raw)
-    version = request_version(request)
+    wire_version = request_version(request)
+    optimizer_module = load_reference("byte_corpus_optimizer")
+    controls = optimizer_module.recipe(request)
+    version = request_version(optimizer_module.design(request))
     if version >= 4:
-        load_reference("byte_corpus_calibration").verify_qualification(request, reference_report.get("calibration_verification"))
+        load_reference("byte_corpus_calibration").verify_qualification(
+            optimizer_module.design(request), reference_report.get("calibration_verification"))
     if (reference_report.get("engine") != "independent_pytorch"
             or actual.get("engine") != "spiraltorch" or not actual.get("adapter")):
         raise ValueError("wrong request, reference, or measured engine identity")
@@ -491,7 +516,8 @@ def compare(request_raw, reference_report, actual):
     if len(set(names)) != len(names):
         raise ValueError("duplicate request case")
     for report in [reference_report, actual]:
-        if report["schema"] != f"spiraltorch.byte_corpus.result.v{version}" or report["request_sha256"] != digest(request_raw):
+        optimizer_module.metadata(request, report)
+        if report["schema"] != f"spiraltorch.byte_corpus.result.v{wire_version}" or report["request_sha256"] != digest(request_raw):
             raise ValueError("result source mismatch")
         if [c["name"] for c in report["cases"]] != names:
             raise ValueError("case identity/order mismatch")
@@ -581,6 +607,13 @@ def compare(request_raw, reference_report, actual):
             summaries[-1]["final_heldout_bpb_abs_error"] = abs(summaries[-1]["final_heldout_bpb"] - summaries[-1]["reference_final_heldout_bpb"])
         if version >= 4:
             summaries[-1]["bias_initialization"] = spec["bias_initialization"]
+        if wire_version == 9:
+            if any("optimizer_state" not in row for row in (expected, got)):
+                raise ValueError("missing optimizer state")
+            summaries[-1]["optimizer_state_errors"] = optimizer_module.compare_states(
+                spec, expected["optimizer_state"], got["optimizer_state"], controls, n, parameter_frozen, close)
+        elif any("optimizer_state" in row for row in (expected, got)):
+            raise ValueError("foreign optimizer state")
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
@@ -639,7 +672,7 @@ def compare(request_raw, reference_report, actual):
             pairs[-1]["absolute_torch_discrepancy"] = {k: abs(pairs[-1][k] - value) for k, value in reference_contrasts.items()}
             pairs[-1]["same_sign_as_torch"] = {k: ((pairs[-1][k] > 0) - (pairs[-1][k] < 0)) == ((v > 0) - (v < 0))
                                               for k, v in reference_contrasts.items()}
-    result = dict(schema=f"spiraltorch.byte_corpus.comparison.v{version}", request_sha256=digest(request_raw),
+    result = dict(schema=f"spiraltorch.byte_corpus.comparison.v{wire_version}", request_sha256=digest(request_raw),
                 numerical_checks_passed=True, criteria=dict(atol=ATOL, rtol=RTOL, geometry_delta_relative_l2=DELTA_RTOL),
                 cases=summaries, paired_deltas=pairs,
                 mean_geometry_minus_ordinary_bpb=statistics.mean(p["geometry_minus_ordinary_bpb"] for p in pairs),
@@ -647,7 +680,7 @@ def compare(request_raw, reference_report, actual):
     if version >= 3:
         for key in ("flat_minus_poincare_bpb", "flat_frozen_minus_poincare_frozen_bpb", "metric_by_training_interaction_bpb"):
             result["mean_" + key] = statistics.mean(p[key] for p in pairs)
-        result["scope"] = "Poincare/flat geometric arms match parameters and SGD budget, not compute or initial functions; ordinary is a lower-parameter context arm; no general quality/speed claim"
+        result["scope"] = "Poincare/flat geometric arms match parameters and update count, not compute or initial functions; ordinary is a lower-parameter context arm; no general quality/speed claim"
     if version >= 4:
         result["bias_calibration"] = request["bias_calibration"]
         result["scope"] = "One frozen initial-weight request across engines; flat RMS calibration uses declared training windows only, not matched patterns or dynamics; seven arms/seed, no general quality or speed claim"
@@ -667,6 +700,10 @@ def compare(request_raw, reference_report, actual):
         result["mixture_contrasts"] = load_reference("byte_corpus_mixture").contrasts(
             [c for c in summaries if "query_projection" not in c.get("mixture", {})])
         result["scope"] = "25 arms/seed: unchanged v7 plus contextual train/frozen projections. Bias stays zero; shared intercept and coordinates learn. Same data/update count, not equal parameter count or compute; no general quality/speed claim."
+    if wire_version == 9:
+        result.update(design_schema=request["design_schema"], optimizer=controls)
+        result["criteria"]["optimizer_moment_relative_l2"] = optimizer_module.MOMENT_RTOL
+        result["scope"] += " Explicit optimizer recipe; raw-coordinate AdamW is not manifold momentum transport."
     return result
 
 
@@ -689,6 +726,10 @@ def main():
     p = commands.add_parser("reference")
     p.add_argument("request", type=Path)
     p.add_argument("output", type=Path)
+    p = commands.add_parser("bind-optimizer", help="Wrap a fully prepared geometry design; Rust preflight remains authoritative")
+    p.add_argument("request", type=Path)
+    p.add_argument("optimizer", type=Path, help="Explicit optimizer recipe JSON")
+    p.add_argument("output", type=Path)
     p = commands.add_parser("compare")
     p.add_argument("request", type=Path)
     p.add_argument("reference", type=Path)
@@ -699,6 +740,15 @@ def main():
         prepare(args)
     elif args.command == "reference":
         reference(args)
+    elif args.command == "bind-optimizer":
+        request = decode_json(args.request.read_bytes())
+        if request_version(request) == 9:
+            raise ValueError("already bound to an optimizer")
+        request["design_schema"] = request["schema"]
+        request["schema"] = REQUEST_V9
+        request["optimizer"] = decode_json(args.optimizer.read_bytes())
+        request_version(request)
+        write_new(args.output, request)
     else:
         result = compare(args.request.read_bytes(), decode_json(args.reference.read_bytes()), decode_json(args.actual.read_bytes()))
         write_new(args.output, result)

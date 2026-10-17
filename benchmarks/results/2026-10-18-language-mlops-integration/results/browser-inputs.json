@@ -1,0 +1,116 @@
+{
+  "schema": "spiraltorch.packaged_byte_mlops.inputs.v1",
+  "parent_head": "529c092bb636afb69e07d90cf72d97bda4695ce7",
+  "scope": "Packaged API qualification; fixed prior inputs; no new quality claim or gate relaxation",
+  "inputs": {
+    "request": {
+      "sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+      "bytes": 827597
+    },
+    "checkpoint": {
+      "sha256": "9df78f5bb0cfbb9eba2e2a5dbb612ab3a1c27593b3ca50e813502f86008281dc",
+      "bytes": 1296451
+    },
+    "learning_request": {
+      "sha256": "208975bab0905a1ee968d5940975259491163680ce7bd2c0132bce23a637e523",
+      "bytes": 1020818
+    },
+    "serving": {
+      "sha256": "0cf6de2e0bb4b530bbc38c877e81e0331ce23a5d6595e025bc09016bd0855fdd",
+      "bytes": 414644
+    }
+  },
+  "fixture": {
+    "sha256": "c8e95902145a8472982e975d419f95b9ecef449426f02a68a8fedf111f3a8f1e",
+    "bytes": 3577982
+  },
+  "source": {
+    "bindings/st-wasm/src/byte_lm/gpu.rs": {
+      "sha256": "5835462445b10a76ce79a461a316055b696214a05386f5a41b57990883fdb6de",
+      "bytes": 14654
+    },
+    "bindings/st-wasm/src/byte_lm.rs": {
+      "sha256": "d2256f3c957823c49ecc7884354049028675e8fe175280d9c7d946b0a136cc8c",
+      "bytes": 9080
+    },
+    "bindings/st-wasm/src/lib.rs": {
+      "sha256": "11cc4c0fbe7e64968b6e1f8bfe02b855e853d2e9e4525c2cdcdf9d77a11ac5f9",
+      "bytes": 3985
+    },
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": {
+      "sha256": "9d0fe0df3311a2d2152a94536d42b9aff27bbcfb886b48f8d50560bc25ffad92",
+      "bytes": 218046
+    },
+    "bindings/st-wasm/tests/byte_lm_boundaries.mjs": {
+      "sha256": "c81c1b280003ecac1c4ad53045b118b7dd2ca153a216697799e50a683fbf0fd3",
+      "bytes": 3943
+    },
+    "bindings/st-wasm/tests/byte_lm_browser.html": {
+      "sha256": "7ed00af224e08a564dd07169fa6281b9bbf116ebb4a8c40d4d58a60b91184523",
+      "bytes": 486
+    },
+    "bindings/st-wasm/tests/byte_lm_browser.mjs": {
+      "sha256": "5e6545cf98ed4974b5335512038178bc9c5ef742bf2cc41f1de0d0c20b913a16",
+      "bytes": 16302
+    },
+    "bindings/st-wasm/tests/byte_lm_node.mjs": {
+      "sha256": "9fa343a6eab23f1fe84f18e8fdff4779dfb427f254ba25e75c34fcb1e776d65e",
+      "bytes": 1299
+    },
+    "benchmarks/results/2026-10-18-packaged-language-mlops/qualify.py": {
+      "sha256": "bb1a07377acebc568cdcbb54448b9706e1567a68a23760f21cc71bcfe2ca08e3",
+      "bytes": 11103
+    },
+    "benchmarks/results/2026-10-18-packaged-language-mlops/test_qualify.py": {
+      "sha256": "52e754ba4159d0361aab30cafbb2a790af9eb5f08727b26e9dcad342afcab782",
+      "bytes": 3673
+    },
+    "Cargo.lock": {
+      "sha256": "c7877840fd118e89225bdd8ca6f95118a27c584f1c54f63a8ebb7a29c71de61b",
+      "bytes": 119743
+    }
+  },
+  "package": {
+    ".gitignore": {
+      "sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+      "bytes": 1
+    },
+    "README.md": {
+      "sha256": "1a53e9e7c506f4da4272e64e711be4dd11159df643ced5d8c40995218018451c",
+      "bytes": 62393
+    },
+    "package.json": {
+      "sha256": "5d87dca24e45f40956518b7cd85752546a5d8cd83f5303dcb7b673c7115eaaec",
+      "bytes": 497
+    },
+    "snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": {
+      "sha256": "7609b6d47bfec2b3fdb9d578280e7ab6c74c30314eec09289370b630ea37072e",
+      "bytes": 707
+    },
+    "snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline1.js": {
+      "sha256": "4b73c9802bc522192067989549f94daafe22ba7413db68cc9be27b4ec8154491",
+      "bytes": 779
+    },
+    "snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline2.js": {
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "bytes": 4526
+    },
+    "spiraltorch_wasm.d.ts": {
+      "sha256": "938b7a0969e2d6de98846977bb2a5ecd4d6b06d7321d9d337f52305f59860c78",
+      "bytes": 188673
+    },
+    "spiraltorch_wasm.js": {
+      "sha256": "9398c00c041b133593ab83ae9032e2bb6ddad6ebf699a6f0ba5b4073a8973338",
+      "bytes": 538787
+    },
+    "spiraltorch_wasm_bg.wasm": {
+      "sha256": "34644dc9854477de2f76270b23a239237a92e22f52c219a42a1fdaf94f76b353",
+      "bytes": 8483622
+    },
+    "spiraltorch_wasm_bg.wasm.d.ts": {
+      "sha256": "a821bd701cf3c05fd163df290c5b16cff95e7e783aef6d937a827682d6eb77db",
+      "bytes": 104043
+    }
+  },
+  "serving_limits": "Reused unchanged from the pinned historical mechanics gate; not production qualification"
+}

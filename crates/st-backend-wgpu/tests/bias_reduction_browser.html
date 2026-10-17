@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident Bias Reduction</title>
+<p>WebGPU cancellation checks. Selected-adapter hardware execution is unverified.</p>
+<pre id="result" data-status="running">Checking shared bias reduction...</pre>
+<a id="download" hidden download="resident-bias-reduction-browser.json">Download verification result</a>
+<script type="module">
+import init, {run_resident_bias_reduction_checks} from "../../../target/resident-bias-reduction-web/resident_bias_reduction_browser.js";
+const output = document.querySelector("#result");
+try {
+  await init();
+  const report = JSON.parse(await run_resident_bias_reduction_checks());
+  if (report.schema !== "spiraltorch.dense_bias_reduction.validation.v1" ||
+      report.checks.length !== 8 || report.guards.length !== 5 || report.integer_oracle.length < 80 ||
+      report.backend !== "BrowserWebGpu" || report.browser_hardware_execution !== "unverified") {
+    throw Error("Incomplete bias-reduction validation");
+  }
+  output.textContent = JSON.stringify(report, null, 2);
+  output.dataset.status = report.passed ? "passed" : "failed";
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([output.textContent + "\n"], {type:"application/json"}));
+  link.hidden = false;
+} catch (error) {
+  output.dataset.status = "error";
+  output.textContent = JSON.stringify({passed:false,error:String(error.stack || error)});
+}
+</script>

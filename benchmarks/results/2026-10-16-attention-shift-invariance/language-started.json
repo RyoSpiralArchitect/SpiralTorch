@@ -1,0 +1,37 @@
+{
+  "pins": {
+    "request": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+    "torch": "96d37dd50825679d52687bb699ab8bcbeb4424af881d75ecabd566bcccc0090b",
+    "before": "6bb2a87dcf87ef83ef209402eb713b8d8bc196ea6ceca560136341982b427317"
+  },
+  "binary_sha256": "4b7d03cc7959212771b1a2698b0cba3a0878ac596d0151a539743a4c04ede6fc",
+  "build_receipt_sha256": "2c69b888ea55c2315953c8088d0db6b33e0640fe3995a9870c1efcc783072929",
+  "sources": {
+    "Cargo.lock": "bbebed8b62e19589596d9bf37f647e6714a0a153e56991f8f3862a7b72c06e97",
+    "Cargo.toml": "0a756da3b71ab178232acdac4e08bd29222d17530e645857edc143f03df3cc05",
+    "benchmarks/results/2026-10-16-attention-adamw-numerics/language_probe.py": "1d72b09c6593d5d39cc7589299fb3ec8a586a02bbcace0fddd8ec71192fef8b9",
+    "benchmarks/results/2026-10-16-attention-shift-invariance/PLAN.md": "da25dfeddebc494aabc3e4a70f4d44edaad6a09bbd9b383d63f9963b4ae99656",
+    "benchmarks/results/2026-10-16-attention-shift-invariance/language_probe.py": "140cc1def5c675a25037566882b8790e14bf3da6b66ad93c6da1b634dbd62421",
+    "benchmarks/results/2026-10-16-language-capacity-budget/diagnose.py": "f45b3e2fa4676157817c19a2cb0e5fb42d749127e44faaca686487865c862a8a",
+    "benchmarks/results/2026-10-16-language-capacity-budget/launch.py": "f9580d7b1c445fbb1c5fb837217443789162c3fac6165ace8b635292b8f8a169",
+    "benchmarks/results/2026-10-16-language-capacity-budget/publish.py": "d0ced3fed2a1205e6dc84da3bb26047d3060bd4fa6e65698d7569a15f8a1bcb4",
+    "benchmarks/results/2026-10-16-language-capacity-budget/qualify.py": "52074ad9f55065b974d1718bc8fea36a65ac0972e6fb9e2b13a4261b4c4d888c",
+    "benchmarks/results/2026-10-16-language-capacity-budget/test_diagnose.py": "eea3e30434fb4d3af3cf0c88f2b48e3a81166efef0410defc525c46a79da9d1b",
+    "benchmarks/results/2026-10-16-language-capacity-budget/test_launch.py": "56a370479025a3601b85995eb91b4c954d032abc922af13c6e928a16f44b56cd",
+    "benchmarks/results/2026-10-16-language-capacity-budget/test_publish.py": "bc37d248eb4e14cfbbd86f7e28d3b84474442f81f29916e3f5cfc9c2745413eb",
+    "benchmarks/results/2026-10-16-language-capacity-budget/test_qualify.py": "2a21e93b92f55c85c0cfc43994f794783a48d090f9ca51cd1d74b0e8a75dd6fc",
+    "benchmarks/results/2026-10-16-language-capacity-budget/test_worker.py": "cfc3253b56f460396fc0e0903670df694d05f0d83a8392c48c0314819cbfc04a",
+    "benchmarks/results/2026-10-16-language-capacity-budget/worker.py": "42908e0f656d1855e7b64c609d53c617c7073d2a63461c29621e35432c8e3a3f",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention_backward.wgsl": "5be1bb186e3f31a21c9b25156ac8e5a54b14577838cd7a1fea888956bb76dd12",
+    "crates/st-kernel-contracts/src/adamw.rs": "7d045c5e8df1d8c67de11261ff02d24d7ef0a4159361cff9c9b07dac7a1d2fd0",
+    "crates/st-kernel-contracts/src/adamw.wgsl": "0f88b3b0bd2e13c5fab44bf9f02960d3dfe656910a5dc81ed78f264c0b4b2322",
+    "crates/st-nn/examples/resident_byte_learning.rs": "f18db4c9b64229eddbe37d22850fa811c5edab56f23c33105b3cb1b2b0c6aa93",
+    "tools/byte_corpus_calibration.py": "e60edafa15ccecc422a6f4780022b6091b280a29802ce5efe2a65d00c821e452",
+    "tools/byte_corpus_headwise.py": "e1aaa1867f16368256782c1434c15d27e374843fd57039875bd2eb4c32f7e297",
+    "tools/byte_corpus_mixture.py": "77e73760075fd8d25face94354bc1abb18d9ef56d7c0d17c418d44e9b813ca48",
+    "tools/byte_corpus_optimizer.py": "1a680a251f2e5bbdc20b8146883aca1122fa5dc64b73b96f054333e2c9056a1a",
+    "tools/byte_corpus_query.py": "9840bd1de7720c08a28ce58de225440a16c185831f71dc0be2e05e947a9c06ea",
+    "tools/byte_corpus_study.py": "3f55ab2b2f901e0f6f095374035487eab2dc0213165bc6fdb46c1c9df3e2bfaa"
+  },
+  "comparison_baseline": "f27ca0aae native debug uninterrupted run; AdamW already repaired"
+}

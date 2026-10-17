@@ -1,0 +1,408 @@
+{
+  "schema": "spiraltorch.byte_corpus.browser_selection.v1",
+  "selection_completed_before_inference": true,
+  "native_decisions_and_artifact_ids_equal": true,
+  "rejected_inputs": 3,
+  "decisions": [
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.093789126795532,
+          "completed_updates": 0,
+          "mean_ce": 5.610187113285065,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.302930193223269,
+          "completed_updates": 64,
+          "mean_ce": 4.36885829269886,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.219766464053612,
+          "completed_updates": 128,
+          "mean_ce": 3.618066407740116,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.934816321040964,
+          "completed_updates": 256,
+          "mean_ce": 3.420554019510746,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed11_ordinary",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:a337c5db4e3777d994c0615c160f27199000544bdb6145f4817408687c235a0f",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.101673800411326,
+          "completed_updates": 0,
+          "mean_ce": 5.615652352571487,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.30779291668509,
+          "completed_updates": 64,
+          "mean_ce": 4.372228875756264,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.224270442454649,
+          "completed_updates": 128,
+          "mean_ce": 3.6211883276700974,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.929554210868178,
+          "completed_updates": 256,
+          "mean_ce": 3.416906602680683,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed11_geometry",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:6926d19cd68280cd95c2ec5bfb4fec3b7e3e62ed2e2dba2440a5194f212c77f0",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.101673800411326,
+          "completed_updates": 0,
+          "mean_ce": 5.615652352571487,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.308065315706225,
+          "completed_updates": 64,
+          "mean_ce": 4.372417688369751,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.224268238926934,
+          "completed_updates": 128,
+          "mean_ce": 3.621186800301075,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.929888641881695,
+          "completed_updates": 256,
+          "mean_ce": 3.4171384125947952,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed11_geometry_frozen",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:501976042fb29fca58e4dd3985ead3c991ab49484a88a79425c214568cb4f5d1",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.064071707107164,
+          "completed_updates": 0,
+          "mean_ce": 5.589588567614555,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.162811585003404,
+          "completed_updates": 64,
+          "mean_ce": 4.2717354744672775,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.196519902352872,
+          "completed_updates": 128,
+          "mean_ce": 3.6019531190395355,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.906114802871242,
+          "completed_updates": 256,
+          "mean_ce": 3.400659643113613,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed29_ordinary",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:0d7e04cec0b13eeaa2487e6485347189e7892721d88fd41f83f53311b725a09a",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.067077662874606,
+          "completed_updates": 0,
+          "mean_ce": 5.591672137379646,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.19097866708557,
+          "completed_updates": 64,
+          "mean_ce": 4.291259407997131,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.213465223955397,
+          "completed_updates": 128,
+          "mean_ce": 3.613698720932007,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.8992815881871605,
+          "completed_updates": 256,
+          "mean_ce": 3.3959232196211815,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed29_geometry",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:55bdd4c0ba4628c7254e6659dc5e4bae7e2f6e30e012ba8d11c51f3bcef11545",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.067077662874606,
+          "completed_updates": 0,
+          "mean_ce": 5.591672137379646,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.192276727640789,
+          "completed_updates": 64,
+          "mean_ce": 4.292159155011177,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.213669001898838,
+          "completed_updates": 128,
+          "mean_ce": 3.6138399690389633,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.89980245914313,
+          "completed_updates": 256,
+          "mean_ce": 3.3962842598557472,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed29_geometry_frozen",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:3f5bfd12b5a60419746350421db2260bc8288559e3b47fd40bb3d46e549012d3",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 7.973188851119919,
+          "completed_updates": 0,
+          "mean_ce": 5.526593372225761,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.115456355568813,
+          "completed_updates": 64,
+          "mean_ce": 4.238911330699921,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.194235069840497,
+          "completed_updates": 128,
+          "mean_ce": 3.600369393825531,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.90079014475812,
+          "completed_updates": 256,
+          "mean_ce": 3.3969688713550568,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed47_ordinary",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:c4b5f7705ef683ad0c60c79d72f8cc172f737e11cdda7a3e9f9f3afc47e8632f",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 7.9650669704329236,
+          "completed_updates": 0,
+          "mean_ce": 5.520963713526726,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.099560085140888,
+          "completed_updates": 64,
+          "mean_ce": 4.227892875671387,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.185077122669041,
+          "completed_updates": 128,
+          "mean_ce": 3.594021588563919,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.885344888083168,
+          "completed_updates": 256,
+          "mean_ce": 3.386263035237789,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed47_geometry",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:a4f3c3da93c4bf16b4c32ac1925800831280a14605bde8aec25a3ea49bc0cfe3",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 7.9650669704329236,
+          "completed_updates": 0,
+          "mean_ce": 5.520963713526726,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.099850069388075,
+          "completed_updates": 64,
+          "mean_ce": 4.2280938774347305,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.185310965329635,
+          "completed_updates": 128,
+          "mean_ce": 3.594183675944805,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.886835418722533,
+          "completed_updates": 256,
+          "mean_ce": 3.3872961923480034,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed47_geometry_frozen",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:0011e71484d72e455b76f94529c4ad3bbc8dfa4fd0225a5da8820b4259942c92",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    }
+  ],
+  "inference": {
+    "artifact_id": "sha256:a337c5db4e3777d994c0615c160f27199000544bdb6145f4817408687c235a0f",
+    "revision": 256,
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "native_loss": 3.3777379989624023,
+    "browser_loss": 3.3777379989624023,
+    "loss_within_existing_tolerance": true,
+    "logits_count": 16384
+  }
+}

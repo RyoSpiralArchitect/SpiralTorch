@@ -1,0 +1,114 @@
+[
+  {
+    "sha256": "595f5327cf526978e51b677c4ce39b5c579905225f9f84c7caa75f679dfa3754",
+    "path": "attention-backward-before.wgsl"
+  },
+  {
+    "sha256": "4825e65c9ed21447bbee1e078e1eb4bd7b7e4f70e4fb06bba489c34a75bafbac",
+    "path": "conservation-before.log"
+  },
+  {
+    "sha256": "f0aaf2ae6327cbc4fd4aa1c0d52f89e3c3f18aa732ed6e105c10bcfaf86d9c27",
+    "path": "conservation-after.log"
+  },
+  {
+    "sha256": "88db2f69fd163e946ce6e258b25b3239338a77383ed50c3a8308f152b27c1151",
+    "path": "native-attention.log"
+  },
+  {
+    "sha256": "8c58be6deef4f30a73d1a20157154d03a8c575bfd219b2ff4d087d59cf7ec12d",
+    "path": "native-language-tests.log"
+  },
+  {
+    "sha256": "57dcf373034b4c10d97744c62638b46c44a16688013ee05b8d7f0640efbcf0ab",
+    "path": "native-fixture-final.log"
+  },
+  {
+    "sha256": "ad50521f8f312cf43f577f2e29ad59fdd6dcc54b5e639f71098b9df4fb1e7a89",
+    "path": "native.json"
+  },
+  {
+    "sha256": "feefb00787a9e92c99f56b4c9aa43ac1d5748ca8a269f0b7b6d2db692847e4dc",
+    "path": "browser.json"
+  },
+  {
+    "sha256": "cf2c4391718d9adb310efd39e00069bcc8eba2ed34c25fa559aa214d3ad2be14",
+    "path": "wasm-build.log"
+  },
+  {
+    "sha256": "e50ef87c35f8550f5aac4429fc836a89901a2e560fdc93d30daebf3b3e1eb6c6",
+    "path": "native-build.log"
+  },
+  {
+    "sha256": "c896a5a19232c2785cb6540d05ecb0a144d585a17d3c224bdfbf26fbd31a23be",
+    "path": "clippy-native.log"
+  },
+  {
+    "sha256": "4adbe8e2710575e48dd07fdd4834146d5a8ea54ec4cd80433ca1ebce27ba9e96",
+    "path": "clippy-wasm.log"
+  },
+  {
+    "sha256": "1e3149b56c468fe9c3fa5cff6f07029c944077f7006448e229e63f311434da5b",
+    "path": "probe-tests.log"
+  },
+  {
+    "sha256": "b93b8adcc6f2dd98e366675310b51dae8c875c5a9a80e5d9a75b03c02dadd8c6",
+    "path": "helper-tests.log"
+  },
+  {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "path": "format.log"
+  },
+  {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "path": "language-driver.log"
+  },
+  {
+    "sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+    "path": "language/request.json"
+  },
+  {
+    "sha256": "140cc1def5c675a25037566882b8790e14bf3da6b66ad93c6da1b634dbd62421",
+    "path": "language/runner.py"
+  },
+  {
+    "sha256": "2c69b888ea55c2315953c8088d0db6b33e0640fe3995a9870c1efcc783072929",
+    "path": "language/build-receipt.json"
+  },
+  {
+    "sha256": "5dc555404289e664018adb8fc73085bfb7b0dbbaf638f52a57c7315ddfe6e6c3",
+    "path": "language/build.jsonl"
+  },
+  {
+    "sha256": "3785e624abf114462be61511a5eab678b59f58987153fdc640d7d67c208cf03b",
+    "path": "language/build.log"
+  },
+  {
+    "sha256": "17a4f3ef2003923004cbd34840a5f0c1a3ddd079a265c0b053d17c776db99da4",
+    "path": "language/started.json"
+  },
+  {
+    "sha256": "858a5576ba95c643fc223044fe6eaab4f502fa9afd0fc15b744eaa7bdb0b3dfe",
+    "path": "language/native.json"
+  },
+  {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "path": "language/native.log"
+  },
+  {
+    "sha256": "9e8ae028c81705e05935e70ba8386e9db602ebfa4603d78ce874670f7b6c491c",
+    "path": "language/checkpoint.json"
+  },
+  {
+    "sha256": "37950c8ab288008fd6211ee1ef010fe13656fb93b2142e5cd6ce742910770491",
+    "path": "language/comparison.json"
+  },
+  {
+    "sha256": "4b7d03cc7959212771b1a2698b0cba3a0878ac596d0151a539743a4c04ede6fc",
+    "path": "language/executed-native"
+  },
+  {
+    "sha256": "68e1ca078aeb3e6870faeb1c0b85a6d411369484963f4e815ff104b279063b0e",
+    "path": "web/target/resident-attention-vjp-web/resident_attention_vjp_browser_bg.wasm"
+  }
+]

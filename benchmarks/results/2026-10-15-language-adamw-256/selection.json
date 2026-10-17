@@ -1,0 +1,666 @@
+{
+  "schema": "spiraltorch.byte_corpus.pilot_selection.v1",
+  "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+  "plan_sha256": "6ad1ae12338aab442b874772893177da974a3006d9a65b163e133890d7440033",
+  "checkpoints": [
+    {
+      "cursor": 0,
+      "segment_checkpoint_binding": true
+    },
+    {
+      "cursor": 64,
+      "segment_checkpoint_binding": true
+    },
+    {
+      "cursor": 128,
+      "segment_checkpoint_binding": true
+    },
+    {
+      "cursor": 256,
+      "segment_checkpoint_binding": true
+    }
+  ],
+  "decisions": [
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.093789126795532,
+          "completed_updates": 0,
+          "mean_ce": 5.610187113285065,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.302930193223269,
+          "completed_updates": 64,
+          "mean_ce": 4.36885829269886,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.219766464053612,
+          "completed_updates": 128,
+          "mean_ce": 3.618066407740116,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.934816321040964,
+          "completed_updates": 256,
+          "mean_ce": 3.420554019510746,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed11_ordinary",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:a337c5db4e3777d994c0615c160f27199000544bdb6145f4817408687c235a0f",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.101673800411326,
+          "completed_updates": 0,
+          "mean_ce": 5.615652352571487,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.30779291668509,
+          "completed_updates": 64,
+          "mean_ce": 4.372228875756264,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.224270442454649,
+          "completed_updates": 128,
+          "mean_ce": 3.6211883276700974,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.929554210868178,
+          "completed_updates": 256,
+          "mean_ce": 3.416906602680683,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed11_geometry",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:6926d19cd68280cd95c2ec5bfb4fec3b7e3e62ed2e2dba2440a5194f212c77f0",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.101673800411326,
+          "completed_updates": 0,
+          "mean_ce": 5.615652352571487,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.308065315706225,
+          "completed_updates": 64,
+          "mean_ce": 4.372417688369751,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.224268238926934,
+          "completed_updates": 128,
+          "mean_ce": 3.621186800301075,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.929888641881695,
+          "completed_updates": 256,
+          "mean_ce": 3.4171384125947952,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed11_geometry_frozen",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:501976042fb29fca58e4dd3985ead3c991ab49484a88a79425c214568cb4f5d1",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.064071707107164,
+          "completed_updates": 0,
+          "mean_ce": 5.589588567614555,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.162811585003404,
+          "completed_updates": 64,
+          "mean_ce": 4.2717354744672775,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.196519902352872,
+          "completed_updates": 128,
+          "mean_ce": 3.6019531190395355,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.906114802871242,
+          "completed_updates": 256,
+          "mean_ce": 3.400659643113613,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed29_ordinary",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:0d7e04cec0b13eeaa2487e6485347189e7892721d88fd41f83f53311b725a09a",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.067077662874606,
+          "completed_updates": 0,
+          "mean_ce": 5.591672137379646,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.19097866708557,
+          "completed_updates": 64,
+          "mean_ce": 4.291259407997131,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.213465223955397,
+          "completed_updates": 128,
+          "mean_ce": 3.613698720932007,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.8992815881871605,
+          "completed_updates": 256,
+          "mean_ce": 3.3959232196211815,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed29_geometry",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:55bdd4c0ba4628c7254e6659dc5e4bae7e2f6e30e012ba8d11c51f3bcef11545",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 8.067077662874606,
+          "completed_updates": 0,
+          "mean_ce": 5.591672137379646,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.192276727640789,
+          "completed_updates": 64,
+          "mean_ce": 4.292159155011177,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.213669001898838,
+          "completed_updates": 128,
+          "mean_ce": 3.6138399690389633,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.89980245914313,
+          "completed_updates": 256,
+          "mean_ce": 3.3962842598557472,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed29_geometry_frozen",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:3f5bfd12b5a60419746350421db2260bc8288559e3b47fd40bb3d46e549012d3",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 7.973188851119919,
+          "completed_updates": 0,
+          "mean_ce": 5.526593372225761,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.115456355568813,
+          "completed_updates": 64,
+          "mean_ce": 4.238911330699921,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.194235069840497,
+          "completed_updates": 128,
+          "mean_ce": 3.600369393825531,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.90079014475812,
+          "completed_updates": 256,
+          "mean_ce": 3.3969688713550568,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed47_ordinary",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:c4b5f7705ef683ad0c60c79d72f8cc172f737e11cdda7a3e9f9f3afc47e8632f",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 7.9650669704329236,
+          "completed_updates": 0,
+          "mean_ce": 5.520963713526726,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.099560085140888,
+          "completed_updates": 64,
+          "mean_ce": 4.227892875671387,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.185077122669041,
+          "completed_updates": 128,
+          "mean_ce": 3.594021588563919,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.885344888083168,
+          "completed_updates": 256,
+          "mean_ce": 3.386263035237789,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed47_geometry",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:a4f3c3da93c4bf16b4c32ac1925800831280a14605bde8aec25a3ea49bc0cfe3",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    },
+    {
+      "candidates": [
+        {
+          "bits_per_byte": 7.9650669704329236,
+          "completed_updates": 0,
+          "mean_ce": 5.520963713526726,
+          "study_checkpoint_sha256": "97c0388b8543f2fc7ec0f296263b8ccaedc1b12242af0a9aa369c052dc573704",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 6.099850069388075,
+          "completed_updates": 64,
+          "mean_ce": 4.2280938774347305,
+          "study_checkpoint_sha256": "d1e3229f3764c8dcfa00c5ac836af8bb04d4feb399fd900ddf34fa1978abccf5",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 5.185310965329635,
+          "completed_updates": 128,
+          "mean_ce": 3.594183675944805,
+          "study_checkpoint_sha256": "96bfc59facbd3e69ae42c24fda9f3b2fcfa00dd0de8a346e3da1a1c020f77ec2",
+          "target_bytes": 2048
+        },
+        {
+          "bits_per_byte": 4.886835418722533,
+          "completed_updates": 256,
+          "mean_ce": 3.3872961923480034,
+          "study_checkpoint_sha256": "ab1544e795956a18f2ba1bfbae1e5f2e0893f064b3feaaa2c3385e5309b2643b",
+          "target_bytes": 2048
+        }
+      ],
+      "case_name": "seed47_geometry_frozen",
+      "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+      "rule": "minimum_validation_ce_earliest_saved.v1",
+      "schema": "spiraltorch.byte_corpus.checkpoint_selection.v1",
+      "scope": "Saved-model development selection only; not an unsaved minimum, training attestation, test result or serving promotion",
+      "selected": {
+        "artifact_id": "sha256:0011e71484d72e455b76f94529c4ad3bbc8dfa4fd0225a5da8820b4259942c92",
+        "candidate_index": 3,
+        "completed_updates": 256
+      },
+      "selection_data": "request_validation_windows"
+    }
+  ],
+  "artifacts": [
+    {
+      "case_name": "seed11_ordinary",
+      "cursor": 0,
+      "file": "case0-revision0.json",
+      "artifact_id": "sha256:7949933978adbe35eaa4f0fc571cf05824a82f7b8a89531aea96b3bcf646493d",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_ordinary",
+      "cursor": 64,
+      "file": "case0-revision64.json",
+      "artifact_id": "sha256:b4e2403cd10746037f4c690acc1cf162d65dd6e87c1e3f7c2e04a8845f8623f3",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_ordinary",
+      "cursor": 128,
+      "file": "case0-revision128.json",
+      "artifact_id": "sha256:7d8b2df0f140601d42da2d1e74c177762a7c478a405d57b102e4f706a55dae20",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_ordinary",
+      "cursor": 256,
+      "file": "case0-revision256.json",
+      "artifact_id": "sha256:a337c5db4e3777d994c0615c160f27199000544bdb6145f4817408687c235a0f",
+      "selected": true
+    },
+    {
+      "case_name": "seed11_geometry",
+      "cursor": 0,
+      "file": "case1-revision0.json",
+      "artifact_id": "sha256:4dd1dddeb488a1f0e5c71b24b4c8797d578f4d9be381e889514a7113de4772d2",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_geometry",
+      "cursor": 64,
+      "file": "case1-revision64.json",
+      "artifact_id": "sha256:0f23ba4dc728cf3de54122fca2e82e6a692a3ae9b73793b6a4b041e8015a7871",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_geometry",
+      "cursor": 128,
+      "file": "case1-revision128.json",
+      "artifact_id": "sha256:f0836b6e316e7e99770b81457e9c5ca9cfd18a7b546bcddec64b42be9949ed3a",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_geometry",
+      "cursor": 256,
+      "file": "case1-revision256.json",
+      "artifact_id": "sha256:6926d19cd68280cd95c2ec5bfb4fec3b7e3e62ed2e2dba2440a5194f212c77f0",
+      "selected": true
+    },
+    {
+      "case_name": "seed11_geometry_frozen",
+      "cursor": 0,
+      "file": "case2-revision0.json",
+      "artifact_id": "sha256:a0e0a6312051c364c77444cb1fb775823a020b0e12dd0acfb5057e8c76a2fbf6",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_geometry_frozen",
+      "cursor": 64,
+      "file": "case2-revision64.json",
+      "artifact_id": "sha256:b9fd4a5893fb376544ddddb47f4b7049edc3306b17f633dc21b19e4c4fdf0621",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_geometry_frozen",
+      "cursor": 128,
+      "file": "case2-revision128.json",
+      "artifact_id": "sha256:90b308e11c34eea2ba73b87229aad7f9e58938a3a93032ccc8c433139476318c",
+      "selected": false
+    },
+    {
+      "case_name": "seed11_geometry_frozen",
+      "cursor": 256,
+      "file": "case2-revision256.json",
+      "artifact_id": "sha256:501976042fb29fca58e4dd3985ead3c991ab49484a88a79425c214568cb4f5d1",
+      "selected": true
+    },
+    {
+      "case_name": "seed29_ordinary",
+      "cursor": 0,
+      "file": "case3-revision0.json",
+      "artifact_id": "sha256:fe6e0525571f0b6426669e198a46300f1a31e2d1d83567e7577c46c83a0baf38",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_ordinary",
+      "cursor": 64,
+      "file": "case3-revision64.json",
+      "artifact_id": "sha256:b4d0a7073e802335ef21831d3e586a8fdfc874f30739a3c6e5bb453c462a862f",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_ordinary",
+      "cursor": 128,
+      "file": "case3-revision128.json",
+      "artifact_id": "sha256:fb792e66dfabe15e3cd652b26fe4a952f8993a5d91931a20c52fba63fdd4cf84",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_ordinary",
+      "cursor": 256,
+      "file": "case3-revision256.json",
+      "artifact_id": "sha256:0d7e04cec0b13eeaa2487e6485347189e7892721d88fd41f83f53311b725a09a",
+      "selected": true
+    },
+    {
+      "case_name": "seed29_geometry",
+      "cursor": 0,
+      "file": "case4-revision0.json",
+      "artifact_id": "sha256:9fd1b4833d80eb7838d031b0241cfd9f4a4dbdb5b61721f6222ede2dab03cb5f",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_geometry",
+      "cursor": 64,
+      "file": "case4-revision64.json",
+      "artifact_id": "sha256:a8bca0e92678eb362ec8bf5dda2065487d73c9b39c607f75d2042b68d7bd691a",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_geometry",
+      "cursor": 128,
+      "file": "case4-revision128.json",
+      "artifact_id": "sha256:b87f2ec6cb4c9ae2ebcb40f7293cd89ea9455ae4b3980594151d4cf00aa6bfe9",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_geometry",
+      "cursor": 256,
+      "file": "case4-revision256.json",
+      "artifact_id": "sha256:55bdd4c0ba4628c7254e6659dc5e4bae7e2f6e30e012ba8d11c51f3bcef11545",
+      "selected": true
+    },
+    {
+      "case_name": "seed29_geometry_frozen",
+      "cursor": 0,
+      "file": "case5-revision0.json",
+      "artifact_id": "sha256:be2cee100c344eed6a838bee69e7df8f274a66b1cc3ec88529d3eaff40073786",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_geometry_frozen",
+      "cursor": 64,
+      "file": "case5-revision64.json",
+      "artifact_id": "sha256:845bb87e3f2a66baef6a84e231892e2211866da0422eb2992a61bc4af185fa73",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_geometry_frozen",
+      "cursor": 128,
+      "file": "case5-revision128.json",
+      "artifact_id": "sha256:7410dd5d29aa07e2c1e0ad87af07d7dc1600078a71b0f7e58f8c7b3fa6ec118c",
+      "selected": false
+    },
+    {
+      "case_name": "seed29_geometry_frozen",
+      "cursor": 256,
+      "file": "case5-revision256.json",
+      "artifact_id": "sha256:3f5bfd12b5a60419746350421db2260bc8288559e3b47fd40bb3d46e549012d3",
+      "selected": true
+    },
+    {
+      "case_name": "seed47_ordinary",
+      "cursor": 0,
+      "file": "case6-revision0.json",
+      "artifact_id": "sha256:5fef19efe6b7aee187ed7de43899fe6e770ceb83caeb78e404f052dbe38db471",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_ordinary",
+      "cursor": 64,
+      "file": "case6-revision64.json",
+      "artifact_id": "sha256:c18560e7feebf96126c4c5adba6f574c1eee6fae6e19b93a72d27a45e43d6cb7",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_ordinary",
+      "cursor": 128,
+      "file": "case6-revision128.json",
+      "artifact_id": "sha256:942a9eeeb219b93acd512f1913d5fd628c25a6ce969917e6012d3b8ec80a3316",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_ordinary",
+      "cursor": 256,
+      "file": "case6-revision256.json",
+      "artifact_id": "sha256:c4b5f7705ef683ad0c60c79d72f8cc172f737e11cdda7a3e9f9f3afc47e8632f",
+      "selected": true
+    },
+    {
+      "case_name": "seed47_geometry",
+      "cursor": 0,
+      "file": "case7-revision0.json",
+      "artifact_id": "sha256:28da064e2104594184c38c34ae6cde75f02782eaa4135527223801b2fb32f5b0",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_geometry",
+      "cursor": 64,
+      "file": "case7-revision64.json",
+      "artifact_id": "sha256:76a5fd498b803cad596eef062c0707c1ff77982ea47cbbbc5deb09b78e6c5e52",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_geometry",
+      "cursor": 128,
+      "file": "case7-revision128.json",
+      "artifact_id": "sha256:566cc90748846f56d9eb13829df0ba3a7dabe46a3781253b9bbb2f9329087339",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_geometry",
+      "cursor": 256,
+      "file": "case7-revision256.json",
+      "artifact_id": "sha256:a4f3c3da93c4bf16b4c32ac1925800831280a14605bde8aec25a3ea49bc0cfe3",
+      "selected": true
+    },
+    {
+      "case_name": "seed47_geometry_frozen",
+      "cursor": 0,
+      "file": "case8-revision0.json",
+      "artifact_id": "sha256:c0552b7a2b595582f526ea023a56cecd394f9c5b0580e2778edf8e33b34e8fec",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_geometry_frozen",
+      "cursor": 64,
+      "file": "case8-revision64.json",
+      "artifact_id": "sha256:f6e61144b646baf4d162b3f9c63d6d53b93b1d9aa49fad11330b97ffbfc27386",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_geometry_frozen",
+      "cursor": 128,
+      "file": "case8-revision128.json",
+      "artifact_id": "sha256:f6d44139e26c50ef9146ff9c110873f02271d675f59438421b3e4df73e0d3fb7",
+      "selected": false
+    },
+    {
+      "case_name": "seed47_geometry_frozen",
+      "cursor": 256,
+      "file": "case8-revision256.json",
+      "artifact_id": "sha256:0011e71484d72e455b76f94529c4ad3bbc8dfa4fd0225a5da8820b4259942c92",
+      "selected": true
+    }
+  ]
+}

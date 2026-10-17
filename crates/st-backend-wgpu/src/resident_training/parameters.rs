@@ -1,8 +1,12 @@
-//! Model-independent resident parameters with versioned, all-or-none SGD.
+//! Model-independent resident parameters with versioned, all-or-none updates.
 //! Values are immutable snapshots; submitting an update never maps a buffer.
 
 use super::*;
 use crate::resident_tensor::{storage_limit, INVALID_TENSOR_FLAG};
+
+mod adamw;
+use adamw::AdamWWorkspace;
+pub use adamw::{AdamWSlot, AdamWState, ResidentAdamWReadback};
 
 #[derive(Clone, Debug)]
 pub(super) struct ParameterVersion {
@@ -158,12 +162,13 @@ impl UpdateKernels {
 
 /// Owns the current immutable GPU parameter version. A rejected device update
 /// retains every old value, but invalidates old gradient tokens, as graph SGD does.
-/// This is plain SGD; optimizer history and model/host synchronization are explicit
-/// responsibilities of the caller, not silently reconstructed here.
+/// SGD is stateless. Explicitly enabling AdamW makes moments and accepted clocks
+/// part of this same owner and acceptance decision; SGD then refuses to discard them.
 pub struct ResidentParameters {
     current: ResidentParameterSnapshot,
     device: TensorDevice,
     kernels: UpdateKernels,
+    adamw: Option<AdamWWorkspace>,
 }
 
 impl ResidentParameters {
@@ -200,6 +205,7 @@ impl ResidentParameters {
             },
             device,
             kernels,
+            adamw: None,
         })
     }
 
@@ -253,6 +259,11 @@ impl ResidentParameters {
         gradients: &ResidentParameterGradients,
         rate: impl Fn(usize) -> f32,
     ) -> Result<ResidentParameterUpdate, TrainingError> {
+        if self.adamw.is_some() {
+            return Err(TrainingError::OptimizerState(
+                "SGD cannot discard AdamW history",
+            ));
+        }
         if !self.current.version.matches(&gradients.version) {
             return Err(TrainingError::ParameterVersion);
         }
