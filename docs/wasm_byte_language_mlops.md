@@ -23,8 +23,8 @@ RUSTUP_TOOLCHAIN=1.99.0 wasm-pack build bindings/st-wasm --target web \
 
 Import the resulting `spiraltorch_wasm.js` and initialize its WASM module.
 `webgpu` includes `nn`. With `nn` alone, study/checkpoint/artifact/gate transport
-is available without a device; GPU methods and resident owner classes are
-absent. The bundled handwritten TypeScript declarations describe the feature
+and saved-checkpoint selection are available without a device; GPU methods and
+resident owner classes are absent. The bundled handwritten TypeScript declarations describe the feature
 superset; generated declarations describe the actual build. No CPU fallback is
 used for the resident path. All GPU clients reuse the package's installed runtime.
 
@@ -60,9 +60,45 @@ Checkpoint getters return independently owned handles. Resume validation checks
 every case and its original request, optimizer history and frozen geometry
 policy before acquiring a device. Calling `advanceWebGpu` again starts fresh;
 only `resumeWebGpu` continues a checkpoint. Partial artifacts are allowed but not
-automatically selected or promoted. Saved-checkpoint selection and geometry
-calibration/preparation remain in Rust/Python and standalone qualification APIs;
-they are not additional packaged methods in this slice.
+automatically selected or promoted. Geometry calibration/preparation remains in
+Rust/Python and standalone qualification APIs; it is not an additional packaged
+method in this slice.
+
+## Select Actual Saved Checkpoints
+
+Retain evaluation-boundary checkpoints before inspecting their losses. The
+packaged selector calls the same Rust contract as
+[Python/native selection](byte_corpus_checkpoint_selection.md): minimum
+development CE, earliest supplied cursor on an exact tie, and no unsaved minimum.
+
+```js
+const candidates = study.checkpointCandidates();
+for (const json of savedCheckpointJsonStrings) {
+  candidates.appendJson(json); // Import the exact stored string, without JS reconstruction.
+}
+const selected = candidates.selectCheckpoint(caseName, 'fixed_window_frozen.v1');
+const decision = JSON.parse(selected.reportJson); // Metrics and identities, not weights.
+const selectedArtifact = selected.artifact;
+selected.free(); candidates.free();
+// selectedArtifact remains valid, with the original geometry and optimizer history.
+const inference = await selectedArtifact.restoreWebGpu(); // Optional; requires webgpu.
+selectedArtifact.free();
+```
+
+The collection owns its study and accepts at most 32 opaque checkpoint strings,
+without converting an arbitrary JS array/iterator. Imports validate request and
+checkpoint state, and enforce the combined canonical byte budget; selection validates
+1..32 increasing evaluation cursors, exact request identity, every case's
+history prefixes and a 64 MiB combined canonical JSON budget in Rust. Empty,
+foreign, duplicate, reversed or forked sequences reject. A failed append leaves
+the collection unchanged. None of these new selection methods borrows two
+exported Rust handles in one WASM ABI call, so a disposed input cannot poison another owner's generated
+borrow. Selection does not request an adapter, even in a
+`webgpu` build, and is not early stopping or serving admission.
+
+Persist original request/checkpoint strings privately. The returned artifact is
+byte-identical to direct extraction of the winning saved model. Each artifact
+getter returns an independent handle; release it with `free()` when finished.
 
 ## Run And Switch Real Models
 

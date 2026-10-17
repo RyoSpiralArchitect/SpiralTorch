@@ -52,7 +52,9 @@ pub use headwise::ByteCorpusHeadwiseControls;
 pub use mixture::ByteCorpusMixtureControls;
 use policy::{BiasInitialization, GeometryUpdate};
 pub use query::ByteCorpusQueryMixtureControls;
-pub use selection::ByteCorpusCheckpointSelection;
+pub use selection::{
+    ByteCorpusCheckpointSelection, BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES,
+};
 pub use serving::ByteCorpusServingGate;
 #[cfg(feature = "wgpu")]
 pub use serving::{ResidentByteCandidate, ResidentByteServing};

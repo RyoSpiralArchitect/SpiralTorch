@@ -435,7 +435,7 @@ jobs:
           node bindings/st-wasm/tests/residual_attention_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           python3 -I -S -B bindings/st-wasm/tests/byte_lm_fixture.py > "$RUNNER_TEMP/byte-corpus-transport.json"
           node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js" \
-            "$RUNNER_TEMP/byte-corpus-transport.json" nn
+            "$RUNNER_TEMP/byte-corpus-transport.json" nn selection
       - name: Host NN forward tapes compiled to scalar WASM
         run: |
           cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --example sequential_forward_tape_contract
@@ -449,6 +449,7 @@ jobs:
           echo "$RUNNER_TEMP/typescript/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Browser WebGPU binding build
         run: |
+          node bindings/st-wasm/tests/byte_lm_selection_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example resident_embedding_browser
           cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example causal_zspace_wave_browser
           cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example poincare_bias_browser
@@ -464,11 +465,12 @@ jobs:
           node bindings/st-wasm/tests/attention_training_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/residual_attention_training_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/byte_lm_selection_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
           node bindings/st-wasm/tests/topos_graph_contract.cjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
-            "$RUNNER_TEMP/byte-corpus-transport.json" webgpu
+            "$RUNNER_TEMP/byte-corpus-transport.json" webgpu selection
       - name: Share the public WebGPU client for browser validation
         uses: actions/upload-artifact@v7
         with:
