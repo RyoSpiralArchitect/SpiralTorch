@@ -64,6 +64,11 @@ and vice versa. Do not round-trip through a decoded dict to transport them:
 floating-point spelling and signed zero must not be silently changed.
 Cross-device floating-point equality is not promised.
 
+For private on-disk runs and explicit recovery, use the source-only
+[durable segment execution API](byte-study-runs.md). It wraps this same Rust
+owner with exclusive run claims, sealed saves and lineage-bound recovery into
+a new directory; it does not introduce another training or promotion policy.
+
 **Source-only saved-model selection:** `study.select_checkpoint(saved, case_name,
 policy="fixed_window_frozen.v1")` returns an immutable artifact and Rust decision
 JSON. Supply actual checkpoints at evaluation boundaries, not arbitrary pauses

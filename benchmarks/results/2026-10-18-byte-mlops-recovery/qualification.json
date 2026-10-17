@@ -1,0 +1,110 @@
+{
+  "schema": "spiraltorch.byte_corpus.segment_recovery_qualification.v1",
+  "request_sha256": "208975bab0905a1ee968d5940975259491163680ce7bd2c0132bce23a637e523",
+  "total_updates": 12,
+  "interrupted_after": 5,
+  "interrupted_exit": -9,
+  "optimizer": {
+    "beta1": 0.8999999761581421,
+    "beta2": 0.9990000128746033,
+    "epsilon": 9.999999747378752e-06,
+    "geometry_weight_decay": 0.0,
+    "kind": "adamw_zero_rate_freeze.v1",
+    "weight_decay": 0.009999999776482582
+  },
+  "cases": [
+    {
+      "seed": 11,
+      "geometry": false,
+      "geometry_update": "train",
+      "artifact_id": "sha256:0369df00f4d7e613fcced8e0758d58fd85f0d711e8ca10405608ccb814917020",
+      "logits_sha256": "1ebd0241864341d4756d94bf416cabc48ed1aa523162a9b139c9d9cc9a63fe6e",
+      "generation_sha256": "deb0c2345d98852f1f7b7c1d9eabf3a3cf77adf711644a2224d7efbaba4b24e4"
+    },
+    {
+      "seed": 11,
+      "geometry": true,
+      "geometry_update": "train",
+      "artifact_id": "sha256:4c6a5160deae178521253f9bc54a445ff910947e70116a7fda5fbcc683b2e340",
+      "logits_sha256": "939f2d755f0bb5fcdd48b4792e6c19690ac0e211302b5e82cd0b84671a58f6e8",
+      "generation_sha256": "cf735f13551d70b977e60456ca0f5eefd5dd4f9e8d8b75bc81581e743e5453df"
+    },
+    {
+      "seed": 11,
+      "geometry": true,
+      "geometry_update": "frozen",
+      "artifact_id": "sha256:53b9d4605f5e0025437f640bff0f7eb18a8efff2f83e979aa55d3213ff5b2e65",
+      "logits_sha256": "a07b05cb194f4bd36388a9422476fad3e970880474055be543563724a3e8542b",
+      "generation_sha256": "2f449f81900c1fbb9811cd5dd8e7878100de59c4b46cd1b0799955ae42be3be7"
+    },
+    {
+      "seed": 29,
+      "geometry": false,
+      "geometry_update": "train",
+      "artifact_id": "sha256:6359a7a864c5a629d970d51e883868729173226ae5819709235259712d67ca77",
+      "logits_sha256": "6495ae917f4cffb95967e99a592a73fcb7c83f6092a5e94bdbd8bfad7c570313",
+      "generation_sha256": "000b7d872c9947e397876b9119f925bde10f17fb01b5febaf809114f97f4d8d0"
+    },
+    {
+      "seed": 29,
+      "geometry": true,
+      "geometry_update": "train",
+      "artifact_id": "sha256:cfe0cf00cbbc98b304f84392ea367ffb3b0b4aecc0631197aa966d8158dc5f9a",
+      "logits_sha256": "b61f17b7d6172b68ad4b240518b76e80cc33fab5868ffc0caeefd27c9d3c1a4b",
+      "generation_sha256": "6a144f2e3d353e9398009a1efaaa2728b80cf22ff426946dc504041ba779ea58"
+    },
+    {
+      "seed": 29,
+      "geometry": true,
+      "geometry_update": "frozen",
+      "artifact_id": "sha256:e79a212c60f72891a85834f5fc44271daae8fb1d8451a1879e741d93f281ceb8",
+      "logits_sha256": "7c51b03d48df2887d72ee6cb46295c8a7fc4ed1f00311e7f491ab0803dd5c304",
+      "generation_sha256": "9a2f8a64537788b6f694e6bede526ff5cd5f34f64ff96a43bfd9bdd42c83975a"
+    },
+    {
+      "seed": 47,
+      "geometry": false,
+      "geometry_update": "train",
+      "artifact_id": "sha256:f781dcae7fad7485458308dac0020d829def3584390581283d836dda827225fd",
+      "logits_sha256": "c1d39bfef2bf44e5dd1900eeb1df2a3e60782a9fe8f4e357148dcda908c0df9f",
+      "generation_sha256": "654f0249b0f0ac6360224b2f818af86d35bf8375c9d5bfc039a49b731f610917"
+    },
+    {
+      "seed": 47,
+      "geometry": true,
+      "geometry_update": "train",
+      "artifact_id": "sha256:4ea94db03f774ea0fef3bd65bb6fc8730a4fd6806f835c0e66547acd2f1071f2",
+      "logits_sha256": "8cb83cd1c9fccdf49697b89815512567b08662b6721be2cfc4c190ef4342a3f3",
+      "generation_sha256": "5f74f32e885cd414ac625812f8d0e644dcafb0c41a383fa0e4718af7a3976111"
+    },
+    {
+      "seed": 47,
+      "geometry": true,
+      "geometry_update": "frozen",
+      "artifact_id": "sha256:9a3be466494580ef01fed2d8ecf49f836efccf5a58a7a872da97dd2018164a52",
+      "logits_sha256": "a7c9c9314b041539ee6060e4fdca1a3034d85ef2262ee9e1b8d9ceac45c61d9a",
+      "generation_sha256": "3f77b75c939d7eb61bb71c5a69d2d542174258469c52b48110fc571d37afb80d"
+    }
+  ],
+  "exact_report_equal": true,
+  "exact_checkpoint_equal": true,
+  "source_unchanged": true,
+  "explicit_parent_verified": true,
+  "no_terminal_record_at_death": true,
+  "entrypoint": "installed_console_script",
+  "python": "3.12.6",
+  "wheel_sha256": "760c6c4480784e0c09380edf76278d038b6023399ed198b8da9a6876643870f7",
+  "native_extension_sha256": "bbd3e2d8cbb3049e31e17a54a511b605cc1f81ead8e7ea253324de531908d521",
+  "run_primitive_sha256": "a822c3aea888d0df35ed65078d0240397483051d4ef3a057cb7ad2bdaa34f448",
+  "qualifier_sha256": "fd4737979d256c033c46b5f90fe5ec302f7033f8660560d83f3241090904161b",
+  "adapter": {
+    "name": "Apple M4",
+    "backend": "Metal",
+    "device_type": "IntegratedGpu"
+  },
+  "process_interruption_only": true,
+  "power_loss_tested": false,
+  "geometric_quality_benefit_established": false,
+  "report_sha256": "5b15949751c861d1e273eb06fe8e54cba24e21cf03c3d0c590d5cf8ab326b316",
+  "checkpoint_sha256": "795c41447f977dbe031969c48435c68b536d92451348be685582a0e0fb94c1fc"
+}

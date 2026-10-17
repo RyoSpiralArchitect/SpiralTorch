@@ -7,6 +7,12 @@ from typing import Any, Callable, ContextManager, Dict, Iterable, Iterator, List
 from types import ModuleType
 
 from .optim import Amegagrad, amegagrad
+from . import byte_corpus_runs as byte_corpus_runs
+from .byte_corpus_runs import (
+    ByteCorpusSavedSegment as ByteCorpusSavedSegment,
+    load_byte_corpus_segment as load_byte_corpus_segment,
+    run_byte_corpus_segments as run_byte_corpus_segments,
+)
 from .geometry_adapters import GeometryAdapterStack as GeometryAdapterStack
 from .fractional_autograd import (
     FractionalMemoryAdapter as FractionalMemoryAdapter,

@@ -453,6 +453,12 @@ browser AdamW checkpoints can resume on a fresh page. JS supplies orchestration,
 not another acceptance policy. Pending operations own their inputs, and live
 serving changes use Rust's typed, one-use permits rather than report JSON.
 
+The Python [durable segment primitive](python/byte-study-runs.md) exposes the
+same study owner as an importable/installed-CLI operation, with exclusive
+private runs and explicit recovery from a sealed checkpoint into a new lineage.
+It preserves the Rust geometry/optimizer contract rather than rebuilding it in
+Python. This is local storage/execution, not a second scheduler or promotion gate.
+
 Next, compare generated behavior alongside the fixed-window cohort measurements,
 and connect this lifecycle to orchestration without duplicating policy. Reuse the existing
 [HF lineage, promotion and experiment executor](python/build-and-validation.md)

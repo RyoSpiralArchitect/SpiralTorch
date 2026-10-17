@@ -40,6 +40,7 @@ exclude = [
 
 [project.scripts]
 spiral-train = "spiral.cli:main"
+spiral-byte-corpus-run = "spiraltorch.byte_corpus_runs:main"
 spiral-model-zoo = "spiraltorch.model_zoo:main"
 spiral-export = "spiral.export:main"
 spiral-plugin = "spiraltorch.plugin_cli:main"
