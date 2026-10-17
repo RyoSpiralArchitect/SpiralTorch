@@ -6,8 +6,11 @@ const [modulePath, fixturePath, features] = process.argv.slice(2);
 if (!modulePath || !fixturePath || !['nn', 'webgpu'].includes(features)) {
   throw Error('usage: byte_lm_node.mjs /absolute/package.js /private/input.json nn|webgpu');
 }
-const M = await import(pathToFileURL(modulePath));
-await M.default({module_or_path: fs.readFileSync(modulePath.replace(/\.js$/, '_bg.wasm'))});
+const imported = await import(pathToFileURL(modulePath));
+// Web glue has an async initializer; Node glue initializes on import.
+const web = typeof imported.default === 'function';
+const M = web ? imported : (imported.default ?? imported);
+if (web) await M.default({module_or_path: fs.readFileSync(modulePath.replace(/\.js$/, '_bg.wasm'))});
 const gpu = features === 'webgpu';
 for (const name of ['ResidentByteInference', 'ResidentByteServing', 'ResidentByteCandidate']) {
   assert((typeof M[name] === 'function') === gpu, `${name} feature mismatch`);

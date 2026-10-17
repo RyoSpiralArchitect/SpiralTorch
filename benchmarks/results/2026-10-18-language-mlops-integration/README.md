@@ -9,6 +9,10 @@ Production source: `8a4b003704f0f308b1e5147b4ba87bb16d56373b`.
 The [manifest](results/manifest.json) records source, wheel, WASM and log hashes.
 Generated receipts are consistency evidence, not independent attestation.
 
+The subsequent [CI follow-up](CI_FOLLOW_UP.md) repairs native-only example
+compilation on WASM and adds public synthetic transport checks to CI. It does
+not replace the original lifecycle qualification below.
+
 ## Results
 
 - **Installed Python:** rebuilt release-equivalent WGPU wheel, nine AdamW cases,

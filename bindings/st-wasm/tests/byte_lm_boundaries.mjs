@@ -29,7 +29,8 @@ export async function cpuChecks(M, fixture) {
   const study = M.ByteCorpusStudy.fromJson(fixture.request_json);
   const checkpoint = study.checkpointFromJson(fixture.checkpoint_json);
   const foreign = M.ByteCorpusStudy.fromJson(fixture.request_json + ' ');
-  await bad('foreign checkpoint request', () => foreign.checkpointFromJson(fixture.checkpoint_json));
+  const foreignCheckpoint = /checkpoint schema, request identity, cursor or case count differs/;
+  await bad('foreign checkpoint request', () => foreign.checkpointFromJson(fixture.checkpoint_json), foreignCheckpoint);
   foreign.free();
   const name = fixture.case_names[0];
   const artifact = study.caseArtifact(checkpoint, name, 'fixed_window_frozen.v1');
@@ -50,11 +51,15 @@ export async function cpuChecks(M, fixture) {
   await bad('gate JSON object', () => M.ByteCorpusServingGate.fromJson(JSON.parse(fixture.serving.gate_json)));
   if (typeof study.advanceWebGpu === 'function') {
     for (const value of ['1', true, 0.5, -1, NaN, Infinity, 2 ** 32 + 1, trap]) {
-      await bad('strict study cursor', () => study.advanceWebGpu(value));
+      const expected = typeof value === 'number'
+        ? /stop_after must be a finite nonnegative u32 integer/
+        : /stop_after must be a number/;
+      await bad('strict study cursor', () => study.advanceWebGpu(value), expected);
     }
-    await bad('cursor beyond total', () => study.advanceWebGpu(study.totalUpdates + 1));
+    await bad('cursor beyond total', () => study.advanceWebGpu(study.totalUpdates + 1),
+      /stop cursor must lie between saved cursor and total updates/);
     const other = M.ByteCorpusStudy.fromJson(fixture.request_json + ' ');
-    await bad('foreign typed resume', () => other.resumeWebGpu(checkpoint, checkpoint.completedUpdates));
+    await bad('foreign typed resume', () => other.resumeWebGpu(checkpoint, checkpoint.completedUpdates), foreignCheckpoint);
     other.free();
   }
   assert(coercions === 0, 'FFI invoked a coercion hook');
