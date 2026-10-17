@@ -7,7 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
-import signal
+import re
 import subprocess
 import sys
 import time
@@ -21,6 +21,8 @@ PINS = {
     "wheel": "74fdba8c31dbca9e6200992467447e986fbfc742a681c9bb85e8fdc78c0f36d9",
 }
 NATIVE = "f1539edd9305f54ce8ac25534b267cfca8e85a8d7520058e12d727440af5d305"
+HISTORICAL_REVISION = "5cbcfbe900a453526e7408204548dcb5ec86db4a"
+HISTORICAL_MANIFEST = "8ad54e792b6704210bfce0a25af8c7d8ca119ec7e6d184b780396d215c73628e"
 POLICIES = {"disabled": {"kind": "disabled.v1"},
             "active": {"kind": "active_global_l2.v1", "max_norm": 0.01}}
 
@@ -56,7 +58,7 @@ def module(path):
 
 def sources():
     paths = {Path(__file__).resolve(), HERE / "PLAN.md", ROOT / "Cargo.toml", ROOT / "Cargo.lock",
-             ROOT / "tools/qualify_byte_corpus_runs.py"}
+             ROOT / "tools/qualify_byte_corpus_runs.py", ROOT / "tools/owned_process.py"}
     for pattern in ("tools/byte_corpus*.py", "tools/generate_*torch_fixture.py",
                     "tools/fisher_rao_reference.py",
                     "benchmarks/results/2026-10-16-language-capacity-budget/*.py",
@@ -80,27 +82,45 @@ def execute(output, label, command, timeout):
     started = time.monotonic()
     with os.fdopen(os.open(output / (label + ".log"), os.O_CREAT | os.O_EXCL | os.O_WRONLY,
                           0o600), "wb") as log:
-        process = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                                   start_new_session=True)
         timed_out = False
         try:
-            code = process.wait(timeout=timeout)
+            result = module(ROOT / "tools/owned_process.py").run(
+                command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=timeout,
+                cleanup_grace=5)
+            code = result.returncode
         except subprocess.TimeoutExpired:
             timed_out = True
-            # Kill the qualification worker's descendants too, not just its CLI.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            code = process.wait()
+            code = None  # Timeout is known; do not invent a termination signal.
     return dict(exit_code=code, timed_out=timed_out, timeout_seconds=timeout,
                 elapsed_seconds=time.monotonic() - started,
                 log_sha256=sha((output / (label + ".log")).read_bytes()))
 
 
-def verify(root):
-    manifest = read(root / "started.json")
-    require(sources() == manifest["sources"], "source or plan drift")
+def verify(root, executed_revision=None):
+    manifest_raw = (root / "started.json").read_bytes()
+    manifest = module(ROOT / "tools/byte_corpus_study.py").decode_json(manifest_raw)
+    if executed_revision is None:
+        require(sources() == manifest["sources"], "source or plan drift")
+    else:
+        require(re.fullmatch(r"[0-9a-f]{40}", executed_revision) is not None,
+                "historical publication requires an exact commit SHA")
+        # This dated experiment has one retained historical execution, not an
+        # open-ended manifest importer. Bind its complete inventory first.
+        require(executed_revision == HISTORICAL_REVISION
+                and sha(manifest_raw) == HISTORICAL_MANIFEST,
+                "historical manifest or revision differs from the pinned execution")
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--verify", executed_revision + "^{commit}"], cwd=ROOT).decode().strip()
+        require(commit == executed_revision, "historical commit does not exist")
+        changed_harness = {str(Path(__file__).relative_to(ROOT)), "tools/qualify_byte_corpus_runs.py"}
+        for path, expected in manifest["sources"].items():
+            require(not Path(path).is_absolute() and ".." not in Path(path).parts, "invalid source path")
+            raw = subprocess.check_output(["git", "show", executed_revision + ":" + path], cwd=ROOT)
+            require(sha(raw) == expected, "executed source does not match historical commit")
+            # Repaired orchestration may recheck an old run, but its numerical
+            # checker and all model sources must still be the pinned versions.
+            if path not in changed_harness:
+                require(sha((ROOT / path).read_bytes()) == expected, "historical checker or model drift")
     for name in POLICIES:
         require(sha((root / (name + ".json")).read_bytes()) == manifest["requests"][name], "request drift")
     return manifest
@@ -148,6 +168,45 @@ def summarize(root, name):
     return result
 
 
+def failure(root, name, stage, error):
+    payload = {"error": str(error)}
+    path = root / f"{name}-{stage}-error.json"
+    if path.exists():
+        require(read(path) == payload, "failure disposition changed")
+    else:
+        write(path, payload)
+    return {stage + "_error": dict(kind=type(error).__name__, error_sha256=sha(str(error).encode()))}
+
+
+def comparison_outcome(root, name):
+    try:
+        return {"comparison": summarize(root, name)}
+    except (ValueError, RuntimeError, OSError, KeyError, TypeError, IndexError, OverflowError) as error:
+        return failure(root, name, "comparison", error)
+
+
+def collect_condition(root, name, reference, recovery):
+    row = dict(name=name, reference_execution=reference, recovery_execution=recovery)
+    # A malformed partial report must not erase the execution disposition or
+    # prevent the next declared condition from running.
+    write(root / (name + "-execution.json"), row)
+    if recovery["exit_code"] == 0:
+        try:
+            receipt = read(root / name / "result.json")
+            for field in ("exact_report_equal", "exact_checkpoint_equal", "source_unchanged",
+                          "explicit_parent_verified", "no_terminal_record_at_death"):
+                require(receipt[field] is True, "recovery gate missing or failed")
+            row["recovery"] = receipt
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            row.update(failure(root, name, "recovery", error))
+    if reference["exit_code"] == 0:
+        row.update(comparison_outcome(root, name))
+    else:
+        row["comparison_not_run"] = "reference_execution_failed"
+    write(root / (name + "-result.json"), row)
+    return row
+
+
 def run(args):
     import spiraltorch as st
     paths = {key: getattr(args, key) for key in PINS}
@@ -189,14 +248,9 @@ def run(args):
             str(ROOT / "tools/qualify_byte_corpus_runs.py"), "run", str(request), str(root / name),
             "--stop", "512", "--wheel", str(args.wheel), "--timeout-seconds", "1800"], 6000)
         verify(root)
-        row = dict(name=name, reference_execution=reference, recovery_execution=recovery)
-        if recovery["exit_code"] == 0:
-            row["recovery"] = read(root / name / "result.json")
-        if reference["exit_code"] == 0 and (root / name / "continuous/report-1024.json").is_file():
-            row["comparison"] = summarize(root, name)
-        write(root / (name + "-result.json"), row)
+        row = collect_condition(root, name, reference, recovery)
         rows.append(row)
-        print(json.dumps(dict(condition=name, recovery_passed=recovery["exit_code"] == 0,
+        print(json.dumps(dict(condition=name, recovery_passed="recovery" in row,
             strict_gate=row.get("comparison", {}).get("strict_gate", {}).get("passed", False))), flush=True)
     verify(root)
     write(root / "result.json", dict(schema="spiraltorch.byte_clipping.long_study.v1", rows=rows,
@@ -217,7 +271,7 @@ def screen(value):
 
 def publish(args):
     root = args.private
-    manifest = verify(root)
+    manifest = verify(root, args.executed_revision)
     for key in ("request", "native", "torch"):
         require(sha((root / ("prior-" + key + ".json")).read_bytes()) == PINS[key], "prior pin drift")
     result = read(root / "result.json")
@@ -227,6 +281,9 @@ def publish(args):
         require(read(root / (name + "-result.json")) == row, "result changed")
         if "comparison" in row:
             require(summarize(root, name) == row["comparison"], "comparison changed")
+        if "comparison_error" in row:
+            require(comparison_outcome(root, name).get("comparison_error") == row["comparison_error"],
+                    "comparison failure changed")
         if "recovery" in row:
             require(read(root / name / "result.json") == row["recovery"], "recovery changed")
             for kind in ("report", "checkpoint"):
@@ -241,6 +298,14 @@ def publish(args):
     write(args.output / "results.json", result)
     write(args.output / "inputs.json", manifest)
     write(args.output / "artifacts.json", artifacts)
+    write(args.output / "postprocessing.json", dict(
+        schema="spiraltorch.byte_clipping.postprocessing.v1",
+        executed_revision=args.executed_revision,
+        source_manifest_sha256=sha((root / "started.json").read_bytes()),
+        postprocessor_sha256=sha(Path(__file__).read_bytes()),
+        supervisor_sha256=sha((ROOT / "tools/owned_process.py").read_bytes()),
+        results_sha256=sha(encoded(result)),
+        scope="Revalidated retained outcomes; not new training or attribution to the repaired supervisor"))
     print("Exported both conditions, including failures; private inputs and weights retained locally.")
 
 
@@ -253,6 +318,7 @@ def main():
     p = sub.add_parser("publish")
     p.add_argument("private", type=Path)
     p.add_argument("output", type=Path)
+    p.add_argument("--executed-revision", help="Exact recorded source commit for explicit historical revalidation")
     args = parser.parse_args()
     (run if args.command == "run" else publish)(args)
 

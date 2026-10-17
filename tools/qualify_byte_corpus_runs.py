@@ -6,6 +6,7 @@ Run with an isolated interpreter from the source-candidate wheel environment.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -15,6 +16,10 @@ import struct
 import subprocess
 import sys
 import zipfile
+
+_spec = importlib.util.spec_from_file_location("owned_process", Path(__file__).with_name("owned_process.py"))
+processes = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(processes)
 
 
 def digest(raw):
@@ -50,8 +55,8 @@ def run_child(root, label, arguments, expected=0, *, timeout=600):
     timeout = timeout_seconds(timeout)
     with os.fdopen(os.open(root / f"{label}.log", os.O_CREAT | os.O_EXCL | os.O_WRONLY,
                           0o600), "wb") as log:
-        result = subprocess.run([sys.executable, "-I", "-B", *map(str, arguments)],
-                                stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+        result = processes.run([sys.executable, "-I", "-B", *map(str, arguments)],
+                               stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
     require(result.returncode == expected, f"{label} exited {result.returncode}; inspect its private log")
     return result.returncode
 

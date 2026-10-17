@@ -181,3 +181,11 @@ adds installed Python interruption recovery and packaged browser fresh-page
 resume. It keeps the failed small-SGD minimum-delta control alongside passing
 numerical conditions; choosing a tiny clip limit is not automatically a useful
 learning recipe.
+
+The [1,024-update clipping study](../benchmarks/results/2026-10-18-byte-clipping-1024/README.md)
+compares the same three-arm AdamW request with clipping disabled and at 0.01.
+Both recover exactly from a killed step-512 worker. The active recipe passes
+the unchanged numerical gate but has worse final BPB in every arm; the disabled
+recipe reproduces its original strict failure. This is a numerical-agreement/quality
+tradeoff for one fixed recipe, not a recommended default or a numerical repair
+of the original unclipped path.

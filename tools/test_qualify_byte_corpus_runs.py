@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -40,13 +41,14 @@ class TimeoutTests(unittest.TestCase):
     def test_default_and_explicit_worker_limits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with patch.object(qualifier.subprocess, "run") as run:
+            with patch.object(qualifier.processes, "run") as run:
                 run.return_value.returncode = 0
                 qualifier.run_child(root, "default", ["worker.py"])
                 self.assertEqual(run.call_args.kwargs["timeout"], 600)
                 qualifier.run_child(root, "long", ["worker.py"], timeout=1800)
                 self.assertEqual(run.call_args.kwargs["timeout"], 1800)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX process ownership")
     def test_real_timeout_is_not_success(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(subprocess.TimeoutExpired):
@@ -55,7 +57,7 @@ class TimeoutTests(unittest.TestCase):
             self.assertTrue((Path(directory) / "timeout.log").is_file())
 
     def test_cli_rejects_invalid_limit_before_importing_runtime(self):
-        result = subprocess.run([sys.executable, str(Path(qualifier.__file__)), "run",
+        result = subprocess.run([sys.executable, "-I", "-B", str(Path(qualifier.__file__)), "run",
                                  "absent.json", "absent-output", "--stop", "512",
                                  "--wheel", "absent.whl", "--timeout-seconds", "7201"],
                                 capture_output=True, text=True, timeout=10)

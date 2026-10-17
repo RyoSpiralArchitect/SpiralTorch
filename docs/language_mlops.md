@@ -91,6 +91,13 @@ retains both exact recovery checks and a small-SGD minimum-update failure: when
 both runtimes round a geometric update to zero, numerical equality alone does
 not qualify it as demonstrated geometric learning.
 
+The [1,024-update comparison](../benchmarks/results/2026-10-18-byte-clipping-1024/README.md)
+extends exact process recovery to the longer three-arm study. Explicit clipping
+at 0.01 passes its unchanged Torch numerical gate, while disabled reproduces
+the prior Key-bias failures. Evaluation BPB worsens in all three clipped arms:
+numerical agreement and recovery are not quality improvement, and the limit
+is not promoted to a default. Both results and private-artifact hashes remain.
+
 Existing [HF/PEFT workflows](python/build-and-validation.md) retain their own
 adapter lineage and execution APIs. A native byte-LM artifact is not an HF
 adapter, and this path does not yet supply KV caching, distributed scheduling,

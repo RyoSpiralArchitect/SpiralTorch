@@ -30,6 +30,8 @@ jobs:
           python3 -I -S -B tools/test_run_byte_corpus_segments.py
           python3 -I -S -B bindings/st-py/tests/test_byte_corpus_runs.py
           python3 -I -S -B tools/test_qualify_byte_corpus_runs.py
+          python3 -I -S -B tools/test_owned_process.py
+          python3 -I -S -B benchmarks/results/2026-10-18-byte-clipping-1024/test_study.py
           python3 -I -S -B tools/test_generate_wide_rounding_fixture.py
           python3 -I -S -B benchmarks/results/2026-10-18-wide-rounding/test_publish.py
           python3 -I -S -B tools/generate_wide_rounding_fixture.py > "$RUNNER_TEMP/wide_rounding.json"

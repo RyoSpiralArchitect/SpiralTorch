@@ -1,0 +1,9 @@
+{
+  "schema": "spiraltorch.byte_clipping.postprocessing.v1",
+  "executed_revision": "5cbcfbe900a453526e7408204548dcb5ec86db4a",
+  "source_manifest_sha256": "8ad54e792b6704210bfce0a25af8c7d8ca119ec7e6d184b780396d215c73628e",
+  "postprocessor_sha256": "dee1787112bcdcbdd26c9ff1ad2492278ea64ec338edf84257ff612c368e7087",
+  "supervisor_sha256": "8c9904c01cc044241a2ff8911b0ce7b406dbf5f8898e8e62f14c6aea9855f6c0",
+  "results_sha256": "1929cee8833383f839f04dec913c0ada3895248a54b89e79ff45368fbda6a565",
+  "scope": "Revalidated retained outcomes; not new training or attribution to the repaired supervisor"
+}

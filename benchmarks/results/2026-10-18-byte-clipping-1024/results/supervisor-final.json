@@ -1,0 +1,87 @@
+{
+  "schema": "spiraltorch.byte_clipping.supervisor_recheck.v1",
+  "execution": {
+    "exit_code": 0,
+    "timed_out": false,
+    "timeout_seconds": 180,
+    "elapsed_seconds": 4.477109207997273,
+    "log_sha256": "4c5b80588115a50d5786f6588bea2e4e9f6472c7a1b136c6a24850ce19bd472c"
+  },
+  "recovery": {
+    "schema": "spiraltorch.byte_corpus.segment_recovery_qualification.v1",
+    "request_sha256": "104c4696c74def324221c8fae2218ce1a554ac6e22da1e12250ad15ff0f4f333",
+    "total_updates": 2,
+    "interrupted_after": 1,
+    "interrupted_exit": -9,
+    "optimizer": {
+      "beta1": 0.8999999761581421,
+      "beta2": 0.9990000128746033,
+      "epsilon": 9.999999747378752e-06,
+      "geometry_weight_decay": 0.0,
+      "kind": "adamw_zero_rate_freeze.v1",
+      "weight_decay": 0.009999999776482582
+    },
+    "cases": [
+      {
+        "seed": 11,
+        "geometry": false,
+        "geometry_update": "train",
+        "artifact_id": "sha256:5439dd605819983c6169bd1523d18c7747aea198ec31870abd1b452fbca029d1",
+        "logits_sha256": "61e7a7af50f3d4fef59a7aa33311e3c24701306f95ddd6f1090b3d03d6becbd9",
+        "generation_sha256": "4f0ca4c9d0e285b1555dacdce62a9ef037be2e1890f8202e0c1cde153c62b5ef"
+      },
+      {
+        "seed": 11,
+        "geometry": true,
+        "geometry_update": "train",
+        "artifact_id": "sha256:955bf7d63cc955c56d2f7dc9ad7a2e863b05395e322dbc4a4213a4a87cf8df35",
+        "logits_sha256": "c8bf9fb59f7d296214963a4eb85aae5e629500bee90e5ccb11515e3ad25ab758",
+        "generation_sha256": "4a0d299d368b4fca14e7e5889b2d2bce38b7d8387df39f9b0a3063f1a6bedd2e"
+      },
+      {
+        "seed": 11,
+        "geometry": true,
+        "geometry_update": "frozen",
+        "artifact_id": "sha256:6c9f4cb4b4653244c9b4b03fc6ce725aea6380ab945b9e2ef9f88b5b5d576be1",
+        "logits_sha256": "97c3c87ff999bd5c945c11e571fc56d6a818cb841f295e90967a46ce19124d8f",
+        "generation_sha256": "fe8dd69cfe0098a7850290b49fcc496eb07559107a0ac44bf2d009046482fe4c"
+      }
+    ],
+    "exact_report_equal": true,
+    "exact_checkpoint_equal": true,
+    "source_unchanged": true,
+    "explicit_parent_verified": true,
+    "no_terminal_record_at_death": true,
+    "entrypoint": "installed_console_script",
+    "python": "3.12.6",
+    "worker_timeout_seconds": 600,
+    "wheel_sha256": "74fdba8c31dbca9e6200992467447e986fbfc742a681c9bb85e8fdc78c0f36d9",
+    "native_extension_sha256": "f1539edd9305f54ce8ac25534b267cfca8e85a8d7520058e12d727440af5d305",
+    "run_primitive_sha256": "a822c3aea888d0df35ed65078d0240397483051d4ef3a057cb7ad2bdaa34f448",
+    "qualifier_sha256": "75bd5dd2f0bbe02b7215207da0fd1782a3285ccf11f0890ef8f5033b50f64540",
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    },
+    "process_interruption_only": true,
+    "power_loss_tested": false,
+    "geometric_quality_benefit_established": false,
+    "report_sha256": "d05eda16590a43b4e9ba5ad14e1edc325f6ef873cc0ab4a0b191ed4bdc1b1a7b",
+    "checkpoint_sha256": "ca69e451df7c832605293cf62afc1b9e3b8b3a4e3867d79e947c2d15c1702882",
+    "gradient_clip": {
+      "kind": "active_global_l2.v1",
+      "max_norm": 0.009999999776482582
+    }
+  },
+  "prior_payloads_equal": {
+    "report": true,
+    "checkpoint": true
+  },
+  "sources": {
+    "benchmarks/results/2026-10-18-byte-clipping-1024/study.py": "30e97018e3cd9239fa6295ec958fd152f3fb2396193477cfcdf954ba4b09460f",
+    "tools/qualify_byte_corpus_runs.py": "75bd5dd2f0bbe02b7215207da0fd1782a3285ccf11f0890ef8f5033b50f64540",
+    "tools/owned_process.py": "a5dc7ccf742576b6969ee73f76a6d858246f9726a66c7517001c3c65f8f77b60"
+  },
+  "scope": "Two-update fixed AdamW fixture at final supervisor/historical-verifier revision; not a rerun of the 1024-update study"
+}
