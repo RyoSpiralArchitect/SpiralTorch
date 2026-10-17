@@ -109,6 +109,31 @@ class StudyPortable(unittest.TestCase):
         study.validate_artifact(checkpoints[1], artifact)
         self.assertEqual(artifact.to_json(), study.case_artifact(
             checkpoints[1], "plain", policy="fixed_window_frozen.v1").to_json())
+        from_iterator, iterator_report = study.select_checkpoint(
+            iter(checkpoints), "plain", policy="fixed_window_frozen.v1")
+        self.assertEqual(from_iterator.to_json(), artifact.to_json())
+        self.assertEqual(iterator_report, report_json)
+
+        class HugeSequence:
+            def __len__(self):
+                return sys.maxsize
+
+            def __getitem__(self, index):
+                return checkpoints[0]
+
+        consumed = []
+
+        def excess_candidates():
+            for index in range(34):
+                consumed.append(index)
+                yield checkpoints[0]
+
+        for candidates in (HugeSequence(), itertools.repeat(checkpoints[0]), excess_candidates()):
+            with self.assertRaisesRegex(ValueError, "1..32"):
+                study.select_checkpoint(candidates, "plain", policy="fixed_window_frozen.v1")
+        self.assertEqual(consumed, list(range(33)))
+        with self.assertRaises(TypeError):
+            study.select_checkpoint(range(sys.maxsize), "plain", policy="fixed_window_frozen.v1")
         for candidates in ([], list(reversed(checkpoints)), [checkpoints[0]] * 33):
             with self.assertRaises(ValueError):
                 study.select_checkpoint(candidates, "plain", policy="fixed_window_frozen.v1")

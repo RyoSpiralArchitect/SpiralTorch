@@ -168,16 +168,23 @@ impl PyByteCorpusStudy {
     fn select_checkpoint(
         &self,
         py: Python<'_>,
-        checkpoints: Vec<Py<PyByteCorpusStudyCheckpoint>>,
+        checkpoints: &Bound<'_, PyAny>,
         case_name: &str,
         policy: &str,
     ) -> PyResult<(PyByteCorpusModelArtifact, String)> {
         let policy = serde_json::from_value(serde_json::Value::String(policy.to_owned()))
             .map_err(value_error)?;
         let checkpoints: Vec<_> = checkpoints
-            .iter()
-            .map(|c| c.borrow(py).inner.clone())
-            .collect();
+            .try_iter()?
+            // Bound extraction before allocating from an untrusted sequence
+            // length; Rust owns rejection of the first excess candidate.
+            .take(33)
+            .map(|item| {
+                let item = item?;
+                let checkpoint: PyRef<'_, PyByteCorpusStudyCheckpoint> = item.extract()?;
+                Ok(checkpoint.inner.clone())
+            })
+            .collect::<PyResult<Vec<_>>>()?;
         py.detach(|| {
             let refs: Vec<_> = checkpoints.iter().map(Arc::as_ref).collect();
             let selected = self
