@@ -5,8 +5,10 @@ use super::*;
 use crate::resident_tensor::{storage_limit, INVALID_TENSOR_FLAG};
 
 mod adamw;
+mod clipping;
 use adamw::AdamWWorkspace;
 pub use adamw::{AdamWSlot, AdamWState, ResidentAdamWReadback};
+use clipping::ClippingKernels;
 
 #[derive(Clone, Debug)]
 pub(super) struct ParameterVersion {
@@ -73,6 +75,13 @@ impl ResidentParameterSnapshot {
 pub struct ResidentParameterGradients {
     version: ParameterVersion,
     values: Vec<ResidentTensor>,
+}
+
+impl ResidentParameterGradients {
+    /// Immutable resident derivatives; observing values still requires explicit readback.
+    pub fn values(&self) -> &[ResidentTensor] {
+        &self.values
+    }
 }
 
 #[repr(C)]
@@ -169,6 +178,7 @@ pub struct ResidentParameters {
     device: TensorDevice,
     kernels: UpdateKernels,
     adamw: Option<AdamWWorkspace>,
+    clipping: Option<ClippingKernels>,
 }
 
 impl ResidentParameters {
@@ -206,6 +216,7 @@ impl ResidentParameters {
             device,
             kernels,
             adamw: None,
+            clipping: None,
         })
     }
 

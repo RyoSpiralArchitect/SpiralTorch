@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Resident parameter clipping</title>
+<h1>Shared GPU Gradient Clipping</h1>
+<p>Boundary validation, not model quality or a speed comparison.</p>
+<pre id="result" data-status="running">Running...</pre>
+<script type="module">
+import init, {run_parameter_clip} from '/package/spiraltorch_wasm.js';
+const output = document.querySelector('#result');
+try {
+  await init();
+  const raw = await run_parameter_clip();
+  const result = JSON.parse(raw);
+  if (!result.passed || result.cases.length !== 15) throw Error('incomplete result');
+  const saved = await fetch('/results/main.json', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: raw});
+  if (!saved.ok) throw Error('exclusive receipt write failed: ' + saved.status);
+  output.textContent = raw;
+  output.dataset.status = 'passed';
+  const link = document.createElement('a');
+  link.textContent = 'Download complete synthetic result';
+  link.href = URL.createObjectURL(new Blob([raw], {type: 'application/json'}));
+  link.download = 'parameter-clip-browser.json';
+  document.body.append(link);
+} catch (error) {
+  output.dataset.status = 'failed'; output.textContent = String(error);
+  try { await fetch('/results/failure-main.json', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({passed:false,error:String(error)})}); } catch {}
+}
+</script>

@@ -19,6 +19,7 @@ use st_backend_wgpu::{
 };
 use st_kernel_contracts::adamw::{AdamWConfig, AdamWState, AdamWStep};
 use st_kernel_contracts::classification::CrossEntropySpec;
+use st_kernel_contracts::gradient_clip::GlobalNormClip;
 
 mod geometry;
 use geometry::{GeometryAutograd, GeometryTape};
@@ -297,6 +298,23 @@ impl ResidentByteDecoder {
         Ok(update)
     }
 
+    /// Apply one explicit global clip across nonzero-rate model/geometry
+    /// parameters before AdamW moments. Frozen derivatives still validate.
+    /// Retain and reapply this caller-owned training recipe after checkpoint load.
+    pub fn adamw_with_steps_clipped(
+        &mut self,
+        gradients: &ResidentByteDecoderVjp,
+        steps: &[AdamWStep],
+        clip: GlobalNormClip,
+    ) -> Result<ResidentParameterUpdate, InferenceError> {
+        require_uncommitted_route()?;
+        let update = self
+            .parameters
+            .adamw_with_steps_clipped(&gradients.bound, steps, clip)?;
+        self.latest = None;
+        Ok(update)
+    }
+
     pub fn tensor_device(&self) -> &TensorDevice {
         self.parameters.tensor_device()
     }
@@ -566,6 +584,23 @@ impl ResidentByteDecoder {
     ) -> Result<ResidentParameterUpdate, InferenceError> {
         require_uncommitted_route()?;
         let update = self.parameters.sgd_with_rates(&gradients.bound, rates)?;
+        self.latest = None;
+        Ok(update)
+    }
+
+    /// Explicit global clipping before per-parameter SGD; zero-rate geometry
+    /// remains frozen without hiding invalid derivatives. No implicit readback.
+    /// Like rates, the clip is a caller-owned step input, not checkpoint state.
+    pub fn sgd_with_rates_clipped(
+        &mut self,
+        gradients: &ResidentByteDecoderVjp,
+        rates: &[f32],
+        clip: GlobalNormClip,
+    ) -> Result<ResidentParameterUpdate, InferenceError> {
+        require_uncommitted_route()?;
+        let update = self
+            .parameters
+            .sgd_with_rates_clipped(&gradients.bound, rates, clip)?;
         self.latest = None;
         Ok(update)
     }

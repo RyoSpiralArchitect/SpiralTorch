@@ -79,6 +79,14 @@ The [longer numerical comparison](../benchmarks/results/2026-10-18-wide-rounding
 still has unresolved Key-bias differences against its fixed PyTorch reference;
 the passing short run does not replace that result.
 
+The [resident clipping slice](resident_byte_decoder.md#resident-active-gradient-clipping)
+now adds a Rust-owned stability mechanism to actual geometric byte-LM SGD and
+AdamW, with frozen-geometry and exact-continuation tests. It is currently an
+explicit step input, not a durable study recipe or a new Python/WASM package
+API. The next integration must bind this policy into the Rust request/checkpoint
+identity before offering it as a resumable client option; it must not silently
+change existing studies or mask the unresolved numerical gate.
+
 Existing [HF/PEFT workflows](python/build-and-validation.md) retain their own
 adapter lineage and execution APIs. A native byte-LM artifact is not an HF
 adapter, and this path does not yet supply KV caching, distributed scheduling,
