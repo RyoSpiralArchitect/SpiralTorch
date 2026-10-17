@@ -31,13 +31,14 @@ used for the resident path. All GPU clients reuse the package's installed runtim
 ## Train And Retain Geometry
 
 Use the same bounded request JSON as [Python](python/byte-corpus-studies.md),
-including the [v9 optimizer recipe](byte_corpus_optimizers.md) when appropriate.
+including [v9 optimizer and v10 clipping recipes](byte_corpus_optimizers.md) when appropriate.
 Keep exact request bytes, not a JS-parsed/re-serialized reconstruction.
 
 ```js
 import init, {ByteCorpusStudy} from './spiraltorch_wasm.js';
 await init();
 const study = ByteCorpusStudy.fromJson(requestJson);
+console.log(study.gradientClipRecipeJson);   // Rust metadata; legacy: disabled.v1
 const segment = await study.advanceWebGpu(5); // Absolute accepted-update boundary.
 const saved = segment.checkpoint;
 const checkpointJson = saved.toJson();       // Persist privately, unchanged.
@@ -58,7 +59,8 @@ restored.free(); saved.free(); finalCheckpoint.free(); final.free(); study.free(
 
 Checkpoint getters return independently owned handles. Resume validation checks
 every case and its original request, optimizer history and frozen geometry
-policy before acquiring a device. Calling `advanceWebGpu` again starts fresh;
+policy, including the exact request-bound clipping recipe, before acquiring a
+device. Calling `advanceWebGpu` again starts fresh;
 only `resumeWebGpu` continues a checkpoint. Partial artifacts are allowed but not
 automatically selected or promoted. Saved-checkpoint selection and geometry
 calibration/preparation remain in Rust/Python and standalone qualification APIs;

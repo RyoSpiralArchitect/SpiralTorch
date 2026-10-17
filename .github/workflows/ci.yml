@@ -802,6 +802,7 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -I -c 'import torch; print(torch.__version__)'
           python -I -B tools/test_resident_parameter_clip.py
+          python -I -B tools/test_byte_corpus_gradient_clip.py
           python -I -B tools/check_resident_parameter_clip.py --input benchmarks/results/2026-10-18-resident-language-clipping/native.json --output "$RUNNER_TEMP/parameter-clip-native.json"
           python -I -B tools/check_resident_parameter_clip.py --input benchmarks/results/2026-10-18-resident-language-clipping/browser.json --output "$RUNNER_TEMP/parameter-clip-browser.json"
           python -I -B benchmarks/nerf-pointwise-input/test_compare_pointwise.py

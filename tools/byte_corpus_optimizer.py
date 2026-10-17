@@ -7,6 +7,7 @@ import math
 import struct
 
 SCHEMA = "spiraltorch.byte_corpus.request.v9"
+CLIPPED_SCHEMA = "spiraltorch.byte_corpus.request.v10"
 SGD = "stateless_sgd.v1"
 ADAMW = "adamw_zero_rate_freeze.v1"
 FIELDS = {"beta1", "beta2", "epsilon", "weight_decay", "geometry_weight_decay"}
@@ -26,17 +27,17 @@ def scalar(value):
 
 
 def recipe(request):
-    if request["schema"] != SCHEMA:
+    if request["schema"] not in (SCHEMA, CLIPPED_SCHEMA):
         if "optimizer" in request or "design_schema" in request:
-            raise ValueError("optimizer/design metadata belongs to v9 only")
+            raise ValueError("optimizer/design metadata belongs to v9/v10 only")
         return {"kind": SGD}
     if request.get("design_schema") not in {
         f"spiraltorch.byte_corpus.request.v{i}" for i in range(1, 9)
     }:
-        raise ValueError("v9 requires a v1-v8 geometry design")
+        raise ValueError("v9/v10 require a v1-v8 geometry design")
     value = request.get("optimizer")
     if type(value) is not dict:
-        raise ValueError("v9 requires an explicit optimizer")
+        raise ValueError("v9/v10 require an explicit optimizer")
     if value.get("kind") == SGD and set(value) == {"kind"}:
         return {"kind": SGD}
     if value.get("kind") != ADAMW or set(value) != FIELDS | {"kind"}:
@@ -50,18 +51,20 @@ def recipe(request):
 
 
 def design(request):
-    if request["schema"] != SCHEMA:
+    if request["schema"] not in (SCHEMA, CLIPPED_SCHEMA):
         return request
     recipe(request)
     result = {key: value for key, value in request.items()
               if key not in ("optimizer", "design_schema")}
+    if request["schema"] == CLIPPED_SCHEMA:
+        result.pop("gradient_clip", None)
     result["schema"] = request["design_schema"]
     return result
 
 
 def metadata(request, report):
     expected = recipe(request)
-    if request["schema"] == SCHEMA:
+    if request["schema"] in (SCHEMA, CLIPPED_SCHEMA):
         actual = report.get("optimizer")
         if (report.get("design_schema") != request["design_schema"] or type(actual) is not dict
                 or actual.keys() != expected.keys() or actual.get("kind") != expected["kind"]

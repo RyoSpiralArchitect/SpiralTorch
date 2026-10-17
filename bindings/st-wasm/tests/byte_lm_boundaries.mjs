@@ -27,6 +27,29 @@ export async function cpuChecks(M, fixture) {
     await bad('unpaired surrogate', () => M.ByteCorpusStudy.fromJson(invalid), /unpaired UTF-16 surrogate/);
   }
   const study = M.ByteCorpusStudy.fromJson(fixture.request_json);
+  assert(Object.getOwnPropertyDescriptor(M.ByteCorpusStudy.prototype, 'gradientClipRecipeJson')?.set === undefined,
+    'clipping recipe must be read-only');
+  const original = JSON.parse(fixture.request_json);
+  const expectedClip = original.gradient_clip ?? {kind: 'disabled.v1'};
+  const actualClip = JSON.parse(study.gradientClipRecipeJson);
+  assert(actualClip.kind === expectedClip.kind &&
+    (actualClip.kind === 'disabled.v1' || actualClip.max_norm === Math.fround(expectedClip.max_norm)),
+    'Rust clipping metadata differs');
+  // Fresh synthetic requests test metadata; never re-encode a retained model/checkpoint.
+  for (const policy of [{kind: 'disabled.v1'}, {kind: 'active_global_l2.v1', max_norm: .01}]) {
+    const request = {...original, schema: 'spiraltorch.byte_corpus.request.v10',
+      design_schema: original.design_schema ?? original.schema,
+      optimizer: {kind: 'stateless_sgd.v1'}, gradient_clip: policy};
+    const clipped = M.ByteCorpusStudy.fromJson(JSON.stringify(request));
+    const actual = JSON.parse(clipped.gradientClipRecipeJson);
+    assert(actual.kind === policy.kind && (actual.kind === 'disabled.v1' || actual.max_norm === Math.fround(.01)),
+      'v10 clipping recipe did not roundtrip through Rust');
+    clipped.free();
+    await bad('null clipping recipe', () => M.ByteCorpusStudy.fromJson(JSON.stringify({...request, gradient_clip: null})));
+    await bad('legacy request cannot ignore clipping', () => M.ByteCorpusStudy.fromJson(JSON.stringify({
+      ...request, schema: 'spiraltorch.byte_corpus.request.v9'})));
+  }
+  checks.push('Rust-owned explicit clipping metadata');
   const checkpoint = study.checkpointFromJson(fixture.checkpoint_json);
   const foreign = M.ByteCorpusStudy.fromJson(fixture.request_json + ' ');
   const foreignCheckpoint = /checkpoint schema, request identity, cursor or case count differs/;

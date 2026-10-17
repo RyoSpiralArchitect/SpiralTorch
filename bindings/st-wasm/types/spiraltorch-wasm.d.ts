@@ -17,6 +17,7 @@ declare module "spiraltorch-wasm" {
         readonly totalUpdates: number;
         readonly designSchema: string;
         readonly optimizerRecipeJson: string;
+  readonly gradientClipRecipeJson: string;
         checkpointSizeBound(): number;
         checkpointFromJson(input: string): ByteCorpusStudyCheckpoint;
         caseArtifact(checkpoint: ByteCorpusStudyCheckpoint, case_name: string, inference_policy: string): ByteCorpusModelArtifact;

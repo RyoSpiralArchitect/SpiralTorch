@@ -161,9 +161,11 @@ values by subsequent nonzero-rate optimizer arithmetic.
 
 Clipping is an **explicit per-step input**, like the rates. The model checkpoint
 does not capture that caller policy: resumption must supply the same policy to
-reproduce training. This slice does not yet persist clipping in a study request
-or expose it through packaged Python/WASM training entry points. Existing
-unclipped methods and study defaults remain unchanged.
+reproduce training. For durable studies, the
+[v10 recipe](byte_corpus_optimizers.md#request-bound-clipping)
+binds the explicit clipping policy into request/checkpoint identity and applies
+these same methods from Rust, packaged Python and WASM. Existing unclipped
+methods and v1-v9 study defaults remain unchanged.
 
 ## Portable model checkpoint and resume
 

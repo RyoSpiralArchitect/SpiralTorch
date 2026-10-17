@@ -138,7 +138,9 @@ impl Request {
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.optimizer.is_some() {
+        if self.gradient_clip.is_some() {
+            "spiraltorch.byte_corpus.checkpoint.v10"
+        } else if self.optimizer.is_some() {
             "spiraltorch.byte_corpus.checkpoint.v9"
         } else if self.query_controls() {
             "spiraltorch.byte_corpus.checkpoint.v8"
@@ -161,6 +163,13 @@ impl Request {
 
     #[cfg(any(feature = "wgpu", test))]
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.gradient_clip.is_some() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v10"
+            } else {
+                "spiraltorch.byte_corpus.partial.v10"
+            };
+        }
         if self.optimizer.is_some() {
             return if complete {
                 "spiraltorch.byte_corpus.result.v9"

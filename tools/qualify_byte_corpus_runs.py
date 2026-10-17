@@ -168,6 +168,8 @@ def qualify(args):
                   adapter={key: adapter[key] for key in ("name", "backend", "device_type")},
                   process_interruption_only=True, power_loss_tested=False,
                   geometric_quality_benefit_established=False, **payloads)
+    if request["schema"] == "spiraltorch.byte_corpus.request.v10":
+        result["gradient_clip"] = json.loads(study.gradient_clip_recipe_json)
     write(root / "result.json", (json.dumps(result, indent=2, allow_nan=False) + "\n").encode())
     print(json.dumps(dict(status="passed", cases=len(rows), interrupted_after=args.stop,
                           total_updates=study.total_updates, **payloads)))
