@@ -6,7 +6,10 @@ use st_backend_wgpu::{
         TrainingError,
     },
 };
-use st_kernel_contracts::adamw::{AdamWConfig, AdamWState, AdamWStep};
+use st_kernel_contracts::{
+    adamw::{AdamWConfig, AdamWState, AdamWStep},
+    elementwise::ElementwiseOp,
+};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn floats(v: &Value) -> Vec<f32> {
@@ -73,6 +76,7 @@ fn state_bits(s: &AdamWState) -> Vec<Vec<u32>> {
 }
 
 pub async fn run(device: &TensorDevice) -> Result<Value> {
+    scalar_resume(device).await?;
     let f: Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/resident_adamw_torch.json"
@@ -167,7 +171,7 @@ pub async fn run(device: &TensorDevice) -> Result<Value> {
         .slots
         .iter()
         .all(|s| s.steps == 0 && s.first.iter().chain(&s.second).all(|x| x.to_bits() == 0)));
-    // Reject a late finite overflow, including when its tensor is frozen.
+    // Reject a late optimizer overflow, or an inherited invalid frozen gradient.
     for frozen in [false, true] {
         let snapshot = owner.snapshot();
         let before = bits(&values(&owner).await?);
@@ -179,8 +183,8 @@ pub async fn run(device: &TensorDevice) -> Result<Value> {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         gs[2] = if frozen {
             device
-                .upload(&[1], &[f32::MAX])?
-                .mul(&device.upload(&[1], &[2.0])?)?
+                .upload(&[1], &[1.0])?
+                .apply(ElementwiseOp::Divide, Some(&device.upload(&[1], &[0.0])?))?
         } else {
             device.upload(&[1], &[f32::from_bits(0x5f800000)])?
         };
@@ -303,6 +307,77 @@ pub async fn run(device: &TensorDevice) -> Result<Value> {
     Ok(
         serde_json::json!({"status":"passed", "torch_updates":12, "torch":f["torch"],
         "same_device_resume":"bitwise", "atomic_rejection":true, "retained_snapshot":true,
+        "scalar_resume_updates":3, "scalar_snapshot_restore":true,
+        "frozen_gradient_poison":"guarded_divide_by_zero",
         "division_domain_rejection":true, "division_headroom_rejection":true}),
     )
+}
+
+async fn scalar_resume(device: &TensorDevice) -> Result<()> {
+    let config = AdamWConfig::new(0.5, 0.75, 0.25)?;
+    let step = AdamWStep::new(0.1, 0.2)?;
+    let mut owner = ResidentParameters::new(vec![device.upload(&[], &[1.0])?])?;
+    owner.enable_adamw(config)?;
+    let retained = owner.adamw_snapshot()?.ok_or("missing scalar optimizer")?;
+    let mut expected = (1.0, 0.0, 0.0, 0);
+    for gradient in [0.5, -0.25, 1.5] {
+        // Exercise both fresh and nonzero-clock restore, with rank preserved.
+        let history = state(&owner).await?;
+        assert!(history.slots[0].shape.is_empty());
+        assert_eq!(history.slots[0].first.len(), 1);
+        assert_eq!(history.slots[0].second.len(), 1);
+        let snapshot = owner.snapshot();
+        let mut restored = ResidentParameters::from_restored_values(
+            snapshot.values().to_vec(),
+            snapshot.revision(),
+        )?;
+        restored.restore_adamw(&history)?;
+        let restored_history = state(&restored).await?;
+        assert_eq!(restored_history.slots[0].shape, history.slots[0].shape);
+        assert_eq!(state_bits(&restored_history), state_bits(&history));
+        assert!(restored.snapshot().values()[0].layout().shape().is_empty());
+        assert_eq!(
+            bits(&values(&restored).await?),
+            bits(&values(&owner).await?)
+        );
+        let candidate = step.candidate(
+            config, expected.0, gradient, expected.1, expected.2, expected.3,
+        )?;
+        expected = (
+            candidate.value,
+            candidate.first,
+            candidate.second,
+            candidate.steps,
+        );
+        for current in [&mut owner, &mut restored] {
+            let gradient = current
+                .snapshot()
+                .bind_gradients(vec![device.upload(&[], &[gradient])?])?;
+            assert_eq!(
+                receipt(&current.adamw(&gradient, step)?).await?,
+                u64::from(expected.3)
+            );
+            assert!(current.snapshot().values()[0].layout().shape().is_empty());
+            close(&values(current).await?[0], &[expected.0])?;
+            let history = state(current).await?;
+            close(&history.slots[0].first, &[expected.1])?;
+            close(&history.slots[0].second, &[expected.2])?;
+            assert_eq!(history.slots[0].steps, expected.3);
+        }
+        assert_eq!(
+            bits(&values(&owner).await?),
+            bits(&values(&restored).await?)
+        );
+        assert_eq!(
+            state_bits(&state(&owner).await?),
+            state_bits(&state(&restored).await?)
+        );
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let retained = retained.read()?;
+    #[cfg(target_arch = "wasm32")]
+    let retained = retained.read_async().await?;
+    assert!(retained.slots[0].shape.is_empty());
+    assert_eq!(state_bits(&retained), vec![vec![0, 0, 0]]);
+    Ok(())
 }

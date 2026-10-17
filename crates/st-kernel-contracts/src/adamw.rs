@@ -247,7 +247,6 @@ impl AdamWState {
                 .try_fold(1usize, |n, &d| n.checked_mul(d))
                 .ok_or(AdamWError::State("shape overflow"))?;
             if len == 0
-                || shape.is_empty()
                 || slot.shape != *shape
                 || slot.first.len() != len
                 || slot.second.len() != len
@@ -274,6 +273,35 @@ impl AdamWState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scalar_state_preserves_rank_and_requires_one_moment() {
+        let mut state = AdamWState {
+            config: AdamWConfig::default(),
+            slots: vec![AdamWSlot {
+                shape: vec![],
+                first: vec![0.0],
+                second: vec![0.0],
+                steps: 0,
+            }],
+        };
+        assert!(state.validate(&[vec![]], 0).is_ok());
+        assert!(state.validate(&[], 0).is_err());
+        assert!(state.validate(&[vec![1]], 0).is_err());
+        state.slots[0].first.clear();
+        assert!(state.validate(&[vec![]], 0).is_err());
+        state.slots[0].first = vec![0.1];
+        state.slots[0].second = vec![0.01];
+        state.slots[0].steps = 1;
+        assert!(state.validate(&[vec![]], 1).is_ok());
+        assert!(state.validate(&[vec![]], 0).is_err());
+        state.slots[0].second.push(0.0);
+        assert!(state.validate(&[vec![]], 1).is_err());
+        state.slots[0].shape = vec![0];
+        state.slots[0].first.clear();
+        state.slots[0].second.clear();
+        assert!(state.validate(&[vec![0]], 1).is_err());
+    }
 
     #[test]
     fn bias_correction_tracks_f64_across_u32_clocks() {
