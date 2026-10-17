@@ -42,16 +42,10 @@ struct VjpParams {
 }
 
 fn shader_source() -> String {
-    include_str!("../shaders/attention_backward.wgsl")
-        .replace(
-            "ROUNDED_ADD",
-            include_str!("../../shaders/rounded_add.wgsl"),
-        )
-        .replace(
-            "WIDE_ARITHMETIC",
-            include_str!("../shaders/layer_norm_wide.wgsl"),
-        )
+    compose_shader(include_str!("../shaders/attention_backward.wgsl"))
 }
+
+const VJP_WORKGROUP_BYTES: u32 = 2560;
 
 #[derive(Debug)]
 pub(crate) struct AttentionVjpKernels {
@@ -130,7 +124,7 @@ impl PackedLayout {
             || limits.max_uniform_buffer_binding_size < std::mem::size_of::<VjpParams>() as u32
             || limits.max_compute_workgroup_size_x < 64
             || limits.max_compute_invocations_per_workgroup < 64
-            || limits.max_compute_workgroup_storage_size < 10_240
+            || limits.max_compute_workgroup_storage_size < VJP_WORKGROUP_BYTES
         {
             return Err(TensorError::Limit("attention VJP pipeline"));
         }
@@ -144,7 +138,7 @@ impl PackedLayout {
             if pair_bias { rows * spec.keys() } else { 0 },
         ];
         let mut total = rows
-            .checked_mul(9)
+            .checked_mul(14)
             .ok_or(TensorError::Limit("attention VJP allocation"))?;
         let mut offsets = [0; 5];
         for (offset, length) in offsets.iter_mut().zip(lengths) {
@@ -166,7 +160,7 @@ impl PackedLayout {
 }
 
 /// Validate the complete gradient allocation and dispatch before creating GPU
-/// resources. Scratch is nine words per query, not a quadratic probability tape.
+/// resources. Scratch is fourteen words per query, not a quadratic probability tape.
 pub fn validate_vjp_limits(
     spec: AttentionSpec,
     z_bias: bool,

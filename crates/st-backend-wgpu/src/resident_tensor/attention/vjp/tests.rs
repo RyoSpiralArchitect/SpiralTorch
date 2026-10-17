@@ -97,6 +97,46 @@ fn normalized_pullbacks_preserve_value_and_score_shift_directions() {
 }
 
 #[test]
+fn normalization_keeps_the_aggregate_of_tiny_denominator_weights() {
+    let Some(device) = device() else { return };
+    for count in [9, 17, 33] {
+        let q = device.upload(&[1, 1, 1, 1], &[0.]).unwrap();
+        let k = device
+            .upload(&[1, 1, count, 1], &vec![2f32.powi(127); count])
+            .unwrap();
+        let mut values = vec![1.; count];
+        values[0] = 0.;
+        let v = device.upload(&[1, 1, count, 1], &values).unwrap();
+        let mut bias = vec![-85.; count];
+        bias[0] = 0.;
+        let p = device.upload(&[1, 1, 1, count], &bias).unwrap();
+        let u = device.upload(&[1, 1, 1, 1], &[2f32.powi(120)]).unwrap();
+        let g = q
+            .scaled_dot_attention_vjp(&k, &v, &u, 1., AttentionMask::None, None, Some(&p))
+            .unwrap();
+        // Inspect the actual packed scratch tail without subtracting near-one
+        // host floats. The power-of-two upstream recovers the shader weight;
+        // its normalization correction is far below one output f32 ULP.
+        let stats = g
+            .query
+            .view(
+                NdLayout::contiguous(&[14])
+                    .unwrap()
+                    .narrow(0, 1, 4)
+                    .unwrap(),
+            )
+            .unwrap();
+        let sum = read(&stats);
+        assert_eq!(sum[0], 0.5);
+        assert_eq!(sum[2].to_bits(), 1);
+        let tail = 2. * (f64::from(sum[1]) + f64::from(sum[3]));
+        let weight = f64::from(read(&g.value)[1]) * 2f64.powi(-120);
+        assert!(weight.is_finite() && weight > 0.0);
+        assert_eq!(tail, (count - 1) as f64 * weight);
+    }
+}
+
+#[test]
 fn shader_abi_and_workgroup_storage_validate_without_an_adapter() {
     let source = shader_source();
     let module = naga::front::wgsl::parse_str(&source)
@@ -137,9 +177,12 @@ fn shader_abi_and_workgroup_storage_validate_without_an_adapter() {
         .global_variables
         .iter()
         .filter(|(_, v)| v.space == naga::AddressSpace::WorkGroup)
-        .map(|(_, v)| layouter[v.ty].size)
+        .map(|(_, v)| layouter[v.ty].size.next_multiple_of(16))
         .sum();
-    assert!(storage <= 10_240, "{storage} exceeds preflight bound");
+    assert!(
+        storage <= VJP_WORKGROUP_BYTES,
+        "{storage} exceeds preflight bound"
+    );
     assert_eq!(module.entry_points.len(), 3);
 }
 
@@ -150,8 +193,8 @@ fn complete_allocation_and_both_grids_are_preflighted() {
     let spec = AttentionSpec::new(&qs, &ks, &ks, 1., AttentionMask::None).unwrap();
     let mut limits = wgpu::Limits::default();
     let packed = PackedLayout::new(spec, true, true, &limits).unwrap();
-    assert_eq!(packed.total, 18 + 6 + 21 + 21 + 7 + 14);
-    assert_eq!(packed.offsets, [18, 24, 45, 66, 73]);
+    assert_eq!(packed.total, 28 + 6 + 21 + 21 + 7 + 14);
+    assert_eq!(packed.offsets, [28, 34, 55, 76, 83]);
     limits.max_storage_buffer_binding_size = (packed.total * 4 - 1) as u32;
     assert!(validate_vjp_limits(spec, true, true, &limits).is_err());
     limits.max_storage_buffer_binding_size += 1;
@@ -179,7 +222,7 @@ fn complete_allocation_and_both_grids_are_preflighted() {
             ..Default::default()
         },
         wgpu::Limits {
-            max_compute_workgroup_storage_size: 10_239,
+            max_compute_workgroup_storage_size: VJP_WORKGROUP_BYTES - 1,
             ..Default::default()
         },
         wgpu::Limits {

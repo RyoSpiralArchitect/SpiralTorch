@@ -1,5 +1,5 @@
 //! Owning attention. Q/K/V, optional score biases, strided reads,
-//! online softmax, and inherited validity guards stay on the same GPU queue.
+//! range-preserving softmax, and inherited validity guards stay on the same GPU queue.
 
 use super::*;
 use crate::runtime::timestamps::PassTimestampCursor;
@@ -7,8 +7,25 @@ pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 pub(crate) mod vjp;
 pub use vjp::{validate_vjp_limits, ResidentAttentionGradients};
 
-const SHADER_SOURCE: &str = include_str!("shaders/attention.wgsl");
 const MAX_HEAD_DIM: usize = 256;
+const WORKGROUP_BYTES: u32 = 1536;
+
+fn compose_shader(source: &str) -> String {
+    source
+        .replace("ROUNDED_ADD", include_str!("../shaders/rounded_add.wgsl"))
+        .replace(
+            "WIDE_ARITHMETIC",
+            include_str!("shaders/layer_norm_wide.wgsl"),
+        )
+        .replace(
+            "ATTENTION_EXPONENTIAL",
+            include_str!("shaders/attention_exponential.wgsl"),
+        )
+}
+
+fn shader_source() -> String {
+    compose_shader(include_str!("shaders/attention.wgsl"))
+}
 
 #[derive(Clone, Copy)]
 enum OutputOrder {
@@ -102,7 +119,7 @@ impl AttentionKernels {
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("attention.shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
+            source: wgpu::ShaderSource::Wgsl(shader_source().into()),
         });
         Self {
             layout,
@@ -161,7 +178,7 @@ fn preflight(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<[u32; 2], Ten
         || limits.max_storage_buffers_per_shader_stage < 7
         || limits.max_uniform_buffers_per_shader_stage < 1
         || limits.max_uniform_buffer_binding_size < std::mem::size_of::<Params>() as u32
-        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 18) * 4
+        || limits.max_compute_workgroup_storage_size < WORKGROUP_BYTES
     {
         return Err(TensorError::Limit(
             "attention pipeline (head dimension <= 256)",
@@ -196,7 +213,10 @@ impl ResidentTensor {
     /// read directly from their immutable storage, without intermediate packing.
     /// Returns owned, contiguous head-major output [B,H,Q,D].
     ///
-    /// This initial forward kernel supports D <= 256, no dropout or backward
+    /// Weights are recomputed at the final row maximum, then reduced with
+    /// extended-exponent compensated sums and narrowed only at output. This is
+    /// not IEEE f64. No quadratic probability matrix is retained.
+    /// This forward kernel supports D <= 256, no dropout or backward
     /// tape. Unsupported shapes/devices return errors, never a CPU fallback.
     pub fn scaled_dot_attention(
         &self,

@@ -43,13 +43,24 @@ fn merge_heads(shape: [usize; 4], values: &[f32]) -> Vec<f32> {
 
 #[test]
 fn shader_parses_and_validates_without_a_runtime() {
-    let module = naga::front::wgsl::parse_str(SHADER_SOURCE).unwrap();
+    let source = shader_source();
+    let module = naga::front::wgsl::parse_str(&source)
+        .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::empty(),
     )
     .validate(&module)
     .unwrap();
+    let mut layouter = naga::proc::Layouter::default();
+    layouter.update(module.to_ctx()).unwrap();
+    let storage: u32 = module
+        .global_variables
+        .iter()
+        .filter(|(_, v)| v.space == naga::AddressSpace::WorkGroup)
+        .map(|(_, v)| layouter[v.ty].size.next_multiple_of(16))
+        .sum();
+    assert!(storage <= WORKGROUP_BYTES, "{storage} exceeds preflight");
     assert_eq!(std::mem::size_of::<View>(), 32);
     assert_eq!(std::mem::size_of::<Params>(), 208);
     let params = module
@@ -78,6 +89,25 @@ fn shader_parses_and_validates_without_a_runtime() {
             .offset as usize,
         std::mem::offset_of!(Params, pair_bias)
     );
+}
+
+#[test]
+fn normalization_keeps_constant_values_at_the_finite_range_boundary() {
+    let Some(device) = device() else { return };
+    for count in [3, 131] {
+        let q = device.upload(&[1, 1, 1, 3], &[0.; 3]).unwrap();
+        let k = device
+            .upload(&[1, 1, count, 3], &vec![0.; count * 3])
+            .unwrap();
+        let values: Vec<_> = (0..count).flat_map(|_| [f32::MAX, -f32::MAX, 1.]).collect();
+        let v = device.upload(&[1, 1, count, 3], &values).unwrap();
+        let bias: Vec<_> = (0..count).map(|i| -(i as f32) * 0.75).collect();
+        let p = device.upload(&[1, 1, 1, count], &bias).unwrap();
+        let result = q
+            .scaled_dot_attention(&k, &v, 1., AttentionMask::None, None, Some(&p))
+            .unwrap();
+        assert_eq!(read(&result), [f32::MAX, -f32::MAX, 1.]);
+    }
 }
 
 #[test]
@@ -171,7 +201,7 @@ fn capabilities_and_portable_grid_fail_before_pipeline_creation() {
     limits.max_bindings_per_bind_group = 7;
     assert!(preflight(spec, &limits).is_err());
     limits.max_bindings_per_bind_group = 8;
-    limits.max_compute_workgroup_storage_size = (256 * 2 + 64 + 18) * 4 - 1;
+    limits.max_compute_workgroup_storage_size = WORKGROUP_BYTES - 1;
     assert!(preflight(spec, &limits).is_err());
     limits.max_compute_workgroup_storage_size += 1;
     assert!(preflight(spec, &limits).is_ok());
