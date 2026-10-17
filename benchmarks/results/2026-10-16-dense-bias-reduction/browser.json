@@ -1,0 +1,880 @@
+{
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "backend": "BrowserWebGpu",
+  "browser_hardware_execution": "unverified",
+  "checks": [
+    {
+      "bias_forward_reverse": [
+        2.9802322387695312e-8,
+        2.9802322387695312e-8
+      ],
+      "expected": 2.9802322387695312e-8,
+      "name": "small_residual",
+      "passed": true,
+      "rows": 3
+    },
+    {
+      "bias_forward_reverse": [
+        1,
+        1
+      ],
+      "expected": 1,
+      "name": "unit_residual",
+      "passed": true,
+      "rows": 3
+    },
+    {
+      "bias_forward_reverse": [
+        2.9802322387695312e-8,
+        2.9802322387695312e-8
+      ],
+      "expected": 2.9802322387695312e-8,
+      "name": "nested_residual",
+      "passed": true,
+      "rows": 5
+    },
+    {
+      "bias_forward_reverse": [
+        9.094947017729282e-13,
+        9.094947017729282e-13
+      ],
+      "expected": 9.094947017729282e-13,
+      "name": "small_gradient",
+      "passed": true,
+      "rows": 3
+    },
+    {
+      "bias_forward_reverse": [
+        0.0000019073486328125,
+        0.0000019073486328125
+      ],
+      "expected": 0.0000019073486328125,
+      "name": "repeated_cancellation",
+      "passed": true,
+      "rows": 192
+    },
+    {
+      "bias_forward_reverse": [
+        0.000007599592208862305,
+        0.000007599592208862305
+      ],
+      "expected": 0.000007599592208862305,
+      "name": "long_tail",
+      "passed": true,
+      "rows": 257
+    },
+    {
+      "bias_same_order": [
+        3.4028234663852886e+38,
+        3.4028234663852886e+38
+      ],
+      "expected": 3.4028234663852886e+38,
+      "name": "finite_collapse_boundary_1",
+      "passed": true,
+      "rows": 4
+    },
+    {
+      "bias_same_order": [
+        -3.4028234663852886e+38,
+        -3.4028234663852886e+38
+      ],
+      "expected": -3.4028234663852886e+38,
+      "name": "finite_collapse_boundary_-1",
+      "passed": true,
+      "rows": 4
+    }
+  ],
+  "guards": [
+    {
+      "boundary": "upload",
+      "name": "nan_seed",
+      "recovered": true,
+      "rejected": true
+    },
+    {
+      "boundary": "upload",
+      "name": "infinite_seed",
+      "recovered": true,
+      "rejected": true
+    },
+    {
+      "boundary": "guarded_read",
+      "name": "overflowing_prefix",
+      "recovered": true,
+      "rejected": true
+    },
+    {
+      "boundary": "guarded_read",
+      "name": "overflowing_final",
+      "recovered": true,
+      "rejected": true
+    },
+    {
+      "boundary": "guarded_read",
+      "name": "inherited_overflow",
+      "recovered": true,
+      "rejected": true
+    }
+  ],
+  "integer_oracle": [
+    {
+      "actual_bits": [
+        0,
+        0
+      ],
+      "expected_bits": 0,
+      "name": "zero",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        0,
+        0
+      ],
+      "expected_bits": 0,
+      "name": "zero_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1,
+        1
+      ],
+      "expected_bits": 1,
+      "name": "minimum",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2147483649,
+        2147483649
+      ],
+      "expected_bits": 2147483649,
+      "name": "minimum_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        8388608,
+        8388608
+      ],
+      "expected_bits": 8388608,
+      "name": "normal_transition",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2155872256,
+        2155872256
+      ],
+      "expected_bits": 2155872256,
+      "name": "normal_transition_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1065353216,
+        1065353216
+      ],
+      "expected_bits": 1065353216,
+      "name": "even_tie",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3212836864,
+        3212836864
+      ],
+      "expected_bits": 3212836864,
+      "name": "even_tie_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1065353218,
+        1065353218
+      ],
+      "expected_bits": 1065353218,
+      "name": "odd_tie",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3212836866,
+        3212836866
+      ],
+      "expected_bits": 3212836866,
+      "name": "odd_tie_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1065353217,
+        1065353217
+      ],
+      "expected_bits": 1065353217,
+      "name": "above_tie",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3212836865,
+        3212836865
+      ],
+      "expected_bits": 3212836865,
+      "name": "above_tie_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1065353216,
+        1065353216
+      ],
+      "expected_bits": 1065353216,
+      "name": "below_tie",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3212836864,
+        3212836864
+      ],
+      "expected_bits": 3212836864,
+      "name": "below_tie_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1073741824,
+        1073741824
+      ],
+      "expected_bits": 1073741824,
+      "name": "carry_exponent",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3221225472,
+        3221225472
+      ],
+      "expected_bits": 3221225472,
+      "name": "carry_exponent_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2139095039,
+        2139095039
+      ],
+      "expected_bits": 2139095039,
+      "name": "finite_max",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4286578687,
+        4286578687
+      ],
+      "expected_bits": 4286578687,
+      "name": "finite_max_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1,
+        1
+      ],
+      "expected_bits": 1,
+      "name": "exponent_span",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2147483649,
+        2147483649
+      ],
+      "expected_bits": 2147483649,
+      "name": "exponent_span_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        577962979,
+        577962979
+      ],
+      "expected_bits": 577962979,
+      "name": "random_0",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2725446627,
+        2725446627
+      ],
+      "expected_bits": 2725446627,
+      "name": "random_0_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3587361589,
+        3587361589
+      ],
+      "expected_bits": 3587361589,
+      "name": "random_1",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1439877941,
+        1439877941
+      ],
+      "expected_bits": 1439877941,
+      "name": "random_1_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1203870541,
+        1203870541
+      ],
+      "expected_bits": 1203870541,
+      "name": "random_2",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3351354189,
+        3351354189
+      ],
+      "expected_bits": 3351354189,
+      "name": "random_2_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        749858292,
+        749858292
+      ],
+      "expected_bits": 749858292,
+      "name": "random_3",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2897341940,
+        2897341940
+      ],
+      "expected_bits": 2897341940,
+      "name": "random_3_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3252558181,
+        3252558181
+      ],
+      "expected_bits": 3252558181,
+      "name": "random_4",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1105074533,
+        1105074533
+      ],
+      "expected_bits": 1105074533,
+      "name": "random_4_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4240393301,
+        4240393301
+      ],
+      "expected_bits": 4240393301,
+      "name": "random_5",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2092909653,
+        2092909653
+      ],
+      "expected_bits": 2092909653,
+      "name": "random_5_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1851706471,
+        1851706471
+      ],
+      "expected_bits": 1851706471,
+      "name": "random_6",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3999190119,
+        3999190119
+      ],
+      "expected_bits": 3999190119,
+      "name": "random_6_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1899964702,
+        1899964702
+      ],
+      "expected_bits": 1899964702,
+      "name": "random_7",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4047448350,
+        4047448350
+      ],
+      "expected_bits": 4047448350,
+      "name": "random_7_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1114369109,
+        1114369109
+      ],
+      "expected_bits": 1114369109,
+      "name": "random_8",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3261852757,
+        3261852757
+      ],
+      "expected_bits": 3261852757,
+      "name": "random_8_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        592946581,
+        592946581
+      ],
+      "expected_bits": 592946581,
+      "name": "random_9",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2740430229,
+        2740430229
+      ],
+      "expected_bits": 2740430229,
+      "name": "random_9_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1175976441,
+        1175976441
+      ],
+      "expected_bits": 1175976441,
+      "name": "random_10",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3323460089,
+        3323460089
+      ],
+      "expected_bits": 3323460089,
+      "name": "random_10_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2100267968,
+        2100267968
+      ],
+      "expected_bits": 2100267968,
+      "name": "random_11",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4247751616,
+        4247751616
+      ],
+      "expected_bits": 4247751616,
+      "name": "random_11_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1603254869,
+        1603254869
+      ],
+      "expected_bits": 1603254869,
+      "name": "random_12",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3750738517,
+        3750738517
+      ],
+      "expected_bits": 3750738517,
+      "name": "random_12_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2049464041,
+        2049464041
+      ],
+      "expected_bits": 2049464041,
+      "name": "random_13",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4196947689,
+        4196947689
+      ],
+      "expected_bits": 4196947689,
+      "name": "random_13_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1229809178,
+        1229809178
+      ],
+      "expected_bits": 1229809178,
+      "name": "random_14",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3377292826,
+        3377292826
+      ],
+      "expected_bits": 3377292826,
+      "name": "random_14_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1630549156,
+        1630549156
+      ],
+      "expected_bits": 1630549156,
+      "name": "random_15",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3778032804,
+        3778032804
+      ],
+      "expected_bits": 3778032804,
+      "name": "random_15_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3375037683,
+        3375037683
+      ],
+      "expected_bits": 3375037683,
+      "name": "random_16",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1227554035,
+        1227554035
+      ],
+      "expected_bits": 1227554035,
+      "name": "random_16_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4199150442,
+        4199150442
+      ],
+      "expected_bits": 4199150442,
+      "name": "random_17",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2051666794,
+        2051666794
+      ],
+      "expected_bits": 2051666794,
+      "name": "random_17_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        688278610,
+        688278610
+      ],
+      "expected_bits": 688278610,
+      "name": "random_18",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2835762258,
+        2835762258
+      ],
+      "expected_bits": 2835762258,
+      "name": "random_18_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4204635087,
+        4204635087
+      ],
+      "expected_bits": 4204635087,
+      "name": "random_19",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2057151439,
+        2057151439
+      ],
+      "expected_bits": 2057151439,
+      "name": "random_19_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3324997320,
+        3324997320
+      ],
+      "expected_bits": 3324997320,
+      "name": "random_20",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1177513672,
+        1177513672
+      ],
+      "expected_bits": 1177513672,
+      "name": "random_20_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1108694558,
+        1108694558
+      ],
+      "expected_bits": 1108694558,
+      "name": "random_21",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3256178206,
+        3256178206
+      ],
+      "expected_bits": 3256178206,
+      "name": "random_21_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3383502439,
+        3383502439
+      ],
+      "expected_bits": 3383502439,
+      "name": "random_22",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1236018791,
+        1236018791
+      ],
+      "expected_bits": 1236018791,
+      "name": "random_22_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4255550170,
+        4255550170
+      ],
+      "expected_bits": 4255550170,
+      "name": "random_23",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2108066522,
+        2108066522
+      ],
+      "expected_bits": 2108066522,
+      "name": "random_23_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        659784390,
+        659784390
+      ],
+      "expected_bits": 659784390,
+      "name": "random_24",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2807268038,
+        2807268038
+      ],
+      "expected_bits": 2807268038,
+      "name": "random_24_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1943834326,
+        1943834326
+      ],
+      "expected_bits": 1943834326,
+      "name": "random_25",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4091317974,
+        4091317974
+      ],
+      "expected_bits": 4091317974,
+      "name": "random_25_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3329870834,
+        3329870834
+      ],
+      "expected_bits": 3329870834,
+      "name": "random_26",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1182387186,
+        1182387186
+      ],
+      "expected_bits": 1182387186,
+      "name": "random_26_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        78500514,
+        78500514
+      ],
+      "expected_bits": 78500514,
+      "name": "random_27",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2225984162,
+        2225984162
+      ],
+      "expected_bits": 2225984162,
+      "name": "random_27_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        1250644477,
+        1250644477
+      ],
+      "expected_bits": 1250644477,
+      "name": "random_28",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        3398128125,
+        3398128125
+      ],
+      "expected_bits": 3398128125,
+      "name": "random_28_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4188591423,
+        4188591423
+      ],
+      "expected_bits": 4188591423,
+      "name": "random_29",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2041107775,
+        2041107775
+      ],
+      "expected_bits": 2041107775,
+      "name": "random_29_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        138293986,
+        138293986
+      ],
+      "expected_bits": 138293986,
+      "name": "random_30",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2285777634,
+        2285777634
+      ],
+      "expected_bits": 2285777634,
+      "name": "random_30_negative",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        4272090171,
+        4272090171
+      ],
+      "expected_bits": 4272090171,
+      "name": "random_31",
+      "passed": true
+    },
+    {
+      "actual_bits": [
+        2124606523,
+        2124606523
+      ],
+      "expected_bits": 2124606523,
+      "name": "random_31_negative",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "schema": "spiraltorch.dense_bias_reduction.validation.v1",
+  "scope": "exact synthetic cancellation and rejection/recovery; no throughput or quality claim"
+}

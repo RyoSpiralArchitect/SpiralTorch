@@ -110,7 +110,10 @@ The standalone `resident_byte_learning_browser` WASM example exposes
 The last creates a fresh owner and maps logits/loss for qualification. The
 [browser recipe](../byte_corpus_learning.md#browser-execution) and
 `byte_learning_resume_browser.html` exercise them. These functions are **not**
-yet exports of the packaged `st-wasm` module.
+yet one-to-one exports of the packaged `st-wasm` module. The
+[packaged client](../wasm_byte_language_mlops.md) now provides the same Rust
+artifact validator via `ByteCorpusStudy.caseArtifact`, `validateArtifact`,
+`ByteCorpusModelArtifact.fromJson` and the typed `restoreWebGpu` owner.
 
 The [serving gate](byte-serving-gates.md) pins language and geometry-health
 criteria, binds actual paired inference to the artifact/operating conditions,

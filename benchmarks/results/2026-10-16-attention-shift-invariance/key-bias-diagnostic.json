@@ -1,0 +1,34 @@
+{
+  "schema": "spiraltorch.byte_corpus.key_bias_diagnostic.v1",
+  "scope": "Post-hoc read-only localization on all three retained cases; no gate change or qualification",
+  "width": 16,
+  "updates": 1024,
+  "request_sha256": "b0a612eec9aeb2f890f1d37c7f4edc50acedd5d898c456cadc3c1c717849d29c",
+  "before_sha256": "6bb2a87dcf87ef83ef209402eb713b8d8bc196ea6ceca560136341982b427317",
+  "after_sha256": "858a5576ba95c643fc223044fe6eaab4f502fa9afd0fc15b744eaa7bdb0b3dfe",
+  "reference_sha256": "96d37dd50825679d52687bb699ab8bcbeb4424af881d75ecabd566bcccc0090b",
+  "measure": "Maximum absolute value of all final Key-bias components, indices16..31 of block.0.qkv.bias; initial values are exactly zero",
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "initial_max_abs": 0,
+      "before_max_abs": 1.6592229030720773e-06,
+      "after_max_abs": 7.946164828354085e-07,
+      "torch_max_abs": 4.523052211879985e-06
+    },
+    {
+      "name": "seed11_geometry",
+      "initial_max_abs": 0,
+      "before_max_abs": 2.282067498526885e-06,
+      "after_max_abs": 1.5178861758613493e-06,
+      "torch_max_abs": 4.44892248196993e-06
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "initial_max_abs": 0,
+      "before_max_abs": 1.3750830021308502e-06,
+      "after_max_abs": 1.4020878325027297e-06,
+      "torch_max_abs": 4.233044819557108e-06
+    }
+  ]
+}

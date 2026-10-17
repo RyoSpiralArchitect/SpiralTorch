@@ -1,0 +1,99 @@
+{
+  "schema": "spiraltorch.attention_shift_conservation.verification.v1",
+  "date": "2026-10-16",
+  "base_commit": "f27ca0aaedb7a1f1eab770ecf644a7b7eb06a869",
+  "baseline_shader_sha256": "595f5327cf526978e51b677c4ce39b5c579905225f9f84c7caa75f679dfa3754",
+  "corrected_shader_sha256": "5be1bb186e3f31a21c9b25156ac8e5a54b14577838cd7a1fea888956bb76dd12",
+  "isolated_regression": {
+    "old_shader_expected_failure": true,
+    "old_shader_failed_key_counts": [16, 32, 64, 257],
+    "corrected_test_passed": true,
+    "tested_key_counts": [8, 16, 32, 64, 257],
+    "old_key_sum_at_257": -0.0000025426270440220833,
+    "new_key_sum_at_257": 0.000000004627509042620659,
+    "bound": "sum of one ULP per final f32 component plus 2e-12",
+    "extracted_records": ["conservation-before.txt", "conservation-after.txt"]
+  },
+  "shared_fixture": {
+    "native": {"passed": true, "backend": "Metal", "adapter": "Apple M4", "record": "native.json"},
+    "browser": {
+      "passed": true,
+      "backend": "BrowserWebGpu",
+      "hardware_execution": "unverified",
+      "record": "browser.json"
+    },
+    "existing_pytorch_cases": 18,
+    "existing_layout_checks": 36,
+    "existing_sgd_updates": 16,
+    "existing_inherited_guard_cases": 12,
+    "existing_range_cases": 2,
+    "existing_forward_reduction_controls": 3,
+    "added_shift_cases": 13,
+    "added_nonzero_poincare_pullback_cases": 2,
+    "added_oracle": "algebraic conservation and existing f64-accumulating Rust VJP",
+    "comparison_tolerance_unchanged": true
+  },
+  "tests": {
+    "gpu_opt_in_enabled": true,
+    "native_attention": {"passed": 26, "failed": 0, "ignored": 1},
+    "ignored_scope": "opt-in forward-only timestamp experiment; not backward evidence",
+    "native_byte_model_study": {"passed": 120, "failed": 0},
+    "native_shared_integration": {"passed": 1, "failed": 0},
+    "runner": {"passed": 4, "failed": 0},
+    "reused_runner_helper": {"passed": 6, "failed": 0},
+    "native_strict_clippy": "passed",
+    "wasm_example_strict_clippy": "passed",
+    "rustfmt": "passed",
+    "rustc": "1.99.0 (b940084d7 2026-09-28)",
+    "wasm_bindgen": "0.2.129",
+    "scope": "Test counts overlap in exercised behavior and are not independent experimental samples"
+  },
+  "language": {
+    "plan": "PLAN.md",
+    "width": 16,
+    "seed": 11,
+    "cases_completed": 3,
+    "updates_per_case": 1024,
+    "new_runs": 1,
+    "strict_gate_passed": false,
+    "before_failed_weight_components": 8,
+    "after_failed_weight_components": 9,
+    "failed_family": "block.0.qkv.bias Key slice",
+    "moment_component_failures": 0,
+    "max_training_or_development_loss_error": 0.00000095367431640625,
+    "record": "language.json",
+    "build_receipt": "language-build.json",
+    "started_record": "language-started.json",
+    "post_hoc_saved_report_diagnostic": "key-bias-diagnostic.json",
+    "scope": "No uniform full-model agreement, geometry efficacy or retroactive qualification"
+  },
+  "review": {
+    "mode": "independent read-only local agent",
+    "kernel_and_shared_fixture": "no findings on static review",
+    "pre_run_driver_finding": "Supplied binary hash was not bound to a corrected native build",
+    "resolution": "Driver builds the declared target and executes only its Cargo-reported debug artifact; receipt and drift checks recorded",
+    "resolution_static_review": "resolved",
+    "final_scope_review": "no new findings in public results, post-hoc interpretation and linked docs",
+    "private_statistics_recomputed_by_reviewer": false,
+    "runtime_verified_independently_by_reviewer": false
+  },
+  "ci_observation": {
+    "pull_request": 2270,
+    "head": "d487e367c1cc97112564a56cea2d9fccf6bce527",
+    "run": 38739550458,
+    "conclusion": "failure",
+    "annotation": "The job was not started because your account is locked due to a billing issue.",
+    "scope": "Latest observed parent-PR run, not execution of this change or a live billing-status check",
+    "merge_performed": false
+  },
+  "limits": [
+    "No backward performance measurement",
+    "No Python wheel rebuild or publication",
+    "No full public-client WASM binding rerun in this record",
+    "No new language generation or quality promotion",
+    "No exact continuation guarantee across changed kernels or builds",
+    "Hashes identify bytes, not independent execution attestation"
+  ],
+  "source_hashes": "source-hashes.json",
+  "retained_private_file_hashes": "private-hashes.json"
+}

@@ -1,0 +1,17 @@
+K=8 value: sum=1.000000074505806e0, expected=1e0, bound=8.940896716308594e-8
+K=8 key: sum=-1.210719347000122e-8, expected=0e0, bound=2.0025435354232787e-8
+K=8 pair: sum=-1.210719347000122e-8, expected=0e0, bound=2.0025435354232787e-8
+K=16 value: sum=1.0000001341104507e0, expected=1e0, bound=8.940896716308594e-8
+K=16 key: sum=-5.2852556109428406e-8, expected=0e0, bound=4.342491504144669e-8
+K=16 pair: sum=-5.2852556109428406e-8, expected=0e0, bound=4.342491504144669e-8
+K=32 value: sum=1.0000002514570951e0, expected=1e0, bound=8.754632201385498e-8
+K=32 key: sum=-2.018059603869915e-7, expected=0e0, bound=8.550905388188362e-8
+K=32 pair: sum=-2.018059603869915e-7, expected=0e0, bound=8.550905388188362e-8
+K=64 value: sum=1.000000434461981e0, expected=1e0, bound=8.708066072654724e-8
+K=64 key: sum=-7.243361324071884e-7, expected=0e0, bound=1.4552115228366852e-7
+K=64 pair: sum=-7.243361324071884e-7, expected=0e0, bound=1.4552115228366852e-7
+K=257 value: sum=1.0000006381715139e0, expected=1e0, bound=8.240312947532907e-8
+K=257 key: sum=-2.5426270440220833e-6, expected=0e0, bound=2.505859802324772e-7
+K=257 pair: sum=-2.5426270440220833e-6, expected=0e0, bound=2.505859802324772e-7
+normalization residual exceeds final-narrowing budget
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 344 filtered out; finished in 0.39s

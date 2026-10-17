@@ -1,0 +1,38 @@
+[
+  {
+    "sha256": "5be1bb186e3f31a21c9b25156ac8e5a54b14577838cd7a1fea888956bb76dd12",
+    "path": "crates/st-backend-wgpu/src/resident_tensor/shaders/attention_backward.wgsl"
+  },
+  {
+    "sha256": "e868f867ff7e7d9f72b2772b3099ced3b166a5ebbbc757698f364730840f32f2",
+    "path": "crates/st-backend-wgpu/src/resident_tensor/attention/vjp/tests.rs"
+  },
+  {
+    "sha256": "159c7a2440c82e3f49d6dfbe650f2a1966e2178e5cfd83fd6e6132f06ce2918f",
+    "path": "crates/st-backend-wgpu/tests/support/attention_shift.rs"
+  },
+  {
+    "sha256": "998495d2ecf3e5cca9c6a69c3336acd517d1babc79d084a82901a04f803527b2",
+    "path": "crates/st-backend-wgpu/tests/support/attention_vjp.rs"
+  },
+  {
+    "sha256": "d95e3bb1c3d16060b7c99d9ef91c4b3dc5937e52f9c11c4b59a0029fb837cdb4",
+    "path": "crates/st-backend-wgpu/tests/resident_attention_vjp.rs"
+  },
+  {
+    "sha256": "b15a863cca447bd6378a3f9d637278cb70202c8707930dce0f6e795fd3fc95b5",
+    "path": "crates/st-backend-wgpu/tests/attention_vjp_browser.html"
+  },
+  {
+    "sha256": "140cc1def5c675a25037566882b8790e14bf3da6b66ad93c6da1b634dbd62421",
+    "path": "benchmarks/results/2026-10-16-attention-shift-invariance/language_probe.py"
+  },
+  {
+    "sha256": "f3ee965f2d4152ecc3f2bc0ac079a51ad5d340b1c395b74706e015a63b1db289",
+    "path": "benchmarks/results/2026-10-16-attention-shift-invariance/test_language_probe.py"
+  },
+  {
+    "sha256": "da25dfeddebc494aabc3e4a70f4d44edaad6a09bbd9b383d63f9963b4ae99656",
+    "path": "benchmarks/results/2026-10-16-attention-shift-invariance/PLAN.md"
+  }
+]

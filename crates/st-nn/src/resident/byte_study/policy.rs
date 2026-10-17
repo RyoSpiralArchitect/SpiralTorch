@@ -53,7 +53,6 @@ impl Case {
             .as_ref()
             .is_some_and(|m| m.router_update == GeometryUpdate::Frozen)
     }
-    #[cfg(any(feature = "wgpu", test))]
     pub(super) fn parameter_frozen(&self, name: &str) -> bool {
         (self.frozen() && name.starts_with("geometry."))
             || (self.router_frozen() && name.starts_with("geometry.mixture_logits."))
@@ -70,12 +69,12 @@ impl Case {
 
 impl Request {
     pub(super) fn controls(&self) -> bool {
-        self.schema != "spiraltorch.byte_corpus.request.v1"
+        self.design_schema() != "spiraltorch.byte_corpus.request.v1"
     }
 
     pub(super) fn metric_controls(&self) -> bool {
         matches!(
-            self.schema.as_str(),
+            self.design_schema(),
             "spiraltorch.byte_corpus.request.v3"
                 | "spiraltorch.byte_corpus.request.v4"
                 | "spiraltorch.byte_corpus.request.v5"
@@ -87,7 +86,7 @@ impl Request {
 
     pub(super) fn calibration_controls(&self) -> bool {
         matches!(
-            self.schema.as_str(),
+            self.design_schema(),
             "spiraltorch.byte_corpus.request.v4"
                 | "spiraltorch.byte_corpus.request.v5"
                 | "spiraltorch.byte_corpus.request.v6"
@@ -98,7 +97,7 @@ impl Request {
 
     pub(super) fn fisher_controls(&self) -> bool {
         matches!(
-            self.schema.as_str(),
+            self.design_schema(),
             "spiraltorch.byte_corpus.request.v5"
                 | "spiraltorch.byte_corpus.request.v6"
                 | "spiraltorch.byte_corpus.request.v7"
@@ -107,15 +106,15 @@ impl Request {
     }
 
     pub(super) fn headwise_controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v6"
+        self.design_schema() == "spiraltorch.byte_corpus.request.v6"
     }
 
     pub(super) fn mixture_controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v7" || self.query_controls()
+        self.design_schema() == "spiraltorch.byte_corpus.request.v7" || self.query_controls()
     }
 
     pub(super) fn query_controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v8"
+        self.design_schema() == "spiraltorch.byte_corpus.request.v8"
     }
 
     pub(super) fn arms_per_seed(&self) -> usize {
@@ -139,7 +138,9 @@ impl Request {
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.query_controls() {
+        if self.optimizer.is_some() {
+            "spiraltorch.byte_corpus.checkpoint.v9"
+        } else if self.query_controls() {
             "spiraltorch.byte_corpus.checkpoint.v8"
         } else if self.mixture_controls() {
             "spiraltorch.byte_corpus.checkpoint.v7"
@@ -160,6 +161,13 @@ impl Request {
 
     #[cfg(any(feature = "wgpu", test))]
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.optimizer.is_some() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v9"
+            } else {
+                "spiraltorch.byte_corpus.partial.v9"
+            };
+        }
         if self.query_controls() {
             return if complete {
                 "spiraltorch.byte_corpus.result.v8"

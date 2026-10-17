@@ -219,21 +219,45 @@ fn wide_sqrt(a: Wide) -> Wide {
 }
 
 fn wide_float(a: Wide) -> f32 {
-    if (a.hi == 0.0) { return 0.0; }
     let bits = bitcast<u32>(a.hi);
+    if ((bits & 0x7fffffffu) == 0u) { return 0.0; }
     let sign = bits & 0x80000000u;
+    let fraction = bits & 0x7fffffu;
+    // Bound before adding the f32 exponent bias. A normalized significand
+    // outside this range cannot reach a finite nonzero f32 by its low terms.
+    if (a.exponent > 129) { return bitcast<f32>(sign | 0x7f800000u); }
+    if (a.exponent < -149) { return bitcast<f32>(sign); }
     let encoded = 126 + a.exponent;
-    if (encoded >= 255) { return bitcast<f32>(sign | 0x7f800000u); }
-    if (encoded > 0) { return bitcast<f32>(sign | (u32(encoded) << 23u) | (bits & 0x7fffffu)); }
+    if (encoded == 255 && fraction != 0u) { return bitcast<f32>(sign | 0x7f800000u); }
+    let correction = two_sum(a.lo, a.tail);
+    let correction_bits = bitcast<u32>(correction.x);
+    let magnitude = correction_bits & 0x7fffffffu;
+    let grows = (correction_bits & 0x80000000u) == sign;
+    if (encoded > 0) {
+        var result = sign | (u32(encoded) << 23u) | fraction;
+        if (magnitude == 0u || (encoded == 255 && grows)) { return bitcast<f32>(result); }
+        // One adjacent-f32 step suffices for normalized Wide components. Below
+        // a power of two the gap is halved, except at the subnormal boundary.
+        let half = select(0x33000000u, 0x32800000u, !grows && fraction == 0u && encoded > 1);
+        let tail = bitcast<u32>(correction.y);
+        let tail_zero = (tail & 0x7fffffffu) == 0u;
+        let past_half = magnitude > half || (magnitude == half &&
+            ((!tail_zero && ((tail ^ correction_bits) & 0x80000000u) == 0u) ||
+             (tail_zero && (result & 1u) != 0u)));
+        if (past_half) {
+            if (grows) { result += 1u; } else { result -= 1u; }
+        }
+        return bitcast<f32>(result);
+    }
     let distance = 1 - encoded;
-    if (distance > 24) { return bitcast<f32>(sign); }
-    let significand = (bits & 0x7fffffu) | 0x800000u;
+    let significand = fraction | 0x800000u;
     var rounded = significand >> u32(distance);
     let remainder = significand & ((1u << u32(distance)) - 1u);
     let half = 1u << u32(distance - 1);
-    // The low component breaks exact halfway cases before the subnormal store.
-    let directed_tail = select(a.tail, a.lo, a.lo != 0.0) * select(1.0, -1.0, a.hi < 0.0);
-    if (remainder > half || (remainder == half && (directed_tail > 0.0 || (directed_tail == 0.0 && (rounded & 1u) != 0u)))) {
+    // Inspect the retained sign bits: multiplying a subnormal tail by +/-1
+    // can flush the very term that must break this midpoint tie on the GPU.
+    if (remainder > half || (remainder == half &&
+        ((magnitude != 0u && grows) || (magnitude == 0u && (rounded & 1u) != 0u)))) {
         rounded += 1u;
     }
     return bitcast<f32>(sign | rounded);

@@ -1,0 +1,54 @@
+{
+  "schema": "spiraltorch.language_mlops.ci_follow_up.v1",
+  "base_commit": "37fd32273a74347ccbfcfa141e5296e0b6bfaf74",
+  "rust": "1.99.0",
+  "wasm_bindgen": "0.2.129",
+  "node": "24.14.0",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "4d7d122e887b3dce88d42571de7e878e42dd29dc6135aec96b3c98cdfa041d64",
+    "bindings/st-wasm/tests/byte_lm_fixture.py": "45b7bf6430f32539b11896092a9ccfb1a499b00ef2edb766ce7d62f9d03f930a",
+    "bindings/st-wasm/tests/byte_lm_node.mjs": "d736263b12cbe8d5990c48d56e0890c79fa0089b13adb02d5c6431c76da32f09",
+    "bindings/st-wasm/tests/byte_lm_boundaries.mjs": "b0d56185f97391918cf006c6ac63814b220577f175f3f27ed8e2641232548faf",
+    "crates/st-backend-wgpu/examples/language_local_vjp.rs": "3501ff22a92d48272c19d3e030a7fb9042650afb29c00724e30cbaf45d5980b7",
+    "crates/st-nn/examples/resident_byte_gradient_probe.rs": "0927957af2b3e4608fdda85824061181c57bdec920f7f3975118b688a6044d3b"
+  },
+  "checks": {
+    "backend_wasm_all_targets_strict_clippy": "passed",
+    "backend_native_example_strict_clippy": "passed",
+    "nn_native_example_check": "passed",
+    "nn_wasm_example_check": "passed",
+    "node_glue_transport": {"nn": 20, "webgpu": 30},
+    "web_glue_under_node_transport": {"nn": 20, "webgpu": 30},
+    "unrelated_device_error_controls_rejected": [
+      "strict study cursor", "cursor beyond total", "foreign typed resume"
+    ],
+    "native_vjp_cases": 4,
+    "native_denominator_witnesses_unchanged": true,
+    "native_repaired_midpoint_preserved": true,
+    "native_gradient_models": 3,
+    "native_gradient_batches_per_model": 4,
+    "native_gradient_checkpoints_unchanged": true,
+    "extra_nn_native_strict_clippy": "failed: 24 existing library lints",
+    "extra_nn_wasm_strict_clippy": "failed: 24 existing library lints"
+  },
+  "retained_private_sha256": {
+    "backend-wasm-clippy.log": "fc9228a49d21e1d6f96bf06112dc3b91a1000fba8e1d15a352bce021b6aadeb8",
+    "backend-native-clippy.log": "874ca60242f4b1f57f897ad402c41b1e9e27157dec6f45045a2fa02dc021b31d",
+    "nn-wasm-check.log": "019da77ed6b0d7cdd3f58933e466a102710d206a9064a02144878e840178dba9",
+    "nn-native-check.log": "596f4196ce496257f553f1ed537ba115b860a33d7f9dda7e40c0dbc9c2cf7874",
+    "nn-wasm-clippy.log": "ba8e4fc0a0534e71e2798ddd0e2eefaf1f8c6f3e54a4415c492ca009666b44cd",
+    "nn-native-clippy.log": "e59d25833b7d7460e1b335684fbf59a12618f19090c34736cfd47b790eabe363",
+    "synthetic-transport.json": "121bf9b875e39e9debcdb3d0ce1955b991060ca73a26b67077988167071bd78a",
+    "node-nn.json": "a0d4a6ccad88265bfde832926c97662a91ac8d91176d0dcd0205688e34af5b47",
+    "node-webgpu.json": "0e9e4d8525fc924f7155569594101355940cae7c89f4a523f0f5434f5a4532de",
+    "web-nn.json": "a0d4a6ccad88265bfde832926c97662a91ac8d91176d0dcd0205688e34af5b47",
+    "web-webgpu.json": "0e9e4d8525fc924f7155569594101355940cae7c89f4a523f0f5434f5a4532de",
+    "preflight-negative-controls.json": "601402ecb077af67c1efd0b64ce6c9dfa601d5c7aa866f3bb547a239865b957d",
+    "native-probe-reviewed.json": "bd6d6ff6bd2633207a322507411a1dd8ede68f82d207c85db56bd0b782bd359a",
+    "native-gradient-probe.json": "35ee7eea1b7692f409d3d46c398f1274cb95c613e7f750fbd9018ef8ee127e89",
+    "native-gradient-checks.json": "7c040ebc8879e82ccb3f0f7e145d8e6e653927b676542453f184bc1e9d7815a0"
+  },
+  "new_training_quality_claim": false,
+  "long_run_torch_gate_superseded": false,
+  "package_published": false
+}

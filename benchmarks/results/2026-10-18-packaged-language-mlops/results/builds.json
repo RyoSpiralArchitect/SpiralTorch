@@ -1,0 +1,37 @@
+{
+  "schema": "spiraltorch.packaged_byte_mlops.builds.v1",
+  "rust": "1.99.0",
+  "wasm_pack": "0.14.0",
+  "wasm_bindgen": "0.2.129",
+  "node": "24.14.0",
+  "target": "wasm32-unknown-unknown",
+  "profile": "release",
+  "wasm_pack_optimization": true,
+  "webgpu": {
+    "wasm_sha256": "b7059345f37c2981de0f8033f557309e1af0dbcae653b67e08a48f39b4f44434",
+    "wasm_bytes": 8478615,
+    "node_transport_checks": 30,
+    "feature_matrix_passed": true
+  },
+  "nn": {
+    "wasm_sha256": "ffcd21e7a46595202664d8a0119b15ad9947d2e653b7ef21f1ccd47d757ec53a",
+    "wasm_bytes": 5681343,
+    "node_transport_checks": 20,
+    "feature_matrix_passed": true
+  },
+  "no_features_cargo_check": "passed",
+  "rust_byte_study_tests": {
+    "passed": 81,
+    "failed": 0,
+    "gpu_runtime_opt_in": false
+  },
+  "synthetic_http_tests": {
+    "passed": 3,
+    "failed": 0
+  },
+  "rustfmt": "nightly-2026-04-15, changed Rust files passed",
+  "git_diff_check": "passed",
+  "published_package": false,
+  "ci_run_inspected": 38739550458,
+  "ci_observation": "October 15 parent-PR WASM job not started due to account billing lock; not a fresh account-status check"
+}

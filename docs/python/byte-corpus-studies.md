@@ -55,12 +55,27 @@ schedule; it does not insert validation at the pause boundary. Every case must
 reach the requested accepted-update cursor before a new checkpoint is returned.
 On failure the caller's old checkpoint remains unchanged. These checkpoints
 include the common data cursor and complete scalar histories, unlike a bare
-`ByteDecoderCheckpoint`. Both use stateless SGD, not Adam/momentum state.
+`ByteDecoderCheckpoint`. Legacy v1-v8 studies use stateless SGD. The source-only
+[v9 optimizer recipe](../byte_corpus_optimizers.md) can instead retain complete
+resident AdamW moments and accepted clocks, including frozen geometric state.
 
 Native and standalone WASM clients can consume these opaque checkpoint bytes
 and vice versa. Do not round-trip through a decoded dict to transport them:
 floating-point spelling and signed zero must not be silently changed.
 Cross-device floating-point equality is not promised.
+
+For private on-disk runs and explicit recovery, use the source-only
+[durable segment execution API](byte-study-runs.md). It wraps this same Rust
+owner with exclusive run claims, sealed saves and lineage-bound recovery into
+a new directory; it does not introduce another training or promotion policy.
+
+**Source-only saved-model selection:** `study.select_checkpoint(saved, case_name,
+policy="fixed_window_frozen.v1")` returns an immutable artifact and Rust decision
+JSON. Supply actual checkpoints at evaluation boundaries, not arbitrary pauses
+such as the step-one example above. The shared rule selects development CE among
+those saved models only; it does not deploy or promote them. See
+[saved-checkpoint selection](../byte_corpus_checkpoint_selection.md) for the
+Rust/Python/WASM contract and its separate test/generation requirements.
 
 ## From A Study To Inference
 

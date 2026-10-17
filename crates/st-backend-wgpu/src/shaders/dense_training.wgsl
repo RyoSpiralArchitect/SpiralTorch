@@ -27,10 +27,15 @@ fn index(wid: vec3<u32>, lane: u32) -> u32 { return group_index(wid) * 256u + la
 fn delta(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let i = index(wid, lane);
     if (i < p.len) {
-        var derivative = 1.0;
-        if (p.gelu != 0u) { derivative = gelu_prime(a[i]); }
-        let value = b[i] * derivative;
-        check(derivative, 1024u); check(value, 1024u);
+        // The identity VJP is a copy, not a multiply by one: the latter may
+        // flush subnormal cotangents before the exact bias reduction sees them.
+        var value = b[i];
+        if (p.gelu != 0u) {
+            let derivative = gelu_prime(a[i]);
+            check(derivative, 1024u);
+            value = b[i] * derivative;
+        }
+        check(value, 1024u);
         out[i] = value;
     }
 }
@@ -39,12 +44,20 @@ fn delta(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index)
 fn bias_gradient(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let col = index(wid, lane);
     if (col < p.cols) {
-        var value = 0.0;
+        var words: array<u32, 10>;
+        var prefix = 0.0;
         for (var row = 0u; row < p.rows; row = row + 1u) {
-            value = value + a[row * p.cols + col];
+            let value = a[row * p.cols + col];
             check(value, 2048u);
+            // Preserve the old sequential-prefix guard separately from the
+            // exact sum. Integer rounding also prevents fast-math reassociation.
+            prefix = rounded_add(prefix, value);
+            check(prefix, 2048u);
+            f32_sum_add(&words, value);
         }
-        out[col] = value;
+        let result = f32_sum_round(&words);
+        check(result, 2048u);
+        out[col] = result;
     }
 }
 

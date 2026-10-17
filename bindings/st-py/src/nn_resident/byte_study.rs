@@ -96,6 +96,16 @@ impl PyByteCorpusStudy {
         self.inner.request_sha256()
     }
 
+    #[getter]
+    fn design_schema(&self) -> &str {
+        self.inner.design_schema()
+    }
+
+    #[getter]
+    fn optimizer_recipe_json(&self) -> PyResult<String> {
+        self.inner.optimizer_recipe_json().map_err(value_error)
+    }
+
     fn checkpoint_size_bound(&self, py: Python<'_>) -> PyResult<usize> {
         py.detach(|| self.inner.checkpoint_size_bound().map_err(value_error))
     }
@@ -149,6 +159,42 @@ impl PyByteCorpusStudy {
                 .case_artifact(&checkpoint.inner, case_name, policy)
                 .map(PyByteCorpusModelArtifact::from)
                 .map_err(value_error)
+        })
+    }
+
+    /// Select an actual saved model on development CE, without a GPU or promotion.
+    /// Returns the immutable artifact and Rust's weight-free decision JSON.
+    #[pyo3(signature = (checkpoints, case_name, *, policy))]
+    fn select_checkpoint(
+        &self,
+        py: Python<'_>,
+        checkpoints: &Bound<'_, PyAny>,
+        case_name: &str,
+        policy: &str,
+    ) -> PyResult<(PyByteCorpusModelArtifact, String)> {
+        let policy = serde_json::from_value(serde_json::Value::String(policy.to_owned()))
+            .map_err(value_error)?;
+        let checkpoints: Vec<_> = checkpoints
+            .try_iter()?
+            // Bound extraction before allocating from an untrusted sequence
+            // length; Rust owns rejection of the first excess candidate.
+            .take(33)
+            .map(|item| {
+                let item = item?;
+                let checkpoint: PyRef<'_, PyByteCorpusStudyCheckpoint> = item.extract()?;
+                Ok(checkpoint.inner.clone())
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        py.detach(|| {
+            let refs: Vec<_> = checkpoints.iter().map(Arc::as_ref).collect();
+            let selected = self
+                .inner
+                .select_checkpoint(&refs, case_name, policy)
+                .map_err(value_error)?;
+            Ok((
+                selected.artifact.into(),
+                serde_json::to_string(&selected.report).map_err(value_error)?,
+            ))
         })
     }
 

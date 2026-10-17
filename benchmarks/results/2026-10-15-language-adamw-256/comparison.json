@@ -1,0 +1,380 @@
+{
+  "schema": "spiraltorch.byte_corpus.comparison.v9",
+  "request_sha256": "488bd598fe1c8de303662c241364dcb177e788d1eeef31e8ed492c707e5647f6",
+  "numerical_checks_passed": true,
+  "criteria": {
+    "atol": 3e-06,
+    "rtol": 5e-05,
+    "geometry_delta_relative_l2": 0.002,
+    "optimizer_moment_relative_l2": 0.002
+  },
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "seed": 11,
+      "geometry": false,
+      "parameter_scalars": 11216,
+      "train_ce_max_error": 5.7220458984375e-06,
+      "heldout_ce_max_error": 5.245208740234375e-06,
+      "final_parameter_max_error": 1.2690636452816761e-06,
+      "initial_heldout_bpb": 8.093789126795532,
+      "final_heldout_bpb": 4.934816321040964,
+      "geometry_deltas": [],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11216,
+      "optimizer_state_errors": {
+        "first_max_error": 1.658918336033821e-07,
+        "first_max_relative_l2_error": 2.1579202669882278e-05,
+        "second_max_error": 8.847564458847046e-09,
+        "second_max_relative_l2_error": 3.526388853875004e-06
+      }
+    },
+    {
+      "name": "seed11_geometry",
+      "seed": 11,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 5.7220458984375e-06,
+      "heldout_ce_max_error": 5.245208740234375e-06,
+      "final_parameter_max_error": 2.7865171432495117e-06,
+      "initial_heldout_bpb": 8.101673800411326,
+      "final_heldout_bpb": 4.929554210868178,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "actual_delta_l2": 0.1785246923479569,
+          "reference_delta_l2": 0.17852585521230138,
+          "relative_l2_error": 8.43420588766712e-06
+        },
+        {
+          "name": "geometry.projection.bias",
+          "actual_delta_l2": 0.023765559163011502,
+          "reference_delta_l2": 0.02376558596085633,
+          "relative_l2_error": 7.4452818374130156e-06
+        },
+        {
+          "name": "geometry.raw_decay",
+          "actual_delta_l2": 0.019712661664265625,
+          "reference_delta_l2": 0.01971319649364639,
+          "relative_l2_error": 2.8971698689534737e-05
+        },
+        {
+          "name": "geometry.raw_phase",
+          "actual_delta_l2": 0.011941168694065595,
+          "reference_delta_l2": 0.011941143981518215,
+          "relative_l2_error": 1.2725968604050007e-05
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "actual_delta_l2": 0.021862986788099857,
+          "reference_delta_l2": 0.021863551565233636,
+          "relative_l2_error": 2.6858708726880168e-05
+        }
+      ],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11290,
+      "optimizer_state_errors": {
+        "first_max_error": 1.6763806343078613e-07,
+        "first_max_relative_l2_error": 1.9037836560366533e-05,
+        "second_max_error": 5.820766091346741e-09,
+        "second_max_relative_l2_error": 4.633346911617478e-06
+      }
+    },
+    {
+      "name": "seed11_geometry_frozen",
+      "seed": 11,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 5.7220458984375e-06,
+      "heldout_ce_max_error": 5.245208740234375e-06,
+      "final_parameter_max_error": 1.5348196029663086e-06,
+      "initial_heldout_bpb": 8.101673800411326,
+      "final_heldout_bpb": 4.929888641881695,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.projection.bias",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_decay",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_phase",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "frozen_bits_preserved": true
+        }
+      ],
+      "geometry_update": "frozen",
+      "trainable_parameter_scalars": 11216,
+      "optimizer_state_errors": {
+        "first_max_error": 2.123415470123291e-07,
+        "first_max_relative_l2_error": 1.8862893702857158e-05,
+        "second_max_error": 6.984919309616089e-09,
+        "second_max_relative_l2_error": 4.217471967673863e-06
+      }
+    },
+    {
+      "name": "seed29_ordinary",
+      "seed": 29,
+      "geometry": false,
+      "parameter_scalars": 11216,
+      "train_ce_max_error": 5.245208740234375e-06,
+      "heldout_ce_max_error": 5.245208740234375e-06,
+      "final_parameter_max_error": 1.6705150471807428e-06,
+      "initial_heldout_bpb": 8.064071707107164,
+      "final_heldout_bpb": 4.906114802871242,
+      "geometry_deltas": [],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11216,
+      "optimizer_state_errors": {
+        "first_max_error": 2.3993197828531265e-07,
+        "first_max_relative_l2_error": 2.398639482129942e-05,
+        "second_max_error": 5.122274160385132e-09,
+        "second_max_relative_l2_error": 5.7707248681796545e-06
+      }
+    },
+    {
+      "name": "seed29_geometry",
+      "seed": 29,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 5.245208740234375e-06,
+      "heldout_ce_max_error": 5.7220458984375e-06,
+      "final_parameter_max_error": 1.9073486328125e-06,
+      "initial_heldout_bpb": 8.067077662874606,
+      "final_heldout_bpb": 4.8992815881871605,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "actual_delta_l2": 0.17543787982372278,
+          "reference_delta_l2": 0.17543858627220882,
+          "relative_l2_error": 6.7846534241520755e-06
+        },
+        {
+          "name": "geometry.projection.bias",
+          "actual_delta_l2": 0.021413217493605398,
+          "reference_delta_l2": 0.02141325930442606,
+          "relative_l2_error": 7.404513247524364e-06
+        },
+        {
+          "name": "geometry.raw_decay",
+          "actual_delta_l2": 0.02128292538820867,
+          "reference_delta_l2": 0.021283345639945,
+          "relative_l2_error": 3.890620408377233e-05
+        },
+        {
+          "name": "geometry.raw_phase",
+          "actual_delta_l2": 0.0162998208941864,
+          "reference_delta_l2": 0.016299748348122246,
+          "relative_l2_error": 5.781881799334761e-06
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "actual_delta_l2": 0.0381287352278994,
+          "reference_delta_l2": 0.038129019241599046,
+          "relative_l2_error": 1.10052793778559e-05
+        }
+      ],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11290,
+      "optimizer_state_errors": {
+        "first_max_error": 2.3096799850463867e-07,
+        "first_max_relative_l2_error": 3.171828427326631e-05,
+        "second_max_error": 6.402842700481415e-09,
+        "second_max_relative_l2_error": 5.24926484134961e-06
+      }
+    },
+    {
+      "name": "seed29_geometry_frozen",
+      "seed": 29,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 5.245208740234375e-06,
+      "heldout_ce_max_error": 5.245208740234375e-06,
+      "final_parameter_max_error": 2.02068997623428e-06,
+      "initial_heldout_bpb": 8.067077662874606,
+      "final_heldout_bpb": 4.89980245914313,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.projection.bias",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_decay",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_phase",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "frozen_bits_preserved": true
+        }
+      ],
+      "geometry_update": "frozen",
+      "trainable_parameter_scalars": 11216,
+      "optimizer_state_errors": {
+        "first_max_error": 2.2351741790771484e-07,
+        "first_max_relative_l2_error": 2.340883029141721e-05,
+        "second_max_error": 7.683411240577698e-09,
+        "second_max_relative_l2_error": 5.342822861966793e-06
+      }
+    },
+    {
+      "name": "seed47_ordinary",
+      "seed": 47,
+      "geometry": false,
+      "parameter_scalars": 11216,
+      "train_ce_max_error": 5.245208740234375e-06,
+      "heldout_ce_max_error": 4.76837158203125e-06,
+      "final_parameter_max_error": 1.7881393432617188e-06,
+      "initial_heldout_bpb": 7.973188851119919,
+      "final_heldout_bpb": 4.90079014475812,
+      "geometry_deltas": [],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11216,
+      "optimizer_state_errors": {
+        "first_max_error": 2.4260953068733215e-07,
+        "first_max_relative_l2_error": 3.4328327807330767e-05,
+        "second_max_error": 1.0477378964424133e-08,
+        "second_max_relative_l2_error": 7.13034333061735e-06
+      }
+    },
+    {
+      "name": "seed47_geometry",
+      "seed": 47,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 5.245208740234375e-06,
+      "heldout_ce_max_error": 4.76837158203125e-06,
+      "final_parameter_max_error": 1.5795230865478516e-06,
+      "initial_heldout_bpb": 7.9650669704329236,
+      "final_heldout_bpb": 4.885344888083168,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "actual_delta_l2": 0.2790335046911981,
+          "reference_delta_l2": 0.27903466468568994,
+          "relative_l2_error": 7.38533073391247e-06
+        },
+        {
+          "name": "geometry.projection.bias",
+          "actual_delta_l2": 0.03847916109345644,
+          "reference_delta_l2": 0.03847938488135077,
+          "relative_l2_error": 8.134709346943975e-06
+        },
+        {
+          "name": "geometry.raw_decay",
+          "actual_delta_l2": 0.06850921073075618,
+          "reference_delta_l2": 0.06850944713326879,
+          "relative_l2_error": 4.39877050104861e-06
+        },
+        {
+          "name": "geometry.raw_phase",
+          "actual_delta_l2": 0.03174618451384715,
+          "reference_delta_l2": 0.031746159508745354,
+          "relative_l2_error": 3.192160999320229e-06
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "actual_delta_l2": 0.09402873559223908,
+          "reference_delta_l2": 0.09402880019977,
+          "relative_l2_error": 1.9279247374272486e-06
+        }
+      ],
+      "geometry_update": "train",
+      "trainable_parameter_scalars": 11290,
+      "optimizer_state_errors": {
+        "first_max_error": 2.3888424038887024e-07,
+        "first_max_relative_l2_error": 0.00010324013987231518,
+        "second_max_error": 6.28642737865448e-09,
+        "second_max_relative_l2_error": 7.76893615485558e-06
+      }
+    },
+    {
+      "name": "seed47_geometry_frozen",
+      "seed": 47,
+      "geometry": true,
+      "parameter_scalars": 11290,
+      "train_ce_max_error": 4.76837158203125e-06,
+      "heldout_ce_max_error": 5.245208740234375e-06,
+      "final_parameter_max_error": 1.5338824157495878e-06,
+      "initial_heldout_bpb": 7.9650669704329236,
+      "final_heldout_bpb": 4.886835418722533,
+      "geometry_deltas": [
+        {
+          "name": "geometry.projection.weight",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.projection.bias",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_decay",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_phase",
+          "frozen_bits_preserved": true
+        },
+        {
+          "name": "geometry.raw_gain.0",
+          "frozen_bits_preserved": true
+        }
+      ],
+      "geometry_update": "frozen",
+      "trainable_parameter_scalars": 11216,
+      "optimizer_state_errors": {
+        "first_max_error": 2.2631138563156128e-07,
+        "first_max_relative_l2_error": 2.394242134586089e-05,
+        "second_max_error": 5.820766091346741e-09,
+        "second_max_relative_l2_error": 7.2144555038946525e-06
+      }
+    }
+  ],
+  "paired_deltas": [
+    {
+      "seed": 11,
+      "geometry_minus_ordinary_bpb": -0.005262110172786549,
+      "frozen_geometry_minus_ordinary_bpb": -0.0049276791592687275,
+      "learned_geometry_minus_frozen_bpb": -0.0003344310135178219
+    },
+    {
+      "seed": 29,
+      "geometry_minus_ordinary_bpb": -0.00683321468408149,
+      "frozen_geometry_minus_ordinary_bpb": -0.006312343728112069,
+      "learned_geometry_minus_frozen_bpb": -0.0005208709559694213
+    },
+    {
+      "seed": 47,
+      "geometry_minus_ordinary_bpb": -0.015445256674952113,
+      "frozen_geometry_minus_ordinary_bpb": -0.013954726035587228,
+      "learned_geometry_minus_frozen_bpb": -0.0014905306393648843
+    }
+  ],
+  "mean_geometry_minus_ordinary_bpb": -0.009180193843940051,
+  "scope": "Fixed small corpus/recipe/seeds; different parameter counts and compute, no general quality or speed claim Explicit optimizer recipe; raw-coordinate AdamW is not manifold momentum transport.",
+  "design_schema": "spiraltorch.byte_corpus.request.v2",
+  "optimizer": {
+    "kind": "adamw_zero_rate_freeze.v1",
+    "beta1": 0.8999999761581421,
+    "beta2": 0.9990000128746033,
+    "epsilon": 9.999999747378752e-06,
+    "geometry_weight_decay": 0.0,
+    "weight_decay": 0.009999999776482582
+  }
+}

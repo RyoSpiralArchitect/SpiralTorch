@@ -41,11 +41,11 @@ pub use byte_decoder::{
 pub use byte_study::ByteCorpusGeneration;
 pub use byte_study::ByteCorpusServingGate;
 pub use byte_study::{
-    ByteCorpusBiasCalibration, ByteCorpusHeadwiseControls, ByteCorpusInferencePolicy,
-    ByteCorpusMixtureControls, ByteCorpusModelArtifact, ByteCorpusPreparedBiasStudy,
-    ByteCorpusQueryMixtureControls, ByteCorpusStudy, ByteCorpusStudyCheckpoint,
-    ByteCorpusStudyResult, ByteCorpusStudySegment, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA,
-    BYTE_CORPUS_STUDY_MAX_BYTES,
+    ByteCorpusBiasCalibration, ByteCorpusCheckpointSelection, ByteCorpusHeadwiseControls,
+    ByteCorpusInferencePolicy, ByteCorpusMixtureControls, ByteCorpusModelArtifact,
+    ByteCorpusPreparedBiasStudy, ByteCorpusQueryMixtureControls, ByteCorpusStudy,
+    ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment,
+    BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{ResidentByteCandidate, ResidentByteServing};

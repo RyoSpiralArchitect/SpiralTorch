@@ -332,5 +332,39 @@ prose. Report each paired seed difference, including regressions; do not select
 a favorable seed, tune on this held-out set, or loosen the numerical gate after
 seeing the result. Larger independent corpora, repeated runs, capacity/compute
 controls, generation evaluation and general streamed/long-running training
-remain separate work. The resumable fixed study does not supply an Adam state,
-changing learning-rate schedule, continuous recurrent context or live sampler.
+remain separate work. Legacy v1-v8 studies are stateless SGD. The explicit
+[v9 optimizer recipe](byte_corpus_optimizers.md) adds resident AdamW history,
+frozen clocks and optimizer-aware resume without changing those geometry
+designs. Changing learning-rate schedules, continuous recurrent context and a
+live sampler remain separate work.
+
+The [capacity/budget diagnostic](../benchmarks/results/2026-10-16-language-capacity-budget/README.md)
+extends the AdamW path to 18 models across widths16/32 and1024 updates, retaining
+all saved-model generations and training-only baselines. It exactly reproduces
+the earlier256-step width16 states, but all six long-run studies fail the
+unchanged parameter-comparison gate. Lower observed loss is therefore retained
+as diagnostic evidence, not validated geometry efficacy or serving promotion.
+
+The subsequent [Rust/WGSL AdamW repair](../benchmarks/results/2026-10-16-attention-adamw-numerics/README.md)
+removes cancellation from bias correction without changing that gate. Native and
+browser identical-gradient replays now pass, but a bounded width16/seed11
+language follow-up still fails on Key-bias components. This isolates the next
+Attention/VJP question; it does not qualify the earlier study or establish
+uniformly improved language accuracy.
+
+The next [Attention conservation repair](../benchmarks/results/2026-10-16-attention-shift-invariance/README.md)
+fixes a reproduced final-maximum normalization mismatch and passes native/browser
+shift controls with real Poincare pullbacks. Its one-shot, same-build-profile
+language follow-up still fails the unchanged Key-bias gate (nine components
+versus eight before). A saved-report diagnostic also finds invariant-direction
+drift in the independent float32 reference. These observations motivate a
+higher-precision gradient/reduction isolation, not a loosened gate or promotion.
+
+That [fixed-state isolation](../benchmarks/results/2026-10-16-dense-bias-reduction/README.md)
+now reproduces and repairs dense/QKV bias-sum cancellation, including finite
+overflow boundaries and identity-VJP subnormals. All three saved models are
+probed on four fixed batches against independent float32 and float64 Torch
+controls without changing weights, moments or revisions. Key residuals decrease
+in all twelve probes; full-parameter L2 error improves in 51 comparisons, stays
+equal in 188 and worsens in 17. No retraining, generation, gate change or model
+promotion is implied. This keeps numerical repair distinct from Z-Space efficacy.

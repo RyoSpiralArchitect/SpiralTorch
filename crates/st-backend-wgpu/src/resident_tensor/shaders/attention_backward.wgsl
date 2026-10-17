@@ -1,5 +1,6 @@
 ROUNDED_ADD
 WIDE_ARITHMETIC
+ATTENTION_EXPONENTIAL
 
 struct View {
     strides: vec4<u32>,
@@ -44,14 +45,13 @@ struct VjpParams {
 @group(0) @binding(8) var<uniform> params: VjpParams;
 
 var<workgroup> dots: array<f32, 64>;
-var<workgroup> dp_parts: array<Wide, 64>;
-var<workgroup> gradient_a: array<Wide, 256>;
-var<workgroup> gradient_b: array<Wide, 256>;
+var<workgroup> dp_parts: array<WideSum, 64>;
 var<workgroup> pair_score: f32;
-var<workgroup> pair_dp: Wide;
+var<workgroup> pair_dp: WideSum;
 var<workgroup> row_maximum: f32;
-var<workgroup> row_sum: Wide;
-var<workgroup> row_center: Wide;
+var<workgroup> reference_key: u32;
+var<workgroup> row_sum: WideSum;
+var<workgroup> row_center: WideSum;
 var<workgroup> probability: Wide;
 var<workgroup> score_gradient: Wide;
 
@@ -73,22 +73,6 @@ fn visible_keys(query: u32) -> u32 {
     return params.keys;
 }
 
-// Range-reduced exp(score - maximum). A small probability must not flush to
-// zero before multiplication by a large, but finite, upstream derivative.
-fn score_weight(score: f32, maximum: f32) -> Wide {
-    let delta = wide_sub(parts(score), parts(maximum));
-    if (delta.hi == 0.0) { return parts(1.0); }
-    if (delta.exponent >= 11) { return parts(0.0); }
-    let value = wide_float(delta);
-    if (value < -745.0) { return parts(0.0); }
-    let exponent = i32(floor(value * 1.4426950408889634));
-    let ln_two = wide_add(parts(0.6931471824645996), parts(-1.904654323148236e-9));
-    let remainder = wide_sub(delta, wide_mul(parts(f32(exponent)), ln_two));
-    var weight = parts(exp(wide_float(remainder)));
-    weight.exponent += exponent;
-    return weight;
-}
-
 fn store_wide(offset: u32, value: Wide) {
     output[offset] = value.hi;
     output[offset + 1u] = value.lo;
@@ -101,13 +85,14 @@ fn load_wide(offset: u32) -> Wide {
 }
 
 // All callers enter with a uniform context/query/key and all 64 lanes.
-fn compute_pair(context: u32, query: u32, key: u32, lane: u32) {
+fn compute_pair(context: u32, query: u32, key: u32, lane: u32, with_dp: bool, reference: u32) {
     let qb = base(params.query, context, query);
     let kb = base(params.key, context, key);
     let vb = base(params.value, context, key);
+    let rb = base(params.value, context, reference);
     let ub = base(params.upstream, context, query);
     var dot = 0.0;
-    var dp = parts(0.0);
+    var dp = wide_sum_zero();
     // Recompute the same score as forward, including its key-tile reduction.
     // A different tree can change cancellation by O(1), not merely one ULP.
     let dot_lanes = select(64u, 8u, (params.flags & 8u) != 0u);
@@ -116,8 +101,14 @@ fn compute_pair(context: u32, query: u32, key: u32, lane: u32) {
             dot = checked(dot + checked(queries[qb + i * params.query.strides.w] * keys[kb + i * params.key.strides.w]));
         }
     }
-    for (var i = lane; i < params.head_dim; i += 64u) {
-        dp = wide_add(dp, wide_mul(parts(upstream[ub + i * params.upstream.strides.w]), parts(values[vb + i * params.value.strides.w])));
+    if (with_dp) {
+        for (var i = lane; i < params.head_dim; i += 64u) {
+            // Keep the shifted dot's tail through centering. Collapsing Vk-Vref
+            // first can lose a small value against a huge reference value.
+            let u = parts(upstream[ub + i * params.upstream.strides.w]);
+            dp = wide_sum_add(dp, wide_mul(u, parts(values[vb + i * params.value.strides.w])));
+            dp = wide_sum_add(dp, wide_neg(wide_mul(u, parts(values[rb + i * params.value.strides.w]))));
+        }
     }
     dots[lane] = dot;
     dp_parts[lane] = dp;
@@ -125,7 +116,9 @@ fn compute_pair(context: u32, query: u32, key: u32, lane: u32) {
     for (var stride = 32u; stride > 0u; stride >>= 1u) {
         if (lane < stride) {
             if (stride < dot_lanes) { dots[lane] = checked(dots[lane] + dots[lane + stride]); }
-            dp_parts[lane] = wide_add(dp_parts[lane], dp_parts[lane + stride]);
+            if (with_dp) {
+                dp_parts[lane] = wide_sum_add(wide_sum_add(dp_parts[lane], dp_parts[lane + stride].value), dp_parts[lane + stride].correction);
+            }
         }
         workgroupBarrier();
     }
@@ -151,35 +144,49 @@ fn statistics(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation
     let query = row % params.queries;
     if (lane == 0u) {
         row_maximum = bitcast<f32>(0xff7fffffu);
-        row_sum = parts(0.0);
-        row_center = parts(0.0);
+        reference_key = 0u;
+        row_sum = wide_sum_zero();
+        row_center = wide_sum_zero();
     }
     workgroupBarrier();
     for (var key = 0u; key < visible_keys(query); key += 1u) {
-        compute_pair(context, query, key, lane);
+        compute_pair(context, query, key, lane, false, 0u);
+        if (lane == 0u && (key == 0u || pair_score > row_maximum)) {
+            row_maximum = pair_score;
+            reference_key = key;
+        }
+        workgroupBarrier();
+    }
+    // Derivatives recompute weights at this final maximum. Online rescaling
+    // with rounded exponentials is not multiplicatively consistent with that
+    // recomputation and can break both probability and score-gradient sums.
+    for (var key = 0u; key < visible_keys(query); key += 1u) {
+        compute_pair(context, query, key, lane, true, reference_key);
         if (lane == 0u) {
-            let maximum = max(row_maximum, pair_score);
-            let previous = score_weight(row_maximum, maximum);
-            let current = score_weight(pair_score, maximum);
-            row_sum = wide_add(wide_mul(row_sum, previous), current);
-            row_center = wide_add(wide_mul(row_center, previous), wide_mul(pair_dp, current));
-            row_maximum = maximum;
+            let weight = score_weight(pair_score, row_maximum);
+            row_sum = wide_sum_add(row_sum, weight);
+            row_center = wide_sum_add(row_center, wide_mul(pair_dp.value, weight));
+            row_center = wide_sum_add(row_center, wide_mul(pair_dp.correction, weight));
         }
         workgroupBarrier();
     }
     if (lane == 0u) {
-        let offset = params.stats_offset + row * 9u;
+        let offset = params.stats_offset + row * 14u;
         output[offset] = row_maximum;
-        store_wide(offset + 1u, row_sum);
-        store_wide(offset + 5u, wide_div(row_center, row_sum));
+        let denominator = wide_sum_value(row_sum);
+        store_wide(offset + 1u, denominator);
+        store_wide(offset + 5u, wide_div(row_center.value, denominator));
+        store_wide(offset + 9u, wide_div(row_center.correction, denominator));
+        output[offset + 13u] = bitcast<f32>(reference_key);
     }
 }
 
 fn compute_derivatives(row: u32, lane: u32) {
     if (lane == 0u) {
-        let offset = params.stats_offset + row * 9u;
+        let offset = params.stats_offset + row * 14u;
         probability = wide_div(score_weight(pair_score, output[offset]), load_wide(offset + 1u));
-        score_gradient = wide_mul(probability, wide_sub(pair_dp, load_wide(offset + 5u)));
+        let centered = wide_sum_add(wide_sum_add(pair_dp, wide_neg(load_wide(offset + 5u))), wide_neg(load_wide(offset + 9u)));
+        score_gradient = wide_mul(probability, wide_sum_value(centered));
     }
     workgroupBarrier();
 }
@@ -190,15 +197,16 @@ fn query_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
     if (row >= params.contexts * params.queries) { return; }
     let context = row / params.queries;
     let query = row % params.queries;
-    for (var i = lane; i < params.head_dim; i += 64u) { gradient_a[i] = parts(0.0); }
-    workgroupBarrier();
+    var gradient: array<WideSum, 4>;
+    for (var i = 0u; i < 4u; i += 1u) { gradient[i] = wide_sum_zero(); }
+    let reference = bitcast<u32>(output[params.stats_offset + row * 14u + 13u]);
     for (var key = 0u; key < visible_keys(query); key += 1u) {
-        compute_pair(context, query, key, lane);
+        compute_pair(context, query, key, lane, true, reference);
         compute_derivatives(row, lane);
         let scaled = wide_mul(parts(params.scale), score_gradient);
         let kb = base(params.key, context, key);
         for (var i = lane; i < params.head_dim; i += 64u) {
-            gradient_a[i] = wide_add(gradient_a[i], wide_mul(scaled, parts(keys[kb + i * params.key.strides.w])));
+            gradient[i / 64u] = wide_sum_add(gradient[i / 64u], wide_mul(scaled, parts(keys[kb + i * params.key.strides.w])));
         }
         if (lane == 0u && (params.flags & 2u) != 0u) {
             output[params.pair_offset_out + row * params.keys + key] = checked(wide_float(score_gradient));
@@ -211,7 +219,7 @@ fn query_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
         }
     }
     for (var i = lane; i < params.head_dim; i += 64u) {
-        output[params.query_offset_out + row * params.head_dim + i] = checked(wide_float(gradient_a[i]));
+        output[params.query_offset_out + row * params.head_dim + i] = checked(wide_float(wide_sum_value(gradient[i / 64u])));
     }
 }
 
@@ -221,31 +229,33 @@ fn key_value_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_in
     if (row >= params.contexts * params.keys) { return; }
     let context = row / params.keys;
     let key = row % params.keys;
-    var z_gradient = parts(0.0);
-    for (var i = lane; i < params.head_dim; i += 64u) {
-        gradient_a[i] = parts(0.0);
-        gradient_b[i] = parts(0.0);
+    var z_gradient = wide_sum_zero();
+    var gradient_a: array<WideSum, 4>;
+    var gradient_b: array<WideSum, 4>;
+    for (var i = 0u; i < 4u; i += 1u) {
+        gradient_a[i] = wide_sum_zero();
+        gradient_b[i] = wide_sum_zero();
     }
-    workgroupBarrier();
     for (var query = 0u; query < params.queries; query += 1u) {
         if (key >= visible_keys(query)) { continue; }
-        compute_pair(context, query, key, lane);
+        let reference = bitcast<u32>(output[params.stats_offset + (context * params.queries + query) * 14u + 13u]);
+        compute_pair(context, query, key, lane, true, reference);
         compute_derivatives(context * params.queries + query, lane);
         let scaled = wide_mul(parts(params.scale), score_gradient);
         let qb = base(params.query, context, query);
         let ub = base(params.upstream, context, query);
         for (var i = lane; i < params.head_dim; i += 64u) {
-            gradient_a[i] = wide_add(gradient_a[i], wide_mul(scaled, parts(queries[qb + i * params.query.strides.w])));
-            gradient_b[i] = wide_add(gradient_b[i], wide_mul(probability, parts(upstream[ub + i * params.upstream.strides.w])));
+            gradient_a[i / 64u] = wide_sum_add(gradient_a[i / 64u], wide_mul(scaled, parts(queries[qb + i * params.query.strides.w])));
+            gradient_b[i / 64u] = wide_sum_add(gradient_b[i / 64u], wide_mul(probability, parts(upstream[ub + i * params.upstream.strides.w])));
         }
-        if (lane == 0u) { z_gradient = wide_add(z_gradient, score_gradient); }
+        if (lane == 0u) { z_gradient = wide_sum_add(z_gradient, score_gradient); }
         workgroupBarrier();
     }
     for (var i = lane; i < params.head_dim; i += 64u) {
-        output[params.key_offset_out + row * params.head_dim + i] = checked(wide_float(gradient_a[i]));
-        output[params.value_offset_out + row * params.head_dim + i] = checked(wide_float(gradient_b[i]));
+        output[params.key_offset_out + row * params.head_dim + i] = checked(wide_float(wide_sum_value(gradient_a[i / 64u])));
+        output[params.value_offset_out + row * params.head_dim + i] = checked(wide_float(wide_sum_value(gradient_b[i / 64u])));
     }
     if (lane == 0u && (params.flags & 1u) != 0u) {
-        output[params.z_offset_out + row] = checked(wide_float(z_gradient));
+        output[params.z_offset_out + row] = checked(wide_float(wide_sum_value(z_gradient)));
     }
 }

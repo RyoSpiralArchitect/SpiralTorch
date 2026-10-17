@@ -1207,6 +1207,12 @@ from .hf_adapter import (
     write_hf_adapter_promotion,
 )
 
+from . import byte_corpus_runs as byte_corpus_runs
+from .byte_corpus_runs import (
+    ByteCorpusSavedSegment,
+    load_byte_corpus_segment,
+    run_byte_corpus_segments,
+)
 from . import hf_adapter_executor as hf_adapter_executor
 from .hf_adapter_executor import (
     HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME,
@@ -1620,6 +1626,10 @@ _EXTRAS = [
     "hf_finetune_execution_identity_lines",
     "hf_finetune_execution_identity_report",
     "hf_adapter",
+    "ByteCorpusSavedSegment",
+    "byte_corpus_runs",
+    "load_byte_corpus_segment",
+    "run_byte_corpus_segments",
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
     "hf_adapter_executor_recovery",

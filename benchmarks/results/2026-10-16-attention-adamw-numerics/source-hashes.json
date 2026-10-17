@@ -1,0 +1,94 @@
+[
+  {
+    "sha256": "7d045c5e8df1d8c67de11261ff02d24d7ef0a4159361cff9c9b07dac7a1d2fd0",
+    "path": "crates/st-kernel-contracts/src/adamw.rs"
+  },
+  {
+    "sha256": "0f88b3b0bd2e13c5fab44bf9f02960d3dfe656910a5dc81ed78f264c0b4b2322",
+    "path": "crates/st-kernel-contracts/src/adamw.wgsl"
+  },
+  {
+    "sha256": "ac46ef8b34f2894903a7161edf38d884f28549016216c110b4fa549d185dc11a",
+    "path": "crates/st-backend-wgpu/examples/support/resident_adamw_numerics.rs"
+  },
+  {
+    "sha256": "080f5f2d47a24f7c4424c7b1b0cd3adf67d8fcee176c5f07dbafcfd56f522717",
+    "path": "crates/st-backend-wgpu/examples/resident_adamw_numerics.rs"
+  },
+  {
+    "sha256": "7ac4d26bdd4658623c13dcbf96c7c1b159cc9d7feddceca6b40287ffdd1bb31e",
+    "path": "crates/st-backend-wgpu/examples/resident_parameters_browser.rs"
+  },
+  {
+    "sha256": "0c7401b1dc988665fdd22367b156df325f3975c2d6f0234f033ceb94fabb841b",
+    "path": "crates/st-backend-wgpu/src/resident_training/parameters/adamw/tests.rs"
+  },
+  {
+    "sha256": "29a04db435025b1d6324c075b98a78740104cc462459199b99fca33b2b3f930b",
+    "path": "crates/st-backend-wgpu/tests/adamw_numerics_browser.html"
+  },
+  {
+    "sha256": "21adb83c01b0511778137d76015e6ceafc0c72b15c920ec6d79f9a8398c2fc62",
+    "path": "crates/st-backend-wgpu/tests/fixtures/resident_adamw_numerics.json"
+  },
+  {
+    "sha256": "36403ecd2d20ae8cd6187ac2cbea7255016800e20252ee18c84c774d7a6603b1",
+    "path": "tools/generate_resident_adamw_numerics_fixture.py"
+  },
+  {
+    "sha256": "7d89875a0f56a654804430b4440628e851d054adf4e754c9eba63bdeea075197",
+    "path": "docs/resident_adamw.md"
+  },
+  {
+    "sha256": "79880ef1c86648fa425c751921db86afb903564ebd1cc7849cc73c4b756a6350",
+    "path": "docs/byte_corpus_learning.md"
+  },
+  {
+    "sha256": "ba468117cdf179bcebcbbcd9e1cc83fc81fcc80089c2caa4841adac932cb4980",
+    "path": "docs/ecosystem_roadmap.md"
+  },
+  {
+    "sha256": "4c386bb438863ef9b849b89259ce44cae21c726771b955481b449497a2ada36f",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/PLAN.md"
+  },
+  {
+    "sha256": "39b93b0c79d59ce68446d12a539e59e31f4e604e3337b39ecb1336cb9c8fbd4a",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/README.md"
+  },
+  {
+    "sha256": "1d72b09c6593d5d39cc7589299fb3ec8a586a02bbcace0fddd8ec71192fef8b9",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/language_probe.py"
+  },
+  {
+    "sha256": "674f918d16e6ba7c08b88aded65a3ae7701d11045f35c236cea01022700dbc61",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/test_language_probe.py"
+  },
+  {
+    "sha256": "7315f63f183142127f5f34990e8609378c64a526826b56525322e84d9264bed5",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/verification.json"
+  },
+  {
+    "sha256": "c54177b1230f4f3c5a809cb3936bb785e20402e83ea499d928384e06673984cc",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/private-hashes.json"
+  },
+  {
+    "sha256": "7ba58abc6d64f7d58424011a8d576f4867f39b0cb7e1b1c760839ff1afdcad17",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/native-before.json"
+  },
+  {
+    "sha256": "ffcf55d553690e342c1630416a6b95bb3c63571195693dcb4f00a04b42435d92",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/native-after.json"
+  },
+  {
+    "sha256": "a2a556cd9a805a1c5692f4b653a12ed4233af7470e1ea56659db6813d8180a23",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/browser.json"
+  },
+  {
+    "sha256": "888be6f23804a11a06807971e2cb286f1501c088160cc074027e82f0feaeb5e0",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/language.json"
+  },
+  {
+    "sha256": "38e195b4b7d1cc5d2407ee7a9540a3f558acd83422957adb1a5b6bed05982225",
+    "path": "benchmarks/results/2026-10-16-attention-adamw-numerics/language-started.json"
+  }
+]

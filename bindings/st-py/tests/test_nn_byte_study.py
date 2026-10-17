@@ -25,6 +25,7 @@ from test_byte_corpus_headwise import fixture as headwise_fixture
 from test_byte_corpus_mixture import fixture as mixture_fixture
 from test_byte_corpus_query import fixture as query_fixture
 from test_verify_byte_corpus_resume import fixture as resume_fixture
+from test_byte_corpus_optimizer import wrap as optimizer_request, recipe as optimizer_recipe
 
 NAMES = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
@@ -80,6 +81,102 @@ def two_head_source():
 
 
 class StudyPortable(unittest.TestCase):
+    def test_saved_checkpoint_selection_is_rust_owned_and_portable(self):
+        request = protocol.decode_json(fixture()[0])
+        # Match the synthetic checkpoint fixture, including its cursor-zero bits.
+        for case in request["cases"]:
+            for parameter in case["parameters"]:
+                parameter["values"] = [0.1] * len(parameter["values"])
+        study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+        records = []
+        for cursor in (0, 2):
+            record = resume_fixture()[5]
+            record["request_sha256"] = study.request_sha256
+            record["completed_updates"] = cursor
+            for case in record["cases"]:
+                model = json.loads(case["model_json"])
+                model["attempted_revision"] = str(cursor)
+                case["model_json"] = json.dumps(model)
+                case["training"] = [{"revision": i, "ce": 2.0} for i in range(1, cursor + 1)]
+                if cursor:
+                    case["validation"].append({"revision": cursor, "batch_losses": [1.0]})
+            records.append(record)
+        checkpoints = [study.checkpoint_from_json(protocol.encoded(r)) for r in records]
+        artifact, report_json = study.select_checkpoint(checkpoints, "plain", policy="fixed_window_frozen.v1")
+        report = json.loads(report_json)
+        self.assertEqual(report["selected"]["completed_updates"], 2)
+        self.assertEqual(report["selected"]["artifact_id"], artifact.artifact_id)
+        study.validate_artifact(checkpoints[1], artifact)
+        self.assertEqual(artifact.to_json(), study.case_artifact(
+            checkpoints[1], "plain", policy="fixed_window_frozen.v1").to_json())
+        from_iterator, iterator_report = study.select_checkpoint(
+            iter(checkpoints), "plain", policy="fixed_window_frozen.v1")
+        self.assertEqual(from_iterator.to_json(), artifact.to_json())
+        self.assertEqual(iterator_report, report_json)
+
+        class HugeSequence:
+            def __len__(self):
+                return sys.maxsize
+
+            def __getitem__(self, index):
+                return checkpoints[0]
+
+        consumed = []
+
+        def excess_candidates():
+            for index in range(34):
+                consumed.append(index)
+                yield checkpoints[0]
+
+        for candidates in (HugeSequence(), itertools.repeat(checkpoints[0]), excess_candidates()):
+            with self.assertRaisesRegex(ValueError, "1..32"):
+                study.select_checkpoint(candidates, "plain", policy="fixed_window_frozen.v1")
+        self.assertEqual(consumed, list(range(33)))
+        with self.assertRaises(TypeError):
+            study.select_checkpoint(range(sys.maxsize), "plain", policy="fixed_window_frozen.v1")
+        for candidates in ([], list(reversed(checkpoints)), [checkpoints[0]] * 33):
+            with self.assertRaises(ValueError):
+                study.select_checkpoint(candidates, "plain", policy="fixed_window_frozen.v1")
+        for candidates in ([{}], [True], None):
+            with self.assertRaises(TypeError):
+                study.select_checkpoint(candidates, "plain", policy="fixed_window_frozen.v1")
+        with self.assertRaises(TypeError):
+            study.select_checkpoint(checkpoints, "plain")
+        with self.assertRaises(ValueError):
+            study.select_checkpoint(checkpoints, "plain", policy="automatic_promotion")
+        for case in records[1]["cases"]:
+            case["validation"][-1]["batch_losses"] = [2.0]
+        tied = study.checkpoint_from_json(protocol.encoded(records[1]))
+        _, tie_json = study.select_checkpoint([checkpoints[0], tied], "plain", policy="fixed_window_frozen.v1")
+        self.assertEqual(json.loads(tie_json)["selected"]["completed_updates"], 0)
+        records[1]["cases"][1]["validation"][0]["batch_losses"] = [3.0]
+        forked = study.checkpoint_from_json(protocol.encoded(records[1]))
+        with self.assertRaisesRegex(ValueError, "history"):
+            study.select_checkpoint([checkpoints[0], forked], "plain", policy="fixed_window_frozen.v1")
+
+    def test_optimizer_recipe_and_design_are_rust_owned_portable_metadata(self):
+        sources = [source()[0] for source in (fixture, frozen_fixture, metric_fixture,
+                   calibrated_fixture, fisher_fixture, headwise_fixture, mixture_fixture)]
+        sources.append(query_fixture()[1])
+        for source in sources:
+            design = protocol.decode_json(source)
+            for recipe in (optimizer_recipe(), {"kind": "stateless_sgd.v1"}):
+                request = optimizer_request(design, recipe)
+                raw = protocol.encoded(request)
+                study = st.nn.ByteCorpusStudy.from_json(raw)
+                self.assertEqual(study.design_schema, design["schema"])
+                self.assertEqual(study.request_sha256, hashlib.sha256(raw).hexdigest())
+                self.assertEqual(json.loads(study.optimizer_recipe_json),
+                                 protocol.load_reference("byte_corpus_optimizer").recipe(request))
+                study.validate_segment(0)
+                with self.assertRaises(AttributeError):
+                    study.optimizer_recipe_json = "{}"
+        for key in ("optimizer", "design_schema"):
+            request = optimizer_request(protocol.decode_json(fixture()[0]))
+            request[key] = None
+            with self.assertRaises(ValueError):
+                st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+
     def test_exports_and_stubs(self):
         namespace = {}
         exec("from spiraltorch.nn import *", namespace)
@@ -97,8 +194,9 @@ class StudyPortable(unittest.TestCase):
                 getattr(st.nn, name)()
         self.assertEqual(st.nn.BYTE_CORPUS_STUDY_MAX_BYTES, 64 * 1024 * 1024)
         self.assertIn("BYTE_CORPUS_STUDY_MAX_BYTES", namespace)
-        self.assertIn("case_checkpoint", {n.name for n in classes["_NnByteCorpusStudy"].body
-                                          if isinstance(n, ast.FunctionDef)})
+        for method in ("case_checkpoint", "select_checkpoint"):
+            self.assertIn(method, {n.name for n in classes["_NnByteCorpusStudy"].body
+                                  if isinstance(n, ast.FunctionDef)})
 
     def test_all_versions_portable_and_exact_byte_identity(self):
         requests = [make()[0] for make in (fixture, frozen_fixture, metric_fixture,
@@ -311,6 +409,30 @@ class StudyPortable(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class StudyGpu(unittest.TestCase):
+    def test_adamw_optimizer_history_survives_study_resume(self):
+        request = optimizer_request(protocol.decode_json(frozen_fixture()[0]))
+        request["rate"] = .001
+        raw = protocol.encoded(request)
+        study = st.nn.ByteCorpusStudy.from_json(raw)
+        full = study.advance_wgpu()
+        partial = study.advance_wgpu(1)
+        loaded = study.checkpoint_from_json(partial.checkpoint.to_json())
+        resumed = study.advance_wgpu(resume=loaded)
+        self.assertEqual(full.report_json, resumed.report_json)
+        self.assertEqual(full.checkpoint.to_json(), resumed.checkpoint.to_json())
+        self.assertEqual(study.run_wgpu(), full.report_json)
+        for case, row in zip(request["cases"], json.loads(full.report_json)["cases"]):
+            protocol.load_reference("byte_corpus_optimizer").validate_state(
+                case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
+                protocol.parameter_frozen)
+        model = json.loads(json.loads(partial.checkpoint.to_json())["cases"][0]["model_json"])
+        self.assertEqual(model["update_rule"], "adamw_zero_rate_freeze.v1")
+        corrupted = json.loads(partial.checkpoint.to_json())
+        model["optimizer"]["slots"][0]["steps"] = 0
+        corrupted["cases"][0]["model_json"] = json.dumps(model)
+        with self.assertRaises(ValueError):
+            study.checkpoint_from_json(protocol.encoded(corrupted))
+
     def test_detached_calls_share_a_recipe_not_mutable_models(self):
         study = st.nn.ByteCorpusStudy.from_json(fixture()[0])
         expected = study.run_wgpu()
@@ -354,6 +476,18 @@ class StudyGpu(unittest.TestCase):
                 self.assertEqual(resumed.report_json, study.run_wgpu())
                 if version == 8:
                     self.check_fresh_case_inference(study, prepared.request_json, resumed.checkpoint)
+        request = optimizer_request(protocol.decode_json(query.request_json))
+        request["rate"] = .001
+        raw = protocol.encoded(request)
+        study = st.nn.ByteCorpusStudy.from_json(raw)
+        first = study.advance_wgpu(1)
+        resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
+        self.assertEqual(resumed.report_json, study.run_wgpu())
+        for case, row in zip(request["cases"], protocol.decode_json(resumed.report_json)["cases"]):
+            protocol.load_reference("byte_corpus_optimizer").validate_state(
+                case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
+                protocol.parameter_frozen)
+        self.check_fresh_case_inference(study, raw, resumed.checkpoint)
 
     def check_fresh_case_inference(self, study, raw, saved):
         request = protocol.decode_json(raw)
@@ -364,6 +498,11 @@ class StudyGpu(unittest.TestCase):
             self.assertEqual(model.to_json(),
                              st.nn.ByteDecoderCheckpoint.from_json(case["model_json"]).to_json())
             artifact = study.case_artifact(saved, case["name"], policy="fixed_window_frozen.v1")
+            selected, decision_json = study.select_checkpoint(
+                [saved], case["name"], policy="fixed_window_frozen.v1")
+            self.assertEqual(selected.to_json(), artifact.to_json())
+            self.assertEqual(json.loads(decision_json)["selected"]["completed_updates"],
+                             saved.completed_updates)
             loaded = st.nn.ByteCorpusModelArtifact.from_json(artifact.to_json(), expected_id=artifact.artifact_id)
             study.validate_artifact(saved, loaded)
             self.assertEqual(loaded.checkpoint().to_json(), model.to_json())
