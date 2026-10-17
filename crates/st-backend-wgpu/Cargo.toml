@@ -74,6 +74,10 @@ name = "resident_bias_reduction_browser"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "resident_wide_rounding_browser"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "resident_embedding_browser"
 crate-type = ["cdylib"]
 

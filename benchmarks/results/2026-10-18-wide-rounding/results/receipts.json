@@ -1,0 +1,16 @@
+{
+  "sha256": {
+    "build-before.log": "1ab2c3fd5485f25a742b2d36a37bea6163fd2b545584954efdf41ca3a86c04df",
+    "build-after.log": "478fb7be1364b4eef373d62824550d398d18170ef19a3f6f780ee1046a4feb30",
+    "test-wide.log": "a24a20292f7b418abbc820b4902f67c50c8da5d057aa8eb5beba29cf24c0f3b3",
+    "build-wasm.log": "92f6c0d179bcb5ca86abf974ca4486840b6ed21d58a4cbd5b6af92c5863148fc",
+    "test-resident-tensor.log": "b175ae505405d46b89f8b28a5a21d5b92449a8fa2e6c2f75cdcbf099bb16e371",
+    "test-geometric-integration.log": "cc5028e81ef4bbe9c1b5b928bc25120e1cf116e4b2bb268b6aa2265ae8127157",
+    "browser-attention-after.json": "b22b39b578486cc849f4fb24c38a32c24038dadbd8a0dc498cae377ec7bd0148"
+  },
+  "wasm_sha256": {
+    "rounding": "e20847476598d336be50d8a307837ac80f00ace2f5a0ee6022264397a6a33701",
+    "attention": "847d51386af2588a5bae6b0e17d88422bebae5484ca858de14d6f106ad15918a"
+  },
+  "scope": "Raw logs and complete Attention regression report retained locally"
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Retained Wide Rounding</title>
+<p>Shared exact-integer fixtures and actual Attention midpoint checks.
+Browser physical hardware execution remains unverified.</p>
+<pre id="result" data-status="running">Checking the shared conversion...</pre>
+<a id="download" hidden download="wide-rounding-browser.json">Download complete result</a>
+<script type="module">
+import init, {run_wide_rounding_checks} from "../../../target/wide-rounding-web/resident_wide_rounding_browser.js";
+const output = document.querySelector("#result");
+try {
+  await init();
+  const report = JSON.parse(await run_wide_rounding_checks());
+  if (report.schema !== "spiraltorch.wide_rounding.validation.v1" ||
+      report.case_count !== 7042 || report.actual_bits.length !== 7042 ||
+      report.attention.length !== 12 || report.backend !== "BrowserWebGpu" ||
+      report.browser_hardware_execution !== "unverified") {
+    throw Error("Incomplete conversion validation");
+  }
+  output.textContent = JSON.stringify(report);
+  output.dataset.status = report.passed ? "passed" : "failed";
+  const link = document.querySelector("#download");
+  link.href = URL.createObjectURL(new Blob([output.textContent + "\n"], {type:"application/json"}));
+  link.hidden = false;
+} catch (error) {
+  output.dataset.status = "error";
+  output.textContent = JSON.stringify({passed:false, error:String(error.stack || error)});
+}
+</script>
