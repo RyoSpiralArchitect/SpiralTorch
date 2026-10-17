@@ -24,6 +24,7 @@ REQUEST_V6 = "spiraltorch.byte_corpus.request.v6"
 REQUEST_V7 = "spiraltorch.byte_corpus.request.v7"
 REQUEST_V8 = "spiraltorch.byte_corpus.request.v8"
 REQUEST_V9 = "spiraltorch.byte_corpus.request.v9"
+REQUEST_V10 = "spiraltorch.byte_corpus.request.v10"
 POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
 FISHER = "categorical_fisher_rao_squared.v1"
 ORIGINAL, MATCHED = "original", "matched_poincare_rms"
@@ -90,11 +91,12 @@ def parameter_frozen(case, name):
 
 
 def request_version(request):
+    load_reference("byte_corpus_gradient_clip").recipe(request)
     optimizer = load_reference("byte_corpus_optimizer")
     optimizer.recipe(request)
-    if request["schema"] == REQUEST_V9:
+    if request["schema"] in (REQUEST_V9, REQUEST_V10):
         request_version(optimizer.design(request))
-        return 9
+        return 10 if request["schema"] == REQUEST_V10 else 9
     if request["schema"] == REQUEST_V8:
         load_reference("byte_corpus_query").validate_request(request)
         return 8
@@ -365,6 +367,8 @@ def reference(args):
     wire_version = request_version(request)
     optimizer_module = load_reference("byte_corpus_optimizer")
     controls = optimizer_module.recipe(request)
+    clipping_module = load_reference("byte_corpus_gradient_clip")
+    clipping = clipping_module.recipe(request)
     version = request_version(optimizer_module.design(request))
     config = request["config"]
     headwise_pair = load_reference("byte_corpus_headwise").pair_bias if version == 6 else None
@@ -442,6 +446,8 @@ def reference(args):
         for step, (ids, targets) in enumerate(train, 1):
             loss = functional.cross_entropy(forward(ids).reshape(-1, 256), targets.reshape(-1))
             gradients = torch.autograd.grad(loss, p)
+            gradients = clipping_module.torch_gradients(torch, clipping, gradients,
+                [not parameter_frozen(case, descriptor["name"]) for descriptor in case["parameters"]])
             if optimizer is None:
                 with torch.no_grad():
                     for descriptor, value, gradient in zip(case["parameters"], p, gradients):
@@ -469,14 +475,16 @@ def reference(args):
             reports[-1]["pair_metric"] = case.get("pair_metric")
         if version >= 4:
             reports[-1]["bias_initialization"] = case["bias_initialization"]
-        if wire_version == 9:
+        if wire_version >= 9:
             reports[-1]["optimizer_state"] = optimizer_module.torch_state(optimizer, controls, case["parameters"], p)
     report = dict(schema=f"spiraltorch.byte_corpus.result.v{wire_version}", engine="independent_pytorch", torch_version=torch.__version__,
                   dtype="float32", device="cpu", threads=1, request_sha256=digest(raw), cases=reports)
     if version >= 4:
         report.update(bias_calibration=request["bias_calibration"], calibration_verification=calibration)
-    if wire_version == 9:
+    if wire_version >= 9:
         report.update(design_schema=request["design_schema"], optimizer=controls)
+    if wire_version == 10:
+        report["gradient_clip"] = clipping
     write_new(args.output, report)
 
 
@@ -517,6 +525,7 @@ def compare(request_raw, reference_report, actual):
         raise ValueError("duplicate request case")
     for report in [reference_report, actual]:
         optimizer_module.metadata(request, report)
+        load_reference("byte_corpus_gradient_clip").metadata(request, report)
         if report["schema"] != f"spiraltorch.byte_corpus.result.v{wire_version}" or report["request_sha256"] != digest(request_raw):
             raise ValueError("result source mismatch")
         if [c["name"] for c in report["cases"]] != names:
@@ -607,7 +616,7 @@ def compare(request_raw, reference_report, actual):
             summaries[-1]["final_heldout_bpb_abs_error"] = abs(summaries[-1]["final_heldout_bpb"] - summaries[-1]["reference_final_heldout_bpb"])
         if version >= 4:
             summaries[-1]["bias_initialization"] = spec["bias_initialization"]
-        if wire_version == 9:
+        if wire_version >= 9:
             if any("optimizer_state" not in row for row in (expected, got)):
                 raise ValueError("missing optimizer state")
             summaries[-1]["optimizer_state_errors"] = optimizer_module.compare_states(
@@ -700,10 +709,12 @@ def compare(request_raw, reference_report, actual):
         result["mixture_contrasts"] = load_reference("byte_corpus_mixture").contrasts(
             [c for c in summaries if "query_projection" not in c.get("mixture", {})])
         result["scope"] = "25 arms/seed: unchanged v7 plus contextual train/frozen projections. Bias stays zero; shared intercept and coordinates learn. Same data/update count, not equal parameter count or compute; no general quality/speed claim."
-    if wire_version == 9:
+    if wire_version >= 9:
         result.update(design_schema=request["design_schema"], optimizer=controls)
         result["criteria"]["optimizer_moment_relative_l2"] = optimizer_module.MOMENT_RTOL
         result["scope"] += " Explicit optimizer recipe; raw-coordinate AdamW is not manifold momentum transport."
+    if wire_version == 10:
+        result["gradient_clip"] = load_reference("byte_corpus_gradient_clip").recipe(request)
     return result
 
 
@@ -730,6 +741,10 @@ def main():
     p.add_argument("request", type=Path)
     p.add_argument("optimizer", type=Path, help="Explicit optimizer recipe JSON")
     p.add_argument("output", type=Path)
+    p = commands.add_parser("bind-gradient-clip", help="Bind explicit clipping to an optimizer-aware v9 request")
+    p.add_argument("request", type=Path)
+    p.add_argument("gradient_clip", type=Path, help="Explicit clipping recipe JSON")
+    p.add_argument("output", type=Path)
     p = commands.add_parser("compare")
     p.add_argument("request", type=Path)
     p.add_argument("reference", type=Path)
@@ -742,11 +757,19 @@ def main():
         reference(args)
     elif args.command == "bind-optimizer":
         request = decode_json(args.request.read_bytes())
-        if request_version(request) == 9:
+        if request_version(request) >= 9:
             raise ValueError("already bound to an optimizer")
         request["design_schema"] = request["schema"]
         request["schema"] = REQUEST_V9
         request["optimizer"] = decode_json(args.optimizer.read_bytes())
+        request_version(request)
+        write_new(args.output, request)
+    elif args.command == "bind-gradient-clip":
+        request = decode_json(args.request.read_bytes())
+        if request_version(request) != 9:
+            raise ValueError("bind-gradient-clip requires a v9 request")
+        request["schema"] = REQUEST_V10
+        request["gradient_clip"] = decode_json(args.gradient_clip.read_bytes())
         request_version(request)
         write_new(args.output, request)
     else:

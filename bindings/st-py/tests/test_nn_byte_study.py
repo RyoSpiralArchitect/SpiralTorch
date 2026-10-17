@@ -26,6 +26,7 @@ from test_byte_corpus_mixture import fixture as mixture_fixture
 from test_byte_corpus_query import fixture as query_fixture
 from test_verify_byte_corpus_resume import fixture as resume_fixture
 from test_byte_corpus_optimizer import wrap as optimizer_request, recipe as optimizer_recipe
+from test_byte_corpus_gradient_clip import bind as clipping_request, learning_design
 
 NAMES = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
@@ -81,6 +82,34 @@ def two_head_source():
 
 
 class StudyPortable(unittest.TestCase):
+    def test_clipping_recipe_is_explicit_rust_owned_and_read_only(self):
+        sources = [source()[0] for source in (fixture, frozen_fixture, metric_fixture,
+                   calibrated_fixture, fisher_fixture, headwise_fixture, mixture_fixture)]
+        sources.append(query_fixture()[1])
+        clip = protocol.load_reference("byte_corpus_gradient_clip")
+        for source in sources:
+            design = protocol.decode_json(source)
+            legacy = st.nn.ByteCorpusStudy.from_json(source)
+            self.assertEqual(json.loads(legacy.gradient_clip_recipe_json), {"kind": "disabled.v1"})
+            for optimizer in (optimizer_recipe(), {"kind": "stateless_sgd.v1"}):
+                for policy in ({"kind": "disabled.v1"}, {"kind": "active_global_l2.v1", "max_norm": .01}):
+                    request = clipping_request(optimizer_request(design, optimizer), policy)
+                    raw = protocol.encoded(request)
+                    study = st.nn.ByteCorpusStudy.from_json(raw)
+                    self.assertEqual(study.request_sha256, hashlib.sha256(raw).hexdigest())
+                    self.assertEqual(study.design_schema, design["schema"])
+                    self.assertEqual(json.loads(study.gradient_clip_recipe_json), clip.recipe(request))
+                    study.validate_segment(0)
+                    with self.assertRaises(AttributeError):
+                        study.gradient_clip_recipe_json = "{}"
+        base = clipping_request(optimizer_request(protocol.decode_json(fixture()[0])))
+        for invalid in (None, {}, {"kind": "disabled.v1", "max_norm": 1.},
+                        {"kind": "active_global_l2.v1", "max_norm": 1e-100}):
+            request = copy.deepcopy(base)
+            request["gradient_clip"] = invalid
+            with self.assertRaises(ValueError):
+                st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+
     def test_saved_checkpoint_selection_is_rust_owned_and_portable(self):
         request = protocol.decode_json(fixture()[0])
         # Match the synthetic checkpoint fixture, including its cursor-zero bits.
@@ -194,7 +223,7 @@ class StudyPortable(unittest.TestCase):
                 getattr(st.nn, name)()
         self.assertEqual(st.nn.BYTE_CORPUS_STUDY_MAX_BYTES, 64 * 1024 * 1024)
         self.assertIn("BYTE_CORPUS_STUDY_MAX_BYTES", namespace)
-        for method in ("case_checkpoint", "select_checkpoint"):
+        for method in ("case_checkpoint", "select_checkpoint", "gradient_clip_recipe_json"):
             self.assertIn(method, {n.name for n in classes["_NnByteCorpusStudy"].body
                                   if isinstance(n, ast.FunctionDef)})
 
@@ -409,6 +438,60 @@ class StudyPortable(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class StudyGpu(unittest.TestCase):
+    def test_clipped_contextual_mixtures_preserve_all_frozen_clocks(self):
+        fisher = st.nn.ByteCorpusBiasCalibration.from_json(
+            two_head_source(), [0, 1], fisher_rao_control=True).prepare_wgpu()
+        mixed = st.nn.ByteCorpusMixtureControls.from_json(fisher.request_json).prepare_wgpu()
+        query = st.nn.ByteCorpusQueryMixtureControls.from_json(mixed.request_json).prepare()
+        request = clipping_request(optimizer_request(protocol.decode_json(query.request_json)))
+        request["rate"] = .001
+        study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+        full, first = study.advance_wgpu(), study.advance_wgpu(1)
+        resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
+        self.assertEqual(full.report_json, resumed.report_json)
+        self.assertEqual(full.checkpoint.to_json(), resumed.checkpoint.to_json())
+        self.assertEqual(len(request["cases"]), 25)
+        for case, row in zip(request["cases"], protocol.decode_json(full.report_json)["cases"]):
+            protocol.load_reference("byte_corpus_optimizer").validate_state(
+                case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
+                protocol.parameter_frozen)
+            for parameter, values in zip(case["parameters"], row["final_parameters"]):
+                if protocol.parameter_frozen(case, parameter["name"]):
+                    self.assertEqual([struct.pack("<f", x) for x in values],
+                                     [struct.pack("<f", x) for x in parameter["values"]])
+
+    def test_clipped_learning_freeze_and_resume_are_one_rust_contract(self):
+        for optimizer in ({"kind": "stateless_sgd.v1"}, optimizer_recipe()):
+            v9 = optimizer_request(learning_design(), optimizer)
+            legacy = json.loads(st.nn.ByteCorpusStudy.from_json(protocol.encoded(v9)).run_wgpu())
+            disabled_request = clipping_request(v9, {"kind": "disabled.v1"})
+            disabled = json.loads(st.nn.ByteCorpusStudy.from_json(protocol.encoded(disabled_request)).run_wgpu())
+            self.assertEqual(legacy["cases"], disabled["cases"])
+            request = clipping_request(v9)
+            study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
+            full, partial = study.advance_wgpu(), study.advance_wgpu(1)
+            saved = partial.checkpoint.to_json()
+            resumed = study.advance_wgpu(resume=study.checkpoint_from_json(saved))
+            self.assertEqual(full.report_json, resumed.report_json)
+            self.assertEqual(full.checkpoint.to_json(), resumed.checkpoint.to_json())
+            self.assertEqual(partial.checkpoint.to_json(), saved)
+            report = json.loads(full.report_json)
+            self.assertEqual(report["gradient_clip"], json.loads(study.gradient_clip_recipe_json))
+            self.assertNotEqual(report["cases"][0]["final_parameters"], disabled["cases"][0]["final_parameters"])
+            for case, row in zip(request["cases"], report["cases"]):
+                protocol.load_reference("byte_corpus_optimizer").validate_state(
+                    case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
+                    protocol.parameter_frozen)
+                geometry_changed = any(values != parameter["values"]
+                    for parameter, values in zip(case["parameters"], row["final_parameters"])
+                    if parameter["name"].startswith("geometry."))
+                if case["geometry"]:
+                    self.assertEqual(geometry_changed, not protocol.frozen(case))
+            for policy in ({"kind": "disabled.v1"}, {"kind": "active_global_l2.v1", "max_norm": .02}):
+                changed = st.nn.ByteCorpusStudy.from_json(protocol.encoded(clipping_request(v9, policy)))
+                with self.assertRaises(ValueError):
+                    changed.checkpoint_from_json(saved)
+
     def test_adamw_optimizer_history_survives_study_resume(self):
         request = optimizer_request(protocol.decode_json(frozen_fixture()[0]))
         request["rate"] = .001

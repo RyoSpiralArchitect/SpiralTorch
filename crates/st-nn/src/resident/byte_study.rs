@@ -31,6 +31,7 @@ pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
 mod artifact;
 mod calibration;
+mod clipping;
 #[cfg(any(feature = "wgpu", test))]
 mod generation;
 mod headwise;
@@ -68,6 +69,7 @@ pub use serving::{ResidentByteCandidate, ResidentByteServing};
 /// v8 retains v7 and adds zero-initialized contextual projections, trained/frozen,
 /// with a frozen zero projection bias and the same trainable shared intercept.
 /// v9 binds an explicit optimizer to any unchanged v1-v8 geometry design.
+/// v10 also binds an explicit gradient-clipping policy before that optimizer.
 /// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
@@ -193,6 +195,8 @@ struct Request {
     design_schema: Option<String>,
     #[serde(default, deserialize_with = "optimizer::explicit_optimizer")]
     optimizer: Option<optimizer::Optimizer>,
+    #[serde(default, deserialize_with = "clipping::explicit_recipe")]
+    gradient_clip: Option<clipping::GradientClip>,
     config: Config,
     train_documents: Vec<Vec<u8>>,
     validation_documents: Vec<Vec<u8>>,
@@ -229,6 +233,7 @@ fn parse(input: &[u8]) -> Result<Request> {
             | "spiraltorch.byte_corpus.request.v7"
             | "spiraltorch.byte_corpus.request.v8"
             | "spiraltorch.byte_corpus.request.v9"
+            | "spiraltorch.byte_corpus.request.v10"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
@@ -264,6 +269,7 @@ fn parse(input: &[u8]) -> Result<Request> {
         return Err("invalid study configuration".into());
     }
     optimizer::validate_spec(&r)?;
+    clipping::validate_spec(&r)?;
     calibration::validate_spec(&r)?;
     headwise::validate_spec(&r)?;
     mixture::validate_spec(&r)?;
@@ -545,7 +551,7 @@ impl ByteCorpusStudy {
         self.request.train_batches.len()
     }
 
-    /// Geometry design, independent of an explicit v9 optimizer recipe.
+    /// Geometry design, independent of optimizer/clipping recipes.
     pub fn design_schema(&self) -> &str {
         self.request.design_schema()
     }
@@ -553,6 +559,13 @@ impl ByteCorpusStudy {
     /// Canonical float32 controls. Legacy requests report stateless SGD.
     pub fn optimizer_recipe_json(&self) -> Result<String> {
         Ok(serde_json::to_string(&json!(self.request.optimizer()))?)
+    }
+
+    /// Canonical float32 clipping controls. Legacy requests report disabled.
+    pub fn gradient_clip_recipe_json(&self) -> Result<String> {
+        Ok(serde_json::to_string(&json!(self
+            .request
+            .gradient_clip_recipe()))?)
     }
 
     pub fn request_sha256(&self) -> &str {
@@ -753,6 +766,7 @@ impl ByteCorpusStudy {
             return Err("real GPU required for this resident learning study".into());
         }
         let r = &self.request;
+        let gradient_clip = r.gradient_clip_recipe().clip()?;
         // This only verifies the frozen initialization on the selected device.
         // Fitting is a separate preparation API; resume never changes gains.
         calibration::verify_initial(r, &runtime).await?;
@@ -822,9 +836,13 @@ impl ByteCorpusStudy {
                 let loss =
                     tape.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
                 let gradients = model.backward(&tape, loss.prediction_gradient())?;
-                let update = match &adamw_steps {
-                    Some(steps) => model.adamw_with_steps(&gradients, steps)?,
-                    None => model.sgd_with_rates(&gradients, &rates)?,
+                let update = match (&adamw_steps, gradient_clip) {
+                    (Some(steps), Some(clip)) => {
+                        model.adamw_with_steps_clipped(&gradients, steps, clip)?
+                    }
+                    (None, Some(clip)) => model.sgd_with_rates_clipped(&gradients, &rates, clip)?,
+                    (Some(steps), None) => model.adamw_with_steps(&gradients, steps)?,
+                    (None, None) => model.sgd_with_rates(&gradients, &rates)?,
                 };
                 pending.push((update, loss.value().clone()));
                 if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
@@ -921,6 +939,9 @@ impl ByteCorpusStudy {
         if r.optimizer.is_some() {
             report["design_schema"] = json!(r.design_schema());
             report["optimizer"] = json!(r.optimizer());
+        }
+        if r.gradient_clip.is_some() {
+            report["gradient_clip"] = json!(r.gradient_clip_recipe());
         }
         let checkpoint = capture.then(|| ByteCorpusStudyCheckpoint {
             schema: r.checkpoint_schema().to_owned(),

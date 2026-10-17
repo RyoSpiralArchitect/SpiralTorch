@@ -2,6 +2,7 @@
 
 Source API after PyPI 0.4.31; build the current source for this interface.
 The v9 request binds a declared optimizer to an unchanged v1-v8 geometry design.
+V10 additionally binds an explicit active-gradient clipping policy.
 This separates **what geometry is learned** from **how parameters are updated**.
 The same Rust runner owns native, Python and browser execution.
 
@@ -26,7 +27,7 @@ Then wrap that request without changing its data, cases or initial parameters:
 ```
 
 The excerpt omits the existing required config, rate, documents, windows and
-cases. `design_schema` is mandatory and cannot recursively select v9.
+cases. `design_schema` is mandatory and cannot recursively select v9 or v10.
 `{"kind":"stateless_sgd.v1"}` supplies an explicit SGD control. Legacy v1-v8
 requests retain their exact SGD meaning and reject optimizer/design metadata;
 there is no inferred optimizer or silent history conversion.
@@ -53,7 +54,41 @@ reference uses `grad=None` for these tensors, not a present gradient with
 
 This is [resident raw-coordinate AdamW](resident_adamw.md), not Riemannian
 momentum transport. Geometric forward/VJP paths still supply the geometric
-mechanism. No schedule, clipping, AMSGrad or gradient accumulation is implied.
+mechanism. No schedule, AMSGrad or gradient accumulation is implied. Clipping
+is opt-in through the v10 recipe below, never inferred by v9.
+
+## Request-Bound Clipping
+
+After preparing the design and binding its optimizer, explicitly choose either
+`{"kind":"disabled.v1"}` or `{"kind":"active_global_l2.v1","max_norm":1.0}`:
+
+```bash
+python tools/byte_corpus_study.py bind-gradient-clip adamw-request.json \
+  examples/configs/byte_corpus/clip_active_global_l2.json clipped-request.json
+python tools/byte_corpus_study.py bind-gradient-clip adamw-request.json \
+  examples/configs/byte_corpus/clip_disabled.json unclipped-control.json
+```
+
+The result uses `spiraltorch.byte_corpus.request.v10` and requires all three
+fields: `design_schema`, `optimizer`, `gradient_clip`. The eight geometry
+designs are unchanged. Missing/null/unknown recipes reject, and older request
+versions reject a clipping field rather than silently ignoring it. `max_norm`
+must remain positive, normal and finite after float32 conversion. The example
+limit is illustrative, not a tuned default.
+
+Rust clips the joint norm of tensors whose effective learning rate is nonzero,
+before SGD or AdamW moments. Frozen geometry/query tensors are excluded from
+that budget but still checked for nonfinite gradients and inherited failures.
+Weights, moments and clocks of frozen tensors remain unchanged. This uses the
+[resident clipping contract](resident_byte_decoder.md#resident-active-gradient-clipping),
+including its small-norm/near-one no-ops; it is not PyTorch's epsilon-adjusted
+`clip_grad_norm_` formula or Riemannian momentum transport.
+
+V10 report/checkpoint envelopes bind the exact request bytes, including the
+clipping policy. Changing the limit or disabling clipping rejects resume.
+Legacy v1-v9 retain unclipped execution; v10 `disabled.v1` takes that same path.
+Model-only checkpoints still do not encode a caller's next-step policy: use the
+complete study request/checkpoint pair for reproducible study continuation.
 
 ## Train, Resume, Serve
 
@@ -64,6 +99,7 @@ import spiraltorch as st
 
 study = st.nn.ByteCorpusStudy.from_json(Path("adamw-request.json").read_bytes())
 print(study.design_schema, json.loads(study.optimizer_recipe_json))
+print(json.loads(study.gradient_clip_recipe_json))  # disabled.v1 for legacy requests
 study.validate_segment()  # CPU-only preflight, including expanded checkpoint size
 first = study.advance_wgpu(3)
 saved = first.checkpoint.to_json()
@@ -78,16 +114,18 @@ inference = artifact.restore_wgpu()
 
 Parsing, metadata inspection and checkpoint validation work in a CPU-only wheel.
 Execution there raises `NotImplementedError`; it is not a hidden CPU fallback.
-Rust exposes the same `design_schema()`, `optimizer_recipe_json()`, `advance`
+Rust exposes the same `design_schema()`, `optimizer_recipe_json()`,
+`gradient_clip_recipe_json()`, `advance`
 and checkpoint/artifact operations.
 
 The browser example exports `inspect_resident_byte_learning(input)` without
 requesting a GPU, plus the existing `advance_resident_byte_learning` and
-artifact functions. Its learning/resume pages accept v9. Keep request and
+artifact functions. Its learning/resume pages accept v9/v10. The packaged WASM
+client exposes the readonly `gradientClipRecipeJson` getter. Keep request and
 checkpoint/model JSON opaque through JavaScript transport: reconstruction can
 lose signed-zero bits.
 
-V9 report/checkpoint envelopes retain the geometry design, exact request-byte
+V9/v10 report/checkpoint envelopes retain the geometry design, exact request-byte
 identity and all case histories. AdamW model checkpoints use model envelope v6,
 preserving their topology-specific v1-v5 `model_schema`. Resume validates the
 optimizer configuration and requires each active clock to equal the study
@@ -121,9 +159,12 @@ parameters, held-out losses, geometric learning deltas, both moments and
 accepted/frozen clocks. Every moment tensor also requires relative L2 error at
 most 0.002, without an absolute floor that could hide erased tiny history.
 At the final cursor, paused and no-op-resumed reports must match exactly.
-V9 retains the selected design's original controls and
+V9/v10 retain the selected design's original controls and
 contrasts, rather than treating all new requests as the most complex geometry.
 The resume verifier also binds saved optimizer bits to the paused report.
+For v10, the independent Torch reference computes a float64 norm from its own
+float32 VJPs and scales before the optimizer; it does not copy Rust's reduction
+or factor decomposition. Report comparison requires matching clipping metadata.
 
 The rate remains part of the fixed request. Matching data, initial values and
 update counts is not equal compute, tuned hyperparameters or equal model
@@ -134,3 +175,17 @@ The [2026-10-15 qualification record](../benchmarks/results/2026-10-15-byte-stud
 keeps all three seeds, both optimizer recipes, native/browser comparisons,
 resume checks and known limitations. Full corpus requests and model states
 remain private; source revisions, hashes and reconstruction steps are public.
+
+The [v10 client qualification](../benchmarks/results/2026-10-18-byte-study-clipping/README.md)
+adds installed Python interruption recovery and packaged browser fresh-page
+resume. It keeps the failed small-SGD minimum-delta control alongside passing
+numerical conditions; choosing a tiny clip limit is not automatically a useful
+learning recipe.
+
+The [1,024-update clipping study](../benchmarks/results/2026-10-18-byte-clipping-1024/README.md)
+compares the same three-arm AdamW request with clipping disabled and at 0.01.
+Both recover exactly from a killed step-512 worker. The active recipe passes
+the unchanged numerical gate but has worse final BPB in every arm; the disabled
+recipe reproduces its original strict failure. This is a numerical-agreement/quality
+tradeoff for one fixed recipe, not a recommended default or a numerical repair
+of the original unclipped path.

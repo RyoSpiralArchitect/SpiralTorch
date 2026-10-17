@@ -1,0 +1,101 @@
+{
+  "schema": "spiraltorch.resident_parameter_clip.torch.v1",
+  "passed": true,
+  "torch": "2.12.1",
+  "device": "cpu",
+  "cases": [
+    {
+      "name": "global",
+      "norm_f64": 5.0,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "zero",
+      "norm_f64": 0.0,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "norm_floor",
+      "norm_f64": 1.4142135537782532e-08,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "near_one",
+      "norm_f64": 1.0,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "wide_norm",
+      "norm_f64": 5.8938631329669654e+38,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "tiny_scale",
+      "norm_f64": 5.8938631329669654e+38,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "frozen_excluded",
+      "norm_f64": 5.0,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "all_frozen",
+      "norm_f64": 0.0,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "many_partials",
+      "norm_f64": 55.59676249567055,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "floor_below",
+      "norm_f64": 1.1920928244535389e-07,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "floor_equal",
+      "norm_f64": 1.1920928955078125e-07,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "floor_above_9",
+      "norm_f64": 1.1920929310349493e-07,
+      "max_relative_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "floor_above_33",
+      "norm_f64": 1.192092922144369e-07,
+      "max_relative_error": 6.752701029766649e-08,
+      "passed": true
+    },
+    {
+      "name": "floor_above_257",
+      "norm_f64": 1.192092917679823e-07,
+      "max_relative_error": 9.422304384716457e-08,
+      "passed": true
+    },
+    {
+      "name": "subnormal_noop",
+      "norm_f64": 1.1754942106924494e-38,
+      "max_relative_error": 0.0,
+      "passed": true
+    }
+  ],
+  "quality_claim": false,
+  "scope": "same clipping policy, float64 Torch norm over exact f32 operands; no speed claim",
+  "input_sha256": "38ec99b5f2f8d9343bb4c3b0956831b6ef388a3b68022f307389a4bc63b55726"
+}

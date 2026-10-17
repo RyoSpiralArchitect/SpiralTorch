@@ -52,11 +52,15 @@ pub fn inspect_resident_byte_learning(input: &str) -> Result<String, wasm_bindge
     let optimizer: serde_json::Value =
         serde_json::from_str(&study.optimizer_recipe_json().map_err(error)?)
             .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let gradient_clip: serde_json::Value =
+        serde_json::from_str(&study.gradient_clip_recipe_json().map_err(error)?)
+            .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
     Ok(serde_json::json!({
         "schema":"spiraltorch.byte_corpus.inspection.v1",
         "request_sha256":study.request_sha256(),
         "design_schema":study.design_schema(),
         "optimizer":optimizer,
+        "gradient_clip":gradient_clip,
         "total_updates":study.total_updates(),
         "checkpoint_size_bound":study.checkpoint_size_bound().map_err(error)?
     })

@@ -21,7 +21,7 @@ Keep these decisions separate:
 
 | Stage | Shared contract | Working entry points |
 | --- | --- | --- |
-| Train and resume | Exact request, optimizer recipe and complete case state | [Rust study / Python](python/byte-corpus-studies.md), [WASM](wasm_byte_language_mlops.md) |
+| Train and resume | Exact request, optimizer/clipping recipes and complete case state | [Rust study / Python](python/byte-corpus-studies.md), [WASM](wasm_byte_language_mlops.md) |
 | Survive process interruption | Explicit immutable segment and parent identity | [Python local store and CLI](python/byte-study-runs.md) |
 | Select saved weights | Minimum development CE among actual saved checkpoints | [Rust / Python selector](byte_corpus_checkpoint_selection.md) |
 | Run the selected model | Geometry-bearing artifact and fixed-window inference | [Python artifacts](python/byte-model-artifacts.md), [WASM owners](wasm_byte_language_mlops.md) |
@@ -78,6 +78,25 @@ bounded mechanics checks, not evidence of a geometric language-quality gain.
 The [longer numerical comparison](../benchmarks/results/2026-10-18-wide-rounding/README.md)
 still has unresolved Key-bias differences against its fixed PyTorch reference;
 the passing short run does not replace that result.
+
+The [resident clipping slice](resident_byte_decoder.md#resident-active-gradient-clipping)
+now adds a Rust-owned stability mechanism to actual geometric byte-LM SGD and
+AdamW, with frozen-geometry and exact-continuation tests. The source-only
+[v10 study recipe](byte_corpus_optimizers.md#request-bound-clipping) makes that
+policy durable for the same Rust/Python/WASM runner. It explicitly preserves
+legacy unclipped studies and rejects resume with a changed clipping limit.
+This integration does not resolve or relax the longer numerical gate above.
+The [client qualification](../benchmarks/results/2026-10-18-byte-study-clipping/README.md)
+retains both exact recovery checks and a small-SGD minimum-update failure: when
+both runtimes round a geometric update to zero, numerical equality alone does
+not qualify it as demonstrated geometric learning.
+
+The [1,024-update comparison](../benchmarks/results/2026-10-18-byte-clipping-1024/README.md)
+extends exact process recovery to the longer three-arm study. Explicit clipping
+at 0.01 passes its unchanged Torch numerical gate, while disabled reproduces
+the prior Key-bias failures. Evaluation BPB worsens in all three clipped arms:
+numerical agreement and recovery are not quality improvement, and the limit
+is not promoted to a default. Both results and private-artifact hashes remain.
 
 Existing [HF/PEFT workflows](python/build-and-validation.md) retain their own
 adapter lineage and execution APIs. A native byte-LM artifact is not an HF

@@ -65,6 +65,11 @@ fn global_clip_gpu_wide_norm_tiny_scale_policy_and_disabled_path() {
         (2, 3, 1e-9, 1e-30),
         (1, 7, 0., 1.),
         (1, 257, 1., 100.),
+        (1, 9, f32::from_bits(0x332a_aaaa), 1e-30),
+        (1, 16, f32::from_bits(0x3300_0000), 1e-30),
+        (1, 9, f32::from_bits(0x332a_aaab), 1e-30),
+        (1, 33, f32::from_bits(0x32b2_416a), 1e-30),
+        (1, 257, f32::from_bits(0x31ff_8060), 1e-30),
     ] {
         for policy in [
             GraphGradientPolicy::Exact,

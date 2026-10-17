@@ -7,6 +7,15 @@ pub const SCALE_EPSILON: f32 = f32::EPSILON;
 pub const SCALE_CHUNK: f32 = 5.421011e-20; // 2^-64, a normal f32.
 pub const MAX_SCALE_FACTORS: usize = 12;
 
+/// Shared GPU norm merge and factorization for graph and model-owned updates.
+pub fn wgsl_source() -> String {
+    include_str!("gradient_clip.wgsl")
+        .replace("CLIP_NORM_FLOOR", &format!("{NORM_FLOOR:e}"))
+        .replace("CLIP_SCALE_CHUNK", &format!("{SCALE_CHUNK:e}"))
+        .replace("CLIP_SCALE_EPSILON", &format!("{SCALE_EPSILON:e}"))
+        .replace("CLIP_MAX_FACTORS", &MAX_SCALE_FACTORS.to_string())
+}
+
 #[derive(Debug, Error, Clone, Copy, PartialEq)]
 pub enum GradientClipError {
     #[error("gradient clip max norm must be positive and finite")]
@@ -97,6 +106,11 @@ mod tests {
 
     #[test]
     fn validates_and_preserves_noop_boundaries() {
+        assert_eq!(
+            NORM_FLOOR.to_bits() & 0x7fffff,
+            0,
+            "GPU floor must be a power of two"
+        );
         for x in [0., -1., f32::INFINITY, f32::NAN] {
             assert!(GlobalNormClip::new(x).is_err());
         }
@@ -114,6 +128,24 @@ mod tests {
             .unwrap()
             .as_slice()
             .is_empty());
+    }
+
+    #[test]
+    fn floor_neighbors_do_not_collapse_into_the_noop_boundary() {
+        let clip = GlobalNormClip::new(1e-30).unwrap();
+        for (bits, count, active) in [
+            (0x332a_aaaa, 9, false),
+            (0x3300_0000, 16, false),
+            (0x332a_aaab, 9, true),
+            (0x32b2_416a, 33, true),
+            (0x31ff_8060, 257, true),
+        ] {
+            let squared = f64::from(f32::from_bits(bits)).powi(2) * f64::from(count);
+            assert_eq!(
+                !clip.factors(squared).unwrap().as_slice().is_empty(),
+                active
+            );
+        }
     }
 
     #[test]

@@ -11,25 +11,27 @@ pub(super) enum Optimizer {
     Sgd {},
     #[serde(rename = "adamw_zero_rate_freeze.v1")]
     AdamW {
-        #[serde(deserialize_with = "optimizer_scalar")]
+        #[serde(deserialize_with = "recipe_scalar")]
         beta1: f32,
-        #[serde(deserialize_with = "optimizer_scalar")]
+        #[serde(deserialize_with = "recipe_scalar")]
         beta2: f32,
-        #[serde(deserialize_with = "optimizer_scalar")]
+        #[serde(deserialize_with = "recipe_scalar")]
         epsilon: f32,
-        #[serde(deserialize_with = "optimizer_scalar")]
+        #[serde(deserialize_with = "recipe_scalar")]
         weight_decay: f32,
-        #[serde(deserialize_with = "optimizer_scalar")]
+        #[serde(deserialize_with = "recipe_scalar")]
         geometry_weight_decay: f32,
     },
 }
 
-fn optimizer_scalar<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<f32, D::Error> {
+pub(super) fn recipe_scalar<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<f32, D::Error> {
     let value = f64::deserialize(d)?;
     let narrowed = value as f32;
     if !value.is_finite() || (value != 0. && !narrowed.is_normal()) {
         return Err(serde::de::Error::custom(
-            "optimizer scalar must be zero or normal float32",
+            "training recipe scalar must be zero or normal float32",
         ));
     }
     Ok(narrowed)
@@ -143,7 +145,7 @@ impl Request {
 }
 
 pub(super) fn validate_spec(r: &Request) -> Result<()> {
-    if r.schema == REQUEST_SCHEMA {
+    if r.schema == REQUEST_SCHEMA || r.schema == clipping::REQUEST_SCHEMA {
         if r.optimizer.is_none()
             || !r.design_schema.as_deref().is_some_and(|s| {
                 matches!(
@@ -160,11 +162,11 @@ pub(super) fn validate_spec(r: &Request) -> Result<()> {
             })
         {
             return Err(
-                "v9 requires an explicit optimizer and legacy geometry design schema".into(),
+                "v9/v10 require an explicit optimizer and v1-v8 geometry design schema".into(),
             );
         }
     } else if r.optimizer.is_some() || r.design_schema.is_some() {
-        return Err("optimizer/design metadata belongs to v9 only".into());
+        return Err("optimizer/design metadata belongs to v9/v10 only".into());
     }
     if r.optimizer().config()?.is_some() {
         for name in ["backbone", "geometry.parameter"] {
@@ -175,4 +177,4 @@ pub(super) fn validate_spec(r: &Request) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

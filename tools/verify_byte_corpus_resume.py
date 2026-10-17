@@ -130,6 +130,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                                  else f"spiraltorch.byte_corpus.partial.v{wire_version}"), "partial schema")
     for report in (baseline, partial, resumed):
         optimizer.metadata(request, report)
+        STUDY.load_reference("byte_corpus_gradient_clip").metadata(request, report)
         require(report["engine"] == "spiraltorch", "foreign engine")
         require(report["request_sha256"] == request_hash, "report request identity")
         require(len(report["cases"]) == len(request["cases"]), "missing report cases")
@@ -140,7 +141,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
     for case, full, prefix, resumed_case, saved in zip(request["cases"], baseline["cases"],
                                                     partial["cases"], resumed["cases"], checkpoint["cases"]):
         for report in (full, prefix, resumed_case):
-            if wire_version == 9:
+            if wire_version >= 9:
                 require("optimizer_state" in report, "missing optimizer state")
                 optimizer.validate_state(case, report["optimizer_state"], controls,
                                          cursor if report is prefix else total, STUDY.parameter_frozen)
@@ -197,7 +198,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         model = STUDY.decode_json(saved["model_json"])
         stored = stored_parameters(model, cursor, case.get("pair_metric"), case.get("head_pair_metrics"),
                                    case.get("mixture"), controls)
-        if wire_version == 9:
+        if wire_version >= 9:
             optimizer.validate_state(case, model.get("optimizer"), controls, cursor, STUDY.parameter_frozen)
             if controls["kind"] == optimizer.ADAMW:
                 for a, b in zip(model["optimizer"]["slots"], prefix["optimizer_state"]["slots"]):
@@ -233,9 +234,11 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
             "exact_training_and_evaluation_prefixes": True,
             "saved_parameter_bits_match_paused_report": True, "cases": summaries,
             "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence"}
-    if wire_version == 9:
+    if wire_version >= 9:
         result.update(design_schema=request["design_schema"], optimizer=controls,
                       saved_optimizer_bits_and_clocks_match=True)
+    if wire_version == 10:
+        result["gradient_clip"] = STUDY.load_reference("byte_corpus_gradient_clip").recipe(request)
     return result
 
 

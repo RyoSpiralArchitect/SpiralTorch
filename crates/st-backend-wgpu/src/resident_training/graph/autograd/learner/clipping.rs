@@ -1,8 +1,6 @@
 //! Lazily prepared global clipping; disabled learners keep the old update path.
 use super::*;
-use st_kernel_contracts::gradient_clip::{
-    MAX_SCALE_FACTORS, NORM_FLOOR, SCALE_CHUNK, SCALE_EPSILON,
-};
+use st_kernel_contracts::gradient_clip::MAX_SCALE_FACTORS;
 
 pub(super) struct Clipping {
     passes: Vec<Pass>,
@@ -63,10 +61,8 @@ impl Clipping {
             bind_group_layouts: &[&layout],
             push_constant_ranges: &[],
         });
-        let extra = include_str!("../../../../shaders/graph_gradient_clip.wgsl")
-            .replace("CLIP_NORM_FLOOR", &format!("{NORM_FLOOR:e}"))
-            .replace("CLIP_SCALE_CHUNK", &format!("{SCALE_CHUNK:e}"))
-            .replace("CLIP_SCALE_EPSILON", &format!("{SCALE_EPSILON:e}"));
+        let extra = st_kernel_contracts::gradient_clip::wgsl_source()
+            + include_str!("../../../../shaders/graph_gradient_clip.wgsl");
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("learner.clip.shader"),
             source: wgpu::ShaderSource::Wgsl(
