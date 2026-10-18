@@ -91,6 +91,24 @@ class InputPreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symbolic link"):
             self.call()
 
+    def test_package_identity_detects_source_native_and_inventory_changes(self):
+        package = self.root / "package"
+        package.mkdir()
+        (package / "core.py").write_bytes(b"first")
+        (package / "native.so").write_bytes(b"native")
+        fingerprint = PREFLIGHT["package_identity"]
+        initial = fingerprint(package)
+        self.assertEqual(set(initial), {"core.py", "native.so"})
+        (package / "native.so").write_bytes(b"changed")
+        self.assertNotEqual(fingerprint(package), initial)
+        (package / "native.so").write_bytes(b"native")
+        self.assertEqual(fingerprint(package), initial)
+        (package / "new.py").write_bytes(b"added")
+        self.assertNotEqual(fingerprint(package), initial)
+        (package / "new.py").unlink()
+        (package / "core.py").write_bytes(b"changed")
+        self.assertNotEqual(fingerprint(package), initial)
+
 
 if __name__ == "__main__":
     unittest.main()

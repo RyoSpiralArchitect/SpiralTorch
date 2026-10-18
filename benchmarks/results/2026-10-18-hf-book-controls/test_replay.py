@@ -42,8 +42,10 @@ class ReplayTests(unittest.TestCase):
         self.assertIn(str(API["EXAMPLE"]), command)
         self.assertEqual(command[command.index("--max-steps") + 1], "512")
         self.assertEqual(command[command.index("--expected-dataset-id") + 1], "data-pin")
-        self.assertIn("development/b.txt", command)
+        self.assertIn(str(Path("development/b.txt").resolve()), command)
         self.assertNotIn("reserve/never.txt", command)
+        for option in ("--model-dir", "--geometry-artifact", "--output", "--train-text", "--eval-text"):
+            self.assertTrue(Path(command[command.index(option) + 1]).is_absolute(), option)
 
     def test_artifact_metrics_count_parameters_not_fixed_radius(self):
         values = API["state_metrics"](state(0., 1.), state(.25, 1.))

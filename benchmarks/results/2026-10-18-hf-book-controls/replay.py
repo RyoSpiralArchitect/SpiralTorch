@@ -55,17 +55,17 @@ def cases_for(plan):
 
 
 def command_for(plan, preflight, selected, model_dir, artifacts, output, case):
-    command = [sys.executable, "-I", "-B", str(EXAMPLE), "--model-dir", str(model_dir),
+    command = [sys.executable, "-I", "-B", str(EXAMPLE), "--model-dir", str(model_dir.resolve()),
                "--device", plan["model"]["device"], "--prompt", plan["generation_prompt"],
                "--expected-dataset-id", preflight["tokenized_dataset_identity"],
-               "--geometry-artifact", str(artifacts / f"{case['arm']}-initial.json"),
+               "--geometry-artifact", str((artifacts / f"{case['arm']}-initial.json").resolve()),
                "--geometry-artifact-id", preflight["artifacts"][case["arm"]]["artifact_id"],
-               "--seed", str(case["seed"]), "--output", str(output)]
+               "--seed", str(case["seed"]), "--output", str(output.resolve())]
     for key in ("context_length", "max_steps", "save_steps", "batch_size", "learning_rate", "max_grad_norm"):
         command.extend(("--" + key.replace("_", "-"), str(plan[key])))
     for split, option in (("train", "--train-text"), ("development", "--eval-text")):
         for path in selected[split]:
-            command.extend((option, str(path)))
+            command.extend((option, str(path.resolve())))
     return command
 
 
@@ -175,8 +175,9 @@ def main():
             preflight["artifacts"][arm]["artifact_id"], preflight["runtime_identity"])
         initial_states[arm] = json.loads(artifact.state_json())
     package = Path(st.__file__).parent
-    package_files = sorted([*package.glob("*.py"), *package.glob("*.so")])
-    package_ids = {p.name: digest(p) for p in package_files}
+    package_ids = PREFLIGHT["package_identity"](package)
+    if package_ids != preflight["installed_package_ids"]:
+        raise ValueError("installed SpiralTorch bytes changed since preflight")
     source_files = [Path(__file__), HERE / "preflight.py", HERE / "prepare.py", EXAMPLE, HELPER, OWNER]
     source_ids = {str(p.relative_to(ROOT)): digest(p) for p in source_files}
     args.output.mkdir(parents=True, exist_ok=False)
@@ -194,7 +195,7 @@ def main():
         check_inputs()
         load_pinned(preflight_path, args.expected_preflight_id)
         if (any(digest(ROOT / name) != pin for name, pin in source_ids.items())
-                or any(digest(package / name) != pin for name, pin in package_ids.items())):
+                or PREFLIGHT["package_identity"](package) != package_ids):
             raise ValueError("study code or installed runtime changed during execution")
 
     def execute(case):

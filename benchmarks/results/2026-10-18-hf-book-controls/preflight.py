@@ -11,6 +11,17 @@ def identity(data):
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def package_identity(package):
+    result = {}
+    for path in sorted([*package.glob("*.py"), *package.glob("*.so")]):
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1_048_576), b""):
+                digest.update(block)
+        result[path.name] = "sha256:" + digest.hexdigest()
+    return result
+
+
 def inputs(plan_path, expected_plan_id, data, expected_manifest_id):
     api = runpy.run_path(str(Path(__file__).with_name("prepare.py")))
     raw = api["read_bounded"](plan_path, 65_536)
@@ -82,6 +93,8 @@ def main():
     import transformers
     import accelerate
 
+    package = Path(st.__file__).parent
+    package_ids = package_identity(package)
     torch.set_num_threads(2)
     datasets = {split: st.HfGeometryDataset.from_texts(tokenizer, rows, plan["context_length"])
                 for split, rows in texts.items()}
@@ -115,6 +128,8 @@ def main():
     # Revalidate selected inputs after tokenization; never open reserve files.
     if inputs(args.plan, args.expected_plan_id, args.data, args.expected_manifest_id)[4] != manifest_id:
         raise ValueError("preparation manifest changed during preflight")
+    if package_identity(package) != package_ids:
+        raise ValueError("installed SpiralTorch changed during preflight")
     args.output.mkdir(parents=True, exist_ok=False)
     artifact_info = {}
     for arm, artifact in artifacts.items():
@@ -131,6 +146,7 @@ def main():
         "reserve_opened": False, "model_loaded": False, "optimizer_updates": 0,
         "versions": {"python": __import__("sys").version.split()[0], "torch": torch.__version__,
                      "transformers": transformers.__version__, "accelerate": accelerate.__version__},
+        "installed_package_ids": package_ids,
         "sources": {str(p.relative_to(root)): identity(p.read_bytes()) for p in (
             Path(__file__), Path(__file__).with_name("prepare.py"), example)},
     }
