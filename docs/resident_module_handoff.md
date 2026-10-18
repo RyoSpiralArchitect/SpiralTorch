@@ -83,6 +83,10 @@ Free every owning browser handle after use, including intermediate snapshots.
 - Supported built-ins are `Linear`, `Gelu`, `Relu`, `Scaler` and `Sequential`.
   Weight, bias and gain slots all transfer; packed forward/transpose weight
   caches are invalidated. Existing supported host tensor layouts are preserved.
+  This describes the handoff itself. A subsequent `Linear.backward` canonicalizes
+  trainable values and accumulated gradients to row-major storage for the shared
+  optimizer, preserving their logical coordinates. Handoff tests also compare
+  the ensuing optimizer step and forward output against a row-major model.
 - Both the current Module and updated plan must match the baseline's input
   layout, graph program, parameter slots, roles and shapes. Only the existing
   Rust pointwise-fusion normalization is used to compare fused/unfused programs;

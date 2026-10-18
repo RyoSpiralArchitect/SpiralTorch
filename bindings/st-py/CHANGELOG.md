@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Align native Linear/LoRA parameter and accumulated-gradient layouts before
+  SGD, Realgrad or AmegaHypergrad updates, canonicalizing storage to row-major
+  during nonempty backward. Column-major state now follows the
+  same logical update as row-major state, including warmed projection caches
+  and multiple microbatches. Add installed-wheel learning gates with foreign ML
+  imports forbidden and remove the legacy Linear/LoRA test's fake Torch module.
+  This fixes native layer primitives; it does not add PEFT import or LoRA
+  placement/learning inside `NativeCausalLm`.
+
 - Add opt-in native repetition-unlikelihood learning for the frozen GPT-2
   decoder and attached geometry. Shared Rust tensor loss/VJP and candidate
   selection feed decoder gradients, independently normalized accumulation,

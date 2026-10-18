@@ -19,6 +19,7 @@ models; they must not be mistaken for the native path below.
 | Add repetition-aware language learning | [Native repetition objective](native-repetition.md) | Shared Rust candidates, loss/VJP, two-normalizer reduction and pinned recipe; no Torch auxiliary loss |
 | Generate with ordinary or Z-Space control | [`NativeCausalLmGenerator`, `NativeCausalLmContext`](native-generation.md) | Rust selection, RNG and explicit K/V reuse; no Torch generation loop |
 | Execute portable geometry independently | [`NativeGeometryRuntime`](native-geometry-runtime.md) | Same admitted artifact recipes without a foreign model; standalone MSE is not LM fine-tuning |
+| Train a native dense or low-rank layer | `st.nn.Linear`, `st.nn.LoraLinear` | Rust forward/VJP and SGD, Realgrad or AmegaHypergrad; LoRA freezes its base, but is not a native decoder attachment or PEFT importer |
 | Run other HF models or PEFT adapters today | `load_hf_causal_lm_artifact`, `prepare_hf_finetune_model`, HF Trainer helpers | Explicit optional Transformers/Torch/PEFT path, not a fallback inside `NativeCausalLm` |
 
 The native importer rejects unsupported configurations and extra tensors,

@@ -91,6 +91,14 @@ fn handoff_updates_all_roles_and_invalidates_forward_and_transpose_packs() {
             .unwrap(),
         6
     );
+    model
+        .visit_parameters(&mut |p| {
+            if p.name() == "up::weight" {
+                assert_eq!(p.value().layout(), Layout::ColMajor);
+            }
+            Ok(())
+        })
+        .unwrap();
     assert_ne!(model.forward(&x).unwrap(), before);
     assert_eq!(
         model.forward(&x).unwrap().data(),
@@ -104,11 +112,21 @@ fn handoff_updates_all_roles_and_invalidates_forward_and_transpose_packs() {
     model
         .visit_parameters(&mut |p| {
             if p.name() == "up::weight" {
-                assert_eq!(p.value().layout(), Layout::ColMajor);
+                assert_eq!(p.value().layout(), Layout::RowMajor);
             }
             Ok(())
         })
         .unwrap();
+    model.apply_step(0.03).unwrap();
+    reference.apply_step(0.03).unwrap();
+    assert_eq!(
+        plan(&model).to_json().unwrap(),
+        plan(&reference).to_json().unwrap()
+    );
+    assert_eq!(
+        model.forward(&x).unwrap().data(),
+        reference.forward(&x).unwrap().data()
+    );
 }
 
 #[test]

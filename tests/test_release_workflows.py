@@ -205,6 +205,22 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     self.assertLess(workflow.index("python -I -B " + script),
                                     workflow.index("uses: actions/upload-artifact@"))
 
+    def test_native_layer_learning_is_gated_without_foreign_ml_or_stubs(self) -> None:
+        script = "bindings/st-py/tests/test_nn_native_learning.py -v"
+        for filename in ("ci.yml", "wheels.yml", "release_wheels.yml"):
+            workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+            normal, floor = workflow.split("      - name: Verify installed wheel on CPython 3.8 (Linux)\n", 1)
+            floor = floor.split("\n      - ", 1)[0]
+            prefix = "" if filename == "ci.yml" else "../../"
+            with self.subTest(workflow=filename):
+                self.assertIn("python -I -B " + prefix + script, normal)
+                self.assertIn("python -I -B " + script, floor)
+        smoke = (ROOT / "bindings/st-py/tests/test_nn_native_learning.py").read_text(encoding="utf-8")
+        self.assertIn("sys.meta_path.insert(0, NativeOnly())", smoke)
+        self.assertIn('"torch", "transformers", "peft", "accelerate", "numpy", "safetensors"', smoke)
+        legacy = (ROOT / "bindings/st-py/tests/test_nn_linear_sequential.py").read_text(encoding="utf-8")
+        self.assertNotIn("_ensure_torch_stub", legacy)
+
     def test_manual_and_official_smokes_identify_external_gradient_basis(self) -> None:
         for filename in ("wheels.yml", "release_wheels.yml"):
             with self.subTest(workflow=filename):
