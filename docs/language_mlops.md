@@ -34,6 +34,13 @@ permit is process-local and is never reconstructed from a report after restart.
 
 ## Bring Geometry To HF Models
 
+For supported GPT-2 checkpoints, the source-only
+[native corpus trainer](python/native-corpus-training.md) now runs document-safe
+geometry learning without HF/Torch: Rust owns the decoder, accumulation, AdamW,
+fixed-order cursor and paired checkpoint. Python supplies encoded documents and
+local persistence. This does not make arbitrary HF architectures native or reuse
+the byte-study format; the optional HF integration below remains separate.
+
 The [portable geometry adapter](python/geometry-artifacts.md) extends the same
 Rust-owned-state direction to existing HF language models: learned WaveGate,
 Topos, Elliptic and Fractional tensors travel with their recipes, insertion paths

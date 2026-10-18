@@ -154,6 +154,11 @@ It accepts different unpadded window lengths, weights each loss/gradient by its
 number of shifted targets, and applies one update after the group. Token
 extraction, forward/backward admission and snapshot checks remain native.
 
+For an ordered document corpus, the [native corpus trainer](native-corpus-training.md)
+reuses this accumulator and Rust's document boundaries. It owns the model/optimizer
+pair, fixed recipe and data cursor, so whole runs can continue without HF Trainer
+or a Python reimplementation of the loss/optimizer loop.
+
 ### Selected Targets and Label Smoothing
 
 Source builds also accept HF-style **unshifted** `labels` with the same flat

@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "objective_tests.rs"]
 mod objective;
+#[path = "training_tests.rs"]
+mod training;
 
 fn trainable(model: &NativeCausalLm) -> GeometryAdapterArtifact {
     let mut record = artifact(model, "transformer.h.0.attn", 0.2)

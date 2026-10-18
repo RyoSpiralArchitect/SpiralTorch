@@ -50,6 +50,33 @@ fn identity(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+fn validate_placement_clocks(
+    keys: &[(String, String)],
+    clocks: &[u32],
+    revision: u64,
+) -> Result<()> {
+    if keys.len() != clocks.len() {
+        return Err("native geometry AdamW clock count mismatch".into());
+    }
+    let mut placements = std::collections::BTreeMap::new();
+    for ((path, _), &clock) in keys.iter().zip(clocks) {
+        if u64::from(clock) > revision {
+            return Err("native geometry AdamW clock exceeds revision".into());
+        }
+        if placements
+            .insert(path, clock)
+            .is_some_and(|old| old != clock)
+        {
+            return Err("native geometry AdamW placement clocks differ".into());
+        }
+    }
+    let accepted: u128 = placements.values().map(|&n| u128::from(n)).sum();
+    if u128::from(revision) > accepted {
+        return Err("native geometry AdamW revision exceeds accepted placement updates".into());
+    }
+    Ok(())
+}
+
 impl NativeGeometryAdamW {
     pub fn new(
         artifact: &GeometryAdapterArtifact,
@@ -95,6 +122,30 @@ impl NativeGeometryAdamW {
     }
     pub fn max_gradient_norm(&self) -> Option<f32> {
         self.clip.map(GlobalNormClip::max_norm)
+    }
+
+    /// Check a caller's uniform-all-placement update history, while permitting
+    /// independently aged placements at that caller's initial boundary.
+    pub fn validate_uniform_continuation(
+        &self,
+        initial_revision: u64,
+        initial_clocks: &[u32],
+        accepted_steps: u64,
+    ) -> Result<()> {
+        validate_placement_clocks(&self.keys, initial_clocks, initial_revision)?;
+        if initial_revision.checked_add(accepted_steps) != Some(self.revision)
+            || self
+                .state
+                .slots
+                .iter()
+                .zip(initial_clocks)
+                .any(|(slot, &initial)| {
+                    u64::from(initial).checked_add(accepted_steps) != Some(u64::from(slot.steps))
+                })
+        {
+            return Err("native geometry AdamW uniform continuation clocks differ".into());
+        }
+        Ok(())
     }
 
     /// Canonical checkpoint bytes. Save these together with the geometry artifact
@@ -177,19 +228,11 @@ impl NativeGeometryAdamW {
         state.validate(&shapes, record.revision)?;
         // The shared slot validator permits independently clocked tensors. This
         // owner updates all trainable tensors of a selected placement together.
-        let mut placement_clocks = std::collections::BTreeMap::new();
-        for ((path, _), slot) in result.keys.iter().zip(&state.slots) {
-            if placement_clocks
-                .insert(path, slot.steps)
-                .is_some_and(|clock| clock != slot.steps)
-            {
-                return Err("native geometry AdamW placement clocks differ".into());
-            }
-        }
-        let accepted_placements: u128 = placement_clocks.values().map(|&n| u128::from(n)).sum();
-        if u128::from(record.revision) > accepted_placements {
-            return Err("native geometry AdamW revision exceeds accepted placement updates".into());
-        }
+        validate_placement_clocks(
+            &result.keys,
+            &state.slots.iter().map(|s| s.steps).collect::<Vec<_>>(),
+            record.revision,
+        )?;
         result.state = state;
         result.revision = record.revision;
         Ok(result)

@@ -2,7 +2,7 @@
 import pytest
 
 torch = pytest.importorskip("torch")
-import spiraltorch as st
+import spiraltorch as st  # noqa: E402
 
 pytestmark = pytest.mark.skipif(getattr(st, "_rs", None) is None, reason="native extension required")
 
@@ -16,7 +16,7 @@ def flat(value):
     return [item for row in value.tolist() for item in row]
 
 
-@pytest.mark.parametrize("shape", [(1, 1), (7, 3), (4, 257)])
+@pytest.mark.parametrize("shape", [(1, 1), (7, 3), (4, 257), (4, 50_257)])
 @pytest.mark.parametrize("smoothing", [0.0, 0.13, 1.0])
 @pytest.mark.parametrize("reduction", ["none", "sum", "mean"])
 def test_cross_entropy_value_and_vjp_match_float64_pytorch(shape, smoothing, reduction):

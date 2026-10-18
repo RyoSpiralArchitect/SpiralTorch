@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add Rust-owned `NativeCausalLmTrainer` for fixed-order document-safe geometry
+  learning, token-weighted microbatch groups and atomic model/optimizer/cursor
+  updates. Native checkpoints bind base, complete tokens/labels, recipe and
+  accepted-update position. Expose thin Python handles and an offline example;
+  no Torch fallback, shuffle or base-weight FT is implied.
+
 - Compact native selected-label readout before final normalization and the
   vocabulary head, including reverse scatter into the unchanged full decoder
   context. Logit budgets now cover actual scored rows after bounded label

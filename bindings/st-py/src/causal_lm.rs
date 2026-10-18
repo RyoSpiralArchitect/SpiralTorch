@@ -11,6 +11,7 @@ use st_nn::causal_lm::{
 use std::collections::BTreeMap;
 
 mod accumulation;
+mod training;
 use accumulation::PyNativeCausalLmAccumulator;
 
 fn error(value: impl std::fmt::Display) -> PyErr {
@@ -320,5 +321,6 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLm>()?;
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;
+    training::register(module)?;
     Ok(())
 }

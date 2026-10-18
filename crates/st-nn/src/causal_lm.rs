@@ -15,9 +15,13 @@ mod decoder;
 mod gpt2;
 mod learning;
 mod objective;
+mod training;
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
+pub use training::{
+    CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
+};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
