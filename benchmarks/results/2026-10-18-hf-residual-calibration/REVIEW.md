@@ -24,3 +24,22 @@ installed-wheel affine/artifact tests, Ruff and diff checks. No calibration or
 pretrained-model measurement had been executed at this source-freeze boundary.
 Actual calibration tolerance, artifact roundtrip logits and loss reproduction
 remain runtime gates; a source review does not establish those outcomes.
+
+## Saved-State Verification Follow-Up
+
+A read-only review of the two new verifier/test files found missing stage-state
+identity checks. The verifier now reconstructs each intermediate state using
+only preceding layer strength updates and uses Rust-issued canonical artifact
+IDs for source, intermediate and final stages. Regressions reject missing,
+swapped and incorrect IDs. The focused independent follow-up found no remaining
+actionable findings; it did not run tests or inspect private outcomes.
+
+Main-owned verification subsequently passed all 27 candidates and 102 retained
+traces, including native stage identities, learned-state equality, the fitted
+strength rule and exact public projection. Thirteen model-free tests pass.
+The original measurement and source files were unchanged by the verifier fix.
+
+Final bounded publication review found no actionable findings: all 27 cases,
+12 contrasts, displayed means/ranges, mismatch counts and in-scope hash links
+agree. The reviewer checked public files only; raw trace reaggregation and
+private state verification remain main-owned evidence, not independent reruns.

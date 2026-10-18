@@ -1,0 +1,4026 @@
+{
+  "schema": "spiraltorch.hf_residual_calibration_results.v1",
+  "status": "completed",
+  "plan_id": "sha256:6dbb534990af9cdd0e52f2462223e0ad60e4ba417d271248472693543397b031",
+  "execution_id": "sha256:67138e9b4b623ad32987e715afd6f371366244763733a80674beaa5b98dfc640",
+  "cases": [
+    {
+      "arm": "ordinary",
+      "seed": 41,
+      "mode": "reference",
+      "source_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e",
+      "candidate_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e",
+      "target_artifact_id": null,
+      "development_loss": 4.065830230712891,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:127ab5ae28f041b7313c75c4b24a73c81ed6da13bc05693636b88702d5129c3a",
+        "geometry_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.017109475314094576
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.01575689135382796
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.008856768651472256
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.01878755019424799
+          }
+        ],
+        "trace_id": "sha256:e48924260da2c7d39e63f9a1269273eca5cca46a4cff8ee09d5df71460f8fecf",
+        "geometry_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:d0fadbe4859532299088d92f43e8c824b4522535de66452235121e07c3640d7c"
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 41,
+      "mode": "reference",
+      "source_artifact_id": "sha256:59c666518ec9fbfcffb8a93841c0e3ceb220d910a5716def88da42f2204e1012",
+      "candidate_artifact_id": "sha256:59c666518ec9fbfcffb8a93841c0e3ceb220d910a5716def88da42f2204e1012",
+      "target_artifact_id": null,
+      "development_loss": 4.1108903884887695,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:29171af126d446b4812c0c6d6112d2738a4d20ae0ef19f2610a396383dbb39c8",
+        "geometry_artifact_id": "sha256:59c666518ec9fbfcffb8a93841c0e3ceb220d910a5716def88da42f2204e1012"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0030261015821835325
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.002311869285058483
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.001207953069834494
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0007006813424979201
+          }
+        ],
+        "trace_id": "sha256:6087007f99679e0c08bdec7bd1d93065e81f8426efc6ff5f699fed7fb24617b4",
+        "geometry_artifact_id": "sha256:59c666518ec9fbfcffb8a93841c0e3ceb220d910a5716def88da42f2204e1012"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:7a5fd10c354dad31711074ab60e693bb5b3df34e97ee6b01f86c7ebc81a96800"
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 41,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e",
+      "candidate_artifact_id": "sha256:c5fc116aa2b13f822262c1bc1d52b315885c385344ebf0a9bd0b6108b6452571",
+      "target_artifact_id": "sha256:59c666518ec9fbfcffb8a93841c0e3ceb220d910a5716def88da42f2204e1012",
+      "development_loss": 4.111608028411865,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:127ab5ae28f041b7313c75c4b24a73c81ed6da13bc05693636b88702d5129c3a",
+          "geometry_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:918ed35fc4ae6a0e583a2a955af4adcc90ec046b991f24cfb43ce47a20e4a96c",
+          "geometry_artifact_id": "sha256:46c949e2b95903b287137b0006d7c42b4bf3a3667f255460279872bc819b745b"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:ac8ed54be0290a70b7b31491164fb1de0c1b1dfc85cbb26673eb4319d6bdbf60",
+          "geometry_artifact_id": "sha256:b9e2eda19fa9531a71b8d23d1518919edcebd6d1f24ae8b37500bcc62fb061f9"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:0cb84e28ca24bf168dbd5b19f08e3d5d0f487ad70b526307a886fb3640a7d29c",
+          "geometry_artifact_id": "sha256:e70f3eb38f345e1bb7fe6a41a178d40a68c2277ee58a23b4278723368d4a2ad4"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:096ffbabc4f94114f66cf4651b56cf13d90ea96d2c7b1278977b2388b1b1ff52",
+        "geometry_artifact_id": "sha256:c5fc116aa2b13f822262c1bc1d52b315885c385344ebf0a9bd0b6108b6452571"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:52b12af8c19d6e3daa15de1f9cde9a459754fe843f157ae3419407af6cdf0476",
+        "geometry_artifact_id": "sha256:c5fc116aa2b13f822262c1bc1d52b315885c385344ebf0a9bd0b6108b6452571"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:86b099a234687c7c5efb9cb38d347da10922e4a3e50d39194acf7141d83fd1d9"
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 41,
+      "mode": "reference",
+      "source_artifact_id": "sha256:93518c6a83cf07a67fba5a12099fc3ffcc239794ed69f20404b776b5982ff17e",
+      "candidate_artifact_id": "sha256:93518c6a83cf07a67fba5a12099fc3ffcc239794ed69f20404b776b5982ff17e",
+      "target_artifact_id": null,
+      "development_loss": 4.1084113121032715,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:86124959bbe68bdbe4fe41f57240893a7a3d2ba103649ec9ba39578d5a7eabfd",
+        "geometry_artifact_id": "sha256:93518c6a83cf07a67fba5a12099fc3ffcc239794ed69f20404b776b5982ff17e"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.004092429361245511
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.003126669862692424
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0016247056104403636
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0009236502854428194
+          }
+        ],
+        "trace_id": "sha256:0675024d91cb060fc9ee9065d1ec81589d447a450a93e5a6ac7f3e9e3e252fb7",
+        "geometry_artifact_id": "sha256:93518c6a83cf07a67fba5a12099fc3ffcc239794ed69f20404b776b5982ff17e"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:4f872a4205470e90481bfce9b4ad68550a40b153bd9b62ac5ca3755451c2d004"
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 41,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e",
+      "candidate_artifact_id": "sha256:8d49a0dbba294b2f384f2b8edf3743f4b567b70cef014dcf2952dd87f8d6d1e1",
+      "target_artifact_id": "sha256:93518c6a83cf07a67fba5a12099fc3ffcc239794ed69f20404b776b5982ff17e",
+      "development_loss": 4.109343528747559,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:127ab5ae28f041b7313c75c4b24a73c81ed6da13bc05693636b88702d5129c3a",
+          "geometry_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:99134d853d85ac0792cba00438143a6231f6d775065653ebf5bbdee8b3b0f1ee",
+          "geometry_artifact_id": "sha256:d3caf5ad1d1d9a29980f4fc3c101f4d73a0058da91541715640f542453162206"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:e4d3597a0fdd7a20716d0c3a907feb40b0a6d03cb106cf67ef39767c962345c3",
+          "geometry_artifact_id": "sha256:65493512b8936f57b2886692604326f83b9b510ea3697cf697aec6319f4d54e3"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:99808389dcd7b61e393c0a552111d5cd47fe546011770ae77efa049b2b5e1134",
+          "geometry_artifact_id": "sha256:6938a034487788e9c2f2d8c40bba174ea039c5bd0d1d949d3feda9ae0b8dbe59"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:edb3d833310bfe00585eca98f772cbbdccea2f50a5000f145413ba7a314d371a",
+        "geometry_artifact_id": "sha256:8d49a0dbba294b2f384f2b8edf3743f4b567b70cef014dcf2952dd87f8d6d1e1"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:39e91d8ccc2c099003e8654d6c745977b145e891a1e4f0c0166210df536f125a",
+        "geometry_artifact_id": "sha256:8d49a0dbba294b2f384f2b8edf3743f4b567b70cef014dcf2952dd87f8d6d1e1"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:4dc0bee99e76bbfd145b494601f82200c30da1667edbaa8ae8aeac08ee3780fa"
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 41,
+      "mode": "reference",
+      "source_artifact_id": "sha256:fa74f5e181f9dfa5d98626afe12d80929f525d18eb641908eb9c335d26b00692",
+      "candidate_artifact_id": "sha256:fa74f5e181f9dfa5d98626afe12d80929f525d18eb641908eb9c335d26b00692",
+      "target_artifact_id": null,
+      "development_loss": 4.096088409423828,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:ec7e72185f65a9be60a51b398e8d4a3b85daf9b4f3f8b56f3e787aceef85baba",
+        "geometry_artifact_id": "sha256:fa74f5e181f9dfa5d98626afe12d80929f525d18eb641908eb9c335d26b00692"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.009389390320166361
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.007265595052205547
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0038560814816685995
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.002172446483240054
+          }
+        ],
+        "trace_id": "sha256:0c2ee76ba3bf459f80519b7804541f58f633bd20b3b556cc5ab9deefbbf2aa4b",
+        "geometry_artifact_id": "sha256:fa74f5e181f9dfa5d98626afe12d80929f525d18eb641908eb9c335d26b00692"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:d3fdf9a78b1a197b7b7331d87af4824efefdea74669d7b6dd5e1ceaceadbaf00"
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 41,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e",
+      "candidate_artifact_id": "sha256:a2553e23175811428a605f986892f3867eac5c6cb02e52bf274eee5704774266",
+      "target_artifact_id": "sha256:fa74f5e181f9dfa5d98626afe12d80929f525d18eb641908eb9c335d26b00692",
+      "development_loss": 4.097841739654541,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:127ab5ae28f041b7313c75c4b24a73c81ed6da13bc05693636b88702d5129c3a",
+          "geometry_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:65618999f89caa9e1086c837db9065fe45232db76384ae1631a278ac0421f780",
+          "geometry_artifact_id": "sha256:63c5dd8560618926bc7c7ebb377d73330162224aaf717c19414c5fc433be8401"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:b95c4354f4eadd1f72859388562c49b3e50ad310c327eddd61796fe53d16214b",
+          "geometry_artifact_id": "sha256:097aa36f706f5106f9ca90757a5015d93eba1f9b7bc6b7c4019f07bf5d31212f"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:c520982149c657d5ab310a96fda7792969b1809c11f65c8e7d55ae083efae68f",
+          "geometry_artifact_id": "sha256:50cd632ff139c38ffad71679e18a235eb9ddb80c0e83d85c212c7dbf146307c5"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:a5169b23a1f28df87d8990ca0876c62d23420a8f2294894f7a4f4868134a39f7",
+        "geometry_artifact_id": "sha256:a2553e23175811428a605f986892f3867eac5c6cb02e52bf274eee5704774266"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:a340f70224c4b379bd68af6f72daef396752d421b76bac5429af3c8c05bd84ed",
+        "geometry_artifact_id": "sha256:a2553e23175811428a605f986892f3867eac5c6cb02e52bf274eee5704774266"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:a01d5c9a8ba381317c896df61909d1d34bc3a290ee5a6008b5188c56a204fac4"
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 41,
+      "mode": "reference",
+      "source_artifact_id": "sha256:e38be0437f98550a35ca3ea2872de7d8aa318980292b18be6f061b9806db2cf2",
+      "candidate_artifact_id": "sha256:e38be0437f98550a35ca3ea2872de7d8aa318980292b18be6f061b9806db2cf2",
+      "target_artifact_id": null,
+      "development_loss": 4.090939998626709,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:bf4b0019a9d5400c28a8ea7c3f53f73e6bcd9f6b8f12ecf3ef606a14aaeada63",
+        "geometry_artifact_id": "sha256:e38be0437f98550a35ca3ea2872de7d8aa318980292b18be6f061b9806db2cf2"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.011488329946644801
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.008959489266928291
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0047532912217865125
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0025951137640334966
+          }
+        ],
+        "trace_id": "sha256:827b8855cfd0fceefcfc55f22ab591593586cfeb6ac5e76534be29c82ebcf180",
+        "geometry_artifact_id": "sha256:e38be0437f98550a35ca3ea2872de7d8aa318980292b18be6f061b9806db2cf2"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:fe873e94da2c769f0f7ca7d7183190f932d33fe69de959a390b0d38072679fca"
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 41,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e",
+      "candidate_artifact_id": "sha256:be57405f96a6248cbdf1688cda53bfc6c16e09f3785520e182478460ecfc23fe",
+      "target_artifact_id": "sha256:e38be0437f98550a35ca3ea2872de7d8aa318980292b18be6f061b9806db2cf2",
+      "development_loss": 4.093338489532471,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:127ab5ae28f041b7313c75c4b24a73c81ed6da13bc05693636b88702d5129c3a",
+          "geometry_artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:03058848034002ccc5721c1847a3430395cab16b6c6f83524a6d31e91c7b5c27",
+          "geometry_artifact_id": "sha256:233fdbe6c299e26a2aa9298f4c69ea757b02328dcbc2d544aba76cc6bfcc96c5"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:5ea4781027dbae2bfbc59a5c6a5954172cf046a219462df6bc4a796ee3b6e487",
+          "geometry_artifact_id": "sha256:21cacefab5f528a1a83b6b65bfabfa2d0a06f169274b8610ef48df4ed81468b3"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:99d4fb3a67cf94f981cf148b8f5ce6cce6958914533c330a1f91f847e71f1769",
+          "geometry_artifact_id": "sha256:0c303ff9d3af76efb316214e16e41caccbf2a39042eebb38092f2aeb27dfea54"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:3acb02004f93eb1f21f0c083e9d5804de24efe653334ec41ac4176affdb9eeb8",
+        "geometry_artifact_id": "sha256:be57405f96a6248cbdf1688cda53bfc6c16e09f3785520e182478460ecfc23fe"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:2fa002c0e30bb9acb764e97a491fef40d1da6105cd57e1c1f05a182fdb12c756",
+        "geometry_artifact_id": "sha256:be57405f96a6248cbdf1688cda53bfc6c16e09f3785520e182478460ecfc23fe"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:52841927b794fbd4dee3ba1d396d637d5e232f965e0e2ccc88f0ad9e6fa0cbda"
+    },
+    {
+      "arm": "ordinary",
+      "seed": 43,
+      "mode": "reference",
+      "source_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25",
+      "candidate_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25",
+      "target_artifact_id": null,
+      "development_loss": 4.064968109130859,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:b81a838a118aec3042e207985d3aae6c28ed07bd6685dc4db632c400f597233f",
+        "geometry_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.01746560953268457
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.01585544942218347
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.009103437574904593
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.01899022286156613
+          }
+        ],
+        "trace_id": "sha256:a9cb7cb5fcab8592a56cbb458c625e1425ac910c9411900218c3edb48a40200e",
+        "geometry_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:0554a47ee1f5fc60c81ab56c214df9a7743e240d29c6069ce66b8f7482b7e0b7"
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 43,
+      "mode": "reference",
+      "source_artifact_id": "sha256:b71e447af3f5ccc84b76549f3fc0fa7c94004809e8156ab4b3521a97835bf362",
+      "candidate_artifact_id": "sha256:b71e447af3f5ccc84b76549f3fc0fa7c94004809e8156ab4b3521a97835bf362",
+      "target_artifact_id": null,
+      "development_loss": 4.110875606536865,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:b2dd4e560b9f4e7c39266b39da2edfb432dd3d3bb75d65d2fc2106f17d8722c8",
+        "geometry_artifact_id": "sha256:b71e447af3f5ccc84b76549f3fc0fa7c94004809e8156ab4b3521a97835bf362"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.003029937757921396
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0023150378976284536
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0012087144921707588
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.000700584477398731
+          }
+        ],
+        "trace_id": "sha256:d1876037e9074838232160cd527375f16c02705f93ebadb247122f00109b3e21",
+        "geometry_artifact_id": "sha256:b71e447af3f5ccc84b76549f3fc0fa7c94004809e8156ab4b3521a97835bf362"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:0a4288c8ef49175d0572822275eb78fea3539ba74718e1fbb945b2449293ae40"
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 43,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25",
+      "candidate_artifact_id": "sha256:7fa19e573ef7b344c54e1a4ac4e5d545e0326061ab65aee64b1a26bf5f3b5cc4",
+      "target_artifact_id": "sha256:b71e447af3f5ccc84b76549f3fc0fa7c94004809e8156ab4b3521a97835bf362",
+      "development_loss": 4.1115946769714355,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:b81a838a118aec3042e207985d3aae6c28ed07bd6685dc4db632c400f597233f",
+          "geometry_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:b5cec3df611efe99c9fe50b81e1b53490b4ccf17d97c56636bd67241e3f1f324",
+          "geometry_artifact_id": "sha256:84fd6323acfee25020a2842e53841bdf350285f292e4d8064b258726dd6eb23e"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:147ef732b6a30e3b8189c72b905e3406c9926a7a4f8835052e3aeb78bb3e7161",
+          "geometry_artifact_id": "sha256:f146e40992da908c0eb17d2138928adc7a856ec3f9523603c75426965967e11e"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:dae94d6aaa6b8a450eb7977542a8978e68e516a277747fe20eb58430878106e2",
+          "geometry_artifact_id": "sha256:e1d7d46c4b620b0022dabd399b194a3c02d932b5c884e710cf6967e887473d19"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:01e14d267dfab050c2c378144427975847713cb3b78ced3a0363a6ef3649f93a",
+        "geometry_artifact_id": "sha256:7fa19e573ef7b344c54e1a4ac4e5d545e0326061ab65aee64b1a26bf5f3b5cc4"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:d4d635663a4639eed9f705b75f75706fc3d770bdc0969fb4b0775fe2bfbcccc7",
+        "geometry_artifact_id": "sha256:7fa19e573ef7b344c54e1a4ac4e5d545e0326061ab65aee64b1a26bf5f3b5cc4"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:7bfc1433e0e94224be3701f0dfe591bd83ff83deb01b580ba85231a714f2937c"
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 43,
+      "mode": "reference",
+      "source_artifact_id": "sha256:eddeeca2b7c47136e6849d20ca5086513c6efea0a22c21f48e42847a088bad4c",
+      "candidate_artifact_id": "sha256:eddeeca2b7c47136e6849d20ca5086513c6efea0a22c21f48e42847a088bad4c",
+      "target_artifact_id": null,
+      "development_loss": 4.108377933502197,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:4daec4807b555e30061fb46e0fdf00ec97c66c9b9c54e574cd5cd4de070b8c94",
+        "geometry_artifact_id": "sha256:eddeeca2b7c47136e6849d20ca5086513c6efea0a22c21f48e42847a088bad4c"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.00410351609637769
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.00313229963374074
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0016275833243205833
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0009257612258495554
+          }
+        ],
+        "trace_id": "sha256:998d4a2b083617b191a244a68207849d9544bbd94352a5bcc4ef9f03f11c5c2c",
+        "geometry_artifact_id": "sha256:eddeeca2b7c47136e6849d20ca5086513c6efea0a22c21f48e42847a088bad4c"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:87da90ac006010ea4e897c58b641c05875f938e238cc72c52eeaed6fde6dcd64"
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 43,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25",
+      "candidate_artifact_id": "sha256:8285d723741bb0cf4b2948ff42633c1b5071fa278e85bfc89ab9832e5c7ef94f",
+      "target_artifact_id": "sha256:eddeeca2b7c47136e6849d20ca5086513c6efea0a22c21f48e42847a088bad4c",
+      "development_loss": 4.109313011169434,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:b81a838a118aec3042e207985d3aae6c28ed07bd6685dc4db632c400f597233f",
+          "geometry_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:0b68ac7a16fb4b879cde8127e412217d4ce2c46007db270865a5fc65298be009",
+          "geometry_artifact_id": "sha256:0067e6a8d6478c6f8e208b558d805907f847ee745760b47a9e0b6912735e46a9"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:ad1bf2f063cc655e5b31a33129bdec2f23809d4d7a86a4977189c752decd7a16",
+          "geometry_artifact_id": "sha256:790f9e9b62511cc480818d73ee7e7b6f386e26d7bde3de1e1d8c088ffaeb712b"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:1dd6fac862ae2c1f109fdbbdd615522ca3894c6c8e3bbe418f56850e995d8a71",
+          "geometry_artifact_id": "sha256:a31bd494734497f5736acfae2033d23a509e77d8bbf3ea7d33c42bd0b15f2f69"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:482899e128d1790236fc34284a8ca99fc291d5aea12c300b2da8d46dded9784d",
+        "geometry_artifact_id": "sha256:8285d723741bb0cf4b2948ff42633c1b5071fa278e85bfc89ab9832e5c7ef94f"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:1c75c3d59c4d5d68d7e139ac9bd30bd3ccdf8da061f311fb1246b90612aaafb3",
+        "geometry_artifact_id": "sha256:8285d723741bb0cf4b2948ff42633c1b5071fa278e85bfc89ab9832e5c7ef94f"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:f77ee28fb8f138506b859a6912d79109ddc948a3b68e483cafac1ea8f74a6579"
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 43,
+      "mode": "reference",
+      "source_artifact_id": "sha256:b625d5b2b8b53ffd461aeecf2198db3c5a9cc6404f127883b3e0abc807511f19",
+      "candidate_artifact_id": "sha256:b625d5b2b8b53ffd461aeecf2198db3c5a9cc6404f127883b3e0abc807511f19",
+      "target_artifact_id": null,
+      "development_loss": 4.095949649810791,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:daaa1e736051149138e14b53d7cf8242977e82bbc17bc6ab937f2c8df3984c43",
+        "geometry_artifact_id": "sha256:b625d5b2b8b53ffd461aeecf2198db3c5a9cc6404f127883b3e0abc807511f19"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.009429800463323586
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.007306823498742347
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.003864204720424566
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.002171075492998837
+          }
+        ],
+        "trace_id": "sha256:d8bf03eb160d481183ebb99c2c53100f105647918ea997354ccee85b06502d0e",
+        "geometry_artifact_id": "sha256:b625d5b2b8b53ffd461aeecf2198db3c5a9cc6404f127883b3e0abc807511f19"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:6e27238e16914abf90eaa83644d182f728f03d20fe2c235ca9a8308ba06334be"
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 43,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25",
+      "candidate_artifact_id": "sha256:0e344393c8591dfb8b2c600433e8963b7e14c253467465936e3f5fffdae2c5f2",
+      "target_artifact_id": "sha256:b625d5b2b8b53ffd461aeecf2198db3c5a9cc6404f127883b3e0abc807511f19",
+      "development_loss": 4.097742080688477,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:b81a838a118aec3042e207985d3aae6c28ed07bd6685dc4db632c400f597233f",
+          "geometry_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:a41ec336bb7e163a35d445fadf6b184dd9b211be26427350ed19a729c222ce6c",
+          "geometry_artifact_id": "sha256:95b404a151b8738661ae11dd2917397d5a407c3c20d589ffd5a4e0f5c2c22268"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:c56c28ef0d15fe3ad5435a6dbe17bfb0c78ef841c6d283e50bdf60d002e59c1c",
+          "geometry_artifact_id": "sha256:a781751bc44e4f88389c8532f41dae90c312f78bf85c8eb8315ad55056ef2df2"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:0c43cf1db73d10b6ce7be1311e5ae9b4bca1027a6024b7bb2ea117b733edbedd",
+          "geometry_artifact_id": "sha256:5495821ad3ed3cdc8c4b918cb4e51496fedb4653d9b5e964dae0b0f14ab1f739"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:88dddb59a36c7e74bdbcdec1b84c91ac35e10377200d80e313d6147566e40304",
+        "geometry_artifact_id": "sha256:0e344393c8591dfb8b2c600433e8963b7e14c253467465936e3f5fffdae2c5f2"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:e5ac80933a37f969c53c1a33abaad7159c1492ac7d4d513135b29c015a4aa6df",
+        "geometry_artifact_id": "sha256:0e344393c8591dfb8b2c600433e8963b7e14c253467465936e3f5fffdae2c5f2"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:0da231243786626170412147325a4bcedeb47b3c9b493e9432c4be802950c187"
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 43,
+      "mode": "reference",
+      "source_artifact_id": "sha256:e296673d3b26bbc6a3076f5b42da8476a1397f802ac1cf67a56f811ecd5a0bb3",
+      "candidate_artifact_id": "sha256:e296673d3b26bbc6a3076f5b42da8476a1397f802ac1cf67a56f811ecd5a0bb3",
+      "target_artifact_id": null,
+      "development_loss": 4.090726375579834,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:97af3dcf24aa71f892d85f6994727b7b76cffeb4f2d8e7ada99a744eac7b4d9f",
+        "geometry_artifact_id": "sha256:e296673d3b26bbc6a3076f5b42da8476a1397f802ac1cf67a56f811ecd5a0bb3"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.01155720936763881
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.009026158917886848
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.004769392963247416
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.002593743417195503
+          }
+        ],
+        "trace_id": "sha256:8d9d6175f6498592ea248b44448a86ede19d89720bd38b57691dc29a8d3904fc",
+        "geometry_artifact_id": "sha256:e296673d3b26bbc6a3076f5b42da8476a1397f802ac1cf67a56f811ecd5a0bb3"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:412ec2be8a58cf727dfbb252e580873302466bdcaad826c89bdc011c5580f2cb"
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 43,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25",
+      "candidate_artifact_id": "sha256:f3b368bfa17d2fcd433c9ea71f8d2d9064d519ca34d705b3ed765905ff114032",
+      "target_artifact_id": "sha256:e296673d3b26bbc6a3076f5b42da8476a1397f802ac1cf67a56f811ecd5a0bb3",
+      "development_loss": 4.093180179595947,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:b81a838a118aec3042e207985d3aae6c28ed07bd6685dc4db632c400f597233f",
+          "geometry_artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:17082e95790bcd019b6df4f8b4612203a7d746513811d2a564020a0962187a1e",
+          "geometry_artifact_id": "sha256:5ec4b09e3b33cb89be147911e8a3f4108c30f0a03a2f22fdd6ad14dc701e6812"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:480813d7375bd890dd7f92ac6dedbe686655da87a2c4a7b83af6d82a89041774",
+          "geometry_artifact_id": "sha256:b3628830cdaef65fe5be38cd721597a366d643181b9a288babfadaa07a0db80f"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:94fa701e6319e9ca11e8aac8773920c4e2a73100fe1bae6f94bc02e3242f523f",
+          "geometry_artifact_id": "sha256:d0a30d136b8fb187bd157a0a7be3f61935c1630b4b6e465cc8e649d0201d6f06"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:670a49b3a8297b9d9a89dbc6a8de644c138aa5be9f25e23706a84342351aefb8",
+        "geometry_artifact_id": "sha256:f3b368bfa17d2fcd433c9ea71f8d2d9064d519ca34d705b3ed765905ff114032"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:c47c18969eee6e213c18df030fd0ccd3cbf8f335a800e424ffcfcb6fa974240e",
+        "geometry_artifact_id": "sha256:f3b368bfa17d2fcd433c9ea71f8d2d9064d519ca34d705b3ed765905ff114032"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:ea7b941f21303f5e62fed28dfa0f338c745e832b731ef693cd736e770bb17fdd"
+    },
+    {
+      "arm": "ordinary",
+      "seed": 47,
+      "mode": "reference",
+      "source_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5",
+      "candidate_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5",
+      "target_artifact_id": null,
+      "development_loss": 4.065067291259766,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:9cb3e8b91f1dd9d075e925f4f688c04189b71b3e369e117071be1e4f10ed6005",
+        "geometry_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.017344614771000525
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.015723220970180987
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.009075540243411747
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.019000440840345866
+          }
+        ],
+        "trace_id": "sha256:16b4c2da0c3c18985cf0c853de3d0fa6c744fc9fff1aae3f897ff13b33c1a67f",
+        "geometry_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:9c1b8e926156970783eb5bebe1bc8aadd66f4cc1f13e0bbd2e07edc5f31a4f7a"
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 47,
+      "mode": "reference",
+      "source_artifact_id": "sha256:3335bfd9f67ef55a0b465479d51fb3641655cabf670f4401c2d152de2dbd5687",
+      "candidate_artifact_id": "sha256:3335bfd9f67ef55a0b465479d51fb3641655cabf670f4401c2d152de2dbd5687",
+      "target_artifact_id": null,
+      "development_loss": 4.110872268676758,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:cef464d2212ee5d36729f8362148aef880ef9232c1c87e4e0f94c2d22c9882d9",
+        "geometry_artifact_id": "sha256:3335bfd9f67ef55a0b465479d51fb3641655cabf670f4401c2d152de2dbd5687"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0030287388525291154
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.002314201834273065
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0012086935150311003
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0007008329222147418
+          }
+        ],
+        "trace_id": "sha256:6d58a5848a1d50da60b0713610901dae9f53ecb1acad6bb3103b5f6d1778d1b1",
+        "geometry_artifact_id": "sha256:3335bfd9f67ef55a0b465479d51fb3641655cabf670f4401c2d152de2dbd5687"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:d4fab529c49fc4d9cec527f345733588ee186cee35a594e5f89029f47b6947fb"
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 47,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5",
+      "candidate_artifact_id": "sha256:4912ea9f381032a270f9c600a40d5c65fb8c310d4bd4bb48790ceb70389ab6c5",
+      "target_artifact_id": "sha256:3335bfd9f67ef55a0b465479d51fb3641655cabf670f4401c2d152de2dbd5687",
+      "development_loss": 4.111576080322266,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:9cb3e8b91f1dd9d075e925f4f688c04189b71b3e369e117071be1e4f10ed6005",
+          "geometry_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:6a6f6f0abf4a6c240621778a2a1c3effaaa6f1d8933e2632e49bcc2886ed8ea9",
+          "geometry_artifact_id": "sha256:90d0a57988cc4e9ae077e8aa9aa67592f59d87e50f215d5e73acb8096c53792c"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:065d24817e89d74ed54867f070c4127239e84867d9f529cd351c2eb3b6bc6fc9",
+          "geometry_artifact_id": "sha256:c961eca61ffd7d86065f8a7cebb6e32acc0bd8ede905eb9969d67658d1680500"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:b03c01f793cc473636b1da1d0f68517790f69038d6a636e554985a559c01946c",
+          "geometry_artifact_id": "sha256:cf3f61c090c02a8d3d7719ada828b22cc0eaa2b2dab3c32da205401bd578d41f"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:9e2c294d448bfef7c85b0644910b880f98dab8795b21554b3d8b4c2b519159ee",
+        "geometry_artifact_id": "sha256:4912ea9f381032a270f9c600a40d5c65fb8c310d4bd4bb48790ceb70389ab6c5"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:df35c4b09d8a4db2c5bc547debbbd72bb2cdf057e027e0d5bb023671fc153aae",
+        "geometry_artifact_id": "sha256:4912ea9f381032a270f9c600a40d5c65fb8c310d4bd4bb48790ceb70389ab6c5"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:f863987c78143246e77342b7094de8019a50b67320dc059ad32366aa1a82a54d"
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 47,
+      "mode": "reference",
+      "source_artifact_id": "sha256:f22587a2215b99489257caf61ac299354ae2f8350109f3c0264c0efc54e3c510",
+      "candidate_artifact_id": "sha256:f22587a2215b99489257caf61ac299354ae2f8350109f3c0264c0efc54e3c510",
+      "target_artifact_id": null,
+      "development_loss": 4.108366012573242,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:a9cfbdf467859d545b1df60b315f829620f48792b8d384632af8a0b33df6cb78",
+        "geometry_artifact_id": "sha256:f22587a2215b99489257caf61ac299354ae2f8350109f3c0264c0efc54e3c510"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.00410988665450983
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.003137111706578096
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0016266392964198865
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0009248482438513527
+          }
+        ],
+        "trace_id": "sha256:52b9b929af2bd2bd218a85a345d5145b737866c6c61fe56e7b287676beff72d1",
+        "geometry_artifact_id": "sha256:f22587a2215b99489257caf61ac299354ae2f8350109f3c0264c0efc54e3c510"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:430f3cbf0f24c55e01889e44376c65299c6696720524dea49a489100c44e429f"
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 47,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5",
+      "candidate_artifact_id": "sha256:8c1aec61b3654b1f3999748787c71c4f7915d64259a3794cc45c0b83396a55ab",
+      "target_artifact_id": "sha256:f22587a2215b99489257caf61ac299354ae2f8350109f3c0264c0efc54e3c510",
+      "development_loss": 4.109278678894043,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:9cb3e8b91f1dd9d075e925f4f688c04189b71b3e369e117071be1e4f10ed6005",
+          "geometry_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:33912a0abc7dfd6dac1dbf16b636eb78ddf02fa9c713fc6032517b33b4ee46e8",
+          "geometry_artifact_id": "sha256:62e5209a934086ab16781a6fba47b8213662f76ab4e105631110049478ee23c7"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:890f13370ffe2a4e1515a27b534d957c2a809010eacc55f787eec27b5b87039f",
+          "geometry_artifact_id": "sha256:5274e21ff9f7dfa0338e0f204efb4888ceeced90d82e98f21ff7ae5007a22664"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:ad2d64dbd00cb40f447b4170657f2581ccaa272d58ccf506c21c37d15b8dc3ab",
+          "geometry_artifact_id": "sha256:2998d697895e45687253efa5bfa50a11b6c56f47f77b1e7bc07056624b64b3a3"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:954f618fa2ac98d807b4ef0e74b7dee129412a57a3171f260a27275298b8ebb9",
+        "geometry_artifact_id": "sha256:8c1aec61b3654b1f3999748787c71c4f7915d64259a3794cc45c0b83396a55ab"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:c6d2cd0f8a33da013a89bc903322c5ade53e02ad28bf4c5a39feb6308acd1b2d",
+        "geometry_artifact_id": "sha256:8c1aec61b3654b1f3999748787c71c4f7915d64259a3794cc45c0b83396a55ab"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:a1425cc7094fc107f3ecdc6e186294bcc0d17c4be1a26b9e24ffcfe7fc8d2d4f"
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 47,
+      "mode": "reference",
+      "source_artifact_id": "sha256:3c891037b4511ba8b1e90c54b4f769712a3b20201e96a356919f34d367bda16a",
+      "candidate_artifact_id": "sha256:3c891037b4511ba8b1e90c54b4f769712a3b20201e96a356919f34d367bda16a",
+      "target_artifact_id": null,
+      "development_loss": 4.095967769622803,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:21fdc16ab0114c42f4842858058c0dcd74de29243d99dd61f36063e2e126daf5",
+        "geometry_artifact_id": "sha256:3c891037b4511ba8b1e90c54b4f769712a3b20201e96a356919f34d367bda16a"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.00943787800705609
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.007310569132607914
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.003875227535063527
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0021732768383230785
+          }
+        ],
+        "trace_id": "sha256:d0eb570a4dd9aa72897c42d4564b009a5ed31aaa6107b3fec405b1eb82d57c5a",
+        "geometry_artifact_id": "sha256:3c891037b4511ba8b1e90c54b4f769712a3b20201e96a356919f34d367bda16a"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:5291777b9a4be4d8c448f13e367f92be80ebb91f661076d48904f6993f466f01"
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 47,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5",
+      "candidate_artifact_id": "sha256:b51b286e67b12b451e2d0f4f897350e58c93f53ca9e4cc079315258fd7960f2a",
+      "target_artifact_id": "sha256:3c891037b4511ba8b1e90c54b4f769712a3b20201e96a356919f34d367bda16a",
+      "development_loss": 4.097658634185791,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:9cb3e8b91f1dd9d075e925f4f688c04189b71b3e369e117071be1e4f10ed6005",
+          "geometry_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:6c17f7534a326a7c8c13487add87122a5c8b8e2897b24086695b5fb296e0cd2f",
+          "geometry_artifact_id": "sha256:77704fe9ca04d1f1633e3dbe596902b7611f4f523a75f75a8813579d83af691a"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:309149f65d5c2f64b1bb2f601b9dac3c5cad928059e904b267a448674454c79b",
+          "geometry_artifact_id": "sha256:96b49470ecbc1b335f7798a5964333dfaf42f726131bf85d52fc72a3fed046bd"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:e6ded556aae127eb7c069e149c743fcefdbe638aece3445cc7f272f0fcd93ad5",
+          "geometry_artifact_id": "sha256:c9a356ae6f2e7dce28f4c89643deea26bc8ddcef7d797a3728c9bfe3d1565c51"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:206d26f31d5d11144e2dcc5624c91a58b9769a9593ff13b8b466a04f606a17d7",
+        "geometry_artifact_id": "sha256:b51b286e67b12b451e2d0f4f897350e58c93f53ca9e4cc079315258fd7960f2a"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:d807e6086ef5464b5bd4b725db37e871c2ed55858236210b30aac2dd84b65d20",
+        "geometry_artifact_id": "sha256:b51b286e67b12b451e2d0f4f897350e58c93f53ca9e4cc079315258fd7960f2a"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:85918ca63f45d33fa6c32374d3024a43ce022e72381e13adb2d4bc245b9b658f"
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 47,
+      "mode": "reference",
+      "source_artifact_id": "sha256:ae1bc63ae26a92a67f3c240a67e57965498e1ae36a62c7ff0093cc7a0f6f83eb",
+      "candidate_artifact_id": "sha256:ae1bc63ae26a92a67f3c240a67e57965498e1ae36a62c7ff0093cc7a0f6f83eb",
+      "target_artifact_id": null,
+      "development_loss": 4.09074068069458,
+      "reference_loss_exact": true,
+      "calibration_stages": [],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:2a999bb0c8f00a4e080f8acc7df8fb4c9cedd7fdcad66a66a38b6b7377dc2d81",
+        "geometry_artifact_id": "sha256:ae1bc63ae26a92a67f3c240a67e57965498e1ae36a62c7ff0093cc7a0f6f83eb"
+      },
+      "calibration_mismatch": null,
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.01157471029834947
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.009040157407884131
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.004786490359629103
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352,
+            "relative_residual_rms": 0.0025978253827115805
+          }
+        ],
+        "trace_id": "sha256:7adb02c14e1478a86a10e352b7f7c3464a09233cce64e71f3ce2d3025846ab92",
+        "geometry_artifact_id": "sha256:ae1bc63ae26a92a67f3c240a67e57965498e1ae36a62c7ff0093cc7a0f6f83eb"
+      },
+      "development_mismatch": null,
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": false,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:b9c8e95faaafd2def05c9f18f1fb613c274d3191d82004abe46015b495dcc26b"
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 47,
+      "mode": "calibrated_ordinary",
+      "source_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5",
+      "candidate_artifact_id": "sha256:5036e28651332aab4d09d9a8f27080b37255f9eb9d4ac8859e613fbd7da829b8",
+      "target_artifact_id": "sha256:ae1bc63ae26a92a67f3c240a67e57965498e1ae36a62c7ff0093cc7a0f6f83eb",
+      "development_loss": 4.09306001663208,
+      "reference_loss_exact": null,
+      "calibration_stages": [
+        {
+          "stage": "calibration-before-layer-0",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:9cb3e8b91f1dd9d075e925f4f688c04189b71b3e369e117071be1e4f10ed6005",
+          "geometry_artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5"
+        },
+        {
+          "stage": "calibration-before-layer-1",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:89327bd91928006746c18b60894018ba52f89ace5130a5993447c160510fbd05",
+          "geometry_artifact_id": "sha256:4ebab2b4ed255a411973e351602469f9e70477d72677c49c1009aa6c99e8274d"
+        },
+        {
+          "stage": "calibration-before-layer-2",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:858168fa5cc2c010cd045be426b3628004e27381428d91dd67b3439d168e8978",
+          "geometry_artifact_id": "sha256:dbbbf0ae9d6aa2dc4ada8145196a5999475bb76ef567243eaa9bac9f4e524af8"
+        },
+        {
+          "stage": "calibration-before-layer-3",
+          "layers": [
+            {
+              "path": "transformer.h.8.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.9.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.10.mlp",
+              "calls": 32,
+              "rows": 8192
+            },
+            {
+              "path": "transformer.h.11.mlp",
+              "calls": 32,
+              "rows": 8192
+            }
+          ],
+          "trace_id": "sha256:38cbde63c9d3634db6d943dfa3395d106db8bb63481c0c9af18c3b1ae1c1e813",
+          "geometry_artifact_id": "sha256:8df707d1ee5e1abdbe59337af637d5ca415dd4ac0b1142eb61fa4015ed10158e"
+        }
+      ],
+      "calibration": {
+        "stage": "calibration-final",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 32,
+            "rows": 8192
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 32,
+            "rows": 8192
+          }
+        ],
+        "trace_id": "sha256:50b16d1d411c2f5586ddc7e358f9085925b2840b676f78a19013e2a4a6d2c0a1",
+        "geometry_artifact_id": "sha256:5036e28651332aab4d09d9a8f27080b37255f9eb9d4ac8859e613fbd7da829b8"
+      },
+      "calibration_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "development": {
+        "stage": "development",
+        "layers": [
+          {
+            "path": "transformer.h.8.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.9.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.10.mlp",
+            "calls": 80,
+            "rows": 20352
+          },
+          {
+            "path": "transformer.h.11.mlp",
+            "calls": 80,
+            "rows": 20352
+          }
+        ],
+        "trace_id": "sha256:4349b39b809803e9cf90c0b7237fd98d00c352f0b87c9486687531dad6c739f8",
+        "geometry_artifact_id": "sha256:5036e28651332aab4d09d9a8f27080b37255f9eb9d4ac8859e613fbd7da829b8"
+      },
+      "development_mismatch": [
+        {
+          "path": "transformer.h.8.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "within_0_1_percent": true,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "within_0_1_percent": false,
+          "within_1_percent": true,
+          "within_5_percent": true
+        }
+      ],
+      "all_learned_tensors_unchanged": true,
+      "only_recipe_strengths_may_change": true,
+      "restored_first_window_logits_exact": true,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "optimizer_updates": 0,
+      "private_result_id": "sha256:9b9e505e692cfa90d223b93235e70d6c4aeb0f369402d91e306d7d89935fdfda"
+    }
+  ],
+  "contrasts": [
+    {
+      "arm": "fixed_r1",
+      "seed": 41,
+      "geometry_minus_matched_ordinary_ce": -0.0007176399230957031,
+      "matched_minus_original_ordinary_ce": 0.04577779769897461
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 41,
+      "geometry_minus_matched_ordinary_ce": -0.0009322166442871094,
+      "matched_minus_original_ordinary_ce": 0.04351329803466797
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 41,
+      "geometry_minus_matched_ordinary_ce": -0.0017533302307128906,
+      "matched_minus_original_ordinary_ce": 0.03201150894165039
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 41,
+      "geometry_minus_matched_ordinary_ce": -0.0023984909057617188,
+      "matched_minus_original_ordinary_ce": 0.027508258819580078
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 43,
+      "geometry_minus_matched_ordinary_ce": -0.0007190704345703125,
+      "matched_minus_original_ordinary_ce": 0.04662656784057617
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 43,
+      "geometry_minus_matched_ordinary_ce": -0.0009350776672363281,
+      "matched_minus_original_ordinary_ce": 0.04434490203857422
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 43,
+      "geometry_minus_matched_ordinary_ce": -0.0017924308776855469,
+      "matched_minus_original_ordinary_ce": 0.03277397155761719
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 43,
+      "geometry_minus_matched_ordinary_ce": -0.0024538040161132812,
+      "matched_minus_original_ordinary_ce": 0.02821207046508789
+    },
+    {
+      "arm": "fixed_r1",
+      "seed": 47,
+      "geometry_minus_matched_ordinary_ce": -0.0007038116455078125,
+      "matched_minus_original_ordinary_ce": 0.0465087890625
+    },
+    {
+      "arm": "learned_r1",
+      "seed": 47,
+      "geometry_minus_matched_ordinary_ce": -0.0009126663208007812,
+      "matched_minus_original_ordinary_ce": 0.044211387634277344
+    },
+    {
+      "arm": "fixed_r4",
+      "seed": 47,
+      "geometry_minus_matched_ordinary_ce": -0.0016908645629882812,
+      "matched_minus_original_ordinary_ce": 0.03259134292602539
+    },
+    {
+      "arm": "learned_r4",
+      "seed": 47,
+      "geometry_minus_matched_ordinary_ce": -0.0023193359375,
+      "matched_minus_original_ordinary_ce": 0.027992725372314453
+    }
+  ],
+  "private_manifest_id": "sha256:bced2ebaa87931e6089341441ed6af7cadf9dcec39dea1b2735b0c2d08b37a36",
+  "publication_projection": "calibration_and_matched_control_RMS_private_mismatch_bands_only",
+  "optimizer_updates": 0,
+  "reserve_opened": false,
+  "quality_status": "posttraining_magnitude_diagnosis_not_matched_FT_or_causal_quality_evidence"
+}

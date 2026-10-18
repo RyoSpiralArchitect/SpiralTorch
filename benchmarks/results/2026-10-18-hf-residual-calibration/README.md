@@ -59,6 +59,41 @@ so public summaries use an explicit scalar allowlist instead of exporting those
 reports. The runtime is the already-qualified observation wheel; no new build
 or PyPI release is part of this diagnostic.
 
+## Observed Results
+
+All 27 declared cases completed without retries or optimizer updates. All 15
+untouched references reproduced their earlier development CE exactly. All 48
+layer/control training RMS matches passed 0.1%; development was not refitted:
+11/48 matches stayed within 0.1%, and all 48 stayed within 1%.
+
+Mean development CE across seeds 41/43/47 (lower is better):
+
+| Saved geometry | Geometry CE | Calibrated ordinary CE | Geometry minus control |
+| --- | ---: | ---: | ---: |
+| Fixed radius 1 | 4.110879 | 4.111593 | -0.000714 |
+| Learned radius from 1 | 4.108385 | 4.109312 | -0.000927 |
+| Fixed radius 4 | 4.096002 | 4.097747 | -0.001746 |
+| Learned radius from 4 | 4.090802 | 4.093193 | -0.002391 |
+
+The original ordinary-affine mean remains **4.065289**, lower than all geometry
+and calibrated-control means. Shrinking the ordinary residual moves CE toward
+the saved geometry results. All twelve within-seed calibrated comparisons favor
+geometry, by 0.000704 to 0.002454 CE, but those are small differences between
+differently trained weights with only approximate held-out RMS matching. This
+is not a causal geometry advantage, matched-FT result or deployment promotion.
+
+The next useful training comparison should control effective residual strength
+from the start rather than infer its effect only after training. The native
+Torch-free execution path remains the product goal; these HF runs are an
+optional interoperability/comparison path, not a replacement for that runtime.
+
+`results.json` contains every projected case and contrast. `execution.json`
+binds the frozen protocol, 15 source artifacts, installed package and window
+identity. A read-only saved-state check revalidated all 27 candidates, 102 traces,
+intermediate native artifact IDs and calibration-rule values without loading
+the model. The actual model/logit checks belong to the original run receipts.
+Private raw records, traces and artifacts were retained unchanged.
+
 ## Replay
 
 ```sh
@@ -72,3 +107,13 @@ env HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false \
 Use `tools/owned_process.py` with a 3,600-second outer deadline and five-second
 cleanup grace. The output directory must be new; all case dispositions are
 retained by the shared run-manifest helper. No silent restarts or dropped cases.
+
+To recheck saved results without another model run:
+
+```sh
+"$PYTHON" -I -B benchmarks/results/2026-10-18-hf-residual-calibration/verify_saved_state.py \
+  --private-runs "$PRIVATE_CALIBRATION_RUNS" --book-private "$PRIVATE_BOOK_ROOT" \
+  --radius-runs "$PRIVATE_RADIUS_RUNS" \
+  --expected-results-id "$INDEPENDENTLY_RETAINED_RESULTS_ID" \
+  --expected-manifest-id "$INDEPENDENTLY_RETAINED_MANIFEST_ID"
+```
