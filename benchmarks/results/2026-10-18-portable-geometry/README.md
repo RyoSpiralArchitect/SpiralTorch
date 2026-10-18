@@ -47,6 +47,11 @@ allocation. Regression tests retain valid normalized and empty-history cases.
 Adding role fields intentionally changed the synthetic fixture's pinned ID;
 the final shared expected file binds the updated schema across all clients.
 
+CI subsequently caught module ordering in the WASM registration file. The
+follow-up changes only rustfmt ordering; the qualification record retains the
+original binary-source hash as well as the corrected source hash. The recorded
+binaries precede that formatting-only edit.
+
 ## Reproduce
 
 Build/install the source wheel in an isolated environment with Torch and

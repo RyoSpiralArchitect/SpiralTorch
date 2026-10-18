@@ -41,6 +41,12 @@
     "wasm": "a170061f0fe04ca67a386eca0e7d8a347cb2632dd0fcdf8d352c8625fdb75683",
     "wasm_node_js": "fef84306ccb3c985acc55931fd66a4b4da7a5007cdbb9a32e0c4ab4664e10a4f"
   },
+  "post_qualification_changes": {
+    "bindings/st-wasm/src/lib.rs": {
+      "change": "rustfmt module ordering only; CI lint follow-up",
+      "qualified_binary_source_sha256": "8578c6258f5c08011aa775377466c6540f053455016af5258c98957380ccfd43"
+    }
+  },
   "source_sha256": {
     ".github/workflows/ci.yml": "afbac205ad05dee055ea71b381ed3533b037dc403c085c3c6991f5ca94b0c94d",
     "crates/st-frac/src/learning.rs": "d8c53c1e2db16c34d7d8c5ebfb3e0e73a1af39d9d90c16592d5e07d3d383b373",
@@ -54,7 +60,7 @@
     "bindings/st-py/spiraltorch/geometry_artifact.py": "bcdd41c5f251a1aaff93308f6e0d6d2273192f3064c84d0c0fa25ad432989a63",
     "bindings/st-py/spiraltorch/geometry_adapters.py": "ba470b312cac89c27cf6608c78d9951f3a62a49a0e81929abeda27b6fe29e944",
     "bindings/st-py/tests/test_geometry_artifact.py": "a104d738e5facfab21c206cc2852a747cc1fc0c68400c4edb87dc199ef39e553",
-    "bindings/st-wasm/src/lib.rs": "8578c6258f5c08011aa775377466c6540f053455016af5258c98957380ccfd43",
+    "bindings/st-wasm/src/lib.rs": "86c9616a7f8f4ef3485ea90ce19a01b1dd3444b3782d6ff43487c460a155ef21",
     "bindings/st-wasm/src/geometry_artifact.rs": "1d6d324f4c6f916f0781ff4b74401e2a2162becd31ec9c14185e46128b45bbcd",
     "bindings/st-wasm/tests/geometry_artifact.cjs": "bc9568e1cb186f3951494cedf5e310de044b7fcf99c1375bb1dd153b2784dac0",
     "crates/st-nn/tests/fixtures/geometry_adapter_artifact.json": "e911eeaf6a1858e6e755f418508077232283d3124bc0a0be61de0fa15ed3c9ff",
