@@ -71,6 +71,25 @@ does **not** retroactively pass the failed raw-logit contract. All failed
 measurements, first test-fixture failures and subsequent fixes are retained
 through [verification.json](verification.json).
 
+## Independent Review
+
+Core review found no in-scope correctness defect; an invalid nested-placement
+test fixture was corrected without weakening artifact admission. A subsequent
+publisher review identified four integrity/privacy gaps. Publication now checks
+final and midpoint bodies with Rust's checkpoint validator and declared case
+identity, binds resume rows to current/previous raw-file hashes, derives subgroup
+claims, and rejects unknown fields or nested private objects in public metadata.
+
+The first measurement source is retained in commit `16f22e82d`. A full second
+cohort under the strengthened publisher is retained in commit `8a4cf7d29` and
+[comparison-reviewed.json](comparison-reviewed.json). Runtime binary, model,
+data, decoding conditions and numerical gates were unchanged: all native checks
+passed again, and the same long-input raw-logit gate failed. Neither attempt
+replaces the other. The last scalar-metadata guard was added afterward and
+checked against both retained receipts, not presented as another measured run.
+Eleven publisher regression tests cover these failure paths. Hashes bind bytes
+and case consistency; they are not signatures or proof of producer provenance.
+
 ## Reproduce Without Downloading
 
 Use the same development wheel in a no-foreign-ML `NATIVE_PY` environment and a

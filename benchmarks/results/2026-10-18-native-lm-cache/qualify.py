@@ -218,6 +218,24 @@ def exact_fields(value, fields):
         raise ValueError("unknown or missing receipt fields")
 
 
+def validate_runtime(value, *, native=False):
+    fields = "python platform extension_sha256 optional_ml_imports_forbidden" if native else (
+        "torch transformers python platform torch_threads torch_interop_threads extension_sha256 rows")
+    exact_fields(value, fields)
+    for key in (["python", "platform"] if native else ["torch", "transformers", "python", "platform"]):
+        if not isinstance(value[key], str) or not 0 < len(value[key]) <= 1024:
+            raise ValueError("runtime metadata must be bounded scalar strings")
+    pin = value["extension_sha256"]
+    if not isinstance(pin, str) or len(pin) != 64 or any(c not in "0123456789abcdef" for c in pin):
+        raise ValueError("invalid extension digest")
+    if native:
+        if value["optional_ml_imports_forbidden"] is not True:
+            raise ValueError("native import guard was not enabled")
+    elif (type(value["torch_threads"]) is not int or value["torch_threads"] != 2
+          or type(value["torch_interop_threads"]) is not int or value["torch_interop_threads"] != 1):
+        raise ValueError("unexpected reference thread policy")
+
+
 def publication_inputs(args):
     PRIOR["PRIOR"]["forbid_ml"]()
     data = checked(args)
@@ -295,9 +313,7 @@ def validate(cases, teacher, resumed, timing, identities, hashes, old_continued)
             raise ValueError("incomplete resumed sequence")
         if row["mode"] == "old_full_prefix" and row["continued_tokens"] != old_continued[row["case"]]:
             raise ValueError("incomplete old checkpoint continuation")
-    exact_fields(timing, "torch transformers python platform torch_threads torch_interop_threads extension_sha256 rows")
-    if timing["torch_threads"] != 2 or timing["torch_interop_threads"] != 1:
-        raise ValueError("unexpected reference thread policy")
+    validate_runtime(timing)
     rows = timing["rows"]
     expected = {(length, arm, r) for length in TIMING_LENGTHS for arm in ARMS for r in range(WARMUP+REPEATS)}
     if len(rows) != len(expected) or {(r["length"], r["arm"], r["round"]) for r in rows} != expected:
@@ -339,7 +355,7 @@ def report(args):
     teacher, resumed, timing = [load(args.cohort / name) for name in ["teacher.json", "resume.json", "timing.json"]]
     validate(cases, teacher, resumed, timing, identities, hashes, old_continued)
     native_runtime = load(args.cohort / "native-runtime.json")
-    exact_fields(native_runtime, "python platform extension_sha256 optional_ml_imports_forbidden")
+    validate_runtime(native_runtime, native=True)
     if timing["extension_sha256"] != native_runtime["extension_sha256"]:
         raise ValueError("native/reference extensions differ")
     summaries = []

@@ -40,7 +40,7 @@ def fixture():
                 "checkpoint_exact": True, "continued_tokens": 5, "source_sha256": hashes[mode][name]}
                for mode in ["cached", "old_full_prefix"] for name in names]
     timing = {"torch": "test", "transformers": "test", "python": "test", "platform": "test",
-              "torch_threads": 2, "torch_interop_threads": 1, "extension_sha256": "test",
+              "torch_threads": 2, "torch_interop_threads": 1, "extension_sha256": "a"*64,
               "rows": [{"arm": arm, "length": length, "round": i, "warmup": i < 2,
                          "prefill_ms": .1, "decode_ms": .2, "total_ms": .3, **metric}
                         for arm in q["ARMS"] for length in q["TIMING_LENGTHS"] for i in range(9)]}
@@ -149,6 +149,22 @@ class PublicationTests(unittest.TestCase):
         result = retain(*args)
         self.assertFalse(result["teacher_all_pass"])
         self.assertEqual(result["status"], "UNQUALIFIED_LOGIT_GATE_FAILED")
+
+    def test_nested_metadata_and_invalid_scalar_formats_are_rejected(self):
+        for key, value in [("python", {"private_tokens": [1, 2]}), ("platform", [1, 2]),
+                           ("extension_sha256", "invalid"), ("torch_interop_threads", True)]:
+            args = fixture()
+            args[3]["rows"][0].update(max_logit_abs=.1, within_gate=False)
+            args[3][key] = value
+            with self.assertRaises(ValueError):
+                retain(*args)
+        runtime = {"python": "3.12.6", "platform": "test", "extension_sha256": "a"*64,
+                   "optional_ml_imports_forbidden": True}
+        q["validate_runtime"](runtime, native=True)
+        for key, value in [("python", {"private_tokens": [1, 2]}), ("extension_sha256", "not-hex"),
+                           ("optional_ml_imports_forbidden", 1), ("optional_ml_imports_forbidden", False)]:
+            with self.assertRaises(ValueError):
+                q["validate_runtime"]({**runtime, key: value}, native=True)
 
 
 if __name__ == "__main__":

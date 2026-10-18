@@ -1,0 +1,275 @@
+{
+  "schema": "spiraltorch.native_kv_verification.v1",
+  "implementation_commit": "ce70a5541523ba732e6ef7ea83ac209319ca24c9",
+  "measurement_commits": {
+    "initial": "16f22e82df4584a06e688482c294a88d285c32f0",
+    "reviewed": "8a4cf7d2948f71e5193f4396c0b0faf2ee0a2bda"
+  },
+  "scope": "Rust KV implementation and two fixed local GPT-2 measurement cohorts; source-only development, not a PyPI release",
+  "development_wheel": {
+    "filename": "spiraltorch-0.4.32-cp38-abi3-macosx_14_0_arm64.whl",
+    "sha256": "e5c6f75b5a028ed6dcb768cfa84eee55e9ebed25f6969d05a2b8929db9cede9d",
+    "never_upload": true
+  },
+  "tests": {
+    "rust_causal_lm": 45,
+    "native_python": {
+      "context-python": 7,
+      "generation-python": 9,
+      "geometry-python": 17,
+      "test_native_causal_lm": 7,
+      "test_native_causal_lm_accumulation": 4,
+      "test_native_causal_lm_objective": 6,
+      "test_native_causal_lm_training": 9
+    },
+    "native_python_total": 59,
+    "optional_reference": 171,
+    "publication_guards": 11,
+    "wasm_core_check": true,
+    "clippy": true,
+    "clippy_warning_free_claim": false,
+    "scoped_rustfmt": true,
+    "python38_syntax": [
+      "bindings/st-py/tests/test_native_causal_lm_context.py",
+      "bindings/st-py/tests/test_native_causal_lm_context_parity.py",
+      "bindings/st-py/tests/test_native_causal_lm.py",
+      "bindings/st-py/tests/test_native_geometry_runtime.py"
+    ]
+  },
+  "measurement_status": {
+    "initial": "UNQUALIFIED_LOGIT_GATE_FAILED",
+    "reviewed": "UNQUALIFIED_LOGIT_GATE_FAILED",
+    "per_cohort_native_logit_comparisons": 54,
+    "per_cohort_cached_generation_cases": 18,
+    "per_cohort_generated_tokens": 144,
+    "per_cohort_cached_resumes": 18,
+    "per_cohort_legacy_resumes": 18,
+    "changed_gate": false,
+    "claimed_quality_uplift": false
+  },
+  "retained_test_failures": [
+    {
+      "log": "optional-parity.log",
+      "cause": "joint test fixture placed Topos inside an already selected parent/child path",
+      "fix": "moved Topos to transformer.h.1.mlp; production nested-placement rejection unchanged"
+    },
+    {
+      "log": "rust-numerical-real.log",
+      "cause": "a homogeneous finite-MAX token embedding normalized without overflow, so the intended error fixture did not fail",
+      "fix": "added a finite-MAX positional row so only the selected token overflows embedding addition; production math unchanged"
+    }
+  ],
+  "independent_reviews": [
+    {
+      "agent": "Copernicus",
+      "scope": "context, prefill capture, generation, geometry dependency and Python owner",
+      "result": "no in-scope correctness finding; invalid test fixture fixed and post-append numerical failure regression added",
+      "execution": "static only"
+    },
+    {
+      "agent": "Anscombe",
+      "scope": "measurement, checkpoint/replay binding and public privacy boundary",
+      "findings": 4,
+      "closed": 4,
+      "result": "all findings closed; final metadata-only change schema-validated without a third benchmark",
+      "execution": "static only"
+    }
+  ],
+  "post_measurement_metadata_revalidation": {
+    "scope": "post-measurement public schema validation, not a new numerical run",
+    "current_publisher_sha256": "802a7f7cd7c3bba16660b6c92e26d26c23ebd0f3e5476461bb9e2f519509e1f7",
+    "tests": [
+      {
+        "name": "publication-reviewed-tests",
+        "code": 0
+      },
+      {
+        "name": "ruff-reviewed",
+        "code": 0
+      }
+    ],
+    "cohorts": [
+      {
+        "file": "comparison-initial.json",
+        "sha256": "7a8aeacb74017f35dd5b641516016fbd20425d0b2800b9c27c151677fb74de2b",
+        "metadata_valid": true,
+        "changed_source_after_measurement": [
+          "benchmarks/results/2026-10-18-native-lm-cache/qualify.py"
+        ],
+        "runtime_sources_and_config_and_gates_unchanged": true
+      },
+      {
+        "file": "comparison-reviewed.json",
+        "sha256": "c4ef14059c988cfaae7fc7ae503be7eaa0d8f66476003d82d750bed6d9755807",
+        "metadata_valid": true,
+        "changed_source_after_measurement": [
+          "benchmarks/results/2026-10-18-native-lm-cache/qualify.py"
+        ],
+        "runtime_sources_and_config_and_gates_unchanged": true
+      }
+    ]
+  },
+  "parent_pr": {
+    "number": 2283,
+    "state": "MERGED",
+    "reviewed_head": "01e99c8234a509a5c8062c3157c9bd07badb8116",
+    "merge_commit": "fbbe788fb4d80b039676c5504dadcfc7ef9fa46c",
+    "successful_ci_checks": 10
+  },
+  "preserved_intentional_deletions": {
+    "count": 8234,
+    "git_diff_deleted_nul_sha256": "bc8917dfba59592756119508ad01d973e5062cebffbbc585d3aaa3b6c5adb04a"
+  },
+  "private_logs": {
+    "benchmark-real.log": {
+      "sha256": "125830a6b2d13fa835391e576e8ec8b3be583e37348cff4c0d961517fbd39778",
+      "bytes": 7117
+    },
+    "benchmark-reviewed.log": {
+      "sha256": "ed0f3861d97866a8fec1c7fbcbbeb1de87f98714a7d034e197046458a47e1722",
+      "bytes": 7117
+    },
+    "clippy.log": {
+      "sha256": "97a478ab3f76d2b96a830bd0a20d0e36dbfc91f804f01cd442b5cf67bedc5b75",
+      "bytes": 140931
+    },
+    "context-python.log": {
+      "sha256": "a4e34464d5a0dabdaa583c77147789650829b84fc973acdb63fac174008f962b",
+      "bytes": 1199
+    },
+    "diagnose.log": {
+      "sha256": "0d5587fbd3e04f8a9869b90a26ddee89accf8d4455880e4341ae6169a1536755",
+      "bytes": 1247
+    },
+    "generation-python.log": {
+      "sha256": "a29e95b98efc1c7d285371fa10c60fe95a54daecbd29110a4df18ac610cf5904",
+      "bytes": 1548
+    },
+    "geometry-python.log": {
+      "sha256": "3295d122bc3873fcf380a39b4e95e94735358d56510c1658d6f683bead09d149",
+      "bytes": 2735
+    },
+    "install.log": {
+      "sha256": "0335277a2f5c77388da1179df9a2defe977f08103ec75dc55f6880276600791b",
+      "bytes": 443
+    },
+    "native-real.log": {
+      "sha256": "ec1b7679c18d4e152423e325c5826a9a1c11a905f9ea4097fd35c4c585457c0c",
+      "bytes": 10072
+    },
+    "native-reviewed.log": {
+      "sha256": "ec1b7679c18d4e152423e325c5826a9a1c11a905f9ea4097fd35c4c585457c0c",
+      "bytes": 10072
+    },
+    "optional-parity-fixed.log": {
+      "sha256": "3c631716ddb920378cc5de1c4da6cf9c15d18917c9726a68f1360fc1e88332e4",
+      "bytes": 260
+    },
+    "optional-parity.log": {
+      "sha256": "2fa2a2ee39aba0623d7b9def9a5cb61aa54132e30a17b2b2189593a084191aa4",
+      "bytes": 1649
+    },
+    "prefix-contract.log": {
+      "sha256": "f742eff773e8ca87893a374a9b407067482a6ea1bcf829fcf70c3730e1360e6e",
+      "bytes": 259
+    },
+    "prepare-real.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "prepare-reviewed.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "publication-reviewed-tests.log": {
+      "sha256": "6e679d5456cba512f2b8b1c3c9ae6615236e2c39906d5b7d801f822cb25ae512",
+      "bytes": 110
+    },
+    "publication-tests.log": {
+      "sha256": "a25b5619af971eae96a8c9d37ebc69133b4c28e990455e210be0507206df182c",
+      "bytes": 104
+    },
+    "resume-real.log": {
+      "sha256": "792b839e3a4d9938729ce70eacd1a711d9b2805a77166b28c3f1443008699b7f",
+      "bytes": 3243
+    },
+    "resume-reviewed.log": {
+      "sha256": "792b839e3a4d9938729ce70eacd1a711d9b2805a77166b28c3f1443008699b7f",
+      "bytes": 3243
+    },
+    "retain_failure-reviewed.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "retain_failure.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "ruff-reviewed.log": {
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "bytes": 19
+    },
+    "ruff.log": {
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "bytes": 19
+    },
+    "rust-initial.log": {
+      "sha256": "f489e8d133e9c4d006a9c3aa7d590d949966a4016c5fde47be7c7e87b2a322e2",
+      "bytes": 5653
+    },
+    "rust-numerical-fixed-real.log": {
+      "sha256": "537ea2c8b3b7a9e54cd37e1d3f6bc1a744d11f842ab6a3e81352d37d6b5f21cc",
+      "bytes": 5612
+    },
+    "rust-numerical-real.log": {
+      "sha256": "19fc7c71189dc11d6ab6025ae9f9834b6bb2777a3eafcf873802360ae32d999a",
+      "bytes": 5732
+    },
+    "scoped-rustfmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "test_native_causal_lm.log": {
+      "sha256": "20960eb5e8a92abb6c482bdb9571c5f194ac9c0a2fc390a7eb87a8817d6df601",
+      "bytes": 1124
+    },
+    "test_native_causal_lm_accumulation.log": {
+      "sha256": "04fefb35856ccb135dc5dea76ef625c026a802f50385cefdc8dff4bae81f6947",
+      "bytes": 730
+    },
+    "test_native_causal_lm_objective.log": {
+      "sha256": "502089fd9852e15df6fc26a0017085a3dcfbad4b64a1fbbd76db7a6981434b22",
+      "bytes": 988
+    },
+    "test_native_causal_lm_training.log": {
+      "sha256": "b3d89bc05191c806f6a55c0a8dfe17743b47140f402dd5c321fd6086ea55e62b",
+      "bytes": 1690
+    },
+    "wasm.log": {
+      "sha256": "ca1b8a3fac19a538132fabfa8d60b5d89f7d145099e62027083e17bf6176e590",
+      "bytes": 1072
+    },
+    "wheel-initial.log": {
+      "sha256": "3b6ab04f7200e6e1ed6e613edddad593e1746ce9a5437057e954ae099b5e5cbe",
+      "bytes": 115905
+    }
+  },
+  "published_files": {
+    "comparison-initial.json": "7a8aeacb74017f35dd5b641516016fbd20425d0b2800b9c27c151677fb74de2b",
+    "comparison-reviewed.json": "c4ef14059c988cfaae7fc7ae503be7eaa0d8f66476003d82d750bed6d9755807",
+    "diagnostic.json": "4876b2af6719a01d7b3d27e6a1588ba0eb86f42ace9e98d3252c61b0b669ad6a"
+  },
+  "final_publication_sources": {
+    "qualify.py": "802a7f7cd7c3bba16660b6c92e26d26c23ebd0f3e5476461bb9e2f519509e1f7",
+    "retain_failure.py": "a2360cd31bca83cacb9a2a5e974f087d8138fcdb3d5cb357e94c1daa38840f1c",
+    "test_qualification.py": "7063546c16e1388b0f024b7dc4bc6c3164a0661a8ac26c6f380ec249eb23bfe9"
+  },
+  "limitations": [
+    "native decoder remains frozen GPT-2 CPU f32; geometry-only learning",
+    "no arbitrary-HF conversion, base-weight FT, batched serving or browser model execution",
+    "causal geometry replays prefixes and KV transactions copy buffers",
+    "both native ordinary arms fail the predeclared long-input raw-logit gate against Torch",
+    "Torch cached path remains faster; no general speed or quality claim",
+    "existing 0.4.32 package is immutable and does not contain this development path"
+  ]
+}

@@ -55,7 +55,7 @@ def main():
     teacher, resumed, timing = [Q["load"](args.cohort / name) for name in ["teacher.json", "resume.json", "timing.json"]]
     result = failure_receipt(cases, teacher, resumed, timing, identities, hashes, old_continued)
     runtime = Q["load"](args.cohort / "native-runtime.json")
-    Q["exact_fields"](runtime, "python platform extension_sha256 optional_ml_imports_forbidden")
+    Q["validate_runtime"](runtime, native=True)
     if runtime["extension_sha256"] != timing["extension_sha256"]:
         raise ValueError("extensions differ")
     Q["save"](args.output, {**result, "contract": Q["load"](args.cohort / "contract.json"), "native_runtime": runtime,
