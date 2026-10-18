@@ -349,6 +349,7 @@ jobs:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
           SPIRALTORCH_DETACHED_STUDY_DIAGNOSTICS: ${{ runner.temp }}/byte-study-detached
+          SPIRALTORCH_RESUME_STUDY_DIAGNOSTICS: ${{ runner.temp }}/byte-study-resume
         run: |
           python -m pip install "maturin>=1.9,<2"
           maturin build --release --locked -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/attention-wheel"
@@ -366,6 +367,15 @@ jobs:
         with:
           name: synthetic-byte-study-detached-failure
           path: ${{ runner.temp }}/byte-study-detached/
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Retain exact contextual-mixture resume failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-byte-study-resume-failure
+          path: ${{ runner.temp }}/byte-study-resume/
           if-no-files-found: ignore
           retention-days: 1
 

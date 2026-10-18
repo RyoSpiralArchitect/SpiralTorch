@@ -119,3 +119,42 @@ The filesystem must honor these operations. File/directory `fsync` calls do not
 by themselves prove power-loss resilience on every disk or platform. Requests,
 weights and failure messages may be private: publish selected results/hashes,
 not an entire run directory.
+
+## Exact Resume Qualification
+
+On 2026-10-19 (JST), [the macOS GPU job for source `09e98b0b3`](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39141071472/job/117715511190)
+failed the exact contextual-mixture clipped-AdamW resume comparison. It was a
+numerical mismatch, not a timeout. The original failure did not retain full
+comparison payloads, so it does not isolate restoration from two independently
+executed training prefixes. No numerical fix or tolerance relaxation is claimed.
+
+The same source's default-feature local wheel, installed without Torch,
+Transformers, PEFT, NumPy, Accelerate or safetensors, passed the 25-case comparison
+on Apple M4/Metal. One initial reproduction and eight predeclared fresh-process
+reproductions all had byte-identical full/resumed reports and checkpoints. The
+eight repetitions also shared these SHA-256 values:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Request | `39bb6c540db50f8d9545076a91408de4b1c9b674e1e2947a427dd2ca4ee0b1de` |
+| Full/resumed report | `6dc103dbbb9191ff8b693e33a773a61ca13444b9e1cb9a0408ed84f7fd7548e6` |
+| Full/resumed checkpoint | `f1a5e92d562f2f95ac9ecf0ed59f472f2926c820a26d8e96432e4ee069c37670` |
+| Local development wheel (not publishable) | `e5c6f75b5a028ed6dcb768cfa84eee55e9ebed25f6969d05a2b8929db9cede9d` |
+
+These local passes do **not** resolve the CI failure or qualify a release.
+After installing a source wheel, the isolated test can be reproduced with:
+
+```bash
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 SPIRALTORCH_STRICT_GPU=1 \
+SPIRALTORCH_RESUME_STUDY_DIAGNOSTICS=/trusted/new-synthetic-failure-directory \
+python -I -B bindings/st-py/tests/test_nn_byte_study.py \
+  StudyGpu.test_clipped_contextual_mixtures_preserve_all_frozen_clocks -v
+```
+
+The diagnostic directory is created only on mismatch and must not already
+exist. It retains exact request bytes, full/first/resumed reports and checkpoints,
+hashes, and bounded differences. CI uploads these **synthetic test** payloads on
+failure; private training runs are not automatically published. Strict report
+and checkpoint equality remains required. The next investigation must use the
+first differing histories, parameter values and optimizer states, rather than
+rerunning until green or treating local success as a correctness repair.
