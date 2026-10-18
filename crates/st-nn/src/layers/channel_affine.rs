@@ -38,7 +38,7 @@ impl ChannelAffineKernel {
         self.max_values
     }
 
-    /// y[r,c] = input[r,c] * gate[c] + bias[c]. No saturation or projection.
+    /// `y[r,c] = input[r,c] * gate[c] + bias[c]`. No saturation or projection.
     pub fn forward(
         &self,
         input: &[f32],
