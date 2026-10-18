@@ -4,9 +4,9 @@
 
 pub mod concept_diffusion;
 pub mod generation_control;
-pub mod token_decoding;
 pub mod gnn_roundtable;
 pub mod imaginary_time_schrodinger;
 pub mod temperature_control;
+pub mod token_decoding;
 pub mod zspace_coherence;
 pub mod zspace_posterior;
