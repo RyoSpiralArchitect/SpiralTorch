@@ -103,3 +103,6 @@ Both Python environments need this source build; only the comparison environment
 needs Torch/Transformers. Tokenization uses the standalone Rust-backed tokenizers
 package, not a model framework. A development wheel still reporting 0.4.32 is
 not the published 0.4.32 binary and must never be uploaded under that version.
+These qualification/diagnostic scripts require Python 3.11+ (`hashlib.file_digest`);
+the public training example and installed-wheel contract retain Python 3.8 support.
+The local execution recorded here used Python 3.12, not a simulated 3.8 interpreter.

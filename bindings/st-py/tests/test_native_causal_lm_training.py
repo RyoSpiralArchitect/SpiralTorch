@@ -38,7 +38,7 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
 
     def trainer(self, *, docs=DOCS, labels=None, **overrides):
         return st.NativeCausalLmTrainer(self.model, self.optimizer, docs, 4,
-                                       labels=labels, **(POLICY | overrides))
+                                       labels=labels, **{**POLICY, **overrides})
 
     def test_fixed_order_partial_groups_and_epoch_resume_match_manual_updates(self):
         trainer = self.trainer()
