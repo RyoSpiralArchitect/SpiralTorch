@@ -120,7 +120,7 @@ impl NativeCausalLm {
         })
     }
 
-    /// Labels are unshifted [B,T], independent of input IDs; each row's first
+    /// Labels are unshifted `[B,T]`, independent of input IDs; each row's first
     /// label is validated but not scored. No padding or attention mask inferred.
     pub fn next_token_loss_with_objective(
         &self,
