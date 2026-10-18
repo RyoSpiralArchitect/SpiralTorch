@@ -154,6 +154,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--test layer_norm_autograd", ci)
         self.assertIn("node bindings/st-wasm/tests/layer_norm_autograd.cjs", ci)
 
+    def test_native_weight_loading_is_gated_without_foreign_ml(self) -> None:
+        for filename in ("ci.yml", "release_wheels.yml"):
+            workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+            self.assertIn("bindings/st-py/tests/test_native_weights.py -v", workflow)
+            self.assertIn("bindings/st-py/examples/native_weights_geometry.py", workflow)
+        test = (ROOT / "bindings/st-py/tests/test_native_weights.py").read_text(encoding="utf-8")
+        self.assertIn("NoForeignML()", test)
+        self.assertIn('"safetensors"', test)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("bindings/st-py/tests/test_native_weights_parity.py", ci)
+
     def test_official_actions_use_node24_generation(self) -> None:
         workflow_dir = ROOT / ".github" / "workflows"
         workflow_text = "\n".join(

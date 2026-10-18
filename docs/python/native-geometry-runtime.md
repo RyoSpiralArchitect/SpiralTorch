@@ -62,6 +62,7 @@ This exercises activation fitting, not whole-language-model quality.
 | Topos resonance (source-only extension) | Native shared-feature gates, finite resonance recurrence and complete residual VJP/SGD; row and sequence entries |
 | Fractional memory/history, L2 history, learned-gain and angle/gain history (source-only extension) | Native full-context GL composition, feature gates and parameter charts; explicit sequence entry only |
 | HF Trainer, datasets and model execution | Optional interoperability path; not a Torch-free HF checkpoint executor |
+| Safetensors weight ingress (source-only extension) | [Rust-owned F32/F16/BF16 loader and shape-preserving N-D snapshots](native-weights.md); not architecture conversion or full HF execution |
 
 All recipes currently defined by `GeometryAdapterArtifact` have a native
 selected-placement route. This is not a whole-model executor: a pretrained HF

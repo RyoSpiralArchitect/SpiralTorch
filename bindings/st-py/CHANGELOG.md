@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add Rust-owned bounded safetensors ingress and Python `SafeTensorArchive` /
+  `NdTensor` handles. F32/F16/BF16 weights reach native host tensors with shapes
+  preserved, explicit rank-two conversion, strict header validation and finite
+  materialization. No Python safetensors, NumPy or Torch is required. This is a
+  source-only weight loader after the fixed 0.4.32 candidate, not a whole HF
+  executor or automatic checkpoint-to-model conversion.
+
 - Extend the native geometry artifact runtime to pointwise and fixed-anchor
   elliptic adapters. Rust owns input projection, chart construction, readout,
   complete first-order pullback and SGD; Python transports the same saved

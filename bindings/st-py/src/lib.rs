@@ -20,6 +20,8 @@ mod fractional_learning;
 mod geometry_artifact;
 #[cfg(feature = "nn")]
 mod geometry_runtime;
+#[cfg(feature = "nn")]
+mod weights;
 mod hpo;
 mod inference;
 mod introspect;
@@ -303,6 +305,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     #[cfg(feature = "nn")]
     geometry_runtime::register(m)?;
     #[cfg(feature = "nn")]
+    weights::register(m)?;
+    #[cfg(feature = "nn")]
     channel_affine::register(m)?;
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
@@ -528,6 +532,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 
     #[cfg(feature = "nn")]
     exports.extend_from_slice(&[
+        "SafeTensorArchive",
+        "NdTensor",
         "ChannelAffineKernel",
         "ChannelAffineLearningBatch",
         "WaveGateKernel",
