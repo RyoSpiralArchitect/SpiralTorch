@@ -1,0 +1,60 @@
+{
+  "schema": "spiraltorch.hf_book_preflight_attempt.v1",
+  "status": "rejected_before_training",
+  "plan_id": "sha256:dd6654b2afd60f3c1994739d437759c53f5000995551a32b2756c4c3803fb6d0",
+  "optimizer_updates": 0,
+  "reason": "Initial all-arm bitwise-gradient assumption fails; radius VJP uses f64 products and sums unlike legacy f32 tensor primitives",
+  "gradient_diagnostic": {
+    "ordinary": {
+      "max_abs": [
+        0,
+        0
+      ],
+      "max_relative": [
+        0,
+        0
+      ],
+      "gate_first": 0.5501140356063843,
+      "bias_first": -0.19977205991744995
+    },
+    "wave_gate": {
+      "max_abs": [
+        0,
+        0
+      ],
+      "max_relative": [
+        0,
+        0
+      ],
+      "gate_first": 0.5501140356063843,
+      "bias_first": -0.19977205991744995
+    },
+    "radius4": {
+      "max_abs": [
+        5.960464477539063e-8,
+        5.21540641784668e-8
+      ],
+      "max_relative": [
+        1.134956946202692e-7,
+        0.00007151029421947896
+      ],
+      "gate_first": 0.5501140356063843,
+      "bias_first": -0.19977207481861115
+    }
+  },
+  "review_findings": {
+    "nested_illustration_regex": "35 stray brackets across 27 chapters, reported by independent read-only review"
+  },
+  "source_ids": {
+    "benchmarks/results/2026-10-18-hf-book-controls/plan.json": "sha256:dd6654b2afd60f3c1994739d437759c53f5000995551a32b2756c4c3803fb6d0",
+    "benchmarks/results/2026-10-18-hf-book-controls/prepare.py": "sha256:959a92f4cc0aa54c3dac29a390dbbcd171f6954fe0107bdd0ed84d6628999bf8",
+    "benchmarks/results/2026-10-18-hf-book-controls/preflight.py": "sha256:74dd4daf6b38e359b1be273000652243a4acc63381d1079944016e852963e39e",
+    "benchmarks/results/2026-10-18-hf-book-controls/test_prepare.py": "sha256:518b85ba884f92d41cd6d962a8f0d628c97eed38d8d393171cb58206523be1a7",
+    "benchmarks/results/2026-10-18-hf-book-controls/test_preflight.py": "sha256:b222fc8deebc572441fc27e6402827c5788a951698b972eb8748a3a598799e08"
+  },
+  "private_receipts": {
+    "preflight-reviewed.log": "sha256:e50e128f04a7267bd70d1b6320687569016df12c1670eeda1f773bfe63ea1ed2",
+    "initial-gradient-diagnostic.json": "sha256:6e60607fbf73b96ca62375cb449ffae016180e9f87cc0ffd7012513da312efd8",
+    "chapters-reviewed/manifest.json": "sha256:c1eacb6392fa3282f538170a4cd26dd874bc3a3d1013e23f653ffc97f2abe1fa"
+  }
+}
