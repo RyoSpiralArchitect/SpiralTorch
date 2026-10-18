@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Extend the native geometry artifact runtime to pointwise and fixed-anchor
+  elliptic adapters. Rust owns input projection, chart construction, readout,
+  complete first-order pullback and SGD; Python transports the same saved
+  artifact without Torch or NumPy. Causal variants still require a separate
+  sequence-aware route. This source-only extension is not part of the original
+  0.4.32 candidate qualification and does not change existing HF wrappers.
+
 ## 0.4.32
 
 0.4.32 is prepared in source; this does not confirm PyPI publication.

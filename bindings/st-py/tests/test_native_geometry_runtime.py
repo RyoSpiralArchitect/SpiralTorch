@@ -29,7 +29,20 @@ def artifact(kind="affine", *, frozen_gate=False):
     state = copy.deepcopy(FIXTURE["artifact"])
     p = state["placements"][0]
     p["path"] = "site"
-    if kind != "affine":
+    if kind in {"elliptic", "anchored"}:
+        p["recipe"] = {
+            "schema": "spiraltorch.elliptic_anchored_residual_adapter.v1" if kind == "anchored" else "spiraltorch.elliptic_residual_adapter.v1",
+            "features": 3, "strength": .5,
+            "warp": {"curvature_radius": 1.3, "sheet_count": 3, "spin_harmonics": 2},
+        }
+        p["tensors"] = [
+            {"name": "orientation.weight", "shape": [2, 3], "values": [.2, -.1, .15, .05, .3, -.2], "requires_grad": True, "role": "parameter"},
+            {"name": "orientation.bias", "shape": [2], "values": [.1, -.2], "requires_grad": True, "role": "parameter"},
+            {"name": "readout.weight", "shape": [3, 9], "values": [(i - 13) * .01 for i in range(27)], "requires_grad": True, "role": "parameter"},
+        ]
+        if kind == "anchored":
+            p["tensors"].append({"name": "raw_mix", "shape": [], "values": [.3], "requires_grad": True, "role": "parameter"})
+    elif kind != "affine":
         p["recipe"] = {"schema": "spiraltorch.wave_gate_adapter.v1" if kind == "wave" else "spiraltorch.wave_gate_adapter.v2",
                        "features": 3, "strength": .5,
                        "kernel": {"curvature": -1., "saturation": 1., "porosity": .05, "max_values": 64}}
@@ -69,7 +82,7 @@ class NativeGeometryTests(unittest.TestCase):
 
     def test_native_learning_and_exact_save_reload_continuation(self):
         x, y = array("f", [.2, -.3, .4, .5, .1, -.2]), array("f", [.1] * 6)
-        for kind in ("affine", "wave", "fixed", "learned"):
+        for kind in ("affine", "wave", "fixed", "learned", "elliptic", "anchored"):
             with self.subTest(kind=kind):
                 runtime = st.NativeGeometryRuntime(artifact(kind))
                 first = runtime.train_mse_buffer("site", x, y, 2, .2)
@@ -99,6 +112,43 @@ class NativeGeometryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale"):
             runtime.step_sgd(batch, [1.] * 6, .1)
         self.assertEqual(runtime.artifact().artifact_id, updated)
+
+    def test_elliptic_owned_composition_frozen_projection_and_row_budget(self):
+        class MustNotRead:
+            def __len__(self): raise AssertionError("reject row budget before input access")
+        for kind in ("elliptic", "anchored"):
+            state = json.loads(artifact(kind).state_json())
+            for tensor in state["placements"][0]["tensors"]:
+                if tensor["name"].startswith("orientation."):
+                    tensor["requires_grad"] = False
+            saved = st.GeometryAdapterArtifact.create_json(json.dumps(state))
+            runtime = st.NativeGeometryRuntime(saved)
+            values = array("f", [.2, -.3, .4, .5, .1, -.2])
+            batch = runtime.forward_buffer("site", values, 2)
+            output, pullback = batch.output, batch.vjp([1.] * 6)
+            values[0] = float("nan")
+            exported = batch.output_buffer()
+            exported[0] ^= 255
+            runtime.step_sgd(batch, [1.] * 6, .01)
+            self.assertEqual(batch.output, output)
+            self.assertEqual(batch.vjp([1.] * 6), pullback)
+            before = {t["name"]: t for t in state["placements"][0]["tensors"]}
+            after = {t["name"]: t for t in json.loads(runtime.artifact().state_json())["placements"][0]["tensors"]}
+            for name in ("orientation.weight", "orientation.bias"):
+                self.assertEqual(before[name], after[name])
+            self.assertNotEqual(before["readout.weight"], after["readout.weight"])
+            with self.assertRaises(ValueError):
+                runtime.forward("site", MustNotRead(), 65_537)
+            empty = runtime.forward("site", [], 0)
+            self.assertEqual(empty.output, [])
+            self.assertTrue(all(x == 0. for v in empty.vjp([])[1].values() for x in v))
+
+    def test_elliptic_causal_recipe_is_not_silently_flattened(self):
+        state = json.loads(artifact("elliptic").state_json())
+        state["placements"][0]["recipe"]["schema"] = "spiraltorch.elliptic_causal_residual_adapter.v1"
+        runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+        with self.assertRaisesRegex(ValueError, "currently supports"):
+            runtime.forward("site", [.2] * 6, 2)
 
     def test_invalid_updates_leave_artifact_unchanged(self):
         runtime = st.NativeGeometryRuntime(artifact())

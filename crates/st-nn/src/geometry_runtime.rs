@@ -1,6 +1,6 @@
 //! Torch-free execution of selected portable adapter placements.
 //!
-//! This is not a whole HF model loader. Affine/Wave placements share the native
+//! This is not a whole HF model loader. Pointwise placements share the native
 //! kernels, loss and tensor primitives; updates replace a validated artifact
 //! atomically. A snapshot is usable for updates only against its exact source.
 
@@ -17,6 +17,8 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_tensor::{Tensor, TensorUtilBackend};
 use std::collections::BTreeMap;
 
+mod elliptic;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug)]
@@ -25,6 +27,7 @@ enum Pullback {
     Affine(Box<ChannelAffineLearningBatch>),
     Wave(Box<WaveGateLearningBatch>),
     WaveRadius(Box<WaveGateLearningBatch>),
+    Elliptic(Box<elliptic::EllipticRuntimeBatch>),
 }
 
 #[derive(Debug)]
@@ -81,7 +84,9 @@ impl NativeGeometryRuntime {
             GeometryAdapterRecipe::ChannelAffine { features, max_values, .. } => Ok((*features, *max_values)),
             GeometryAdapterRecipe::Wave { features, kernel, .. }
             | GeometryAdapterRecipe::WaveRadius { features, kernel, .. } => Ok((*features, kernel.max_values)),
-            _ => Err("native artifact runtime currently supports channel-affine and WaveGate placements only".into()),
+            GeometryAdapterRecipe::Elliptic { features, .. }
+            | GeometryAdapterRecipe::EllipticAnchored { features, .. } => Ok((*features, elliptic::value_budget(*features))),
+            _ => Err("native artifact runtime currently supports pointwise channel-affine, WaveGate and elliptic placements only".into()),
         }
     }
 
@@ -98,7 +103,9 @@ impl NativeGeometryRuntime {
         let strength = match placement.recipe {
             GeometryAdapterRecipe::ChannelAffine { strength, .. }
             | GeometryAdapterRecipe::Wave { strength, .. }
-            | GeometryAdapterRecipe::WaveRadius { strength, .. } => strength as f32,
+            | GeometryAdapterRecipe::WaveRadius { strength, .. }
+            | GeometryAdapterRecipe::Elliptic { strength, .. }
+            | GeometryAdapterRecipe::EllipticAnchored { strength, .. } => strength as f32,
             _ => unreachable!(),
         };
         let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
@@ -143,6 +150,14 @@ impl NativeGeometryRuntime {
                         )?))
                     }
                 }
+                GeometryAdapterRecipe::Elliptic { warp, .. }
+                | GeometryAdapterRecipe::EllipticAnchored { warp, .. } => {
+                    Pullback::Elliptic(Box::new(elliptic::EllipticRuntimeBatch::forward(
+                        placement,
+                        warp,
+                        &input_tensor,
+                    )?))
+                }
                 _ => unreachable!(),
             }
         };
@@ -150,6 +165,7 @@ impl NativeGeometryRuntime {
             Pullback::Identity => None,
             Pullback::Affine(batch) => Some(batch.output()),
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) => Some(batch.output()),
+            Pullback::Elliptic(batch) => Some(batch.output()),
         };
         let output = if let Some(residual) = residual {
             input_tensor.add_with_backend(
@@ -281,6 +297,13 @@ impl NativeGeometryBatch {
                 let (g, radius) = batch.vjp_with_log_radius(scaled.data())?;
                 (g.grad_input, g.grad_gate, g.grad_bias, Some(radius))
             }
+            Pullback::Elliptic(batch) => {
+                let gradient = batch.vjp(&scaled)?;
+                return Ok(NativeGeometryVjp {
+                    input: direction.add_with_backend(&gradient.input, TensorUtilBackend::Cpu)?,
+                    parameters: gradient.parameters,
+                });
+            }
         };
         let mut parameters = BTreeMap::from([
             ("gate".into(), gate.data().to_vec()),
@@ -306,6 +329,169 @@ impl NativeGeometryBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn elliptic_artifact(anchored: bool, strength: f64) -> GeometryAdapterArtifact {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/channel_affine.fixture.json"
+        ))
+        .unwrap();
+        let mut value = fixture["artifact"].clone();
+        let placement = &mut value["placements"][0];
+        placement["path"] = serde_json::json!("site");
+        placement["recipe"] = serde_json::json!({
+            "schema": if anchored { "spiraltorch.elliptic_anchored_residual_adapter.v1" } else { "spiraltorch.elliptic_residual_adapter.v1" },
+            "features": 3, "strength": strength,
+            "warp": {"curvature_radius": 1.3, "sheet_count": 3, "spin_harmonics": 2}
+        });
+        placement["tensors"] = serde_json::json!([
+            {"name": "orientation.weight", "shape": [2,3], "values": [0.2,-0.1,0.15,0.05,0.3,-0.2], "requires_grad": true, "role": "parameter"},
+            {"name": "orientation.bias", "shape": [2], "values": [0.1,-0.2], "requires_grad": true, "role": "parameter"},
+            {"name": "readout.weight", "shape": [3,9], "values": (0..27).map(|i| (i as f32 - 13.) * 0.01).collect::<Vec<_>>(), "requires_grad": true, "role": "parameter"}
+        ]);
+        if anchored {
+            placement["tensors"].as_array_mut().unwrap().push(serde_json::json!({
+                "name": "raw_mix", "shape": [], "values": [0.3], "requires_grad": true, "role": "parameter"
+            }));
+        }
+        GeometryAdapterArtifact::create_json(value.to_string().as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn elliptic_composite_pullback_matches_all_parameter_and_input_differences() {
+        let x = [0.2, -0.3, 0.4, 0.5, 0.1, -0.2];
+        let seed = [0.3, 0.5, -0.4, 0.2, -0.1, 0.6];
+        for anchored in [false, true] {
+            let runtime = NativeGeometryRuntime::new(elliptic_artifact(anchored, 0.4));
+            let batch = runtime.forward("site", &x, 2).unwrap();
+            let gradient = batch.vjp(&seed).unwrap();
+            let objective = |runtime: &NativeGeometryRuntime, input: &[f32]| {
+                runtime
+                    .forward("site", input, 2)
+                    .unwrap()
+                    .output()
+                    .data()
+                    .iter()
+                    .zip(seed)
+                    .map(|(v, d)| v * d)
+                    .sum::<f32>()
+            };
+            let epsilon = 0.002;
+            for index in 0..x.len() {
+                let (mut plus, mut minus) = (x, x);
+                plus[index] += epsilon;
+                minus[index] -= epsilon;
+                let numerical =
+                    (objective(&runtime, &plus) - objective(&runtime, &minus)) / (2. * epsilon);
+                assert!((numerical - gradient.input.data()[index]).abs() < 3e-4);
+            }
+            for (name, values) in &gradient.parameters {
+                for (index, expected) in values.iter().enumerate() {
+                    let perturbed = |sign: f32| {
+                        let mut record = runtime.artifact().record().clone();
+                        record.placements[0]
+                            .tensors
+                            .iter_mut()
+                            .find(|t| t.name == *name)
+                            .unwrap()
+                            .values[index] += sign * epsilon;
+                        NativeGeometryRuntime::new(GeometryAdapterArtifact::create(record).unwrap())
+                    };
+                    let numerical = (objective(&perturbed(1.), &x)
+                        - objective(&perturbed(-1.), &x))
+                        / (2. * epsilon);
+                    assert!(
+                        (numerical - expected).abs() < 3e-4,
+                        "{name}[{index}]: {numerical} vs {expected}"
+                    );
+                }
+            }
+            assert_eq!(gradient.parameters.contains_key("raw_mix"), anchored);
+        }
+    }
+
+    #[test]
+    fn elliptic_identity_start_learns_and_continues_exactly_after_artifact_restore() {
+        for anchored in [false, true] {
+            let mut record = elliptic_artifact(anchored, 0.5).record().clone();
+            record.placements[0]
+                .tensors
+                .iter_mut()
+                .find(|t| t.name == "readout.weight")
+                .unwrap()
+                .values
+                .fill(0.);
+            let mut runtime =
+                NativeGeometryRuntime::new(GeometryAdapterArtifact::create(record).unwrap());
+            let x = [0.2, -0.3, 0.4, 0.5, 0.1, -0.2];
+            let target = [0.1; 6];
+            let batch = runtime.forward("site", &x, 2).unwrap();
+            assert_eq!(batch.output().data(), &x);
+            let gradient = batch.vjp(&[1.; 6]).unwrap();
+            assert_eq!(gradient.parameters["orientation.weight"], vec![0.; 6]);
+            assert!(gradient.parameters["readout.weight"]
+                .iter()
+                .any(|v| *v != 0.));
+            let first = runtime.train_mse("site", &x, &target, 2, 0.1).unwrap();
+            for _ in 0..39 {
+                runtime.train_mse("site", &x, &target, 2, 0.1).unwrap();
+            }
+            let saved = runtime.artifact();
+            let restored = GeometryAdapterArtifact::from_json(
+                saved.to_json().as_bytes(),
+                saved.artifact_id(),
+                saved.record().base_model_identity.as_str(),
+            )
+            .unwrap();
+            let mut restored = NativeGeometryRuntime::new(restored);
+            let loss = runtime.train_mse("site", &x, &target, 2, 0.1).unwrap();
+            assert!(loss < first);
+            assert_eq!(
+                loss,
+                restored.train_mse("site", &x, &target, 2, 0.1).unwrap()
+            );
+            assert_eq!(
+                runtime.artifact().artifact_id(),
+                restored.artifact().artifact_id()
+            );
+        }
+    }
+
+    #[test]
+    fn elliptic_rows_bypass_empty_and_atomic_failure_boundaries() {
+        for anchored in [false, true] {
+            let mut runtime = NativeGeometryRuntime::new(elliptic_artifact(anchored, 0.4));
+            assert_eq!(runtime.dimensions("site").unwrap(), (3, 3 * 65_536));
+            assert!(runtime
+                .forward("site", &vec![0.; 3 * 65_537], 65_537)
+                .is_err());
+            let empty = runtime.forward("site", &[], 0).unwrap();
+            assert!(empty.output().data().is_empty());
+            assert!(empty
+                .vjp(&[])
+                .unwrap()
+                .parameters
+                .values()
+                .flatten()
+                .all(|v| *v == 0.));
+            let id = runtime.artifact().artifact_id().to_string();
+            assert!(runtime
+                .train_mse("site", &[0.2; 6], &[f32::NAN; 6], 2, 0.1)
+                .is_err());
+            let batch = runtime.forward("site", &[0.2; 6], 2).unwrap();
+            assert!(runtime.step_sgd(&batch, &[f32::MAX; 6], f32::MAX).is_err());
+            assert_eq!(runtime.artifact().artifact_id(), id);
+            let bypass = NativeGeometryRuntime::new(elliptic_artifact(anchored, 0.));
+            let identity = bypass.forward("site", &[f32::MAX; 6], 2).unwrap();
+            assert_eq!(identity.output().data(), &[f32::MAX; 6]);
+            assert!(identity
+                .vjp(&[1.; 6])
+                .unwrap()
+                .parameters
+                .values()
+                .flatten()
+                .all(|v| *v == 0.));
+        }
+    }
 
     fn artifact(wave: bool, radius: Option<bool>, strength: f64) -> GeometryAdapterArtifact {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
