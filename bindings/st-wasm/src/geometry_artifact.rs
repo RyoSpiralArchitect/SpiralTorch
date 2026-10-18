@@ -47,6 +47,11 @@ impl GeometryAdapterArtifact {
         self.inner.artifact_id().to_owned()
     }
 
+    #[wasm_bindgen(getter, js_name = layoutId)]
+    pub fn layout_id(&self) -> Result<String, JsValue> {
+        self.inner.layout_id().map_err(js_error)
+    }
+
     #[wasm_bindgen(getter, js_name = baseModelIdentity)]
     pub fn base_model_identity(&self) -> String {
         self.inner.record().base_model_identity.clone()

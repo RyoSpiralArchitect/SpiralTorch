@@ -12,6 +12,11 @@ intervention report. Rust owns validation and immutable state; Python owns
 Torch modules and placement. WASM `nn` builds expose the same artifact contract
 without claiming browser HF execution.
 
+For actual training through HF optimizer, clipping and checkpoint/resume, see
+the [geometry Trainer integration](hf-geometry-training.md). Its Rust-owned
+`artifact.layout_id` binds resume-compatible structure separately from the
+exact-weight `artifact_id`.
+
 ## Export And Use
 
 Start with a float32 HF model loaded through `load_hf_causal_lm_artifact`, and an

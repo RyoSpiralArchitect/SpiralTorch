@@ -9561,6 +9561,11 @@ def __getattr__(name: str) -> _Any:
 
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    if name == "hf_geometry_trainer_class":
+        module = import_module("spiraltorch.hf_geometry_trainer")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     if name == "GeometryAdapterStack":
         module = import_module("spiraltorch.geometry_adapters")
         value = getattr(module, name)
@@ -9654,7 +9659,7 @@ for _name in [
         _EXPORTED.add(_name)
 
 _EXPORTED.update(
-    ["hg", "rg", "z", "__version__", "model_zoo", "GeometryAdapterStack",
+    ["hg", "rg", "z", "__version__", "model_zoo", "GeometryAdapterStack", "hf_geometry_trainer_class",
      "FractionalMemoryAdapter", "fractional_gl_autograd",
      "FractionalHistoryAdapter", "fractional_gl_history_autograd",
      "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd",

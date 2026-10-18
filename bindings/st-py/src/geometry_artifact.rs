@@ -50,6 +50,11 @@ impl PyGeometryAdapterArtifact {
     }
 
     #[getter]
+    fn layout_id(&self) -> PyResult<String> {
+        self.inner.layout_id().map_err(value_error)
+    }
+
+    #[getter]
     fn base_model_identity(&self) -> &str {
         &self.inner.record().base_model_identity
     }

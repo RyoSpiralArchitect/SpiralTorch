@@ -1,0 +1,42 @@
+{
+  "schema": "spiraltorch.hf_geometry_resume_followup.v1",
+  "previous_qualification": "validation.json",
+  "base_commit": "a2c73f38e7296ae98650239dcfa9cbe8f2d63921",
+  "scope": "Trainer fix qualified in an installed combined source candidate also containing the separately stacked document-window feature; not a standalone parent wheel.",
+  "environment": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "machine": "Darwin arm64"
+  },
+  "outcomes": {
+    "pre_fix_later_epoch_cpu_regression_failed": true,
+    "trainer_tests_passed": 38,
+    "combined_tests_passed": 117,
+    "skipped": 0,
+    "epoch_boundary_and_later_resumes": [
+      7,
+      8,
+      15
+    ],
+    "random_order_matches_hf_seedable_sampler": true,
+    "cloned_shard_skip_preserves_epoch": true,
+    "early_epoch_stop_rejected_before_checkpoint_write": true,
+    "logging_and_evaluation_callback_bypass_rejected": true,
+    "whole_run_stopping_supported": true,
+    "independent_review_residual_findings": 0,
+    "independent_reviewer_ran_training": false,
+    "source_overlay_used_for_final_qualification": false
+  },
+  "source_sha256": {
+    "bindings/st-py/spiraltorch/hf_geometry_trainer.py": "f27317b9ad40c1bd29125787e3290990cad447e801a4e76ed42297b9beb71b3c",
+    "bindings/st-py/tests/test_hf_geometry_trainer.py": "45263439ebf88efdc1f27316dab8caaec7f10566b8f396425c5429cb6a11eaf2"
+  },
+  "wheel_sha256": "8ca03a46ec5fcebc83786382dc7d43cd06846e0f9026533fef3fdfc1c0328435",
+  "private_log_sha256": {
+    "python-final.log": "859116580d30d120c68b31871ec26eda62b40454a799ac0ae4f16e498cb3c428",
+    "python-final.xml": "31727413ac996271d7e785e2ce2574b3e7894e995459e45632722955e09f6dc2",
+    "epoch-regression-before.log": "414690e75bf4ce8a5a74a7e164da8e69c81913d160537701a385990d726343b7"
+  }
+}

@@ -18,6 +18,13 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
             import spiraltorch as st
             namespace = {}
             exec('from spiraltorch import *', namespace)
+            assert 'hf_geometry_trainer_class' in namespace
+            try:
+                namespace['hf_geometry_trainer_class']()
+            except RuntimeError as error:
+                assert 'hf-geometry' in str(error)
+            else:
+                raise AssertionError('Trainer factory did not reject missing PyTorch')
             from spiraltorch import geometry_autograd as geometry
             assert geometry.torch is None
             assert 'GeometryAdapterStack' in st.__all__ and 'GeometryAdapterStack' in namespace

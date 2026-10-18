@@ -834,7 +834,7 @@ jobs:
           TOKENIZERS_PARALLELISM: "false"
           OMP_NUM_THREADS: "2"
         run: |
-          python -m pip install "transformers==4.57.6"
+          python -m pip install "transformers==4.57.6" "accelerate>=0.27"
           python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticGatedCausalLearningBatch"); assert hasattr(st, "EllipticGatedCausalResidualAdapter")'
           python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticAnchoredLearningBatch"); assert hasattr(st, "EllipticAnchoredResidualAdapter")'
           python -I -c 'import spiraltorch as st; assert hasattr(st, "FractionalGlKernel"); assert hasattr(st, "FractionalMemoryAdapter"); assert hasattr(st, "FractionalHistoryAdapter")'
@@ -848,6 +848,7 @@ jobs:
             bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \
             bindings/st-py/tests/test_geometry_artifact.py \
+            bindings/st-py/tests/test_hf_geometry_trainer.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \
             bindings/st-py/tests/test_geometry_optional_dependency.py \
             bindings/st-py/tests/test_fractional_learning.py \

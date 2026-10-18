@@ -209,6 +209,7 @@ def test_shared_native_wasm_fixture_reconstructs_all_thirteen_placements():
     assert len(restored.paths) == 13
     canonical = st.GeometryAdapterArtifact.create_json(payload)
     assert canonical.artifact_id == expected["canonical_artifact_id"]
+    assert canonical.layout_id == expected["layout_id"]
     assert restored.export_artifact(base_model_identity=BASE).artifact_id == canonical.artifact_id
     assert equal(json.loads(canonical.state_json()), json.loads(restored.export_artifact(base_model_identity=BASE).state_json()))
 
