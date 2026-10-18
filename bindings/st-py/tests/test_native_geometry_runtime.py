@@ -29,9 +29,12 @@ def artifact(kind="affine", *, frozen_gate=False):
     state = copy.deepcopy(FIXTURE["artifact"])
     p = state["placements"][0]
     p["path"] = "site"
-    if kind in {"elliptic", "anchored"}:
+    if kind in {"elliptic", "anchored", "causal", "gated"}:
         p["recipe"] = {
-            "schema": "spiraltorch.elliptic_anchored_residual_adapter.v1" if kind == "anchored" else "spiraltorch.elliptic_residual_adapter.v1",
+            "schema": {"elliptic": "spiraltorch.elliptic_residual_adapter.v1",
+                       "anchored": "spiraltorch.elliptic_anchored_residual_adapter.v1",
+                       "causal": "spiraltorch.elliptic_causal_residual_adapter.v1",
+                       "gated": "spiraltorch.elliptic_gated_causal_residual_adapter.v1"}[kind],
             "features": 3, "strength": .5,
             "warp": {"curvature_radius": 1.3, "sheet_count": 3, "spin_harmonics": 2},
         }
@@ -40,7 +43,7 @@ def artifact(kind="affine", *, frozen_gate=False):
             {"name": "orientation.bias", "shape": [2], "values": [.1, -.2], "requires_grad": True, "role": "parameter"},
             {"name": "readout.weight", "shape": [3, 9], "values": [(i - 13) * .01 for i in range(27)], "requires_grad": True, "role": "parameter"},
         ]
-        if kind == "anchored":
+        if kind in {"anchored", "gated"}:
             p["tensors"].append({"name": "raw_mix", "shape": [], "values": [.3], "requires_grad": True, "role": "parameter"})
     elif kind != "affine":
         p["recipe"] = {"schema": "spiraltorch.wave_gate_adapter.v1" if kind == "wave" else "spiraltorch.wave_gate_adapter.v2",
@@ -144,11 +147,76 @@ class NativeGeometryTests(unittest.TestCase):
             self.assertTrue(all(x == 0. for v in empty.vjp([])[1].values() for x in v))
 
     def test_elliptic_causal_recipe_is_not_silently_flattened(self):
-        state = json.loads(artifact("elliptic").state_json())
-        state["placements"][0]["recipe"]["schema"] = "spiraltorch.elliptic_causal_residual_adapter.v1"
-        runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
-        with self.assertRaisesRegex(ValueError, "currently supports"):
-            runtime.forward("site", [.2] * 6, 2)
+        for kind in ("causal", "gated"):
+            runtime = st.NativeGeometryRuntime(artifact(kind))
+            with self.assertRaisesRegex(ValueError, "currently supports"):
+                runtime.forward("site", [.2] * 6, 2)
+            result = runtime.forward_sequence("site", [.2] * 6, (1, 2))
+            self.assertEqual(result.sequence_shape, (1, 2, 3))
+            self.assertEqual(result.shape, (2, 3))
+
+    def test_native_sequence_learning_and_saved_context_continuation(self):
+        x = array("f", [(i * 7 % 19) * .05 - .3 for i in range(18)])
+        y = array("f", [.1] * 18)
+        for kind in ("causal", "gated"):
+            runtime = st.NativeGeometryRuntime(artifact(kind))
+            snapshot = runtime.forward_sequence_buffer("site", x, (2, 3))
+            first = runtime.train_sequence_mse_buffer("site", x, y, (2, 3), .2)
+            for _ in range(39):
+                runtime.train_sequence_mse("site", list(x), list(y), (2, 3), .2)
+            saved = runtime.artifact()
+            restored = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.from_json(
+                saved.to_json(), saved.artifact_id, saved.base_model_identity))
+            loss = runtime.train_sequence_mse_buffer("site", x, y, (2, 3), .2)
+            self.assertLess(loss, first)
+            self.assertEqual(loss, restored.train_sequence_mse("site", list(x), list(y), (2, 3), .2))
+            self.assertEqual(runtime.artifact().artifact_id, restored.artifact().artifact_id)
+            before = runtime.artifact().artifact_id
+            with self.assertRaisesRegex(ValueError, "stale"):
+                runtime.step_sgd(snapshot, [1.] * 18, .1)
+            with self.assertRaises(ValueError):
+                runtime.train_sequence_mse("site", list(x), [float("nan")] * 18, (2, 3), .1)
+            self.assertEqual(runtime.artifact().artifact_id, before)
+
+    def test_sequence_admission_is_before_foreign_values_and_preserves_pointwise_route(self):
+        class MustNotRead:
+            def __len__(self): raise AssertionError("shape admission must precede values")
+        class OversizedTarget:
+            def __len__(self): return 10**10
+            def __getitem__(self, _): raise AssertionError("target length must precede extraction")
+        runtime = st.NativeGeometryRuntime(artifact("gated"))
+        invalid = ((), (1, 2, 3), (True, 3), (-1, 3), (1., 3), (0, 1), (1, 0),
+                   (2**32, 2), (65_537, 1), (1, 1025))
+        for shape in invalid:
+            for method in (runtime.forward_sequence, runtime.forward_sequence_buffer):
+                with self.assertRaises((TypeError, ValueError, OverflowError)):
+                    method("site", MustNotRead(), shape)
+        before = runtime.artifact().artifact_id
+        with self.assertRaises(ValueError):
+            runtime.train_sequence_mse("site", [.2] * 18, OversizedTarget(), (2, 3), .1)
+        self.assertEqual(runtime.artifact().artifact_id, before)
+        pointwise = st.NativeGeometryRuntime(artifact("wave"))
+        flat = pointwise.forward("site", [.2] * 18, 6)
+        context = pointwise.forward_sequence("site", [.2] * 18, (2, 3))
+        self.assertIsNone(flat.sequence_shape)
+        self.assertEqual(context.sequence_shape, (2, 3, 3))
+        self.assertEqual(flat.output, context.output)
+        self.assertEqual(flat.vjp([1.] * 18), context.vjp([1.] * 18))
+
+    def test_sequence_causality_and_cross_batch_isolation(self):
+        values = [(i * 7 % 19) * .05 - .3 for i in range(18)]
+        for kind in ("causal", "gated"):
+            runtime = st.NativeGeometryRuntime(artifact(kind))
+            batch = runtime.forward_sequence("site", values, (2, 3))
+            changed = values[:6] + [v + 3. for v in values[6:]]
+            self.assertEqual(batch.output[:6], runtime.forward_sequence("site", changed, (2, 3)).output[:6])
+            for index in range(2):
+                separate = runtime.forward_sequence("site", values[9 * index:9 * (index + 1)], (1, 3))
+                self.assertEqual(separate.output, batch.output[9 * index:9 * (index + 1)])
+            seed = [.2, -.4, .1] + [0.] * 15
+            self.assertEqual(batch.vjp(seed)[0][3:], [0.] * 15)
+            buffers = batch.vjp_buffer(array("f", seed))
+            self.assertEqual(list(memoryview(buffers[0]).cast("f")), batch.vjp(seed)[0])
 
     def test_invalid_updates_leave_artifact_unchanged(self):
         runtime = st.NativeGeometryRuntime(artifact())

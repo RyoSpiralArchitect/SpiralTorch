@@ -11,15 +11,18 @@ torch = pytest.importorskip("torch")
 artifact = runpy.run_path(str(Path(__file__).with_name("test_native_geometry_runtime.py")))["artifact"]
 
 
-@pytest.mark.parametrize("kind", ["affine", "wave", "fixed", "learned", "elliptic", "anchored"])
+@pytest.mark.parametrize("kind", ["affine", "wave", "fixed", "learned", "elliptic", "anchored", "causal", "gated"])
 def test_native_residual_pullback_and_sgd_match_optional_torch_transport(kind):
     saved = artifact(kind)
     native = st.NativeGeometryRuntime(saved)
     stack = st.GeometryAdapterStack.from_artifact(saved, expected_base_model_identity=saved.base_model_identity)
     adapter = stack.adapters[0]
-    x = torch.tensor([[.2, -.3, .4], [.5, .1, -.2]], requires_grad=True)
-    direction = torch.tensor([[.3, .5, -.4], [.2, -.1, .6]])
-    batch = native.forward("site", x.detach().flatten().tolist(), 2)
+    causal = kind in {"causal", "gated"}
+    values = [[.2, -.3, .4], [.5, .1, -.2]]
+    x = torch.tensor([values] if causal else values, requires_grad=True)
+    direction = torch.tensor([[.3, .5, -.4], [.2, -.1, .6]]).reshape_as(x)
+    batch = (native.forward_sequence("site", x.detach().flatten().tolist(), (1, 2)) if causal
+             else native.forward("site", x.detach().flatten().tolist(), 2))
     actual = adapter(x)
     torch.testing.assert_close(torch.tensor(batch.output).reshape_as(actual), actual, atol=1e-6, rtol=1e-6)
     actual.backward(direction)
@@ -36,7 +39,7 @@ def test_native_residual_pullback_and_sgd_match_optional_torch_transport(kind):
         torch.testing.assert_close(left, right, atol=1e-6, rtol=1e-6)
 
 
-@pytest.mark.parametrize("kind", ["elliptic", "anchored"])
+@pytest.mark.parametrize("kind", ["elliptic", "anchored", "causal", "gated"])
 @pytest.mark.parametrize("width", [1, 7, 64, 768])
 def test_elliptic_projection_and_readout_cover_hidden_widths_and_leading_axes(kind, width):
     generator = torch.Generator().manual_seed(47)
@@ -55,7 +58,8 @@ def test_elliptic_projection_and_readout_cover_hidden_widths_and_leading_axes(ki
     adapter = st.GeometryAdapterStack.from_artifact(saved, expected_base_model_identity=saved.base_model_identity).adapters[0]
     x = (torch.randn(2, 4, width, generator=generator) * .1).requires_grad_()
     direction = torch.randn(x.shape, generator=generator) * .1
-    batch = native.forward("site", x.detach().flatten().tolist(), 8)
+    batch = native.forward_sequence("site", x.detach().flatten().tolist(), (2, 4))
+    assert batch.sequence_shape == (2, 4, width)
     actual = adapter(x)
     torch.testing.assert_close(torch.tensor(batch.output).reshape_as(x), actual, atol=1e-5, rtol=1e-5)
     actual.backward(direction)

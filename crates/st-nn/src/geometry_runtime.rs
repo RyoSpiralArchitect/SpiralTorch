@@ -1,6 +1,6 @@
 //! Torch-free execution of selected portable adapter placements.
 //!
-//! This is not a whole HF model loader. Pointwise placements share the native
+//! This is not a whole HF model loader. Selected placements share the native
 //! kernels, loss and tensor primitives; updates replace a validated artifact
 //! atomically. A snapshot is usable for updates only against its exact source.
 
@@ -18,6 +18,8 @@ use st_tensor::{Tensor, TensorUtilBackend};
 use std::collections::BTreeMap;
 
 mod elliptic;
+#[cfg(test)]
+mod sequence_tests;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -37,6 +39,7 @@ pub struct NativeGeometryBatch {
     output: Tensor,
     strength: f32,
     pullback: Pullback,
+    sequence_shape: Option<[usize; 3]>,
 }
 
 #[derive(Debug)]
@@ -88,6 +91,70 @@ impl NativeGeometryRuntime {
             | GeometryAdapterRecipe::EllipticAnchored { features, .. } => Ok((*features, elliptic::value_budget(*features))),
             _ => Err("native artifact runtime currently supports pointwise channel-affine, WaveGate and elliptic placements only".into()),
         }
+    }
+
+    /// Admit full, nonempty, unpadded contexts before copying foreign values.
+    /// Returns (feature width, exact value count); causal pair budgets live in Rust.
+    pub fn sequence_dimensions(&self, path: &str, shape: [usize; 2]) -> Result<(usize, usize)> {
+        let rows = shape[0]
+            .checked_mul(shape[1])
+            .filter(|&n| n > 0)
+            .ok_or("native sequence requires nonempty non-overflowing batch and sequence axes")?;
+        match &self.placement(path)?.recipe {
+            GeometryAdapterRecipe::EllipticCausal { features, .. }
+            | GeometryAdapterRecipe::EllipticGated { features, .. } => {
+                Ok((*features, elliptic::sequence_values(*features, shape)?))
+            }
+            _ => {
+                let (features, budget) = self.dimensions(path)?;
+                let count = rows
+                    .checked_mul(features)
+                    .filter(|&n| n <= budget)
+                    .ok_or("native sequence exceeds value budget")?;
+                Ok((features, count))
+            }
+        }
+    }
+
+    /// Full-prefix causal execution, or independent pointwise execution with
+    /// the same explicit batch/sequence boundary. No padding mask or KV cache.
+    pub fn forward_sequence(
+        &self,
+        path: &str,
+        input: &[f32],
+        shape: [usize; 2],
+    ) -> Result<NativeGeometryBatch> {
+        let (features, count) = self.sequence_dimensions(path, shape)?;
+        if input.len() != count || input.iter().any(|x| !x.is_finite()) {
+            return Err("invalid native sequence input length or values".into());
+        }
+        let placement = self.placement(path)?;
+        let (warp, strength) = match &placement.recipe {
+            GeometryAdapterRecipe::EllipticCausal { warp, strength, .. }
+            | GeometryAdapterRecipe::EllipticGated { warp, strength, .. } => {
+                (warp, *strength as f32)
+            }
+            _ => {
+                let mut batch = self.forward(path, input, shape[0] * shape[1])?;
+                batch.sequence_shape = Some([shape[0], shape[1], features]);
+                return Ok(batch);
+            }
+        };
+        let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+        let input = Tensor::from_vec(shape[0] * shape[1], features, input.to_vec())?;
+        let pullback = if strength == 0. {
+            Pullback::Identity
+        } else {
+            Pullback::Elliptic(Box::new(elliptic::EllipticRuntimeBatch::forward(
+                placement,
+                warp,
+                &input,
+                Some(shape),
+            )?))
+        };
+        let mut batch = self.finish_forward(placement, input, strength, pullback)?;
+        batch.sequence_shape = Some([shape[0], shape[1], features]);
+        Ok(batch)
     }
 
     /// Flatten only leading axes; each row is an independent feature vector.
@@ -156,11 +223,22 @@ impl NativeGeometryRuntime {
                         placement,
                         warp,
                         &input_tensor,
+                        None,
                     )?))
                 }
                 _ => unreachable!(),
             }
         };
+        self.finish_forward(placement, input_tensor, strength, pullback)
+    }
+
+    fn finish_forward(
+        &self,
+        placement: &GeometryAdapterPlacement,
+        input: Tensor,
+        strength: f32,
+        pullback: Pullback,
+    ) -> Result<NativeGeometryBatch> {
         let residual = match &pullback {
             Pullback::Identity => None,
             Pullback::Affine(batch) => Some(batch.output()),
@@ -168,12 +246,12 @@ impl NativeGeometryRuntime {
             Pullback::Elliptic(batch) => Some(batch.output()),
         };
         let output = if let Some(residual) = residual {
-            input_tensor.add_with_backend(
+            input.add_with_backend(
                 &residual.scale_with_backend(strength, TensorUtilBackend::Cpu)?,
                 TensorUtilBackend::Cpu,
             )?
         } else {
-            input_tensor
+            input
         };
         Ok(NativeGeometryBatch {
             source_id: self.artifact.artifact_id().into(),
@@ -181,6 +259,7 @@ impl NativeGeometryRuntime {
             output,
             strength,
             pullback,
+            sequence_shape: None,
         })
     }
 
@@ -241,6 +320,28 @@ impl NativeGeometryRuntime {
         learning_rate: f32,
     ) -> Result<f32> {
         let batch = self.forward(path, input, rows)?;
+        self.apply_mse(&batch, target, learning_rate)
+    }
+
+    /// Mean-MSE across every value in a full, nonempty unpadded context.
+    pub fn train_sequence_mse(
+        &mut self,
+        path: &str,
+        input: &[f32],
+        target: &[f32],
+        shape: [usize; 2],
+        learning_rate: f32,
+    ) -> Result<f32> {
+        let batch = self.forward_sequence(path, input, shape)?;
+        self.apply_mse(&batch, target, learning_rate)
+    }
+
+    fn apply_mse(
+        &mut self,
+        batch: &NativeGeometryBatch,
+        target: &[f32],
+        learning_rate: f32,
+    ) -> Result<f32> {
         if target.len() != batch.output.data().len() {
             return Err("native geometry target length differs from the validated output".into());
         }
@@ -250,7 +351,7 @@ impl NativeGeometryRuntime {
         let mut loss = MeanSquaredError::new();
         let value = loss.forward(&batch.output, &target)?.data()[0];
         let upstream = loss.backward(&batch.output, &target)?;
-        self.step_sgd(&batch, upstream.data(), learning_rate)?;
+        self.step_sgd(batch, upstream.data(), learning_rate)?;
         Ok(value)
     }
 }
@@ -261,6 +362,9 @@ impl NativeGeometryBatch {
     }
     pub fn source_artifact_id(&self) -> &str {
         &self.source_id
+    }
+    pub fn sequence_shape(&self) -> Option<[usize; 3]> {
+        self.sequence_shape
     }
 
     /// First-order residual pullback. Parameter gradients are row sums; fixed
@@ -330,7 +434,7 @@ impl NativeGeometryBatch {
 mod tests {
     use super::*;
 
-    fn elliptic_artifact(anchored: bool, strength: f64) -> GeometryAdapterArtifact {
+    pub(super) fn elliptic_artifact(anchored: bool, strength: f64) -> GeometryAdapterArtifact {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../tests/fixtures/channel_affine.fixture.json"
         ))

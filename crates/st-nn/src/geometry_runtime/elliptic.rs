@@ -3,16 +3,31 @@
 use super::{tensor, GeometryAdapterPlacement, GeometryAdapterRecipe, NativeGeometryVjp, Result};
 use crate::geometry_artifact::{EllipticRecipe, GEOMETRY_ADAPTER_MAX_VALUES};
 use st_core::theory::microlocal::{
-    EllipticAnchoredLearningBatch, EllipticLearningBatch, EllipticWarp,
+    EllipticAnchoredLearningBatch, EllipticCausalLearningBatch, EllipticGatedCausalLearningBatch,
+    EllipticLearningBatch, EllipticWarp,
 };
 use st_tensor::{MatmulBackend, PackedB, Tensor, TensorUtilBackend, Tile};
 use std::collections::BTreeMap;
 
 const MAX_ROWS: usize = 65_536;
+const MAX_PAIRS: usize = 1_048_576;
 const MATMUL: MatmulBackend = MatmulBackend::CpuSimd;
 
 pub(super) fn value_budget(features: usize) -> usize {
     GEOMETRY_ADAPTER_MAX_VALUES.min(features.saturating_mul(MAX_ROWS))
+}
+
+pub(super) fn sequence_values(features: usize, shape: [usize; 2]) -> Result<usize> {
+    let rows = shape[0]
+        .checked_mul(shape[1])
+        .filter(|&n| n > 0 && n <= MAX_ROWS)
+        .ok_or("native elliptic sequence exceeds nonempty row budget")?;
+    rows.checked_mul(shape[1])
+        .filter(|&n| n <= MAX_PAIRS)
+        .ok_or("native elliptic sequence exceeds score-pair budget")?;
+    rows.checked_mul(features)
+        .filter(|&n| n <= GEOMETRY_ADAPTER_MAX_VALUES)
+        .ok_or_else(|| "native elliptic sequence exceeds value budget".into())
 }
 
 fn finite(value: Tensor) -> Result<Tensor> {
@@ -26,6 +41,8 @@ fn finite(value: Tensor) -> Result<Tensor> {
 enum Map {
     Pointwise(EllipticLearningBatch),
     Anchored(EllipticAnchoredLearningBatch),
+    Causal(EllipticCausalLearningBatch),
+    Gated(EllipticGatedCausalLearningBatch),
 }
 
 #[derive(Debug)]
@@ -43,6 +60,7 @@ impl EllipticRuntimeBatch {
         placement: &GeometryAdapterPlacement,
         recipe: &EllipticRecipe,
         input: &Tensor,
+        sequence: Option<[usize; 2]>,
     ) -> Result<Self> {
         let (rows, width) = input.shape();
         let orientation_weight =
@@ -65,21 +83,46 @@ impl EllipticRuntimeBatch {
             recipe.sheet_count,
             recipe.spin_harmonics,
         )?;
-        let map = if matches!(
-            placement.recipe,
-            GeometryAdapterRecipe::EllipticAnchored { .. }
-        ) {
-            Map::Anchored(warp.differentiate_anchored_batch(
-                &orientations,
-                tensor(placement, "raw_mix")[0],
-                MAX_ROWS,
-            )?)
-        } else {
-            Map::Pointwise(warp.differentiate_batch(&orientations, MAX_ROWS)?)
+        let map = match placement.recipe {
+            GeometryAdapterRecipe::EllipticAnchored { .. } => {
+                Map::Anchored(warp.differentiate_anchored_batch(
+                    &orientations,
+                    tensor(placement, "raw_mix")[0],
+                    MAX_ROWS,
+                )?)
+            }
+            GeometryAdapterRecipe::EllipticCausal { .. } => {
+                let [batch, steps] =
+                    sequence.ok_or("causal elliptic execution requires explicit sequence axes")?;
+                Map::Causal(warp.differentiate_causal_batch(
+                    &orientations,
+                    batch,
+                    steps,
+                    MAX_ROWS,
+                    MAX_PAIRS,
+                )?)
+            }
+            GeometryAdapterRecipe::EllipticGated { .. } => {
+                let shape =
+                    sequence.ok_or("gated elliptic execution requires explicit sequence axes")?;
+                Map::Gated(warp.differentiate_gated_causal_batch(
+                    &orientations,
+                    shape,
+                    tensor(placement, "raw_mix")[0],
+                    MAX_ROWS,
+                    MAX_PAIRS,
+                )?)
+            }
+            GeometryAdapterRecipe::Elliptic { .. } => {
+                Map::Pointwise(warp.differentiate_batch(&orientations, MAX_ROWS)?)
+            }
+            _ => return Err("invalid native elliptic recipe".into()),
         };
         let values = match &map {
             Map::Pointwise(batch) => batch.features(),
             Map::Anchored(batch) => batch.features(),
+            Map::Causal(batch) => batch.features(),
+            Map::Gated(batch) => batch.features(),
         };
         let features = Tensor::from_vec(rows, 9, values.to_vec())?;
         let output = finite(features.matmul_prepacked_with_backend(
@@ -110,6 +153,11 @@ impl EllipticRuntimeBatch {
         let (orientations, raw_mix) = match &self.map {
             Map::Pointwise(batch) => (batch.vjp(grad_features.data())?, None),
             Map::Anchored(batch) => {
+                let gradient = batch.vjp(grad_features.data())?;
+                (gradient.orientations, Some(gradient.raw_mix))
+            }
+            Map::Causal(batch) => (batch.vjp(grad_features.data())?, None),
+            Map::Gated(batch) => {
                 let gradient = batch.vjp(grad_features.data())?;
                 (gradient.orientations, Some(gradient.raw_mix))
             }

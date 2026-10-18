@@ -5,9 +5,14 @@
 - Extend the native geometry artifact runtime to pointwise and fixed-anchor
   elliptic adapters. Rust owns input projection, chart construction, readout,
   complete first-order pullback and SGD; Python transports the same saved
-  artifact without Torch or NumPy. Causal variants still require a separate
-  sequence-aware route. This source-only extension is not part of the original
+  artifact without Torch or NumPy. This source-only extension is not part of the original
   0.4.32 candidate qualification and does not change existing HF wrappers.
+- Add explicit full-context native sequence forward/MSE APIs for causal and
+  gated-causal elliptic artifacts, with captured batch/sequence shape, shared
+  native residual/SGD semantics and pre-extraction row/value/score-pair limits.
+  Existing pointwise recipes can use the same sequence entry. Full unpadded
+  contexts only: no padding mask or KV cache, and no implicit row flattening
+  into one causal stream. This extension is also source-only after the candidate.
 
 ## 0.4.32
 
