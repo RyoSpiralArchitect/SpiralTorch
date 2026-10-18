@@ -198,6 +198,8 @@ jobs:
           cargo run --locked -p st-tensor --release --no-default-features --features cpu,faer --example readme_autograd
           cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
           cargo test --locked -p st-nn --release --no-default-features --lib resident::byte_study
+          cargo test --locked -p st-nn --release --no-default-features --lib geometry_artifact
+          cargo test --locked -p st-frac --release --lib recipe_preflight
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
       - name: Cross-crate layout and geometry regressions
@@ -434,6 +436,7 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu"
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/geometry_artifact.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/residual_attention_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           python3 -I -S -B bindings/st-wasm/tests/byte_lm_fixture.py > "$RUNNER_TEMP/byte-corpus-transport.json"
           node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js" \
@@ -840,6 +843,7 @@ jobs:
             bindings/st-py/tests/test_topos_matched_controls.py \
             bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \
+            bindings/st-py/tests/test_geometry_artifact.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \
             bindings/st-py/tests/test_geometry_optional_dependency.py \
             bindings/st-py/tests/test_fractional_learning.py \

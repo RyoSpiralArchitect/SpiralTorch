@@ -32,6 +32,17 @@ validator. Browser callers own persistence of opaque request/checkpoint JSON;
 the packaged WASM API does not yet expose saved-checkpoint selection. A serving
 permit is process-local and is never reconstructed from a report after restart.
 
+## Bring Geometry To HF Models
+
+The [portable geometry adapter](python/geometry-artifacts.md) extends the same
+Rust-owned-state direction to existing HF language models: learned WaveGate,
+Topos, Elliptic and Fractional tensors travel with their recipes, insertion paths
+and explicit base-runtime identity. Python reconstructs the working stack for
+inference or further learning; WASM validates/transports the same contract.
+This is separate from the byte decoder's artifact, not an interchangeable model
+format. HF base weights, optimizer, data/RNG and promotion decisions remain
+owned by the existing HF experiment lifecycle.
+
 ## Start With One Explicit Run
 
 Build a [WGPU source wheel](python/build-and-validation.md). Pin a request and

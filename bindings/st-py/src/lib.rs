@@ -14,6 +14,7 @@ mod export;
 mod frac;
 mod f32_buffer;
 mod fractional_learning;
+mod geometry_artifact;
 mod hpo;
 mod inference;
 mod introspect;
@@ -292,6 +293,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     inference::register(py, m)?;
     frac::register(py, m)?;
     fractional_learning::register(m)?;
+    geometry_artifact::register(m)?;
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;

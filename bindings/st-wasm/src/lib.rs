@@ -9,6 +9,8 @@ mod elliptic_learning;
 mod fractal_field;
 #[cfg(target_arch = "wasm32")]
 mod fractional_learning;
+#[cfg(feature = "nn")]
+mod geometry_artifact;
 mod free_energy;
 mod generation_control;
 mod generation_evidence;
@@ -102,6 +104,8 @@ pub use fft::*;
 pub use fractal_field::*;
 #[cfg(target_arch = "wasm32")]
 pub use fractional_learning::*;
+#[cfg(feature = "nn")]
+pub use geometry_artifact::*;
 pub use free_energy::*;
 pub use generation_control::*;
 pub use generation_evidence::*;

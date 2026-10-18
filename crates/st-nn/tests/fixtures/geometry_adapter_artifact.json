@@ -1,0 +1,752 @@
+{
+  "schema": "spiraltorch.geometry_adapter_artifact.v1",
+  "base_model_identity": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "policy": "full_prefix_f32_no_cache.v1",
+  "training": true,
+  "placements": [
+    {
+      "path": "blocks.0.mlp",
+      "recipe": {
+        "schema": "spiraltorch.wave_gate_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "curvature": -0.75,
+          "saturation": 1,
+          "porosity": 0.05,
+          "max_values": 256
+        }
+      },
+      "training": true,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "bias",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.1.mlp",
+      "recipe": {
+        "schema": "spiraltorch.wave_gate_adapter.v2",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "curvature": -0.75,
+          "saturation": 1,
+          "porosity": 0.05,
+          "max_values": 256
+        },
+        "learnable_radius": true
+      },
+      "training": false,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "bias",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_radius",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.2.mlp",
+      "recipe": {
+        "schema": "spiraltorch.wave_gate_adapter.v2",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "curvature": -0.75,
+          "saturation": 1,
+          "porosity": 0.05,
+          "max_values": 256
+        },
+        "learnable_radius": false
+      },
+      "training": true,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "bias",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_radius",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": false,
+          "role": "buffer"
+        }
+      ]
+    },
+    {
+      "path": "blocks.3.mlp",
+      "recipe": {
+        "schema": "spiraltorch.topos_resonator_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "coupling": 0.25,
+          "iterations": 4,
+          "saturation": 1,
+          "porosity": 0,
+          "max_values": 256
+        }
+      },
+      "training": false,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.4.mlp",
+      "recipe": {
+        "schema": "spiraltorch.elliptic_residual_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "warp": {
+          "curvature_radius": 1,
+          "sheet_count": 2,
+          "spin_harmonics": 1
+        }
+      },
+      "training": true,
+      "tensors": [
+        {
+          "name": "orientation.weight",
+          "shape": [
+            2,
+            2
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "orientation.bias",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "readout.weight",
+          "shape": [
+            2,
+            9
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.5.mlp",
+      "recipe": {
+        "schema": "spiraltorch.elliptic_causal_residual_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "warp": {
+          "curvature_radius": 1,
+          "sheet_count": 2,
+          "spin_harmonics": 1
+        }
+      },
+      "training": false,
+      "tensors": [
+        {
+          "name": "orientation.weight",
+          "shape": [
+            2,
+            2
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "orientation.bias",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "readout.weight",
+          "shape": [
+            2,
+            9
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.6.mlp",
+      "recipe": {
+        "schema": "spiraltorch.elliptic_gated_causal_residual_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "warp": {
+          "curvature_radius": 1,
+          "sheet_count": 2,
+          "spin_harmonics": 1
+        }
+      },
+      "training": true,
+      "tensors": [
+        {
+          "name": "orientation.weight",
+          "shape": [
+            2,
+            2
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "orientation.bias",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "readout.weight",
+          "shape": [
+            2,
+            9
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "raw_mix",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.7.mlp",
+      "recipe": {
+        "schema": "spiraltorch.elliptic_anchored_residual_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "warp": {
+          "curvature_radius": 1,
+          "sheet_count": 2,
+          "spin_harmonics": 1
+        }
+      },
+      "training": false,
+      "tensors": [
+        {
+          "name": "orientation.weight",
+          "shape": [
+            2,
+            2
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "orientation.bias",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "readout.weight",
+          "shape": [
+            2,
+            9
+          ],
+          "values": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "raw_mix",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.8.mlp",
+      "recipe": {
+        "schema": "spiraltorch.fractional_memory_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "kernel_len": 5,
+          "step": 1,
+          "max_values": 256,
+          "max_products": 1280
+        }
+      },
+      "training": true,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_alpha",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.9.mlp",
+      "recipe": {
+        "schema": "spiraltorch.fractional_history_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "kernel_len": 5,
+          "step": 1,
+          "max_values": 256,
+          "max_products": 1280
+        }
+      },
+      "training": false,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_alpha",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "local_gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.10.mlp",
+      "recipe": {
+        "schema": "spiraltorch.fractional_l2_history_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "kernel_len": 5,
+          "step": 1,
+          "max_values": 256,
+          "max_products": 1280
+        },
+        "gain": 0.7
+      },
+      "training": true,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_alpha",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "local_gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.11.mlp",
+      "recipe": {
+        "schema": "spiraltorch.fractional_gain_history_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "kernel_len": 5,
+          "step": 1,
+          "max_values": 256,
+          "max_products": 1280
+        },
+        "lag_window": [
+          1,
+          4
+        ]
+      },
+      "training": false,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_alpha",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "local_gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_gain",
+          "shape": [],
+          "values": [
+            0.1
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    },
+    {
+      "path": "blocks.12.mlp",
+      "recipe": {
+        "schema": "spiraltorch.fractional_angle_gain_history_adapter.v1",
+        "features": 2,
+        "strength": 0.3,
+        "kernel": {
+          "kernel_len": 5,
+          "step": 1,
+          "max_values": 256,
+          "max_products": 1280
+        },
+        "lag_window": [
+          1,
+          4
+        ]
+      },
+      "training": true,
+      "tensors": [
+        {
+          "name": "gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "history_angle",
+          "shape": [],
+          "values": [
+            0.2
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "local_gate",
+          "shape": [
+            2
+          ],
+          "values": [
+            0.03,
+            0.03
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        },
+        {
+          "name": "log_gain",
+          "shape": [],
+          "values": [
+            0.1
+          ],
+          "requires_grad": true,
+          "role": "parameter"
+        }
+      ]
+    }
+  ]
+}

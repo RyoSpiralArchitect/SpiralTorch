@@ -6,6 +6,10 @@ module surgery, not any geometric operator, derivative or optimizer rule.
 Different families can share this placement API without gaining a second
 Python implementation of their mathematics.
 
+For source-candidate portable weights plus recipes and placement, use the
+[Rust-owned geometry artifact](python/geometry-artifacts.md). It reconstructs
+built-in adapters without pickle; optimizer/RNG/cursor remain separate.
+
 The [captured Topos tape](topos_learning.md) avoids backward recomputation and
 reupload of saved inputs without changing placement, optimizer or derivative
 semantics.
