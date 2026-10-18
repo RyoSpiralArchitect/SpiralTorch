@@ -27,6 +27,7 @@ from test_byte_corpus_query import fixture as query_fixture
 from test_verify_byte_corpus_resume import fixture as resume_fixture
 from test_byte_corpus_optimizer import wrap as optimizer_request, recipe as optimizer_recipe
 from test_byte_corpus_gradient_clip import bind as clipping_request, learning_design
+from byte_study_diagnostics import exact_report_differences, retain_detached_failure
 
 NAMES = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
@@ -517,11 +518,20 @@ class StudyGpu(unittest.TestCase):
             study.checkpoint_from_json(protocol.encoded(corrupted))
 
     def test_detached_calls_share_a_recipe_not_mutable_models(self):
-        study = st.nn.ByteCorpusStudy.from_json(fixture()[0])
+        request = fixture()[0]
+        study = st.nn.ByteCorpusStudy.from_json(request)
         expected = study.run_wgpu()
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(lambda _: study.run_wgpu(), range(2)))
-        self.assertEqual(results, [expected, expected])
+        for round_index in range(4):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(lambda _: study.run_wgpu(), range(2)))
+            identical = results == [expected, expected]
+            if not identical:
+                directory = os.environ.get("SPIRALTORCH_DETACHED_STUDY_DIAGNOSTICS")
+                if directory:
+                    retain_detached_failure(directory, request, expected, results, round_index)
+                differences = [exact_report_differences(expected, raw) for raw in results]
+                self.fail(f"exact detached comparison round {round_index}: {json.dumps(differences)}")
+        self.assertEqual(study.request_sha256, hashlib.sha256(request).hexdigest())
 
     def test_full_run_and_split_resume_are_identical(self):
         raw = frozen_fixture()[0]

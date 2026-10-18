@@ -29,6 +29,7 @@ jobs:
           python3 -I -S -B -m unittest discover -s tools -p 'test_verify_byte_corpus*.py'
           python3 -I -S -B tools/test_run_byte_corpus_segments.py
           python3 -I -S -B tools/test_hf_affine_replay.py
+          python3 -I -S -B tools/test_byte_study_diagnostics.py
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-book-controls -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-geometry-observation -p 'test_*.py'
           python3 -I -S -B bindings/st-py/tests/test_byte_corpus_runs.py
@@ -340,6 +341,7 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
+          SPIRALTORCH_DETACHED_STUDY_DIAGNOSTICS: ${{ runner.temp }}/byte-study-detached
         run: |
           python -m pip install "maturin>=1.9,<2"
           maturin build --release --locked -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/attention-wheel"
@@ -351,6 +353,14 @@ jobs:
           python -I -B bindings/st-py/tests/test_nn_byte_study.py -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
           python -I -B bindings/st-py/tests/test_nn_byte_generation.py -v
+      - name: Retain exact detached-study failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-byte-study-detached-failure
+          path: ${{ runner.temp }}/byte-study-detached/
+          if-no-files-found: ignore
+          retention-days: 1
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
