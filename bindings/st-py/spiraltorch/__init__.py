@@ -9680,7 +9680,7 @@ _EXPORTED.update(
      "WaveGateAdapter", "wave_gate_autograd", "ChannelAffineAdapter", "channel_affine_autograd"]
 )
 for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact",
-              "NativeGeometryRuntime", "NativeGeometryBatch"):
+              "NativeGeometryRuntime", "NativeGeometryBatch", "SafeTensorArchive", "NdTensor", "NativeCausalLm", "NativeCausalLmGradients"):
     if _resolve_rs_attr(_name) is not None:
         _EXPORTED.add(_name)
 _EXPORTED.update(

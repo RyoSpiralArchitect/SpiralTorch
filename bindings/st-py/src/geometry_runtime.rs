@@ -38,6 +38,20 @@ impl PyNativeGeometryRuntime {
             .ok_or_else(|| error("native geometry shape exceeds value budget"))?;
         Ok((rows, count, budget))
     }
+
+    fn context_shape(&self, path: &str, shape: &Bound<'_, PyAny>) -> PyResult<([usize; 2], usize)> {
+        if shape.len()? != 2 {
+            return Err(error(
+                "sequence shape must be [batch, sequence]; feature width comes from the artifact",
+            ));
+        }
+        let shape = [
+            dimension(&shape.get_item(0)?)?,
+            dimension(&shape.get_item(1)?)?,
+        ];
+        let (_, count) = self.inner.sequence_dimensions(path, shape).map_err(error)?;
+        Ok((shape, count))
+    }
 }
 
 #[pymethods]
@@ -84,6 +98,34 @@ impl PyNativeGeometryRuntime {
         let (rows, count, budget) = self.shape(path, rows)?;
         let input = read_f32(input, budget, Some(count))?;
         py.detach(|| self.inner.forward(path, &input, rows))
+            .map(|inner| PyNativeGeometryBatch { inner })
+            .map_err(error)
+    }
+
+    fn forward_sequence(
+        &self,
+        py: Python<'_>,
+        path: &str,
+        input: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeGeometryBatch> {
+        let (shape, count) = self.context_shape(path, shape)?;
+        let input = sequence(input, count, count)?;
+        py.detach(|| self.inner.forward_sequence(path, &input, shape))
+            .map(|inner| PyNativeGeometryBatch { inner })
+            .map_err(error)
+    }
+
+    fn forward_sequence_buffer(
+        &self,
+        py: Python<'_>,
+        path: &str,
+        input: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeGeometryBatch> {
+        let (shape, count) = self.context_shape(path, shape)?;
+        let input = read_f32(input, count, Some(count))?;
+        py.detach(|| self.inner.forward_sequence(path, &input, shape))
             .map(|inner| PyNativeGeometryBatch { inner })
             .map_err(error)
     }
@@ -142,6 +184,46 @@ impl PyNativeGeometryRuntime {
         })
         .map_err(error)
     }
+
+    fn train_sequence_mse(
+        &mut self,
+        py: Python<'_>,
+        path: &str,
+        input: &Bound<'_, PyAny>,
+        target: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        learning_rate: &Bound<'_, PyAny>,
+    ) -> PyResult<f32> {
+        let (shape, count) = self.context_shape(path, shape)?;
+        let input = sequence(input, count, count)?;
+        let target = sequence(target, count, count)?;
+        let learning_rate = rate(learning_rate)?;
+        py.detach(|| {
+            self.inner
+                .train_sequence_mse(path, &input, &target, shape, learning_rate)
+        })
+        .map_err(error)
+    }
+
+    fn train_sequence_mse_buffer(
+        &mut self,
+        py: Python<'_>,
+        path: &str,
+        input: &Bound<'_, PyAny>,
+        target: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        learning_rate: &Bound<'_, PyAny>,
+    ) -> PyResult<f32> {
+        let (shape, count) = self.context_shape(path, shape)?;
+        let input = read_f32(input, count, Some(count))?;
+        let target = read_f32(target, count, Some(count))?;
+        let learning_rate = rate(learning_rate)?;
+        py.detach(|| {
+            self.inner
+                .train_sequence_mse(path, &input, &target, shape, learning_rate)
+        })
+        .map_err(error)
+    }
 }
 
 #[pymethods]
@@ -157,6 +239,13 @@ impl PyNativeGeometryBatch {
     #[getter]
     fn shape(&self) -> (usize, usize) {
         self.inner.output().shape()
+    }
+
+    #[getter]
+    fn sequence_shape(&self) -> Option<(usize, usize, usize)> {
+        self.inner
+            .sequence_shape()
+            .map(|[batch, steps, features]| (batch, steps, features))
     }
 
     fn output_buffer<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyByteArray>> {
@@ -191,6 +280,34 @@ impl PyNativeGeometryBatch {
             write_f32(py, result.input.data().iter().copied())?,
             parameters,
         ))
+    }
+
+    fn vjp_parameters(
+        &self,
+        py: Python<'_>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<BTreeMap<String, Vec<f32>>> {
+        let count = self.inner.output().data().len();
+        let upstream = sequence(upstream, count, count)?;
+        py.detach(|| self.inner.vjp_parameters(&upstream))
+            .map_err(error)
+    }
+
+    fn vjp_parameters_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let count = self.inner.output().data().len();
+        let upstream = read_f32(upstream, count, Some(count))?;
+        let result = py
+            .detach(|| self.inner.vjp_parameters(&upstream))
+            .map_err(error)?;
+        let parameters = PyDict::new(py);
+        for (name, values) in result {
+            parameters.set_item(name, write_f32(py, values.into_iter())?)?;
+        }
+        Ok(parameters)
     }
 }
 

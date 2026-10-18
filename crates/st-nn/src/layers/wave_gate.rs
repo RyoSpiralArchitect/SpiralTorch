@@ -250,6 +250,22 @@ pub struct WaveGateVjp {
     pub grad_bias: Tensor,
 }
 
+pub(crate) struct WaveGatePartialVjp {
+    pub grad_input: Option<Tensor>,
+    pub grad_gate: Tensor,
+    pub grad_bias: Tensor,
+}
+
+impl WaveGatePartialVjp {
+    fn into_full(self) -> WaveGateVjp {
+        WaveGateVjp {
+            grad_input: self.grad_input.unwrap(),
+            grad_gate: self.grad_gate,
+            grad_bias: self.grad_bias,
+        }
+    }
+}
+
 impl WaveGate {
     /// Creates a wave gate with deterministic small parameters and an inferred topos.
     pub fn new(
@@ -350,7 +366,9 @@ impl WaveGate {
         grad_output: &Tensor,
         parameter_gradient_scale: Option<f32>,
     ) -> PureResult<Tensor> {
-        let gradients = self.pullback(input, grad_output, parameter_gradient_scale, true)?;
+        let gradients = self
+            .pullback(input, grad_output, parameter_gradient_scale, true, true)?
+            .into_full();
         if input.shape().0 != 0 {
             self.gate.accumulate_euclidean(&gradients.grad_gate)?;
             self.bias.accumulate_euclidean(&gradients.grad_bias)?;
@@ -364,16 +382,17 @@ impl WaveGate {
     /// not average or apply the training-policy saturation to those gradients.
     /// Call before changing parameters; this method is not a saved forward tape.
     pub fn vjp(&self, input: &Tensor, grad_output: &Tensor) -> PureResult<WaveGateVjp> {
-        self.pullback(input, grad_output, Some(1.0), false)
+        self.pullback(input, grad_output, Some(1.0), false, true)
+            .map(WaveGatePartialVjp::into_full)
     }
 
     fn finish_pullback(
         &self,
-        grad_input: Tensor,
+        grad_input: Option<Tensor>,
         mut grad_gate: Tensor,
         mut grad_bias: Tensor,
         rewrite_parameters: bool,
-    ) -> PureResult<WaveGateVjp> {
+    ) -> PureResult<WaveGatePartialVjp> {
         for (gradient, &raw_gate) in grad_gate
             .data_mut()
             .iter_mut()
@@ -383,8 +402,9 @@ impl WaveGate {
         }
         // Validate the actual derivative before a training-policy rewrite can
         // hide a nonfinite result, and before mutating either accumulator.
-        self.topos
-            .guard_tensor("wave_gate_backward_out", &grad_input)?;
+        if let Some(input) = &grad_input {
+            self.topos.guard_tensor("wave_gate_backward_out", input)?;
+        }
         self.topos.guard_tensor("wave_gate_grad_gate", &grad_gate)?;
         self.topos.guard_tensor("wave_gate_grad_bias", &grad_bias)?;
         if rewrite_parameters {
@@ -392,7 +412,7 @@ impl WaveGate {
             monad.rewrite_tensor("wave_gate_grad_gate", &mut grad_gate)?;
             monad.rewrite_tensor("wave_gate_grad_bias", &mut grad_bias)?;
         }
-        Ok(WaveGateVjp {
+        Ok(WaveGatePartialVjp {
             grad_input,
             grad_gate,
             grad_bias,
@@ -405,7 +425,8 @@ impl WaveGate {
         grad_output: &Tensor,
         parameter_gradient_scale: Option<f32>,
         rewrite_parameters: bool,
-    ) -> PureResult<WaveGateVjp> {
+        need_input: bool,
+    ) -> PureResult<WaveGatePartialVjp> {
         let (rows, cols) = input.shape();
         if grad_output.shape() != (rows, cols) {
             return Err(TensorError::ShapeMismatch {
@@ -430,7 +451,7 @@ impl WaveGate {
         let reduction_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let requested_backend = tensor_util_backend_label(requested_backend);
         if rows == 0 {
-            let grad_input = Tensor::zeros(rows, cols)?;
+            let grad_input = need_input.then(|| Tensor::zeros(rows, cols)).transpose()?;
             emit_wave_gate_backward_meta(
                 rows,
                 cols,
@@ -447,7 +468,7 @@ impl WaveGate {
                 rewrite_parameters,
                 None,
             );
-            return Ok(WaveGateVjp {
+            return Ok(WaveGatePartialVjp {
                 grad_input,
                 grad_gate: Tensor::zeros(1, cols)?,
                 grad_bias: Tensor::zeros(1, cols)?,
@@ -463,7 +484,9 @@ impl WaveGate {
 
         #[cfg(feature = "wgpu")]
         {
-            if matches!(reduction_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available()
+            if need_input
+                && matches!(reduction_backend, TensorUtilBackend::GpuWgpu)
+                && wgpu_dense::is_available()
             {
                 match wgpu_dense::wave_gate_backward(
                     input.data(),
@@ -499,7 +522,7 @@ impl WaveGate {
                         )?;
                         let grad_input = Tensor::from_vec(rows, cols, grad_input_data)?;
                         let result = self.finish_pullback(
-                            grad_input,
+                            Some(grad_input),
                             grad_gate,
                             grad_bias,
                             rewrite_parameters,
@@ -529,7 +552,7 @@ impl WaveGate {
                         wgpu_failure = Some(message);
                     }
                 }
-            } else if matches!(reduction_backend, TensorUtilBackend::GpuWgpu) {
+            } else if need_input && matches!(reduction_backend, TensorUtilBackend::GpuWgpu) {
                 if strict_gpu_path() {
                     return Err(wave_gate_wgpu_error(
                         "wave_gate_backward",
@@ -570,8 +593,8 @@ impl WaveGate {
             cols,
             grad_affine.try_sum_axis0_scaled_with_backend(gradient_scale, reduction_backend)?,
         )?;
-        let mut grad_input = Tensor::zeros(rows, cols)?;
-        {
+        let mut grad_input = need_input.then(|| Tensor::zeros(rows, cols)).transpose()?;
+        if let Some(grad_input) = &mut grad_input {
             let grad_input_buf = grad_input.data_mut();
             let grad_affine_buf = grad_affine.data();
             for r in 0..rows {

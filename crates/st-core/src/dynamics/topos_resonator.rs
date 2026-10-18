@@ -354,23 +354,31 @@ impl ToposResonatorLearningBatch {
     }
 
     pub fn vjp(&self, grad_output: &[f32]) -> Result<ToposResonatorBackward, ToposResonatorError> {
-        self.vjp_with_gate_statistics::<false>(grad_output)
+        self.vjp_with_gate_statistics::<false, true>(grad_output)
             .map(|(backward, _)| backward)
     }
 
-    fn vjp_with_gate_statistics<const ELEMENTWISE_RMS: bool>(
+    /// Gate-only pullback; do not evaluate or allocate discarded input gradients.
+    pub fn vjp_gate(&self, grad_output: &[f32]) -> Result<Vec<f32>, ToposResonatorError> {
+        self.vjp_with_gate_statistics::<false, false>(grad_output)
+            .map(|(backward, _)| backward.grad_gate)
+    }
+
+    fn vjp_with_gate_statistics<const ELEMENTWISE_RMS: bool, const INPUT: bool>(
         &self,
         grad_output: &[f32],
     ) -> Result<(ToposResonatorBackward, f64), ToposResonatorError> {
         validate_length("grad_output", grad_output, self.input.len())?;
-        let mut grad_input = Vec::with_capacity(self.input.len());
+        let mut grad_input = Vec::with_capacity(if INPUT { self.input.len() } else { 0 });
         let mut grad_gate = Vec::with_capacity(self.gate.len());
         let mut gate_sum_squares = 0.0_f64;
         let mut point = |upstream: f32, sensitivity: f32, input: f32, gate: f32| {
             // Keep (upstream * sensitivity) * parameter in the legacy order.
             // Caching sensitivity * parameter would change f32 rounding.
             let grad_drive = require_derived_finite("grad_drive", upstream * sensitivity)?;
-            grad_input.push(require_derived_finite("grad_input", grad_drive * gate)?);
+            if INPUT {
+                grad_input.push(require_derived_finite("grad_input", grad_drive * gate)?);
+            }
             let contribution = require_derived_finite("grad_gate", grad_drive * input)?;
             if ELEMENTWISE_RMS {
                 let contribution = f64::from(contribution);
@@ -443,7 +451,8 @@ impl ToposResonatorLearningBatch {
         &self,
         grad_output: &[f32],
     ) -> Result<(ToposResonatorBackward, ToposResonatorBackwardAudit), ToposResonatorError> {
-        let (backward, gate_sum_squares) = self.vjp_with_gate_statistics::<true>(grad_output)?;
+        let (backward, gate_sum_squares) =
+            self.vjp_with_gate_statistics::<true, true>(grad_output)?;
         let grad_gate_rms = if self.input.is_empty() {
             0.0
         } else {
@@ -1104,6 +1113,35 @@ fn backward_audit_from_rms(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gate_only_vjp_preserves_bits_and_omits_unused_input_overflow() {
+        let operator =
+            ToposResonatorOperator::new(ToposResonatorConfig::new(0., 1).unwrap(), topos(1., 0.05))
+                .unwrap();
+        for gate in [vec![0.3, -0.2], vec![0.3, -0.2, 0.4, 0.1]] {
+            let input = [0.2, -0.1, 0.3, 0.4];
+            let capture = if gate.len() == 2 {
+                operator.capture_shared_rows(&input, &gate, 2, 2)
+            } else {
+                operator.capture(&input, &gate, 2, 2)
+            }
+            .unwrap();
+            let dy = [0.3, -0.2, 0.5, 0.1];
+            let bits = |values: Vec<f32>| values.into_iter().map(f32::to_bits).collect::<Vec<_>>();
+            assert_eq!(
+                bits(capture.vjp_gate(&dy).unwrap()),
+                bits(capture.vjp(&dy).unwrap().grad_gate)
+            );
+            assert!(capture.vjp_gate(&[]).is_err());
+            assert!(capture.vjp_gate(&[f32::NAN; 4]).is_err());
+        }
+        let capture = operator
+            .capture_shared_rows(&[0.; 4], &[f32::MAX; 2], 2, 2)
+            .unwrap();
+        assert!(capture.vjp(&[4.; 4]).is_err());
+        assert_eq!(capture.vjp_gate(&[4.; 4]).unwrap(), [0.; 2]);
+    }
 
     #[test]
     fn kernel_contract_matches_audited_capture_and_vjp_bits() {

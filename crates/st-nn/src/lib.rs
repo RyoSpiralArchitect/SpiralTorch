@@ -30,6 +30,7 @@ pub(crate) fn test_backend_policy(
     )
 }
 
+pub mod causal_lm;
 pub mod cloud;
 pub mod dataset;
 pub mod discovery;
@@ -55,6 +56,7 @@ pub mod resident;
 pub mod roundtable;
 pub mod schedule;
 pub mod trainer;
+pub mod weights;
 pub mod z_rba;
 pub mod zspace_coherence;
 

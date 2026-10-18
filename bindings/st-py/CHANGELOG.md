@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+- Add native `vjp_parameters` / `vjp_parameters_buffer` for all 14 geometry
+  recipe configurations. Shared Rust pullbacks omit unused input adjoints in
+  standalone SGD and at the earliest frozen-GPT-2 geometry site, preventing
+  discarded input-gradient overflow from suppressing valid learning. Complete
+  VJPs remain available for preceding-site propagation; required parameter
+  validation and atomic updates are unchanged. Source-only after the fixed
+  0.4.32 candidate, not a new Torch dependency or measured speedup.
+
+- Add end-to-end native language-loss gradients for geometry fine-tuning on
+  the frozen GPT-2 decoder. Rust owns full decoder pullback and atomic
+  multi-placement SGD, with sealed snapshot-bound gradients, artifact restore,
+  block checkpoint recomputation, cached packed transposes and input-only
+  LayerNorm gradients. Python remains transport only; optional Torch/HF tests
+  compare all 14 recipe configurations. No base-weight FT, padding or KV cache
+  is implied. This remains after the fixed 0.4.32 candidate.
+
+- Add `NativeCausalLm` with an explicit GPT-2 safetensors importer: complete
+  frozen token-ID-to-logits/NLL/greedy execution in Rust, prepacked CPU
+  projections, tied/untied output heads and validated native geometry output
+  placements. Config/checkpoint identity and work budgets are enforced before
+  execution. This does not convert arbitrary HF architectures or provide
+  padding, KV cache, dropout or full-model backward/FT. Source-only after the
+  fixed 0.4.32 release candidate.
+
+- Add Rust-owned bounded safetensors ingress and Python `SafeTensorArchive` /
+  `NdTensor` handles. F32/F16/BF16 weights reach native host tensors with shapes
+  preserved, explicit rank-two conversion, strict header validation and finite
+  materialization. No Python safetensors, NumPy or Torch is required. This is a
+  source-only weight loader after the fixed 0.4.32 candidate, not a whole HF
+  executor or automatic checkpoint-to-model conversion.
+
+- Extend the native geometry artifact runtime to pointwise and fixed-anchor
+  elliptic adapters. Rust owns input projection, chart construction, readout,
+  complete first-order pullback and SGD; Python transports the same saved
+  artifact without Torch or NumPy. This source-only extension is not part of the original
+  0.4.32 candidate qualification and does not change existing HF wrappers.
+- Add explicit full-context native sequence forward/MSE APIs for causal and
+  gated-causal elliptic artifacts, with captured batch/sequence shape, shared
+  native residual/SGD semantics and pre-extraction row/value/score-pair limits.
+  Existing pointwise recipes can use the same sequence entry. Full unpadded
+  contexts only: no padding mask or KV cache, and no implicit row flattening
+  into one causal stream. This extension is also source-only after the candidate.
+- Recover Topos resonance and all five fractional adapter compositions into
+  the same native runtime. Rust owns gates, residuals, log-order/angle controls,
+  complete VJPs and atomic SGD, reusing `st-core`/`st-frac` kernels. Fractional
+  recipes require explicit sequence boundaries and enforce value/product
+  budgets before Python input extraction, including zero-strength calls.
+  This source-only extension does not change the fixed 0.4.32 candidate or
+  imply Torch-free execution of a whole HF model.
+
 ## 0.4.32
 
 0.4.32 is prepared in source; this does not confirm PyPI publication.

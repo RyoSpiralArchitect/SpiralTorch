@@ -1,0 +1,376 @@
+{
+  "schema": "spiraltorch.native_gpt2_comparison.v1",
+  "scope": "offline_forward_compatibility_and_intervention_not_training_or_quality",
+  "source_sha256": {
+    "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+    "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+    "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+  },
+  "steps": 4,
+  "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+  "geometry_artifact_id": "sha256:74fb1ee5f4b6ac1b2696e1e7ac0d3357fa1369bcca2811a1742a9d5c353052e7",
+  "native_report_sha256": "baaacf033e6f5283902a871a58263d283a1fb809a08660db084c18b17328af36",
+  "reference_report_sha256": "9295bc8c095472ff26e67fe4b18bd50794b866ef520fef90d0ed92f2ec7b6c7e",
+  "native_backend": "rust_f32_cpu_prepacked",
+  "reference_backend": "torch_cpu_eager",
+  "reference_versions": {
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  },
+  "rows": [
+    {
+      "case": "meaning",
+      "arm": "base",
+      "prompt": "The meaning of life is",
+      "ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318
+      ],
+      "shape": [
+        1,
+        5,
+        50257
+      ],
+      "logit_error": {
+        "max_abs": 9.1552734375e-05,
+        "rms": 2.6881099759336543e-05
+      },
+      "native_nll": 3.8122482299804688,
+      "reference_nll": 3.812222480773926,
+      "nll_abs_error": 2.574920654296875e-05,
+      "greedy_ids_equal": true,
+      "native_generated_ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318,
+        407,
+        262,
+        976,
+        355
+      ],
+      "reference_generated_ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318,
+        407,
+        262,
+        976,
+        355
+      ],
+      "reference_generated_text": "The meaning of life is not the same as",
+      "native_logits_sha256": "594ce1f7205ff3bc96ad2fc995214c36768f8926696da950d42fd9f464a28bbc",
+      "reference_logits_sha256": "b01dec5ec4e8f2c170a1eb5fc96a17748dc5f28b64275da26d8b5684de7d21e3"
+    },
+    {
+      "case": "meaning",
+      "arm": "wave",
+      "prompt": "The meaning of life is",
+      "ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318
+      ],
+      "shape": [
+        1,
+        5,
+        50257
+      ],
+      "logit_error": {
+        "max_abs": 9.918212890625e-05,
+        "rms": 2.5503765057757126e-05
+      },
+      "native_nll": 3.8115861415863037,
+      "reference_nll": 3.811563014984131,
+      "nll_abs_error": 2.3126602172851562e-05,
+      "greedy_ids_equal": true,
+      "native_generated_ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318,
+        407,
+        262,
+        976,
+        355
+      ],
+      "reference_generated_ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318,
+        407,
+        262,
+        976,
+        355
+      ],
+      "reference_generated_text": "The meaning of life is not the same as",
+      "native_logits_sha256": "fe57c955c6aa69a74661ec6983b72577a2d442e6fdd723f1ac29bfbf7d771c38",
+      "reference_logits_sha256": "67e181b1abe714ec33a6642ef8bcbef1e1e0ee44e629044e41928760a9c37c87"
+    },
+    {
+      "case": "models",
+      "arm": "base",
+      "prompt": "Machine learning models can",
+      "ids": [
+        37573,
+        4673,
+        4981,
+        460
+      ],
+      "shape": [
+        1,
+        4,
+        50257
+      ],
+      "logit_error": {
+        "max_abs": 0.0001373291015625,
+        "rms": 3.176430022017476e-05
+      },
+      "native_nll": 5.828189849853516,
+      "reference_nll": 5.828161239624023,
+      "nll_abs_error": 2.86102294921875e-05,
+      "greedy_ids_equal": true,
+      "native_generated_ids": [
+        37573,
+        4673,
+        4981,
+        460,
+        307,
+        973,
+        284,
+        4331
+      ],
+      "reference_generated_ids": [
+        37573,
+        4673,
+        4981,
+        460,
+        307,
+        973,
+        284,
+        4331
+      ],
+      "reference_generated_text": "Machine learning models can be used to predict",
+      "native_logits_sha256": "12d5ed22841da2b75938c6345d385ef0e1d7653a6eaf28af7dc49da03b9d4bf1",
+      "reference_logits_sha256": "cf29e5b7f5d179722e7a356b693e385d876f92229986a461f440c08ce626b3bd"
+    },
+    {
+      "case": "models",
+      "arm": "wave",
+      "prompt": "Machine learning models can",
+      "ids": [
+        37573,
+        4673,
+        4981,
+        460
+      ],
+      "shape": [
+        1,
+        4,
+        50257
+      ],
+      "logit_error": {
+        "max_abs": 0.0001068115234375,
+        "rms": 2.5749673206546045e-05
+      },
+      "native_nll": 5.827739238739014,
+      "reference_nll": 5.827721118927002,
+      "nll_abs_error": 1.811981201171875e-05,
+      "greedy_ids_equal": true,
+      "native_generated_ids": [
+        37573,
+        4673,
+        4981,
+        460,
+        307,
+        973,
+        284,
+        4331
+      ],
+      "reference_generated_ids": [
+        37573,
+        4673,
+        4981,
+        460,
+        307,
+        973,
+        284,
+        4331
+      ],
+      "reference_generated_text": "Machine learning models can be used to predict",
+      "native_logits_sha256": "75fb08feff5b0140531849d3b3b385acb1f6c79928f628f3a392ee328443bbae",
+      "reference_logits_sha256": "ab871d1033dabb9975009d6ca8542c95462e9ad08dbcf6e6fb7bb5ae32030fb0"
+    },
+    {
+      "case": "spiraltorch",
+      "arm": "base",
+      "prompt": "SpiralTorch is a",
+      "ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257
+      ],
+      "shape": [
+        1,
+        7,
+        50257
+      ],
+      "logit_error": {
+        "max_abs": 0.0001373291015625,
+        "rms": 3.208466647232991e-05
+      },
+      "native_nll": 4.494601726531982,
+      "reference_nll": 4.494577407836914,
+      "nll_abs_error": 2.4318695068359375e-05,
+      "greedy_ids_equal": true,
+      "native_generated_ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257,
+        1479,
+        11,
+        1280,
+        2723
+      ],
+      "reference_generated_ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257,
+        1479,
+        11,
+        1280,
+        2723
+      ],
+      "reference_generated_text": "SpiralTorch is a free, open source",
+      "native_logits_sha256": "f3f2c26a2eff7111dc0f89ed736ba41944152e47523147ae9dd7d1f658df6f81",
+      "reference_logits_sha256": "376f87a69fce96c8118817cba707cae21f8bec315dc1a89c7262cd925615a4d9"
+    },
+    {
+      "case": "spiraltorch",
+      "arm": "wave",
+      "prompt": "SpiralTorch is a",
+      "ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257
+      ],
+      "shape": [
+        1,
+        7,
+        50257
+      ],
+      "logit_error": {
+        "max_abs": 0.000152587890625,
+        "rms": 3.125579311312638e-05
+      },
+      "native_nll": 4.494543552398682,
+      "reference_nll": 4.4945149421691895,
+      "nll_abs_error": 2.86102294921875e-05,
+      "greedy_ids_equal": true,
+      "native_generated_ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257,
+        1479,
+        11,
+        1280,
+        2723
+      ],
+      "reference_generated_ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257,
+        1479,
+        11,
+        1280,
+        2723
+      ],
+      "reference_generated_text": "SpiralTorch is a free, open source",
+      "native_logits_sha256": "cb8364b6e29e67d56d7e699039dd468cd501c817c52bcdc1eef683be94a492e2",
+      "reference_logits_sha256": "87d5933f93bcb6e36ca95e4b31463d4ffff982599dc849373475ab9320313889"
+    }
+  ],
+  "interventions": [
+    {
+      "case": "meaning",
+      "native_wave_logit_delta": {
+        "max_abs": 0.01902008056640625,
+        "rms": 0.009413919030788169
+      },
+      "reference_wave_logit_delta": {
+        "max_abs": 0.019012451171875,
+        "rms": 0.009428957948526655
+      },
+      "intervention_delta_error": {
+        "max_abs": 0.0001220703125,
+        "rms": 3.11919291248927e-05
+      }
+    },
+    {
+      "case": "models",
+      "native_wave_logit_delta": {
+        "max_abs": 0.0115203857421875,
+        "rms": 0.004220040410816038
+      },
+      "reference_wave_logit_delta": {
+        "max_abs": 0.01149749755859375,
+        "rms": 0.004192369808307927
+      },
+      "intervention_delta_error": {
+        "max_abs": 0.00018310546875,
+        "rms": 4.7552183071843046e-05
+      }
+    },
+    {
+      "case": "spiraltorch",
+      "native_wave_logit_delta": {
+        "max_abs": 0.0247344970703125,
+        "rms": 0.008555932950994799
+      },
+      "reference_wave_logit_delta": {
+        "max_abs": 0.02463531494140625,
+        "rms": 0.008539747918891913
+      },
+      "intervention_delta_error": {
+        "max_abs": 0.0002288818359375,
+        "rms": 5.1176527833986696e-05
+      }
+    }
+  ],
+  "interpretation": "Measured errors, not an empirically selected pass threshold, efficacy study or timing benchmark."
+}

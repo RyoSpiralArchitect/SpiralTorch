@@ -76,6 +76,25 @@ impl LayerNormRowStats {
 }
 
 impl Tensor {
+    /// Input-only LayerNorm VJP for frozen affine parameters; no gamma/beta
+    /// reductions or gradient arrays are computed.
+    pub fn layer_norm_input_backward(
+        &self,
+        gamma: &Tensor,
+        upstream: &Tensor,
+        epsilon: f32,
+    ) -> PureResult<Tensor> {
+        let [input, _, _] = self.layer_norm_vjp(
+            gamma,
+            upstream,
+            epsilon,
+            1.0,
+            TensorUtilBackend::Cpu,
+            [true, false, false],
+        )?;
+        Ok(input.unwrap())
+    }
+
     /// First-order affine LayerNorm VJP: `(input, gamma, beta)` gradients.
     /// Affine gradients sum rows; any loss reduction belongs to the upstream seed.
     /// CPU intermediates remain f64 until each requested final gradient is stored.
@@ -509,4 +528,32 @@ fn layer_norm_vjp_gpu(
         None
     };
     Ok([dx, dg, db])
+}
+
+#[cfg(test)]
+mod input_only_tests {
+    use super::*;
+
+    #[test]
+    fn input_only_matches_full_layer_norm_vjp_without_affine_reductions() {
+        let input = Tensor::from_vec(2, 3, vec![0.2, -0.7, 0.8, 1.2, 0.3, -0.1]).unwrap();
+        let gamma = Tensor::from_vec(1, 3, vec![0.5, -0.8, 1.3]).unwrap();
+        let upstream = Tensor::from_vec(2, 3, vec![0.4, -0.5, 0.2, 0.7, -0.1, 0.9]).unwrap();
+        let (full, _, _) = input
+            .layer_norm_affine_backward(&gamma, &upstream, 1e-5)
+            .unwrap();
+        assert_eq!(
+            input
+                .layer_norm_input_backward(&gamma, &upstream, 1e-5)
+                .unwrap(),
+            full
+        );
+        let invalid = Tensor::from_vec(2, 3, vec![f32::NAN; 6]).unwrap();
+        assert!(input
+            .layer_norm_input_backward(&gamma, &invalid, 1e-5)
+            .is_err());
+        assert!(input
+            .layer_norm_input_backward(&gamma, &upstream, -1.)
+            .is_err());
+    }
 }

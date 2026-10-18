@@ -585,6 +585,9 @@ jobs:
       - name: Portable byte corpus study contracts
         run: |
           python -I -B bindings/st-py/tests/test_native_geometry_runtime.py -v
+          python -I -B bindings/st-py/tests/test_native_weights.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
+          python -I -B bindings/st-py/examples/native_weights_geometry.py
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
       - name: Resident classifier surface and handoff verifier
@@ -776,6 +779,8 @@ jobs:
           python -P tests/test_release_workflows.py
           python -I tests/test_release_learning_smoke.py
           python -I tests/test_python_compatibility.py
+          python -I -B tests/test_native_gpt2_probe.py
+          python -I -B tests/test_native_gpt2_learning_probe.py
           python -P tests/test_run_char_vae_context_chain.py
           python -P tests/test_run_pypi_publish_from_release.py
           python -P tests/test_runtime_imports.py
@@ -871,6 +876,9 @@ jobs:
             bindings/st-py/tests/test_geometry_artifact.py \
             bindings/st-py/tests/test_channel_affine.py \
             bindings/st-py/tests/test_native_geometry_parity.py \
+            bindings/st-py/tests/test_native_weights_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_learning_parity.py \
             bindings/st-py/tests/test_hf_geometry_trainer.py \
             bindings/st-py/tests/test_hf_geometry_dataset.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \

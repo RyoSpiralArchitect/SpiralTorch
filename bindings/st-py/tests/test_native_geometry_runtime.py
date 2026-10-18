@@ -23,13 +23,50 @@ import spiraltorch as st  # noqa: E402 - install the forbidden-import guard firs
 
 FIXTURE = json.loads((Path(__file__).resolve().parents[3] /
                      "crates/st-nn/tests/fixtures/channel_affine.fixture.json").read_text())
+FRACTIONAL_KINDS = ("fractional", "history", "history_l2", "history_gain", "history_angle")
 
 
 def artifact(kind="affine", *, frozen_gate=False):
     state = copy.deepcopy(FIXTURE["artifact"])
     p = state["placements"][0]
     p["path"] = "site"
-    if kind != "affine":
+    if kind in {"elliptic", "anchored", "causal", "gated"}:
+        p["recipe"] = {
+            "schema": {"elliptic": "spiraltorch.elliptic_residual_adapter.v1",
+                       "anchored": "spiraltorch.elliptic_anchored_residual_adapter.v1",
+                       "causal": "spiraltorch.elliptic_causal_residual_adapter.v1",
+                       "gated": "spiraltorch.elliptic_gated_causal_residual_adapter.v1"}[kind],
+            "features": 3, "strength": .5,
+            "warp": {"curvature_radius": 1.3, "sheet_count": 3, "spin_harmonics": 2},
+        }
+        p["tensors"] = [
+            {"name": "orientation.weight", "shape": [2, 3], "values": [.2, -.1, .15, .05, .3, -.2], "requires_grad": True, "role": "parameter"},
+            {"name": "orientation.bias", "shape": [2], "values": [.1, -.2], "requires_grad": True, "role": "parameter"},
+            {"name": "readout.weight", "shape": [3, 9], "values": [(i - 13) * .01 for i in range(27)], "requires_grad": True, "role": "parameter"},
+        ]
+        if kind in {"anchored", "gated"}:
+            p["tensors"].append({"name": "raw_mix", "shape": [], "values": [.3], "requires_grad": True, "role": "parameter"})
+    elif kind == "topos":
+        p["recipe"] = {"schema": "spiraltorch.topos_resonator_adapter.v1", "features": 3, "strength": .5,
+                       "kernel": {"coupling": .2, "iterations": 4, "saturation": 1., "porosity": .05, "max_values": 96}}
+        p["tensors"] = [t for t in p["tensors"] if t["name"] == "gate"]
+    elif kind in FRACTIONAL_KINDS:
+        names = dict(zip(FRACTIONAL_KINDS, ("fractional_memory", "fractional_history", "fractional_l2_history",
+                                          "fractional_gain_history", "fractional_angle_gain_history")))
+        p["recipe"] = {"schema": "spiraltorch." + names[kind] + "_adapter.v1", "features": 3, "strength": .5,
+                       "kernel": {"kernel_len": 5, "step": .8, "max_values": 96, "max_products": 480}}
+        p["tensors"] = [t for t in p["tensors"] if t["name"] == "gate"]
+        parameters = [("history_angle" if kind == "history_angle" else "log_alpha", [], [-.2])]
+        if kind != "fractional":
+            parameters.append(("local_gate", [3], [.2, -.1, .15]))
+        if kind in {"history_gain", "history_angle"}:
+            p["recipe"]["lag_window"] = [1, 4]
+            parameters.append(("log_gain", [], [.1]))
+        if kind == "history_l2":
+            p["recipe"]["gain"] = .8
+        p["tensors"].extend({"name": name, "shape": shape, "values": values, "requires_grad": True, "role": "parameter"}
+                            for name, shape, values in parameters)
+    elif kind != "affine":
         p["recipe"] = {"schema": "spiraltorch.wave_gate_adapter.v1" if kind == "wave" else "spiraltorch.wave_gate_adapter.v2",
                        "features": 3, "strength": .5,
                        "kernel": {"curvature": -1., "saturation": 1., "porosity": .05, "max_values": 64}}
@@ -43,6 +80,54 @@ def artifact(kind="affine", *, frozen_gate=False):
 
 
 class NativeGeometryTests(unittest.TestCase):
+    def test_parameter_only_pullback_matches_all_recipes_without_input_adjoint(self):
+        values = array("f", [.2, -.3, .4, .5, .1, -.2] * 2)
+        upstream = array("f", [.3, .5, -.4, .2, -.1, .6] * 2)
+        kinds = ("affine", "wave", "fixed", "learned", "elliptic", "anchored", "causal", "gated", "topos") + FRACTIONAL_KINDS
+        for kind in kinds:
+            for strength in (0., .5):
+                for frozen in (False, True):
+                    with self.subTest(kind=kind, strength=strength, frozen=frozen):
+                        state = json.loads(artifact(kind).state_json())
+                        placement = state["placements"][0]
+                        placement["recipe"]["strength"] = strength
+                        if kind == "affine":
+                            placement["recipe"]["max_values"] = len(values)
+                        if frozen:
+                            for tensor in placement["tensors"]:
+                                tensor["requires_grad"] = False
+                        saved = st.GeometryAdapterArtifact.create_json(json.dumps(state))
+                        runtime = st.NativeGeometryRuntime(saved)
+                        batch = runtime.forward_sequence_buffer("site", values, (2, 2))
+                        expected = batch.vjp(list(upstream))[1]
+                        self.assertEqual(batch.vjp_parameters(list(upstream)), expected)
+                        buffers = batch.vjp_parameters_buffer(upstream)
+                        self.assertEqual(buffers, {name: array("f", v).tobytes() for name, v in expected.items()})
+                        next(iter(buffers.values()))[0] ^= 255
+                        self.assertEqual(batch.vjp_parameters(list(upstream)), expected)
+                        self.assertEqual(runtime.artifact().artifact_id, saved.artifact_id)
+                        for invalid in ([], [float("nan")] * len(upstream)):
+                            with self.assertRaises(ValueError):
+                                batch.vjp_parameters(invalid)
+                            with self.assertRaises(ValueError):
+                                batch.vjp_parameters_buffer(array("f", invalid))
+
+    def test_unused_input_overflow_does_not_block_parameters_or_sgd(self):
+        state = json.loads(artifact().state_json())
+        gate = next(t for t in state["placements"][0]["tensors"] if t["name"] == "gate")
+        gate["values"] = [float.fromhex("0x1.fffffep127")] * 3
+        runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+        batch = runtime.forward("site", [0.] * 3, 1)
+        for full in (batch.vjp, lambda u: batch.vjp_buffer(array("f", u))):
+            with self.assertRaises(ValueError):
+                full([4.] * 3)
+        expected = {"gate": [0.] * 3, "bias": [2.] * 3}
+        self.assertEqual(batch.vjp_parameters([4.] * 3), expected)
+        self.assertEqual(batch.vjp_parameters_buffer(array("f", [4.] * 3)),
+                         {name: array("f", v).tobytes() for name, v in expected.items()})
+        before = runtime.artifact().artifact_id
+        self.assertNotEqual(runtime.step_sgd(batch, [4.] * 3, .1), before)
+
     def test_shared_fixture_residual_vjp_and_owned_buffers(self):
         f = FIXTURE
         runtime = st.NativeGeometryRuntime(artifact())
@@ -69,7 +154,7 @@ class NativeGeometryTests(unittest.TestCase):
 
     def test_native_learning_and_exact_save_reload_continuation(self):
         x, y = array("f", [.2, -.3, .4, .5, .1, -.2]), array("f", [.1] * 6)
-        for kind in ("affine", "wave", "fixed", "learned"):
+        for kind in ("affine", "wave", "fixed", "learned", "elliptic", "anchored", "topos"):
             with self.subTest(kind=kind):
                 runtime = st.NativeGeometryRuntime(artifact(kind))
                 first = runtime.train_mse_buffer("site", x, y, 2, .2)
@@ -100,6 +185,108 @@ class NativeGeometryTests(unittest.TestCase):
             runtime.step_sgd(batch, [1.] * 6, .1)
         self.assertEqual(runtime.artifact().artifact_id, updated)
 
+    def test_elliptic_owned_composition_frozen_projection_and_row_budget(self):
+        class MustNotRead:
+            def __len__(self): raise AssertionError("reject row budget before input access")
+        for kind in ("elliptic", "anchored"):
+            state = json.loads(artifact(kind).state_json())
+            for tensor in state["placements"][0]["tensors"]:
+                if tensor["name"].startswith("orientation."):
+                    tensor["requires_grad"] = False
+            saved = st.GeometryAdapterArtifact.create_json(json.dumps(state))
+            runtime = st.NativeGeometryRuntime(saved)
+            values = array("f", [.2, -.3, .4, .5, .1, -.2])
+            batch = runtime.forward_buffer("site", values, 2)
+            output, pullback = batch.output, batch.vjp([1.] * 6)
+            values[0] = float("nan")
+            exported = batch.output_buffer()
+            exported[0] ^= 255
+            runtime.step_sgd(batch, [1.] * 6, .01)
+            self.assertEqual(batch.output, output)
+            self.assertEqual(batch.vjp([1.] * 6), pullback)
+            before = {t["name"]: t for t in state["placements"][0]["tensors"]}
+            after = {t["name"]: t for t in json.loads(runtime.artifact().state_json())["placements"][0]["tensors"]}
+            for name in ("orientation.weight", "orientation.bias"):
+                self.assertEqual(before[name], after[name])
+            self.assertNotEqual(before["readout.weight"], after["readout.weight"])
+            with self.assertRaises(ValueError):
+                runtime.forward("site", MustNotRead(), 65_537)
+            empty = runtime.forward("site", [], 0)
+            self.assertEqual(empty.output, [])
+            self.assertTrue(all(x == 0. for v in empty.vjp([])[1].values() for x in v))
+
+    def test_elliptic_causal_recipe_is_not_silently_flattened(self):
+        for kind in ("causal", "gated", *FRACTIONAL_KINDS):
+            runtime = st.NativeGeometryRuntime(artifact(kind))
+            with self.assertRaisesRegex(ValueError, "currently supports"):
+                runtime.forward("site", [.2] * 6, 2)
+            result = runtime.forward_sequence("site", [.2] * 6, (1, 2))
+            self.assertEqual(result.sequence_shape, (1, 2, 3))
+            self.assertEqual(result.shape, (2, 3))
+
+    def test_native_sequence_learning_and_saved_context_continuation(self):
+        x = array("f", [(i * 7 % 19) * .05 - .3 for i in range(18)])
+        y = array("f", [.1] * 18)
+        for kind in ("causal", "gated", *FRACTIONAL_KINDS):
+            runtime = st.NativeGeometryRuntime(artifact(kind))
+            snapshot = runtime.forward_sequence_buffer("site", x, (2, 3))
+            first = runtime.train_sequence_mse_buffer("site", x, y, (2, 3), .2)
+            for _ in range(39):
+                runtime.train_sequence_mse("site", list(x), list(y), (2, 3), .2)
+            saved = runtime.artifact()
+            restored = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.from_json(
+                saved.to_json(), saved.artifact_id, saved.base_model_identity))
+            loss = runtime.train_sequence_mse_buffer("site", x, y, (2, 3), .2)
+            self.assertLess(loss, first)
+            self.assertEqual(loss, restored.train_sequence_mse("site", list(x), list(y), (2, 3), .2))
+            self.assertEqual(runtime.artifact().artifact_id, restored.artifact().artifact_id)
+            before = runtime.artifact().artifact_id
+            with self.assertRaisesRegex(ValueError, "stale"):
+                runtime.step_sgd(snapshot, [1.] * 18, .1)
+            with self.assertRaises(ValueError):
+                runtime.train_sequence_mse("site", list(x), [float("nan")] * 18, (2, 3), .1)
+            self.assertEqual(runtime.artifact().artifact_id, before)
+
+    def test_sequence_admission_is_before_foreign_values_and_preserves_pointwise_route(self):
+        class MustNotRead:
+            def __len__(self): raise AssertionError("shape admission must precede values")
+        class OversizedTarget:
+            def __len__(self): return 10**10
+            def __getitem__(self, _): raise AssertionError("target length must precede extraction")
+        runtime = st.NativeGeometryRuntime(artifact("gated"))
+        invalid = ((), (1, 2, 3), (True, 3), (-1, 3), (1., 3), (0, 1), (1, 0),
+                   (2**32, 2), (65_537, 1), (1, 1025))
+        for shape in invalid:
+            for method in (runtime.forward_sequence, runtime.forward_sequence_buffer):
+                with self.assertRaises((TypeError, ValueError, OverflowError)):
+                    method("site", MustNotRead(), shape)
+        before = runtime.artifact().artifact_id
+        with self.assertRaises(ValueError):
+            runtime.train_sequence_mse("site", [.2] * 18, OversizedTarget(), (2, 3), .1)
+        self.assertEqual(runtime.artifact().artifact_id, before)
+        pointwise = st.NativeGeometryRuntime(artifact("wave"))
+        flat = pointwise.forward("site", [.2] * 18, 6)
+        context = pointwise.forward_sequence("site", [.2] * 18, (2, 3))
+        self.assertIsNone(flat.sequence_shape)
+        self.assertEqual(context.sequence_shape, (2, 3, 3))
+        self.assertEqual(flat.output, context.output)
+        self.assertEqual(flat.vjp([1.] * 18), context.vjp([1.] * 18))
+
+    def test_sequence_causality_and_cross_batch_isolation(self):
+        values = [(i * 7 % 19) * .05 - .3 for i in range(18)]
+        for kind in ("causal", "gated", *FRACTIONAL_KINDS):
+            runtime = st.NativeGeometryRuntime(artifact(kind))
+            batch = runtime.forward_sequence("site", values, (2, 3))
+            changed = values[:6] + [v + 3. for v in values[6:]]
+            self.assertEqual(batch.output[:6], runtime.forward_sequence("site", changed, (2, 3)).output[:6])
+            for index in range(2):
+                separate = runtime.forward_sequence("site", values[9 * index:9 * (index + 1)], (1, 3))
+                self.assertEqual(separate.output, batch.output[9 * index:9 * (index + 1)])
+            seed = [.2, -.4, .1] + [0.] * 15
+            self.assertEqual(batch.vjp(seed)[0][3:], [0.] * 15)
+            buffers = batch.vjp_buffer(array("f", seed))
+            self.assertEqual(list(memoryview(buffers[0]).cast("f")), batch.vjp(seed)[0])
+
     def test_invalid_updates_leave_artifact_unchanged(self):
         runtime = st.NativeGeometryRuntime(artifact())
         batch = runtime.forward("site", [.2] * 6, 2)
@@ -119,7 +306,7 @@ class NativeGeometryTests(unittest.TestCase):
             runtime.step_sgd(batch, [1e30] * 6, 1e30)
         self.assertEqual(runtime.artifact().artifact_id, before)
 
-    def test_all_frozen_and_unsupported_recipes_fail_without_fallback(self):
+    def test_all_frozen_placements_cannot_update(self):
         state = json.loads(artifact().state_json())
         for tensor in state["placements"][0]["tensors"]:
             tensor["requires_grad"] = False
@@ -129,13 +316,60 @@ class NativeGeometryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no trainable"):
             runtime.step_sgd(batch, [1.] * 6, .1)
         self.assertEqual(runtime.artifact().artifact_id, before)
-        p = state["placements"][0]
-        p["recipe"] = {"schema": "spiraltorch.topos_resonator_adapter.v1", "features": 3, "strength": .1,
-                       "kernel": {"coupling": .1, "iterations": 1, "saturation": 1., "porosity": .05, "max_values": 64}}
-        p["tensors"] = [t for t in p["tensors"] if t["name"] == "gate"]
+
+    def test_memory_budgets_precede_input_extraction_even_with_zero_strength(self):
+        class MustNotRead:
+            def __len__(self): raise AssertionError("native budget must precede values")
+        for strength in (0., .5):
+            for kind in FRACTIONAL_KINDS:
+                state = json.loads(artifact(kind).state_json())
+                recipe = state["placements"][0]["recipe"]
+                recipe["strength"] = strength
+                recipe["kernel"]["max_products"] = 90
+                runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+                for shape in ((0, 1), (1, 0), (2, 4), (1, 33), (2**32, 2)):
+                    for method in (runtime.forward_sequence, runtime.forward_sequence_buffer):
+                        with self.assertRaises((ValueError, OverflowError)):
+                            method("site", MustNotRead(), shape)
+                self.assertEqual(runtime.forward_sequence("site", [.2] * 18, (2, 3)).sequence_shape, (2, 3, 3))
+        topos = st.NativeGeometryRuntime(artifact("topos"))
+        for method in (topos.forward, topos.forward_buffer):
+            with self.assertRaises(ValueError):
+                method("site", MustNotRead(), 33)
+        empty = topos.forward("site", [], 0)
+        self.assertEqual(empty.output, [])
+        self.assertEqual(empty.vjp([]), ([], {"gate": [0., 0., 0.]}))
+
+    def test_history_order_domain_failure_is_atomic_and_frozen_controls_stay_fixed(self):
+        runtime = st.NativeGeometryRuntime(artifact("history_angle"))
+        x = [(i * 7 % 19) * .05 - .3 for i in range(18)]
+        batch = runtime.forward_sequence("site", x, (2, 3))
+        self.assertNotEqual(batch.vjp(x)[1]["history_angle"], [0.])
+        before = runtime.artifact().artifact_id
+        with self.assertRaises(ValueError):
+            runtime.step_sgd(batch, x, 1e10)
+        self.assertEqual(runtime.artifact().artifact_id, before)
+        state = json.loads(runtime.artifact().state_json())
+        for tensor in state["placements"][0]["tensors"]:
+            if not tensor["name"].endswith("gate"):
+                tensor["requires_grad"] = False
         runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
-        with self.assertRaisesRegex(ValueError, "currently supports"):
-            runtime.forward("site", [.2] * 6, 2)
+        runtime.train_sequence_mse("site", x, [.1] * 18, (2, 3), .2)
+        current = {t["name"]: t for t in json.loads(runtime.artifact().state_json())["placements"][0]["tensors"]}
+        for tensor in state["placements"][0]["tensors"]:
+            if not tensor["requires_grad"]:
+                self.assertEqual(tensor, current[tensor["name"]])
+
+    def test_empty_history_window_keeps_only_local_gate(self):
+        for kind in ("history_gain", "history_angle"):
+            state = json.loads(artifact(kind).state_json())
+            state["placements"][0]["recipe"]["lag_window"] = [2, 2]
+            runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+            x = [.2, -.3, .4, .5, .1, -.2]
+            batch = runtime.forward_sequence("site", x, (1, 2))
+            parameters = batch.vjp(x)[1]
+            self.assertTrue(any(parameters["local_gate"]))
+            self.assertTrue(all(v == 0. for name, values in parameters.items() if name != "local_gate" for v in values))
 
     def test_shape_and_value_budgets_precede_foreign_sequence_reads(self):
         class Oversized:

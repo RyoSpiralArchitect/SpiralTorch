@@ -173,7 +173,9 @@ impl ProjectionRadius {
         gate: &Tensor,
         bias: &Tensor,
         upstream: &Tensor,
-    ) -> PureResult<(WaveGateVjp, f32)> {
+        requested: [bool; 2],
+    ) -> PureResult<(WaveGatePartialVjp, Option<f32>)> {
+        let [need_input, need_radius] = requested;
         let (rows, cols) = input.shape();
         let scale = f64::from((-topos.curvature()).sqrt());
         let gates: Vec<_> = gate
@@ -181,7 +183,7 @@ impl ProjectionRadius {
             .iter()
             .map(|&v| topos.saturate_with_slope(v))
             .collect();
-        let mut dx = Vec::with_capacity(input.data().len());
+        let mut dx = need_input.then(|| Vec::with_capacity(input.data().len()));
         let mut dg = vec![0.0f64; cols];
         let mut db = vec![0.0f64; cols];
         let mut dr = 0.0f64;
@@ -216,22 +218,30 @@ impl ProjectionRadius {
                 };
                 let dz = (tangent * (f64::from(dy[c]) - aligned) + radial * aligned) / scale;
                 let da = dz * f64::from(affine[c].1);
-                dx.push((da * f64::from(gates[c].0)) as f32);
+                if let Some(dx) = &mut dx {
+                    dx.push((da * f64::from(gates[c].0)) as f32);
+                }
                 dg[c] += da * f64::from(x[c]) * f64::from(gates[c].1);
                 db[c] += da;
-                dr += f64::from(dy[c]) * f64::from(z[c]) * log_gain / scale;
+                if need_radius {
+                    dr += f64::from(dy[c]) * f64::from(z[c]) * log_gain / scale;
+                }
             }
         }
-        let result = WaveGateVjp {
-            grad_input: Tensor::from_vec(rows, cols, dx)?,
+        let result = WaveGatePartialVjp {
+            grad_input: dx.map(|dx| Tensor::from_vec(rows, cols, dx)).transpose()?,
             grad_gate: Tensor::from_vec(1, cols, dg.into_iter().map(|v| v as f32).collect())?,
             grad_bias: Tensor::from_vec(1, cols, db.into_iter().map(|v| v as f32).collect())?,
         };
-        for gradient in [&result.grad_input, &result.grad_gate, &result.grad_bias] {
+        for gradient in result
+            .grad_input
+            .iter()
+            .chain([&result.grad_gate, &result.grad_bias])
+        {
             topos.guard_tensor("wave_gate_radius_gradient", gradient)?;
         }
-        let dr = dr as f32;
-        if !dr.is_finite() {
+        let dr = need_radius.then_some(dr as f32);
+        if dr.is_some_and(|value| !value.is_finite()) {
             return Err(TensorError::InvalidValue {
                 label: "wave_gate_log_radius_gradient",
             });
