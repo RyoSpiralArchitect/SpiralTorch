@@ -75,3 +75,26 @@ Neither a passing test nor a geometry hash seals the other HF files or verifies
 the live base. Complete checkpoint provenance, runtime/data/training identity,
 selection and promotion remain executor-owned. No language-quality, throughput,
 distributed recovery or whole-checkpoint crash-atomicity claim is made.
+
+## Later-Epoch Resume Follow-Up
+
+The original 88-test qualification above is retained unchanged. A subsequent
+offline pretrained GPT-2 probe exposed a missing case: resuming *inside a later
+epoch* did not preserve the permutation. Its checkpoint weights and CPU/MPS RNG
+matched the uninterrupted run at update 8; divergence began after restoration.
+Accelerate 1.14.0 constructs a new `DataLoaderShard` with iteration zero inside
+`skip_first_batches`, resetting its nested seedable sampler to epoch zero.
+
+The Trainer now composes Torch's random sampler with a private CPU generator,
+seeded by `data_seed` (or `seed`) plus the restored Trainer epoch. It does not
+fork the HF loop or patch Accelerate globally. Tests cover epoch boundaries and
+resumes at updates 7, 8 and 15, sampler-order parity, and actual batch skipping.
+Finite deterministic map data is required; length-grouping, streaming and
+epoch-only callback stopping are rejected. Whole-run update-boundary stops are
+supported. Guards cover step, logging and evaluation callbacks before writes,
+and check again after the parent hook so a no-save stop cannot silently advance.
+
+The follow-up includes 38 Trainer tests against the rebuilt installed candidate,
+plus an independent read-only review. Its hashes and qualification scope are in
+`resume-followup.json`; that wheel also contains the separately stacked document
+dataset feature. The original binary/source hashes are not overwritten.

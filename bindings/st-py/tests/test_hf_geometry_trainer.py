@@ -192,7 +192,7 @@ def test_wrong_identity_or_recipe_rejected_before_mutation(tmp_path, checkpoint,
 
 @pytest.mark.parametrize("options", [{"gradient_checkpointing": True}, {"torch_compile": True},
                                     {"save_only_model": True}, {"neftune_noise_alpha": 1.},
-                                    {"push_to_hub": True}])
+                                    {"push_to_hub": True}, {"group_by_length": True}])
 def test_unsupported_modes_reject_without_training(tmp_path, options, monkeypatch):
     # TrainingArguments(torch_compile=True) mutates Accelerate's process env
     # before our constructor can reject it. Do not leak it into later tests.
@@ -345,3 +345,98 @@ def test_mps_rng_companion_and_exact_dropout_resume(tmp_path):
     missing = make_trainer(tmp_path / "missing", **options)
     with pytest.raises(ValueError, match="incomplete.*spiraltorch-mps-rng"):
         missing.train(resume_from_checkpoint=str(checkpoint), geometry_checkpoint_id=partial.last_geometry_artifact_id)
+
+
+@pytest.mark.parametrize("stop", [7, 8, 15])
+def test_resume_inside_a_later_epoch_preserves_actual_training_order(tmp_path, stop):
+    class FourteenRows(TinyData):
+        def __len__(self):
+            return 14
+
+    class StopAtBoundary(hf.TrainerCallback):
+        def on_step_end(self, args, state, control, **kwargs):
+            if state.global_step == stop:
+                control.should_save = control.should_training_stop = True
+
+    def build(name, callbacks=()):
+        trainer = make_trainer(tmp_path / name, callbacks=callbacks, max_steps=17,
+                               save_steps=stop, gradient_accumulation_steps=1)
+        trainer.train_dataset = FourteenRows()
+        return trainer
+
+    full = build("full")
+    full.train()
+    partial = build("partial", [StopAtBoundary()])
+    partial.train()
+    assert partial.state.epoch >= 1
+    resumed = build("resumed")
+    resumed.train(resume_from_checkpoint=str(tmp_path / f"partial/checkpoint-{stop}"),
+                  geometry_checkpoint_id=partial.last_geometry_artifact_id)
+    assert equal(full.geometry.state_dict(), resumed.geometry.state_dict())
+    assert equal(full.optimizer.state_dict(), resumed.optimizer.state_dict())
+    assert equal(full.lr_scheduler.state_dict(), resumed.lr_scheduler.state_dict())
+
+
+def test_epoch_sampler_matches_hf_order_without_using_global_rng(tmp_path):
+    from accelerate.data_loader import SeedableRandomSampler, skip_first_batches
+
+    trainer = make_trainer(tmp_path)
+    trainer.state.epoch = 2.25
+    sampler = trainer._get_train_sampler()
+    rng = torch.get_rng_state().clone()
+    expected = SeedableRandomSampler(trainer.train_dataset, data_seed=trainer.args.data_seed)
+    expected.set_epoch(2)
+    assert list(sampler) == list(expected)
+    assert torch.equal(rng, torch.get_rng_state())
+    loader = trainer.get_train_dataloader()
+    loader.set_epoch(2)
+    skipped = skip_first_batches(loader, 2)
+    actual = [int(row) for batch in skipped for row in batch["input_ids"][:, 0]]
+    expected.set_epoch(2)
+    assert actual == list(expected)[4:]
+
+
+def test_streaming_training_rejects_instead_of_claiming_cursor_replay(tmp_path):
+    class Stream(torch.utils.data.IterableDataset):
+        def __iter__(self):
+            yield TinyData()[0]
+
+    trainer = make_trainer(tmp_path)
+    trainer.train_dataset = Stream()
+    with pytest.raises(ValueError, match="finite map-style"):
+        trainer.train()
+
+
+def test_early_epoch_callback_rejects_before_checkpoint_save(tmp_path):
+    class SkipRestOfEpoch(hf.TrainerCallback):
+        def on_step_end(self, args, state, control, **kwargs):
+            if state.global_step == 2:
+                control.should_epoch_stop = control.should_save = True
+
+    trainer = make_trainer(tmp_path, callbacks=[SkipRestOfEpoch()], max_steps=9,
+                           gradient_accumulation_steps=1, save_steps=99)
+    with pytest.raises(ValueError, match="early epoch stopping"):
+        trainer.train()
+    assert trainer.state.global_step == 2
+    assert not list(tmp_path.glob("checkpoint-*"))
+    assert trainer.geometry._active_token is None
+
+
+@pytest.mark.parametrize("event", ["log", "evaluate"])
+def test_late_epoch_stop_callback_rejects_before_checkpoint_write(tmp_path, event):
+    class SkipAfterReporting(hf.TrainerCallback):
+        def on_log(self, args, state, control, **kwargs):
+            if event == "log" and state.global_step == 2:
+                control.should_epoch_stop = control.should_save = True
+
+        def on_evaluate(self, args, state, control, **kwargs):
+            if event == "evaluate" and state.global_step == 2:
+                control.should_epoch_stop = control.should_save = True
+
+    trainer = make_trainer(tmp_path, callbacks=[SkipAfterReporting()], max_steps=9,
+                           gradient_accumulation_steps=1, eval_strategy="steps", eval_steps=2,
+                           save_steps=2)
+    with pytest.raises(ValueError, match="early epoch stopping"):
+        trainer.train()
+    assert trainer.state.global_step == 2
+    assert not list(tmp_path.glob("checkpoint-*"))

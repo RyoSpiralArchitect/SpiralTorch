@@ -33,3 +33,17 @@ WASM fixture checks belong to the main qualification, not the independent probe.
 Scope remains bounded: no claim about arbitrary models, distributed execution,
 CUDA numerical behavior, untrusted HF checkpoints, complete crash-atomic saves,
 or general-language quality. Source and binary identities are in `validation.json`.
+## Later-Epoch Follow-Up Review
+
+An independent read-only local reviewer examined the epoch-seeded sampler fix.
+The first pass found that epoch-only stopping callbacks could leave a fractional
+Trainer epoch and repeat the prior permutation. The fix rejects that unsupported
+cursor transition. A second pass found that logging/evaluation callbacks could
+request the stop after the initial guard but before saving. A checkpoint-entry
+guard and a post-parent-hook guard now close those paths.
+
+The final narrow pass found no actionable residual in these fixes. Eight
+model-free callback probes covered log/evaluate, save/no-save and epoch-only/
+whole-run stopping. The reviewer did not run training/builds or independently
+repeat the final-wheel or real-GPT2 qualification. The main agent owns those
+execution results; this is not an exhaustive repository review.

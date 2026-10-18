@@ -142,6 +142,8 @@ def hf_geometry_trainer_class() -> type:
                 raise ValueError("geometry training requires full HF optimizer/scheduler/RNG checkpoints")
             if args.label_names is not None and args.label_names != ["labels"]:
                 raise ValueError("geometry Trainer requires causal-LM labels")
+            if args.group_by_length:
+                raise ValueError("geometry Trainer requires epoch-seeded sampling, not group_by_length")
 
         @property
         def geometry(self):
@@ -155,6 +157,32 @@ def hf_geometry_trainer_class() -> type:
             if self._signature_columns is None:
                 self._signature_columns = list(inspect.signature(self.base_model.forward).parameters)
                 self._signature_columns += ["label", "label_ids", "labels"]
+
+        def get_train_dataloader(self):
+            if (isinstance(self.train_dataset, torch.utils.data.IterableDataset)
+                    or not hasattr(self.train_dataset, "__len__")):
+                raise ValueError("geometry Trainer requires a finite map-style training dataset")
+            return super().get_train_dataloader()
+
+        def _get_train_sampler(self, train_dataset=None):
+            dataset = self.train_dataset if train_dataset is None else train_dataset
+            trainer = self
+            seed = self.args.seed if self.args.data_seed is None else self.args.data_seed
+
+            class EpochSampler(torch.utils.data.Sampler):
+                def __len__(self):
+                    return len(dataset)
+
+                def __iter__(self):
+                    # Accelerate's skip_first_batches constructs a new shard
+                    # whose set_epoch(0) can reset a seedable sampler on resume.
+                    # Keep HF's seed+epoch permutation, reading the restored
+                    # Trainer cursor rather than that new shard's iteration.
+                    generator = torch.Generator(device="cpu")
+                    generator.manual_seed(seed + int(trainer.state.epoch or 0))
+                    return iter(torch.utils.data.RandomSampler(dataset, generator=generator))
+
+            return EpochSampler()
 
         def _validate_optimizer(self):
             expected = {id(p) for p in self.geometry.parameters() if p.requires_grad}
@@ -215,6 +243,25 @@ def hf_geometry_trainer_class() -> type:
             self._check_batch(inputs)
             with self.geometry.attach(self.base_model, require_all=True):
                 return super().training_step(model, inputs, num_items_in_batch)
+
+        def _check_epoch_stop(self):
+            # HF derives its resume epoch from global_step, so skipping the
+            # remainder of an epoch would invalidate that cursor as well as
+            # the epoch-seeded order. Fail before saving a misleading checkpoint.
+            if self.control.should_epoch_stop and not self.control.should_training_stop:
+                raise ValueError("early epoch stopping is unsupported; stop the complete training run instead")
+
+        def _maybe_log_save_evaluate(self, *args, **kwargs):
+            self._check_epoch_stop()
+            result = super()._maybe_log_save_evaluate(*args, **kwargs)
+            self._check_epoch_stop()
+            return result
+
+        def _save_checkpoint(self, *args, **kwargs):
+            # Logging/evaluation callbacks inside the parent hook may have
+            # requested an epoch stop after its entry check.
+            self._check_epoch_stop()
+            return super()._save_checkpoint(*args, **kwargs)
 
         def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
             self._check_batch(inputs)
