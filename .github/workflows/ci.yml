@@ -594,6 +594,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_causal_lm_training.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_generation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_context.py -v
+          python -I -B benchmarks/results/2026-10-18-native-lm-cache/test_qualification.py -v
           python -I -B bindings/st-py/examples/native_weights_geometry.py
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
