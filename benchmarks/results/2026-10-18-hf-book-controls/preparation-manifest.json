@@ -1,0 +1,557 @@
+{
+  "schema": "spiraltorch.hf_book_preparation.v1",
+  "plan_id": "sha256:f90fe89f9b9824365f46be056ca7bf3a15fef6079a141c8ea3172b987ee4c3bb",
+  "raw_source_id": "sha256:3f6bb9d6f78e0293b56acd4714dd68cb7d6d1d293402031ce9d5a216bcaf9d75",
+  "documents": [
+    {
+      "chapter": 1,
+      "split": "train",
+      "relative_path": "train/chapter-01.txt",
+      "bytes": 4618,
+      "characters": 4490,
+      "sha256": "b49358179788451e576b56228d7a501a0b005b803e7e6ee6e3575583d74a89f5",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 2,
+      "split": "train",
+      "relative_path": "train/chapter-02.txt",
+      "bytes": 4446,
+      "characters": 4308,
+      "sha256": "2b0e2cb2e2d1003683fb0400fc0ad84f012e5b3bd09d43c69113fb3553bee649",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 3,
+      "split": "train",
+      "relative_path": "train/chapter-03.txt",
+      "bytes": 9657,
+      "characters": 9569,
+      "sha256": "689eeca4f003ef6ef080f5d9af842099158fd902fa9d53b0e21737974a3f3796",
+      "illustration_blocks_removed": 4
+    },
+    {
+      "chapter": 4,
+      "split": "train",
+      "relative_path": "train/chapter-04.txt",
+      "bytes": 5987,
+      "characters": 5935,
+      "sha256": "bfd7d7a696c22276e2c00ad8a40b0503fbe09d295005cee2c4cd5a608b0c77ef",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 5,
+      "split": "train",
+      "relative_path": "train/chapter-05.txt",
+      "bytes": 5413,
+      "characters": 5275,
+      "sha256": "ea4508b7ffef733c37b03bab4af75efe9813102144b808149d553fd6bfa41e18",
+      "illustration_blocks_removed": 4
+    },
+    {
+      "chapter": 6,
+      "split": "train",
+      "relative_path": "train/chapter-06.txt",
+      "bytes": 13253,
+      "characters": 13031,
+      "sha256": "8b5b38970335e76a8ccbbb25cb14e6d6d9d62318cd98de80d8b1eb689e730780",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 7,
+      "split": "train",
+      "relative_path": "train/chapter-07.txt",
+      "bytes": 11480,
+      "characters": 11267,
+      "sha256": "89bdd7722df041492a9648fbeb696ab4d46af702523106f19a1d423082af149f",
+      "illustration_blocks_removed": 4
+    },
+    {
+      "chapter": 8,
+      "split": "train",
+      "relative_path": "train/chapter-08.txt",
+      "bytes": 11287,
+      "characters": 11009,
+      "sha256": "ee086acc7d95e9ba8b13981afac01903335cd268fb34e087a3793c4767ded57b",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 9,
+      "split": "train",
+      "relative_path": "train/chapter-09.txt",
+      "bytes": 9972,
+      "characters": 9772,
+      "sha256": "352261e08eff0b38d4e76fcdc9aca5c1f5085ce30c033eadf290b423348d01b1",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 10,
+      "split": "train",
+      "relative_path": "train/chapter-10.txt",
+      "bytes": 12766,
+      "characters": 12504,
+      "sha256": "eb613f8173ba95e0a579e22f438bd24e468ed89ce18b48d32ae27952d53c2b84",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 11,
+      "split": "train",
+      "relative_path": "train/chapter-11.txt",
+      "bytes": 9124,
+      "characters": 8950,
+      "sha256": "53d98307337fdc5744033fc6184cbf057fabb6f6cc332f47045fadabb7cc8942",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 12,
+      "split": "train",
+      "relative_path": "train/chapter-12.txt",
+      "bytes": 3939,
+      "characters": 3931,
+      "sha256": "b2e41d84efe5f374287e5b9bff1db472dffd2fbc0af149b9a4601905af9aba42",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 13,
+      "split": "train",
+      "relative_path": "train/chapter-13.txt",
+      "bytes": 9626,
+      "characters": 9482,
+      "sha256": "7a54e3c5f4eb72abbcf074c19946a70f8238d1829348698a866f771619c37d56",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 14,
+      "split": "train",
+      "relative_path": "train/chapter-14.txt",
+      "bytes": 6522,
+      "characters": 6448,
+      "sha256": "d78f472e735f2d3df9e542cd8c33b9f35d394d692534c7f482a2e258fce90f50",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 15,
+      "split": "train",
+      "relative_path": "train/chapter-15.txt",
+      "bytes": 9828,
+      "characters": 9793,
+      "sha256": "2acc39c699e229efd3ac85d7086a0024e162867aedc1f245f89c05c02cd69d85",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 16,
+      "split": "train",
+      "relative_path": "train/chapter-16.txt",
+      "bytes": 19360,
+      "characters": 19082,
+      "sha256": "7e4e2e1ac0c4f6b2d3199e87d61b60bf8165638bf9ae6b473d4a0fd57e70fe50",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 17,
+      "split": "train",
+      "relative_path": "train/chapter-17.txt",
+      "bytes": 7343,
+      "characters": 7279,
+      "sha256": "8cfba5e4d6bd5d96c5ff082733dc63831b76882afe75299106da144442acb29b",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 18,
+      "split": "train",
+      "relative_path": "train/chapter-18.txt",
+      "bytes": 29550,
+      "characters": 29192,
+      "sha256": "5ce9915fb1a6253778827df40dca3d297c8eb397913a7b9c7f48d0521470e74e",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 19,
+      "split": "train",
+      "relative_path": "train/chapter-19.txt",
+      "bytes": 10780,
+      "characters": 10672,
+      "sha256": "35a6bcdf6d5b9c678f29df2b190dd571bd886f59bd885580884350ed2ee70e77",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 20,
+      "split": "train",
+      "relative_path": "train/chapter-20.txt",
+      "bytes": 9331,
+      "characters": 9191,
+      "sha256": "e11ac2eac5157fa1e7ad958d9538a47d5cda91a1c3ae1396e7dd03d546532d79",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 21,
+      "split": "train",
+      "relative_path": "train/chapter-21.txt",
+      "bytes": 11437,
+      "characters": 11297,
+      "sha256": "bb98ef4d08a37f21776edda410e30a20dd1eb4277d9c1a253b480fa0ba2a313e",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 22,
+      "split": "train",
+      "relative_path": "train/chapter-22.txt",
+      "bytes": 10094,
+      "characters": 10010,
+      "sha256": "2e5d2ac27d87e94f682e79fca6d5d587e3a76fae373f03cddc690bf2a08119b6",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 23,
+      "split": "train",
+      "relative_path": "train/chapter-23.txt",
+      "bytes": 9386,
+      "characters": 9326,
+      "sha256": "6bd0a2e7ff92c8bb112aeb9973e2cc89be6dce6917bb3f6e674e1aaedb3cc243",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 24,
+      "split": "train",
+      "relative_path": "train/chapter-24.txt",
+      "bytes": 11000,
+      "characters": 10834,
+      "sha256": "97123d5fba963b10ca0529ce125001a18975387cf6e83ea01aea3776f00d2cc4",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 25,
+      "split": "train",
+      "relative_path": "train/chapter-25.txt",
+      "bytes": 8695,
+      "characters": 8605,
+      "sha256": "d4e5ff41883927dfb0aa9d962fc687187eef5cd045baec0111522ef7fafaf069",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 26,
+      "split": "train",
+      "relative_path": "train/chapter-26.txt",
+      "bytes": 13098,
+      "characters": 12978,
+      "sha256": "681cfaf99d1d61fb1b17371b09f481b35bff458f949d93f4c822d83d7e925e97",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 27,
+      "split": "train",
+      "relative_path": "train/chapter-27.txt",
+      "bytes": 7316,
+      "characters": 7226,
+      "sha256": "e348eed4e0502f5c5f5679d3774b18e5c5962215a87b0efcbcb19535290b8899",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 28,
+      "split": "train",
+      "relative_path": "train/chapter-28.txt",
+      "bytes": 8307,
+      "characters": 8237,
+      "sha256": "8f140b4573356b35b027d245042bd6fe84849a1a15ebc89015988a7dda72fcdd",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 29,
+      "split": "train",
+      "relative_path": "train/chapter-29.txt",
+      "bytes": 13867,
+      "characters": 13689,
+      "sha256": "5110a62fce6e8c63a0c4d6c589d34c6276487d692319bb1f8f7d256c5c196fd7",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 30,
+      "split": "train",
+      "relative_path": "train/chapter-30.txt",
+      "bytes": 7092,
+      "characters": 7068,
+      "sha256": "357e91317a51baa968f7eb74bc7a7c049f23171c5c68a14fa39a7853e944b147",
+      "illustration_blocks_removed": 4
+    },
+    {
+      "chapter": 31,
+      "split": "train",
+      "relative_path": "train/chapter-31.txt",
+      "bytes": 8901,
+      "characters": 8751,
+      "sha256": "9471d23c56b20759013bdcb69f566ab34fad5dabdab471595d286b44b34dad94",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 32,
+      "split": "train",
+      "relative_path": "train/chapter-32.txt",
+      "bytes": 8575,
+      "characters": 8474,
+      "sha256": "ff5b465318e01d9c9ebdb3c039628147a4cd94b2f1b1c82a0398d5e9efff50b5",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 33,
+      "split": "train",
+      "relative_path": "train/chapter-33.txt",
+      "bytes": 10587,
+      "characters": 10389,
+      "sha256": "8082cb78ea7bfacb1ece1ab141dac675abd791c1ed36adc3a88a10b278022832",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 34,
+      "split": "train",
+      "relative_path": "train/chapter-34.txt",
+      "bytes": 12125,
+      "characters": 12013,
+      "sha256": "8adb6726976b3f20c5a28aae3d87901fd2b7e847c4d67b039accac32fae78245",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 35,
+      "split": "train",
+      "relative_path": "train/chapter-35.txt",
+      "bytes": 17035,
+      "characters": 16983,
+      "sha256": "0f2bb37910bf07f6d67deb5c10d177bc89a0e5a4675783b6c1479e254d35e5e4",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 36,
+      "split": "train",
+      "relative_path": "train/chapter-36.txt",
+      "bytes": 11838,
+      "characters": 11798,
+      "sha256": "ef83098f88b5d513c0dfe69802100144edbb1a52312f0780e039fe228ad66b9b",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 37,
+      "split": "train",
+      "relative_path": "train/chapter-37.txt",
+      "bytes": 7855,
+      "characters": 7787,
+      "sha256": "646fc6266fa897818b2cd2cb8a9a853e8a4c71b52650b84ebdfe61a4370f65be",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 38,
+      "split": "train",
+      "relative_path": "train/chapter-38.txt",
+      "bytes": 6010,
+      "characters": 5956,
+      "sha256": "a12d6957934397521c26c93ed6af64f22d242215cf5c329c1749228e683aefa6",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 39,
+      "split": "train",
+      "relative_path": "train/chapter-39.txt",
+      "bytes": 8913,
+      "characters": 8795,
+      "sha256": "6a2f777d3f7eebb4fbdaaaf618a9f48759e3ac641e6754c4a2b1024e40c91021",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 40,
+      "split": "train",
+      "relative_path": "train/chapter-40.txt",
+      "bytes": 9374,
+      "characters": 9208,
+      "sha256": "6ee27e170f487357704bef1bcd3960ca5fb5d052185197000204b396d3fbf224",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 41,
+      "split": "train",
+      "relative_path": "train/chapter-41.txt",
+      "bytes": 13195,
+      "characters": 13025,
+      "sha256": "863ca46003d5536c18a8695ce81f199bb4ceaf3d60726a734102e148ff840f63",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 42,
+      "split": "train",
+      "relative_path": "train/chapter-42.txt",
+      "bytes": 10680,
+      "characters": 10636,
+      "sha256": "3e2a5fe9c59f076903b6596bb9a8041cf69951c64d20e11af54c656f181a95c6",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 43,
+      "split": "train",
+      "relative_path": "train/chapter-43.txt",
+      "bytes": 27822,
+      "characters": 27523,
+      "sha256": "b2a14ae498b94e5bfc79b8d49f6d9dc91b803458cce072cc4990d2cc47a17055",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 44,
+      "split": "train",
+      "relative_path": "train/chapter-44.txt",
+      "bytes": 13399,
+      "characters": 13377,
+      "sha256": "c5cbd1e29c1f3cb1ad76e68150b397f525c4b31ec1a23d04b147b8d0740c1f83",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 45,
+      "split": "train",
+      "relative_path": "train/chapter-45.txt",
+      "bytes": 10172,
+      "characters": 10104,
+      "sha256": "ceb56845ec269e4f27d24273e5034cfdaca82279912baf5634e2910f5e9dfda9",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 46,
+      "split": "train",
+      "relative_path": "train/chapter-46.txt",
+      "bytes": 17068,
+      "characters": 16944,
+      "sha256": "1988671b16f9e2beb2d330954e58a01c1f662dbbc9db37c5a590ca4f23f6b7ca",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 47,
+      "split": "train",
+      "relative_path": "train/chapter-47.txt",
+      "bytes": 22774,
+      "characters": 22452,
+      "sha256": "9456b60cc7222a66902fb4ecca6891c1687ee31fb0d103863f724aa64fbe51aa",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 48,
+      "split": "train",
+      "relative_path": "train/chapter-48.txt",
+      "bytes": 12858,
+      "characters": 12744,
+      "sha256": "269844b2df99bd154540bb626a3b9c878953a7de9b9aa5b023a477cb554500eb",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 49,
+      "split": "train",
+      "relative_path": "train/chapter-49.txt",
+      "bytes": 12727,
+      "characters": 12445,
+      "sha256": "f9eceeca0ae39ad30a22131d49587a44fdd2561e172aacc39e4c42effbe0466f",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 50,
+      "split": "development",
+      "relative_path": "development/chapter-50.txt",
+      "bytes": 12552,
+      "characters": 12490,
+      "sha256": "89aeedb9db9a457545debe7b11d31c0681c1aefe8235da8fbb4abccafd2e557b",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 51,
+      "split": "development",
+      "relative_path": "development/chapter-51.txt",
+      "bytes": 11391,
+      "characters": 11243,
+      "sha256": "79759a8d9997ff548c755310ae94374e2d671b069474b4f73352d852c033c3af",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 52,
+      "split": "development",
+      "relative_path": "development/chapter-52.txt",
+      "bytes": 17476,
+      "characters": 17322,
+      "sha256": "6c70e9b5eb942a03d1731f20c993e614a64121d263ed2ce9970fe98b658a350a",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 53,
+      "split": "development",
+      "relative_path": "development/chapter-53.txt",
+      "bytes": 16365,
+      "characters": 16109,
+      "sha256": "a9ac94bd199e159e2cea81ad98001f77935ecb41afa3af5d499b87d90019f154",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 54,
+      "split": "development",
+      "relative_path": "development/chapter-54.txt",
+      "bytes": 8975,
+      "characters": 8845,
+      "sha256": "12fdf17724ac384a9d2f8c41112b65b12430baae61a7b0f83e497bfa9a737000",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 55,
+      "split": "development",
+      "relative_path": "development/chapter-55.txt",
+      "bytes": 13195,
+      "characters": 13001,
+      "sha256": "4adb745ed0541ec41db758d9a4ee133f2acceecd3b43d95ef1a5f51b05b08244",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 56,
+      "split": "reserve",
+      "relative_path": "reserve/chapter-56.txt",
+      "bytes": 15671,
+      "characters": 15373,
+      "sha256": "010fbb61325ffa6ec6b1e2d60065776013b4d004010c6b55ab477f509665fd78",
+      "illustration_blocks_removed": 3
+    },
+    {
+      "chapter": 57,
+      "split": "reserve",
+      "relative_path": "reserve/chapter-57.txt",
+      "bytes": 9509,
+      "characters": 9415,
+      "sha256": "558b33e01f6d7edd2d779e7682e8a7b63798e1d65ab2ca91cc4c33b8f54549f0",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 58,
+      "split": "reserve",
+      "relative_path": "reserve/chapter-58.txt",
+      "bytes": 13878,
+      "characters": 13678,
+      "sha256": "12c6afbae24cb27d30d114b4ae27ecd0bfa71787893f5c0cbbb077fb35095510",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 59,
+      "split": "reserve",
+      "relative_path": "reserve/chapter-59.txt",
+      "bytes": 13783,
+      "characters": 13565,
+      "sha256": "e781181f5347f9f31d680db523478acead5c2aa5491ec4d8b13aea34798023e0",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 60,
+      "split": "reserve",
+      "relative_path": "reserve/chapter-60.txt",
+      "bytes": 8854,
+      "characters": 8740,
+      "sha256": "f84138a1536769ef8ec5f1914037491486e42a36aa86bcdbce4f6973f5e53659",
+      "illustration_blocks_removed": 2
+    },
+    {
+      "chapter": 61,
+      "split": "reserve",
+      "relative_path": "reserve/chapter-61.txt",
+      "bytes": 7158,
+      "characters": 7130,
+      "sha256": "f62c17f0b005bffb73a532c543b5708eebd0ce46942b99492668042e1ddf1724",
+      "illustration_blocks_removed": 2
+    }
+  ],
+  "reserve_used": false
+}

@@ -50,3 +50,18 @@ implementation changed. Latest-head CI remains mandatory for integration.
 Review is bounded to this experiment and its narrow parent documentation fix,
 not authentication of the environment, a distributed scheduler audit, or review
 of every transitive HF/Python/native dependency.
+
+## Completed-Run Publication Review
+
+A separate read-only follow-up compared the public results/execution/README
+against the private summary, twelve-case manifest and individual result hashes.
+It found no publication discrepancies: all twelve cases and six paired
+differences were retained, and displayed values/means matched the receipts.
+No raw/generated text or weight payloads were included in the reviewed public
+files. Claims remain limited; all arms completed but geometry was not superior
+to the ordinary control in this experiment. No files were changed or models,
+Git, builds or network operations executed by that reviewer.
+
+The additional 24-checkpoint optimizer/scheduler and saved/exported-state checks
+were run by the main agent, not independently repeated by the publication
+reviewer. They do not constitute a new interrupted-training/resume experiment.

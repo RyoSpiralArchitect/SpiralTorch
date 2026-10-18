@@ -1,0 +1,439 @@
+{
+  "schema": "spiraltorch.hf_book_saved_state_check.v1",
+  "status": "passed",
+  "checkpoints": [
+    {
+      "arm": "ordinary",
+      "seed": 41,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:011b9a574db6c347d6afb271f652475ab8b6710884a91dad168cbff817f7f0aa",
+        "optimizer.pt": "sha256:0f43b745f3c647f64effa9e0f7ffd9b287348223e7ed384fd634a8bc0925ed3e",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:b8e4077f572157cb2faa1eeaf69aa03196a06d01498cceb84dd0742500c6571f",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+      }
+    },
+    {
+      "arm": "ordinary",
+      "seed": 41,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:63835ea5555ac4c70410f434887e05f7f010b5a7f9e490d1b218e5cc7d4d18a2",
+        "optimizer.pt": "sha256:bb1cb6fc3db1ded25e5416318047f4c9b616fd7f7a155025d0af5ca9fc1150e4",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:ee2721bf1a7f273113ea8d3a355bc8328c8e7c5eefb804ac4a57f9ff4e077f5f",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+      }
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 41,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:b686b9d050c6a389915d9cab6aa5da9c1c6adee0992da91a51fb7ddcb3e05e2d",
+        "optimizer.pt": "sha256:f3fd4cc2a64a3f7dfc2e50e4370966cdc6a173073325f24d7d95fe7bfc41af65",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:641ac603eb02b21b69f1d860afed2c98b69c3f8d2ca7d537159c210c06523531",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+      }
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 41,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:cfe178a778e1e8b2dac39833d2de3695c63ce20ee782bb82d1703faf6785508d",
+        "optimizer.pt": "sha256:a8b35b2bcfff092b69c0b8c70e314e4fe931bc22671e2207a520036225c889c4",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:d1d96b18b5f3038a5d174f70f3d00e0900bbb7045703db670ecf212883ecb97e",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+      }
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 41,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:64823c35cabdc549940b2abbac0bc355bfdf3010f3310bd3ab7abd9d17ca1424",
+        "optimizer.pt": "sha256:a461651a37ac2e77d16ce8df197e7c6949135097333abdb3a81525bb4c70b9c3",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:b32218328772ff93bf66eeea273d2cc9a9628ae144c90cedc195023e49cc76f7",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+      }
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 41,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:6cbddefef749115aef1e2f6608d35c2bcb21b82229a0d1ff77abf50c3433ab16",
+        "optimizer.pt": "sha256:e02fc48a30b0b3c8c0c669a742b2a1d3ecb13ea906ce6a79158f5c5aad92f39b",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:ef21c069e363bb4a86798ef46379aaff4fe2c31f631d31a032689f218165ce3e",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+      }
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 41,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:1399443629dfd20a4de3723b24d6f0870814114a4b336e9cff18c4e20852b4aa",
+        "optimizer.pt": "sha256:a0bfd50a51510d237948fdc96758f1e6d0cbc8a1078dc843fb7402a1a3f06d1c",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:f79c8cb329647f953f84147f49227dcb8ec61add5099c7a30675a0db064b9365",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+      }
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 41,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:b406102183a4bb4c3a8dd6b4f8af78fe162b50efaa7902891b9d8d169e5205ca",
+        "optimizer.pt": "sha256:511ce1af73f2be073da8dc40c6c09bd7e46ea40b57b1f9a290b860af9ebd90c0",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:3156f605465b6d995538850611ef457dbe957f1dd4a94513200e3ba15993c472",
+        "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+        "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+      }
+    },
+    {
+      "arm": "ordinary",
+      "seed": 43,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:0374def8482d6532a56f249f9f741eaca5aa8a88dce30fc95b6ad6df98ab5878",
+        "optimizer.pt": "sha256:f8f0dc5ebe0294fa576eeca7ad6c761da8265710408a818b7f041ac43620de64",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:83bef7a6159a99142b1dc28ac900a6fec30ff4c314d7a35b4a1d74eee658c7c2",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+      }
+    },
+    {
+      "arm": "ordinary",
+      "seed": 43,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:63e5c473a4227a81a4f3bb44e7eb309f356fcfb5bad915402c6e98c7c98a8ea8",
+        "optimizer.pt": "sha256:39b49875ad39af4b97a5ebbca728c6376803e57a43869c27c922eaa4b06e396d",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:1f143d2717107ae5379cc85e2c85b906fd7f293cedb75da4aca5c10487d55231",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+      }
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 43,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:704eaaec0a20c131243a0626749265085338069e7521f49e8da018d003497b2b",
+        "optimizer.pt": "sha256:a9955992a267de8750ea1fa47db7b2cee0006dcffba662bb6153b4b6eb8b53fa",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:f7bc5be097949daf81ecf01b20c80dedb38c17ab1c0445acca3dbc66fffa5ea6",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+      }
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 43,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:fe9f0224deefcff45d14dab499d27a05464afc06ee156749361eb0d212b26436",
+        "optimizer.pt": "sha256:4481259f918af191e2529ca65a2bfed60f681a120846658368a3af5400377c4d",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:ad5f05f44a234f990faa9e2c02153c21884ddcb55c33a52aea2df87230f50b91",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+      }
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 43,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:418acf759dad8a12457905bb332016141e036bd04a8d1577c30860bf3e79da2b",
+        "optimizer.pt": "sha256:3db496e88e31726320533c71c23d9d475311dc27dc04e601787f49af57a0fd61",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:d731f4beb5f1a91deedb989899c4b65583477e61590c2ac5dbb194e908a95aed",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+      }
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 43,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:19f8ec26c403b7025d44c8271c2345f7be452ce5746131fb75c8cfba7950bc4a",
+        "optimizer.pt": "sha256:4aa3f525eec4577fc8fce15a723a689d16292623b1c54fbfded6ce86ace02e53",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:50b266c128d9e9ffcc4e0610cf3174d144a44b453814c6f6421eb8a6f72af289",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+      }
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 43,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:e4d73b76926212696fc7cdc612120a85c9d1a0665fee94a752a799876415b0c6",
+        "optimizer.pt": "sha256:13538cce166ae35e269a0bd3c4f8af8f085cbcbda310fc4ea1f9cc272b4c20a2",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:0d409f9d1f287d04233c2075d91c63ecbaef96c1e3ec360ec2c890fcb4beb5c0",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+      }
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 43,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:5e51803f03fe9edb10b99829b010d316b515ba2b2b23b31581c88e4cfb6f2fe1",
+        "optimizer.pt": "sha256:266d9285da88cd18b2e0c3d707946cfcec34c6c6de13db2d11d0a8d6d1406db6",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:7a70fb36344f29f3aee898e8afe7743180e7c344027ea637f43bdf0a5596d6f1",
+        "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+        "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+      }
+    },
+    {
+      "arm": "ordinary",
+      "seed": 47,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:c4b52e2a2c3c32653483e82a727aa624fdacae61d903f0717f0dd91a960be2cf",
+        "optimizer.pt": "sha256:2a1c4dbaff78aca8a3d184e3051fd3cd3de3bf3a4c182fa8b1a67c91acb8230b",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:4cdff3c17d5ce7b5f83754bfa61f226d9205396022d5a394042a83230b43f06e",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+      }
+    },
+    {
+      "arm": "ordinary",
+      "seed": 47,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:683f69a15286651577e07975d91e2d6404e7caae8f85548d45d6b3526e2953ed",
+        "optimizer.pt": "sha256:ccf63b4c1c6388e73b0b13230bae0fda555bbff3c7976cffb0cf39ae8ef2cfa6",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:a597ab309cbb8a9c4af3e6ce24e54bc1d6c0fc6c9f838cd7c3c2a91a2af10f86",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+      }
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 47,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:07af3bae4732412ccd9da53148e2bbb3bbe5dd4a8e30f3a3ee4d8a7d18047b25",
+        "optimizer.pt": "sha256:afc555005acfd47d989a2300ca5bd0f9ba0e77f2deb710c41c0474fea4cae016",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:f595f64a6c95e9baaf4d847a90dd10853f008b0394f3db6ff1bd3eaa751e512e",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+      }
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 47,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:17d42a410c440fac685f36d0c6724ee2cd1edaa50c3538eda82be099ca91cafe",
+        "optimizer.pt": "sha256:37551d48805c2dfcde65c95b28dac83d57c06324716ff503e5d2942418ba6895",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:38ff862070bd2336eb5b98dac58312e2f2a5ee5548b90a2fcaceb0c6eea527fa",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+      }
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 47,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:4fca2cd7bae2163045f20193c4cf6dec0df940c55dd982721e64f63d6826fe52",
+        "optimizer.pt": "sha256:e1212305ba65e1d918d9297e7f20ea65e4d0326d0ad93bbe79498bc4838a1c9f",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:50af2ae441e32534e108ce6f965dd13b4bdd216822d4c4064f3198af81eb9703",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+      }
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 47,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:f024cda01d67993d61a40ab2b7199929149be615ced1ddcbc3d69ace9046904a",
+        "optimizer.pt": "sha256:887e460749d8f1bad8784b8d1d68fcbfe3a2578eb606e5213c007603e4e68841",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:d5b6c901982dde3ac08739d9a95637fe0342861fe9a6542ab0e85ab94cf6fb87",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+      }
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 47,
+      "step": 256,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": null,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:fd99e5f062229339c80b3a4ef6e6729a7b2825998e4313431fcc20723aeb49ef",
+        "optimizer.pt": "sha256:147dcdf421e2a632fde1335cbdcfd2dde13b41ba0b897716d16d012e4452bdbc",
+        "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+        "trainer_state.json": "sha256:55f0e3e750a9ac364a4e3169a394d48267b33d2ff79acb4045f20d5470267c42",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+      }
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 47,
+      "step": 512,
+      "optimizer_parameters": 8,
+      "trainable_values": 6144,
+      "optimizer_scheduler_step_exact": true,
+      "moments_finite": true,
+      "checkpoint_export_state_exact_except_training_mode": true,
+      "private_file_ids": {
+        "spiraltorch-geometry.json": "sha256:30282eb6187b2a15ec9137e0e0f997b0420d281ef3175fe36c6d857d6d1b4b38",
+        "optimizer.pt": "sha256:e304b981629b2f2b5e2a37c1a282769ed0d4462b672361ba76eb2edb42d37e2d",
+        "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+        "trainer_state.json": "sha256:b04114b1fbcb4f33c9fffc7b87744b53722a85b54cf537ab16b0c7b7fd9971a5",
+        "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+        "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+      }
+    }
+  ],
+  "book_interrupt_resume_executed": false
+}
