@@ -6,6 +6,7 @@ Run with an isolated interpreter from the source-candidate wheel environment.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -15,6 +16,10 @@ import struct
 import subprocess
 import sys
 import zipfile
+
+_spec = importlib.util.spec_from_file_location("owned_process", Path(__file__).with_name("owned_process.py"))
+processes = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(processes)
 
 
 def digest(raw):
@@ -36,11 +41,22 @@ def write(path, raw):
         handle.write(raw)
 
 
-def run_child(root, label, arguments, expected=0):
+def timeout_seconds(value):
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as error:
+        raise argparse.ArgumentTypeError("timeout must be an integer in [1, 7200]") from error
+    if str(result) != str(value) or not 1 <= result <= 7200:
+        raise argparse.ArgumentTypeError("timeout must be an integer in [1, 7200]")
+    return result
+
+
+def run_child(root, label, arguments, expected=0, *, timeout=600):
+    timeout = timeout_seconds(timeout)
     with os.fdopen(os.open(root / f"{label}.log", os.O_CREAT | os.O_EXCL | os.O_WRONLY,
                           0o600), "wb") as log:
-        result = subprocess.run([sys.executable, "-I", "-B", *map(str, arguments)],
-                                stdout=log, stderr=subprocess.STDOUT, timeout=600)
+        result = processes.run([sys.executable, "-I", "-B", *map(str, arguments)],
+                               stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
     require(result.returncode == expected, f"{label} exited {result.returncode}; inspect its private log")
     return result.returncode
 
@@ -93,9 +109,12 @@ def qualify(args):
     write(pinned, raw)
     cli = Path(sys.executable).parent / "spiral-byte-corpus-run"
     require(cli.is_file(), "installed console entry point is absent")
-    run_child(root, "continuous", [cli, pinned, root / "continuous", "--stop", study.total_updates])
+    timeout = timeout_seconds(args.timeout_seconds)
+    run_child(root, "continuous", [cli, pinned, root / "continuous", "--stop", study.total_updates],
+              timeout=timeout)
     interrupted_exit = run_child(root, "interrupted", [Path(__file__).resolve(), "interrupt",
-                                 pinned, root / "interrupted", "--stop", args.stop], -signal.SIGKILL)
+                                 pinned, root / "interrupted", "--stop", args.stop], -signal.SIGKILL,
+                                 timeout=timeout)
     source = root / "interrupted"
     before = {p.name: digest(p.read_bytes()) for p in source.iterdir()}
     require("failed.json" not in before and "completed.json" not in before,
@@ -104,7 +123,7 @@ def qualify(args):
     saved = st.load_byte_corpus_segment(source, args.stop)
     run_child(root, "resumed", [cli, pinned, root / "resumed", "--stop", study.total_updates,
                                "--resume-from", source, "--resume-after", args.stop,
-                               "--expected-resume-sha256", saved.receipt_sha256])
+                               "--expected-resume-sha256", saved.receipt_sha256], timeout=timeout)
     require(before == {p.name: digest(p.read_bytes()) for p in source.iterdir()}, "source run was mutated")
     parent = json.loads((root / "resumed/claim.json").read_bytes())["parent"]
     require(parent == dict(claim_sha256=saved.claim_sha256, segment_sha256=saved.receipt_sha256,
@@ -162,12 +181,15 @@ def qualify(args):
                   exact_report_equal=True, exact_checkpoint_equal=True, source_unchanged=True,
                   explicit_parent_verified=True, no_terminal_record_at_death=True,
                   entrypoint="installed_console_script", python=sys.version.split()[0],
+                  worker_timeout_seconds=timeout,
                   wheel_sha256=digest(args.wheel.read_bytes()),
                   native_extension_sha256=digest(native.read_bytes()),
                   run_primitive_sha256=digest(module_raw), qualifier_sha256=digest(Path(__file__).read_bytes()),
                   adapter={key: adapter[key] for key in ("name", "backend", "device_type")},
                   process_interruption_only=True, power_loss_tested=False,
                   geometric_quality_benefit_established=False, **payloads)
+    if request["schema"] == "spiraltorch.byte_corpus.request.v10":
+        result["gradient_clip"] = json.loads(study.gradient_clip_recipe_json)
     write(root / "result.json", (json.dumps(result, indent=2, allow_nan=False) + "\n").encode())
     print(json.dumps(dict(status="passed", cases=len(rows), interrupted_after=args.stop,
                           total_updates=study.total_updates, **payloads)))
@@ -183,6 +205,8 @@ def main():
         command.add_argument("--stop", type=int, required=True)
         if name == "run":
             command.add_argument("--wheel", type=Path, required=True)
+            command.add_argument("--timeout-seconds", type=timeout_seconds, default=600,
+                                 help="Per-worker limit, 1..7200 seconds (default: 600)")
     args = parser.parse_args()
     if args.mode == "interrupt":
         interrupt(args.request, args.output, args.stop)

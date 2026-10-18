@@ -128,6 +128,45 @@ correctness controls, not a matched-capacity quality study or a speed benchmark.
 The [native/browser validation record](../benchmarks/results/2026-10-09-resident-parameter-rates/README.md)
 includes scalar results, hashes and reproduction instructions; raw arrays stay local.
 
+### Resident active-gradient clipping
+
+The source-only Rust methods `sgd_with_rates_clipped` and
+`adamw_with_steps_clipped` apply one global L2 limit to **active** gradients
+before the ordinary transactional update. Both use
+`st_kernel_contracts::gradient_clip::GlobalNormClip`. Zero-rate tensors are
+excluded from the norm and retain their bits; their nonfinite values and
+inherited failure guards still reject the whole update. AdamW clips before
+moment accumulation, not after forming its update. Weight decay is not part of
+the gradient norm.
+
+```rust
+use st_kernel_contracts::gradient_clip::GlobalNormClip;
+
+let clip = GlobalNormClip::new(1.0)?;
+let update = model.sgd_with_rates_clipped(&gradients, &rates, clip)?;
+// With AdamW enabled, use model.adamw_with_steps_clipped(&gradients, &steps, clip).
+```
+
+The reduction, scale construction and application stay on the GPU; raw VJPs
+remain immutable. Scaled norm reduction avoids overflowing finite large inputs,
+and normal-f32 scale factors avoid flushing a tiny aggregate multiplier to zero.
+The shared contract retains its small-norm and near-one no-ops. The floor
+comparison uses the exact product of the represented norm pair, rather than a
+rounded division; norm accumulation itself is still f32. This is not
+bitwise-equivalent to `torch.nn.utils.clip_grad_norm_`, whose denominator includes
+an additional epsilon. See the
+[native/browser and independent Torch checks](../benchmarks/results/2026-10-18-resident-language-clipping/README.md).
+Bit-preserving no-op clipping does not guarantee preservation of subnormal
+values by subsequent nonzero-rate optimizer arithmetic.
+
+Clipping is an **explicit per-step input**, like the rates. The model checkpoint
+does not capture that caller policy: resumption must supply the same policy to
+reproduce training. For durable studies, the
+[v10 recipe](byte_corpus_optimizers.md#request-bound-clipping)
+binds the explicit clipping policy into request/checkpoint identity and applies
+these same methods from Rust, packaged Python and WASM. Existing unclipped
+methods and v1-v9 study defaults remain unchanged.
+
 ## Portable model checkpoint and resume
 
 `ResidentByteDecoder::checkpoint_snapshot()` captures the complete current

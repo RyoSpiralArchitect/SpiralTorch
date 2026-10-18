@@ -34,6 +34,8 @@ jobs:
           python3 -I -S -B tools/test_run_byte_corpus_segments.py
           python3 -I -S -B bindings/st-py/tests/test_byte_corpus_runs.py
           python3 -I -S -B tools/test_qualify_byte_corpus_runs.py
+          python3 -I -S -B tools/test_owned_process.py
+          python3 -I -S -B benchmarks/results/2026-10-18-byte-clipping-1024/test_study.py
           python3 -I -S -B tools/test_generate_wide_rounding_fixture.py
           python3 -I -S -B benchmarks/results/2026-10-18-wide-rounding/test_publish.py
           python3 -I -S -B tools/generate_wide_rounding_fixture.py > "$RUNNER_TEMP/wide_rounding.json"
@@ -805,6 +807,10 @@ jobs:
           python -m pip install --upgrade numpy
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -I -c 'import torch; print(torch.__version__)'
+          python -I -B tools/test_resident_parameter_clip.py
+          python -I -B tools/test_byte_corpus_gradient_clip.py
+          python -I -B tools/check_resident_parameter_clip.py --input benchmarks/results/2026-10-18-resident-language-clipping/native.json --output "$RUNNER_TEMP/parameter-clip-native.json"
+          python -I -B tools/check_resident_parameter_clip.py --input benchmarks/results/2026-10-18-resident-language-clipping/browser.json --output "$RUNNER_TEMP/parameter-clip-browser.json"
           python -I -B benchmarks/nerf-pointwise-input/test_compare_pointwise.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_stub_bridge_isolation.py bindings/st-py/tests/test_tensor_dlpack.py bindings/st-py/tests/test_tensor_stub_methods.py bindings/st-py/tests/test_native_binding_ownership.py bindings/st-py/tests/test_native_dlpack_versioned.py
           python -I tools/smoke_dlpack_interop.py

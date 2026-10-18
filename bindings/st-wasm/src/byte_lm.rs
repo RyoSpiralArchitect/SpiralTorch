@@ -84,6 +84,11 @@ impl WasmByteStudy {
         self.inner.optimizer_recipe_json().map_err(js_error)
     }
 
+    #[wasm_bindgen(getter, js_name = gradientClipRecipeJson)]
+    pub fn gradient_clip_recipe_json(&self) -> Result<String, JsValue> {
+        self.inner.gradient_clip_recipe_json().map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = checkpointSizeBound)]
     pub fn checkpoint_size_bound(&self) -> Result<usize, JsValue> {
         self.inner.checkpoint_size_bound().map_err(js_error)

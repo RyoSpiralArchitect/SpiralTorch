@@ -1,19 +1,19 @@
 use super::*;
 use crate::resident::byte_study::tests::{fixture, saved, valid};
 
-fn recipe() -> Value {
+pub(in crate::resident::byte_study) fn recipe() -> Value {
     json!({"kind":"adamw_zero_rate_freeze.v1", "beta1":0.9, "beta2":0.999,
         "epsilon":1e-8, "weight_decay":0.01, "geometry_weight_decay":0.0})
 }
 
-fn wrap(mut value: Value, optimizer: Value) -> Value {
+pub(in crate::resident::byte_study) fn wrap(mut value: Value, optimizer: Value) -> Value {
     value["design_schema"] = value["schema"].clone();
     value["schema"] = json!(REQUEST_SCHEMA);
     value["optimizer"] = optimizer;
     value
 }
 
-fn designs() -> Vec<Value> {
+pub(in crate::resident::byte_study) fn designs() -> Vec<Value> {
     let v1 = fixture();
     let mut v2 = v1.clone();
     v2["schema"] = json!("spiraltorch.byte_corpus.request.v2");
@@ -47,7 +47,10 @@ fn designs() -> Vec<Value> {
 }
 
 // Structural fixtures only: these records are not evidence of a training run.
-fn synthetic(study: &ByteCorpusStudy, cursor: usize) -> ByteCorpusStudyCheckpoint {
+pub(in crate::resident::byte_study) fn synthetic(
+    study: &ByteCorpusStudy,
+    cursor: usize,
+) -> ByteCorpusStudyCheckpoint {
     let mut checkpoint = saved(study, cursor);
     for (case, record) in study.request.cases.iter().zip(&mut checkpoint.cases) {
         let initial = study.request.initial_checkpoint(case).unwrap();

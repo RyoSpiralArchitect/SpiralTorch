@@ -58,6 +58,11 @@ include the common data cursor and complete scalar histories, unlike a bare
 `ByteDecoderCheckpoint`. Legacy v1-v8 studies use stateless SGD. The source-only
 [v9 optimizer recipe](../byte_corpus_optimizers.md) can instead retain complete
 resident AdamW moments and accepted clocks, including frozen geometric state.
+The [v10 clipping recipe](../byte_corpus_optimizers.md#request-bound-clipping)
+adds explicit active-global-L2 clipping before either optimizer. Inspect the
+readonly `study.gradient_clip_recipe_json`; legacy studies return `disabled.v1`.
+Changing the policy/limit invalidates resume instead of changing a saved run's
+meaning. Python does not recompute the norm or scale gradients.
 
 Native and standalone WASM clients can consume these opaque checkpoint bytes
 and vice versa. Do not round-trip through a decoded dict to transport them:
