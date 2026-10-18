@@ -6,6 +6,7 @@ import json
 import math
 import os
 from pathlib import Path
+import struct
 import unittest
 
 import spiraltorch as st
@@ -30,6 +31,16 @@ def values(tensor):
     return tensor.snapshot().read_values()
 
 
+def bits(values):
+    return struct.pack(f"<{len(values)}f", *values)
+
+
+def gradients(model):
+    forward = model.forward(model.prepare_batch(batch()))
+    loss = forward.next_byte_loss()
+    return loss, model.backward(forward, loss.prediction_gradient_tensor())
+
+
 def step(model, data, rate=0.125):
     forward = model.forward(data)
     loss = forward.next_byte_loss()
@@ -52,6 +63,11 @@ class BytePortable(unittest.TestCase):
             self.assertIn(name, exposed)
             with self.assertRaises(TypeError):
                 getattr(st.nn, name)()
+        methods = {n.name for n in classes["_NnResidentByteDecoder"].body if isinstance(n, ast.FunctionDef)}
+        for name in ("sgd_with_rates_clipped", "adamw_with_rates_clipped"):
+            self.assertIn(name, methods)
+            if st.wgpu_kernel_reports_available():
+                self.assertTrue(callable(getattr(st.nn.ResidentByteDecoder, name)))
 
     def test_bytes_and_document_boundaries(self):
         data = st.nn.ByteLmBatch.from_documents([b"012345", bytes([0, 255, 128, 64])], [(0, 2), (1, 0)], 3)
@@ -141,6 +157,179 @@ class BytePortable(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class ByteGpu(unittest.TestCase):
+    def test_clipped_sgd_uses_only_active_norm_and_retains_raw_gradients(self):
+        model = example.make_plan().compile_training_wgpu()
+        _, derivative = gradients(model)
+        raw = [values(t) for t in derivative.parameter_gradient_tensors()]
+        before = [values(t) for t in model.parameter_tensors()]
+        active = model.parameter_layout()["head"][1] - 1
+        rates = [0.0] * len(before)
+        rates[active] = 0.125
+        norm = math.sqrt(math.fsum(x * x for x in raw[active]))
+        whole = math.sqrt(math.fsum(x * x for tensor in raw for x in tensor))
+        limit = struct.unpack("<f", struct.pack("<f", 0.01))[0]
+        self.assertGreater(norm, limit)
+        self.assertGreater(whole, norm)
+        wrong_norm_effect = max(abs(rates[active] * x * limit * (1 / norm - 1 / whole))
+                                for x in raw[active])
+        self.assertGreater(wrong_norm_effect, 3e-6)
+        self.assertEqual(model.sgd_with_rates_clipped(derivative, rates, max_norm=limit).read(), 1)
+        after = [values(t) for t in model.parameter_tensors()]
+        for index, (old, new) in enumerate(zip(before, after)):
+            if index != active:
+                self.assertEqual(bits(old), bits(new))
+            else:
+                self.assertNotEqual(bits(old), bits(new))
+                for original, gradient, actual in zip(old, raw[index], new):
+                    expected = original - rates[index] * gradient * limit / norm
+                    self.assertAlmostEqual(actual, expected, delta=3e-7 * max(1.0, abs(expected)))
+        for original, retained in zip(raw, derivative.parameter_gradient_tensors()):
+            self.assertEqual(bits(original), bits(values(retained)))
+
+    def test_clipped_query_learning_resumes_from_one_identical_boundary(self):
+        for adamw in (False, True):
+            with self.subTest(adamw=adamw):
+                model = example.make_plan().compile_training_wgpu()
+                if adamw:
+                    model.enable_adamw()
+                layout = model.parameter_layout()
+                frozen = {i for start, end in layout["geometry"]["query_projections"] for i in range(start, end)}
+                initial = [values(t) for t in model.parameter_tensors()]
+
+                def advance(owner, freeze=True):
+                    loss, derivative = gradients(owner)
+                    rate = 0.005 if adamw else 0.125
+                    rates = [0.0 if freeze and i in frozen else rate for i in range(layout["count"])]
+                    if adamw:
+                        decays = [0.01] * len(rates)
+                        for i in range(*layout["geometry"]["all"]):
+                            decays[i] = 0.0
+                        update = owner.adamw_with_rates_clipped(derivative, rates, max_norm=0.01,
+                                                               weight_decays=decays)
+                    else:
+                        update = owner.sgd_with_rates_clipped(derivative, rates, max_norm=0.01)
+                    return update, loss.loss_tensor()
+
+                first_update, first_loss = advance(model)
+                capture = model.checkpoint_snapshot()
+                second_update, second_loss = advance(model)
+                saved = capture.read().to_json()
+                restored = st.nn.ByteDecoderCheckpoint.from_json(saved).restore_wgpu()
+                self.assertEqual(restored.checkpoint_snapshot().read().to_json(), saved)
+                resumed_update, resumed_loss = advance(restored)
+                self.assertEqual(first_update.read(), 1)
+                self.assertEqual(second_update.read(), 2)
+                self.assertEqual(resumed_update.read(), 2)
+                self.assertEqual(bits(values(second_loss)), bits(values(resumed_loss)))
+                expected = model.checkpoint_snapshot().read().to_json()
+                self.assertEqual(expected, restored.checkpoint_snapshot().read().to_json())
+                final = [values(t) for t in model.parameter_tensors()]
+                for i in frozen:
+                    self.assertEqual(bits(initial[i]), bits(final[i]))
+                geometry = range(*layout["geometry"]["all"])
+                self.assertTrue(any(bits(initial[i]) != bits(final[i]) for i in geometry if i not in frozen))
+                if adamw:
+                    for i, slot in enumerate(json.loads(expected)["optimizer"]["slots"]):
+                        self.assertEqual(slot["steps"], 0 if i in frozen else 2)
+                self.assertTrue(math.isfinite(values(first_loss)[0]))
+                for freeze in (False, True):
+                    a, left = advance(model, freeze)
+                    b, right = advance(restored, freeze)
+                    self.assertEqual(a.read(), b.read())
+                    self.assertEqual(bits(values(left)), bits(values(right)))
+                    self.assertEqual(model.checkpoint_snapshot().read().to_json(),
+                                     restored.checkpoint_snapshot().read().to_json())
+
+    def test_clipped_adamw_moments_use_one_norm_across_active_tensors(self):
+        model = example.make_plan().compile_training_wgpu()
+        model.enable_adamw()
+        beta1, beta2, _ = model.adamw_config
+        _, derivative = gradients(model)
+        raw = [values(t) for t in derivative.parameter_gradient_tensors()]
+        before = [bits(values(t)) for t in model.parameter_tensors()]
+        layout = model.parameter_layout()
+        active = (layout["token_embedding"], layout["head"][1] - 1)
+        rates = [0.0] * len(before)
+        rates[active[0]], rates[active[1]] = 0.005, 0.01
+        norm = math.sqrt(math.fsum(x * x for i in active for x in raw[i]))
+        limit = struct.unpack("<f", struct.pack("<f", 0.01))[0]
+        self.assertGreater(norm, limit)
+        model.adamw_with_rates_clipped(derivative, rates, max_norm=limit,
+                                      weight_decays=[0.02] * len(rates)).read()
+        state = json.loads(model.checkpoint_snapshot().read().to_json())["optimizer"]
+        for i, (slot, tensor) in enumerate(zip(state["slots"], model.parameter_tensors())):
+            if i not in active:
+                self.assertEqual(bits(values(tensor)), before[i])
+                self.assertEqual(slot["steps"], 0)
+                self.assertEqual(bits(slot["first"]), bytes(len(raw[i]) * 4))
+                self.assertEqual(bits(slot["second"]), bytes(len(raw[i]) * 4))
+                continue
+            self.assertEqual(slot["steps"], 1)
+            self.assertNotEqual(bits(values(tensor)), before[i])
+            for gradient, first, second in zip(raw[i], slot["first"], slot["second"]):
+                clipped = gradient * limit / norm
+                expected_first = (1 - beta1) * clipped
+                expected_second = (1 - beta2) * clipped * clipped
+                self.assertAlmostEqual(first, expected_first, delta=3e-6 * max(abs(expected_first), 1e-30))
+                self.assertAlmostEqual(second, expected_second, delta=3e-6 * max(abs(expected_second), 1e-30))
+
+    def test_clipped_controls_and_ownership_reject_before_model_mutation(self):
+        for adamw in (False, True):
+            with self.subTest(adamw=adamw):
+                model = example.make_plan().compile_training_wgpu()
+                foreign = example.make_plan().compile_training_wgpu()
+                if adamw:
+                    model.enable_adamw()
+                    foreign.enable_adamw()
+                _, derivative = gradients(model)
+                name = "adamw_with_rates_clipped" if adamw else "sgd_with_rates_clipped"
+                update = getattr(model, name)
+                rates = [0.005] * model.parameter_layout()["count"]
+                original = model.checkpoint_snapshot().read().to_json()
+                for limit in (0.0, -0.0, -1.0, math.nan, math.inf, 1e-100, 1e100):
+                    with self.assertRaises(ValueError):
+                        update(derivative, rates, max_norm=limit)
+                for invalid in ([], [-0.1] * len(rates), [math.nan] * len(rates)):
+                    with self.assertRaises(ValueError):
+                        update(derivative, invalid, max_norm=0.01)
+                if adamw:
+                    for decays in ([], [-0.1] * len(rates), [math.inf] * len(rates)):
+                        with self.assertRaises(ValueError):
+                            update(derivative, rates, max_norm=0.01, weight_decays=decays)
+                with self.assertRaises(TypeError):
+                    update(derivative, rates)
+                with self.assertRaises(ValueError):
+                    getattr(foreign, name)(derivative, rates, max_norm=0.01)
+                self.assertEqual(model.checkpoint_snapshot().read().to_json(), original)
+                self.assertEqual(foreign.attempted_updates, 0)
+                before = [bits(values(t)) for t in model.parameter_tensors()]
+                self.assertEqual(update(derivative, [0.0] * len(rates), max_norm=2**-149).read(), 1)
+                self.assertEqual([bits(values(t)) for t in model.parameter_tensors()], before)
+                with self.assertRaises(ValueError):
+                    update(derivative, rates, max_norm=0.01)
+                self.assertEqual(model.attempted_updates, 1)
+
+    def test_clipped_frozen_nonfinite_gradients_still_reject_atomically(self):
+        for adamw in (False, True):
+            with self.subTest(adamw=adamw):
+                model = example.make_plan().compile_training_wgpu()
+                if adamw:
+                    model.enable_adamw()
+                before = [bits(values(t)) for t in model.parameter_tensors()]
+                old_optimizer = json.loads(model.checkpoint_snapshot().read().to_json()).get("optimizer")
+                forward = model.forward(model.prepare_batch(batch()))
+                huge = model.tensor_device().upload([2, 4, 256], [3e38] * 2048)
+                bad = model.backward(forward, huge.mul(huge))
+                update = model.adamw_with_rates_clipped if adamw else model.sgd_with_rates_clipped
+                rejected = update(bad, [0.0] * len(before), max_norm=0.01)
+                with self.assertRaises(ValueError):
+                    rejected.read()
+                self.assertEqual(model.attempted_updates, 1)
+                self.assertEqual([bits(values(t)) for t in model.parameter_tensors()], before)
+                self.assertEqual(json.loads(model.checkpoint_snapshot().read().to_json()).get("optimizer"), old_optimizer)
+                _, good = gradients(model)
+                self.assertEqual(update(good, [0.005] * len(before), max_norm=0.01).read(), 2)
+
     def test_adamw_geometry_history_and_exact_resume(self):
         for mode in ("none", "query_mixture"):
             with self.subTest(mode=mode):

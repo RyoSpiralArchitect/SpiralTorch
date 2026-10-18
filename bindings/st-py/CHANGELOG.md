@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Expose resident byte-decoder `sgd_with_rates_clipped` and
+  `adamw_with_rates_clipped` directly to Python. Shared Rust/WGPU kernels
+  compute one norm over nonzero-rate gradients before SGD or AdamW moments;
+  frozen derivatives still validate and zero rates preserve weights/moments/
+  clocks. No Torch or host-gradient scaling is involved. Clipping/rates remain
+  explicit caller state after checkpoint restoration. The packaged geometric
+  byte-LM example accepts `--optimizer`, `--rate`, and `--max-norm`.
+  Source-only after 0.4.32; this does not resolve the separately recorded
+  contextual-study CI resume discrepancy or qualify a new release.
+
 - Add `NativeCausalLmGenerator` for Rust-owned greedy/seeded sampling, EOS,
   ordinary or Z-Space token control, and pinned continuation. Explicit
   `execution.kind="kv_cache"` reuses native K/V through `NativeCausalLmContext`;

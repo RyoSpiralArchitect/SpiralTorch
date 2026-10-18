@@ -7,6 +7,7 @@
 
 use crate::{module::Module, Tensor, TensorError};
 pub use st_kernel_contracts::adamw::{AdamWConfig, AdamWState, AdamWStep};
+pub use st_kernel_contracts::gradient_clip::GlobalNormClip;
 pub use st_kernel_contracts::graph::{
     GraphDefinition, GraphGradientPolicy, GraphParameter, GraphStage, ParameterRole,
 };

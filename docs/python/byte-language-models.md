@@ -75,7 +75,65 @@ Old forwards and gradients cannot update the restored model. By contrast,
 `checkpoint.plan().compile_training_wgpu()` explicitly starts a new revision
 zero from the saved values. Data cursor, learning schedule, external biases,
 kernel options and query-stop policy are caller state. These are stateless-SGD
-model checkpoints, not Adam/momentum or complete experiment checkpoints.
+model checkpoints by default, not complete experiment checkpoints. The source
+API also supports explicit AdamW history as described below.
+
+## Native Optimizers And Clipping
+
+**The clipped methods below are source-only after 0.4.32.** They expose the
+existing Rust/WGPU optimizer path; no Torch or host-gradient scaling is used.
+Create a fresh resident model and enable AdamW once, before its first update:
+
+```python
+model = plan.compile_training_wgpu()
+model.enable_adamw(beta1=0.9, beta2=0.999, epsilon=1e-8)
+batch = model.prepare_batch(host_batch)
+forward = model.forward(batch)
+loss = forward.next_byte_loss()
+gradients = model.backward(forward, loss.prediction_gradient_tensor())
+
+layout = model.parameter_layout()
+rates = [0.005] * layout["count"]
+if layout["geometry"]:
+    for start, end in layout["geometry"]["query_projections"]:
+        rates[start:end] = [0.0] * (end - start)  # Freeze router projections only.
+model.adamw_with_rates_clipped(gradients, rates, max_norm=0.01).read()
+```
+
+For a model without AdamW history, use
+`model.sgd_with_rates_clipped(gradients, rates, max_norm=0.01)` instead.
+`max_norm` is keyword-only, finite and positive in f32. A value that narrows to
+zero or infinity is rejected; representable positive subnormal limits are
+supported by the shared Rust contract. Clipping is applied globally over
+**nonzero-rate** tensors before SGD arithmetic or AdamW moments, not separately
+per tensor. The original VJP tensors remain unchanged. Zero rates freeze weight,
+moment and clock bits but do not suppress invalid-gradient checks or disconnect
+the geometric pullback. The shared Rust contract's near-zero norm and near-one
+scale no-op rules still apply.
+
+AdamW accepts an optional `weight_decays` list in the same owner order; it must
+cover every parameter tensor and defaults to zero. Invalid controls, wrong
+owners and stale gradients are rejected. A non-finite GPU derivative rejects
+the entire update without partially changing weights or moments; read the
+receipt rather than treating submission as acceptance.
+
+An AdamW-enabled model checkpoint retains both moments and each accepted clock.
+Use `checkpoint.restore_wgpu()` to restore that state; compiling its plan starts
+a new optimizer-free owner. Do not call `enable_adamw()` again on a restored
+AdamW model. Rates, decay, clipping, data cursor and query-stop policy are still
+caller state and must be reapplied. For a complete pinned experiment recipe,
+use the [shared study runner](byte-corpus-studies.md).
+
+The packaged example accepts the same native choices:
+
+```bash
+python -I -m examples.resident_byte_geometry_lm --mode query_mixture \
+  --optimizer adamw --rate 0.005 --max-norm 0.01 --updates 16
+```
+
+Direct-model continuation tests and local passes do not resolve the separately
+recorded [contextual study CI discrepancy](byte-study-runs.md#exact-resume-qualification).
+This API exposure is not a numerical repair or a new PyPI release.
 
 ## Geometry And Interventions
 
