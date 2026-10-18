@@ -69,6 +69,14 @@ the ordinary control in all seeds; widening the fixed radius helped but did not
 close the gap. Every result and private-state hash is retained without promoting
 a default. That is a bounded mechanism comparison, not a verdict on all geometry.
 
+The opt-in [observation scope](python/hf-geometry-training.md#observe-without-replaying)
+connects those saved states to actual adapter-call residuals and Rust-owned
+local conditioning, without replaying forwards or changing training policy.
+The [saved-state diagnostic](../benchmarks/results/2026-10-18-hf-geometry-observation/README.md)
+declares every initial/intermediate/final book case and checks observed versus
+unobserved evaluation. These local map measurements are not end-to-end loss
+gradients, and observation overhead is not a backend speed comparison.
+
 ## Start With One Explicit Run
 
 Build a [WGPU source wheel](python/build-and-validation.md). Pin a request and
