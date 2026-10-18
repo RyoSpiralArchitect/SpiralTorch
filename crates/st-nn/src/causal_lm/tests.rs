@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 #[path = "context_tests.rs"]
 mod context;
+#[path = "evaluation_tests.rs"]
+mod evaluation;
 #[path = "generation_tests.rs"]
 mod generation;
 #[path = "learning_tests.rs"]

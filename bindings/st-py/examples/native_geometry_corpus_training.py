@@ -1,5 +1,6 @@
 """Offline encoded-document geometry FT; Rust owns training and checkpoint semantics."""
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
@@ -21,6 +22,14 @@ def digest(value):
 
 def private_output(path):
     path.mkdir(mode=0o700, parents=True, exist_ok=False)
+
+
+def read_documents(path):
+    raw = read(path, 256 * 1024 * 1024)
+    data = json.loads(raw)
+    if not isinstance(data, dict) or set(data) - {"token_documents", "labels"} or "token_documents" not in data:
+        raise ValueError("data JSON needs token_documents and optional unshifted document labels")
+    return raw, data
 
 
 def save(directory, trainer):
@@ -46,6 +55,8 @@ def main(argv=None):
     parser.add_argument("--checkpoint-id")
     parser.add_argument("--save-every", type=int, default=10)
     parser.add_argument("--stop-after", type=int, help="absolute completed-update boundary, not a changed recipe")
+    parser.add_argument("--eval-data-json", type=Path, help="separate encoded holdout corpus; native NLL, no smoothing")
+    parser.add_argument("--eval-every", type=int, help="evaluation interval; defaults to save-every, plus initial/final")
     args = parser.parse_args(argv)
     if args.resume:
         if not args.checkpoint_id or any((args.recipe_json, args.artifact, args.artifact_id)):
@@ -54,12 +65,12 @@ def main(argv=None):
         parser.error("fresh training needs recipe-json, artifact and artifact-id")
     if args.save_every < 1 or (args.stop_after is not None and args.stop_after < 0):
         parser.error("save-every must be positive and stop-after nonnegative")
+    if args.eval_every is not None and (args.eval_every < 1 or args.eval_data_json is None):
+        parser.error("eval-every must be positive and requires eval-data-json")
     if args.output.exists():
         parser.error("output must be a new private directory")
-    data_bytes = read(args.data_json, 256 * 1024 * 1024)
-    data = json.loads(data_bytes)
-    if not isinstance(data, dict) or set(data) - {"token_documents", "labels"} or "token_documents" not in data:
-        raise ValueError("data JSON needs token_documents and optional unshifted document labels")
+    data_bytes, data = read_documents(args.data_json)
+    evaluation_data = read_documents(args.eval_data_json) if args.eval_data_json else None
     weights = st.SafeTensorArchive(args.model_dir / "model.safetensors")
     base = st.NativeCausalLm.from_gpt2(read(args.model_dir / "config.json", 1_048_576).decode(), weights)
     del weights
@@ -79,10 +90,28 @@ def main(argv=None):
     stop = trainer.total_updates if args.stop_after is None else args.stop_after
     if not trainer.completed_updates <= stop <= trainer.total_updates:
         raise ValueError("stop-after must be between the current cursor and the sealed run end")
+    config = json.loads(trainer.config_json())
+
+    def evaluate():
+        if evaluation_data is None:
+            return None
+        heldout = evaluation_data[1]
+        score = trainer.model.evaluate_documents(heldout["token_documents"], config["context_length"],
+                    microbatch_windows=config["microbatch_windows"], labels=heldout.get("labels"))
+        return {"completed_updates": trainer.completed_updates, "evaluation": json.loads(score.to_json())}
+
+    latest_evaluation = evaluate()  # Validate and score the holdout before creating a run directory.
+    evaluation_count = int(latest_evaluation is not None)
     private_output(args.output)
     initial = save(args.output, trainer)
     saved = [initial]
-    with (args.output / "steps.jsonl").open("x", encoding="utf-8") as log:
+    with ExitStack() as stack:
+        log = stack.enter_context((args.output / "steps.jsonl").open("x", encoding="utf-8"))
+        evaluation_log = (stack.enter_context((args.output / "evaluation.jsonl").open("x", encoding="utf-8"))
+                          if evaluation_data else None)
+        if evaluation_log:
+            evaluation_log.write(json.dumps(latest_evaluation, allow_nan=False) + "\n")
+            evaluation_log.flush()
         while trainer.completed_updates < stop:
             report = trainer.step()
             log.write(report.to_json() + "\n")
@@ -90,12 +119,22 @@ def main(argv=None):
             print(report.to_json(), flush=True)
             if trainer.completed_updates % args.save_every == 0 or trainer.completed_updates == stop:
                 saved.append(save(args.output, trainer))
+            if evaluation_log and (trainer.completed_updates % (args.eval_every or args.save_every) == 0
+                                   or trainer.completed_updates == stop):
+                latest_evaluation = evaluate()
+                evaluation_count += 1
+                evaluation_log.write(json.dumps(latest_evaluation, allow_nan=False) + "\n")
+                evaluation_log.flush()
     summary = {"schema": "spiraltorch.native_corpus_example.v1", "base_model_identity": base.base_model_identity,
                "data_file_id": digest(data_bytes), "data_id": trainer.data_id,
                "config": json.loads(trainer.config_json()), "plan": json.loads(trainer.plan_json()),
                "initial": initial, "checkpoints": saved, "completed_updates": trainer.completed_updates,
                "total_updates": trainer.total_updates, "exhausted": trainer.exhausted,
                "final_geometry_artifact_id": trainer.model.geometry_artifact_id,
+               "evaluation": None if evaluation_data is None else {
+                   "data_file_id": digest(evaluation_data[0]), "file": "evaluation.jsonl",
+                   "count": evaluation_count, "last": latest_evaluation,
+                   "policy": "read-only native NLL; caller supplies the holdout; no automatic model selection"},
                "scope": "geometry-only frozen-GPT2 native CPU training; not full-model FT or quality evidence"}
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(summary, stream, indent=2, allow_nan=False)

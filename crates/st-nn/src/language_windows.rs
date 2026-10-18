@@ -1,4 +1,4 @@
-//! Fixed-width, single-document causal contexts for external-tokenizer clients.
+//! Bounded, single-document causal contexts for external-tokenizer clients.
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -22,8 +22,9 @@ pub struct CausalDocumentWindow {
 }
 
 /// No concatenation, padding, tokenizer, EOS insertion or content authentication.
-/// Each full context is disjoint; its first token is context, not a target.
-/// Incomplete tails are dropped per document, never borrowed from the next one.
+/// `from_lengths` uses disjoint full contexts and drops incomplete tails.
+/// `covering_targets` shares one context token and retains short tails instead.
+/// Both policies keep each window inside one document and emit their policy ID.
 #[derive(Clone, Debug, Serialize)]
 pub struct CausalDocumentWindows {
     schema: &'static str,
@@ -37,6 +38,58 @@ pub struct CausalDocumentWindows {
 }
 
 impl CausalDocumentWindows {
+    /// Evaluation covers every within-document next-token target once. Adjacent
+    /// contexts share one token; short tails remain separate, unpadded windows.
+    /// This does not change the disjoint training policy in `from_lengths`.
+    pub fn covering_targets(
+        document_lengths: Vec<u32>,
+        context_length: u32,
+    ) -> Result<Self, String> {
+        if context_length < 2 {
+            return Err("causal contexts need at least two tokens".into());
+        }
+        if document_lengths.len() > MAX_DOCUMENTS {
+            return Err("document count exceeds budget".into());
+        }
+        let stride = context_length - 1;
+        let count: u64 = document_lengths
+            .iter()
+            .map(|n| u64::from(n.saturating_sub(1).div_ceil(stride)))
+            .sum();
+        if count > MAX_WINDOWS {
+            return Err("window count exceeds budget".into());
+        }
+        let mut windows = Vec::new();
+        windows
+            .try_reserve_exact(count as usize)
+            .map_err(|_| "window allocation failed")?;
+        for (document, &length) in document_lengths.iter().enumerate() {
+            let mut start = 0;
+            while length.saturating_sub(start) >= 2 {
+                let width = (length - start).min(context_length);
+                windows.push(CausalDocumentWindow {
+                    document: document as u32,
+                    start,
+                    length: width,
+                });
+                start += width - 1;
+            }
+        }
+        Ok(Self {
+            schema: "spiraltorch.causal_document_windows.v1",
+            policy: "overlap_one_token_include_tail_per_document.v1",
+            context_length,
+            total_tokens: document_lengths.iter().map(|&n| u64::from(n)).sum(),
+            dropped_tokens: document_lengths.iter().filter(|&&n| n == 1).count() as u64,
+            target_tokens: document_lengths
+                .iter()
+                .map(|n| u64::from(n.saturating_sub(1)))
+                .sum(),
+            document_lengths,
+            windows,
+        })
+    }
+
     pub fn from_lengths(document_lengths: Vec<u32>, context_length: u32) -> Result<Self, String> {
         if context_length < 2 {
             return Err("causal contexts need at least two tokens".into());
@@ -109,6 +162,35 @@ impl CausalDocumentWindows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evaluation_scores_every_noninitial_target_once_without_crossing_documents() {
+        for context in 2..10 {
+            let lengths: Vec<u32> = (0..24).collect();
+            let plan = CausalDocumentWindows::covering_targets(lengths.clone(), context).unwrap();
+            for (document, &length) in lengths.iter().enumerate() {
+                let targets: Vec<_> = plan
+                    .windows()
+                    .iter()
+                    .filter(|w| w.document as usize == document)
+                    .flat_map(|w| w.start + 1..w.start + w.length)
+                    .collect();
+                assert_eq!(targets, (1..length).collect::<Vec<_>>());
+            }
+            assert_eq!(
+                plan.target_tokens,
+                (0..24u64).map(|n| n.saturating_sub(1)).sum::<u64>()
+            );
+            assert_eq!(plan.dropped_tokens, 1);
+        }
+        assert!(CausalDocumentWindows::covering_targets(vec![u32::MAX], 2).is_err());
+        let edge = CausalDocumentWindows::covering_targets(vec![u32::MAX], u32::MAX).unwrap();
+        assert_eq!(edge.windows().len(), 1);
+        assert_eq!(edge.target_tokens, u64::from(u32::MAX - 1));
+        let full = CausalDocumentWindows::from_lengths(vec![8], 4).unwrap();
+        let covered = CausalDocumentWindows::covering_targets(vec![8], 4).unwrap();
+        assert_ne!(full.plan_id().unwrap(), covered.plan_id().unwrap());
+    }
 
     #[test]
     fn windows_never_borrow_from_short_documents_or_tails() {

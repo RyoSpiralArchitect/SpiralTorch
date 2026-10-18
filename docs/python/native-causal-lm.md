@@ -166,6 +166,10 @@ full-prefix or explicitly cached execution, greedy/sampled decoding, EOS,
 Z-Space control and pinned random continuation.
 Python no longer needs a Torch generation loop for this supported model family.
 
+For read-only validation, [native corpus evaluation](native-corpus-training.md#native-corpus-evaluation)
+scores complete document target coverage, including tails, and computes
+target-weighted NLL/perplexity without importing the HF training stack.
+
 ### Selected Targets and Label Smoothing
 
 Source builds also accept HF-style **unshifted** `labels` with the same flat

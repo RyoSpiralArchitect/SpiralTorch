@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add `NativeCausalLm.evaluate_documents`: native, read-only corpus NLL and
+  perplexity for the supported decoder and attached geometry. Rust covers
+  within-document targets including short tails, masks selected labels and
+  reduces by target count. Python only transports bounded documents. The corpus
+  training example can score a separate corpus periodically without Torch or
+  changing optimizer/cursor state. Source-only after 0.4.32; no release or
+  resolution of the independent contextual-study CI discrepancy is implied.
+
 - Expose resident byte-decoder `sgd_with_rates_clipped` and
   `adamw_with_rates_clipped` directly to Python. Shared Rust/WGPU kernels
   compute one norm over nonzero-rate gradients before SGD or AdamW moments;

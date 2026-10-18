@@ -602,6 +602,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_training.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_evaluation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_generation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_context.py -v
           python -I -B benchmarks/results/2026-10-18-native-lm-cache/test_qualification.py -v
@@ -901,6 +902,7 @@ jobs:
             bindings/st-py/tests/test_native_causal_lm_accumulation_parity.py \
             bindings/st-py/tests/test_native_causal_lm_objective_parity.py \
             bindings/st-py/tests/test_native_causal_lm_training_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_evaluation_parity.py \
             bindings/st-py/tests/test_native_causal_lm_generation_parity.py \
             bindings/st-py/tests/test_native_causal_lm_context_parity.py \
             bindings/st-py/tests/test_hf_geometry_trainer.py \

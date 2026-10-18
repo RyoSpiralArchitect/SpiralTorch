@@ -159,6 +159,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
             self.assertIn("bindings/st-py/tests/test_native_weights.py -v", workflow)
             self.assertIn("bindings/st-py/tests/test_native_causal_lm.py -v", workflow)
+            self.assertIn("bindings/st-py/tests/test_native_causal_lm_evaluation.py -v", workflow)
             self.assertIn("bindings/st-py/examples/native_weights_geometry.py", workflow)
         test = (ROOT / "bindings/st-py/tests/test_native_weights.py").read_text(encoding="utf-8")
         self.assertIn("NoForeignML()", test)
@@ -167,6 +168,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("bindings/st-py/tests/test_native_weights_parity.py", ci)
         self.assertIn("bindings/st-py/tests/test_native_causal_lm_parity.py", ci)
         self.assertIn("bindings/st-py/tests/test_native_causal_lm_learning_parity.py", ci)
+        self.assertIn("bindings/st-py/tests/test_native_causal_lm_evaluation_parity.py", ci)
         self.assertIn("python -I -B tests/test_native_gpt2_probe.py", ci)
         self.assertIn("python -I -B tests/test_native_gpt2_learning_probe.py", ci)
 

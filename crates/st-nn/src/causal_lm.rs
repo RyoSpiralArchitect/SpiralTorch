@@ -13,12 +13,14 @@ use std::sync::{Arc, OnceLock};
 
 mod context;
 mod decoder;
+mod evaluation;
 mod generation;
 mod gpt2;
 mod learning;
 mod objective;
 mod training;
 pub use context::NativeCausalLmContext;
+pub use evaluation::{CausalLmEvaluation, CausalLmEvaluationConfig, MAX_EVALUATION_TOKENS};
 pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,
     NativeCausalLmGenerator,

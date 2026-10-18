@@ -1,68 +1,11 @@
 //! No training semantics here: bounded transport into the Rust corpus trainer.
 use super::{
-    adamw_step, dimension, error, limit, loss_labels, loss_objective, tokens, PyNativeCausalLm,
+    adamw_step, dimension, documents::documents, error, limit, loss_objective, PyNativeCausalLm,
     PyNativeGeometryAdamW,
 };
 use pyo3::prelude::*;
-use st_nn::causal_lm::{
-    CausalLmTrainingConfig, CausalLmTrainingStep, NativeCausalLm, NativeCausalLmTrainer,
-};
+use st_nn::causal_lm::{CausalLmTrainingConfig, CausalLmTrainingStep, NativeCausalLmTrainer};
 use st_nn::language_windows::MAX_DOCUMENTS;
-
-type Documents = (Vec<Vec<usize>>, Option<Vec<Vec<i64>>>);
-
-fn documents(
-    model: &NativeCausalLm,
-    config: CausalLmTrainingConfig,
-    value: &Bound<'_, PyAny>,
-    labels: Option<&Bound<'_, PyAny>>,
-) -> PyResult<Documents> {
-    config.validate().map_err(error)?;
-    let count = value.len()?;
-    if count > MAX_DOCUMENTS {
-        return Err(error("document count exceeds budget"));
-    }
-    if labels
-        .map(|value| value.len())
-        .transpose()?
-        .is_some_and(|length| length != count)
-    {
-        return Err(error("document and label counts differ"));
-    }
-    let mut rows = Vec::with_capacity(count);
-    let mut lengths = Vec::with_capacity(count);
-    for index in 0..count {
-        let row = value.get_item(index)?;
-        lengths.push(row.len()?);
-        rows.push(row);
-    }
-    NativeCausalLmTrainer::document_plan(model, config, &lengths, labels.is_some())
-        .map_err(error)?;
-    let mut target_rows = labels.map(|_| Vec::with_capacity(count));
-    if let (Some(value), Some(rows)) = (labels, &mut target_rows) {
-        for (index, &length) in lengths.iter().enumerate() {
-            let row = value.get_item(index)?;
-            if row.len()? != length {
-                return Err(error("document label length differs"));
-            }
-            rows.push(row);
-        }
-    }
-    let ids = rows
-        .iter()
-        .zip(&lengths)
-        .map(|(row, &n)| tokens(row, n))
-        .collect::<PyResult<_>>()?;
-    let labels = target_rows
-        .map(|rows| {
-            rows.iter()
-                .zip(&lengths)
-                .map(|(row, &n)| loss_labels(Some(row), n).map(Option::unwrap))
-                .collect::<PyResult<_>>()
-        })
-        .transpose()?;
-    Ok((ids, labels))
-}
 
 #[pyclass(name = "NativeCausalLmTrainer", module = "spiraltorch")]
 pub struct PyNativeCausalLmTrainer {
@@ -153,7 +96,11 @@ impl PyNativeCausalLmTrainer {
         };
         NativeCausalLmTrainer::validate_owners(&model.inner, &optimizer.inner, config)
             .map_err(error)?;
-        let (docs, labels) = documents(&model.inner, config, token_documents, labels)?;
+        let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
+            NativeCausalLmTrainer::document_plan(&model.inner, config, lengths, has_labels)
+                .map(|_| ())
+                .map_err(error)
+        })?;
         py.detach(|| {
             NativeCausalLmTrainer::new(
                 model.inner.clone(),
@@ -186,7 +133,16 @@ impl PyNativeCausalLmTrainer {
                 )
             })
             .map_err(error)?;
-        let (docs, labels) = documents(resume.model(), resume.config(), token_documents, labels)?;
+        let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
+            NativeCausalLmTrainer::document_plan(
+                resume.model(),
+                resume.config(),
+                lengths,
+                has_labels,
+            )
+            .map(|_| ())
+            .map_err(error)
+        })?;
         py.detach(|| resume.resume(docs, labels))
             .map(|inner| Self { inner })
             .map_err(error)
