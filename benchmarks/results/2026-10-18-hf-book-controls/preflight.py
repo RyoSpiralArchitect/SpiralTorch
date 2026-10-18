@@ -11,15 +11,20 @@ def identity(data):
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def inputs(plan_path, expected_plan_id, data):
+def inputs(plan_path, expected_plan_id, data, expected_manifest_id):
     api = runpy.run_path(str(Path(__file__).with_name("prepare.py")))
     raw = api["read_bounded"](plan_path, 65_536)
     if identity(raw) != expected_plan_id:
         raise ValueError("plan does not match the separately pinned declaration")
     plan = json.loads(raw)
-    if plan["schema"] != "spiraltorch.hf_book_control_plan.v1" or plan["data_policy"] != api["DATA_POLICY"]:
+    if plan["schema"] != "spiraltorch.hf_book_control_plan.v2" or plan["data_policy"] != api["DATA_POLICY"]:
         raise ValueError("unsupported book plan")
-    manifest_bytes = api["read_bounded"](data / "manifest.json", 65_536)
+    manifest_path = data / "manifest.json"
+    if manifest_path.is_symlink():
+        raise ValueError("preparation manifest must not be a symbolic link")
+    manifest_bytes = api["read_bounded"](manifest_path, 65_536)
+    if identity(manifest_bytes) != expected_manifest_id:
+        raise ValueError("preparation does not match the separately pinned manifest")
     manifest = json.loads(manifest_bytes)
     if (manifest["schema"] != "spiraltorch.hf_book_preparation.v1"
             or manifest["plan_id"] != expected_plan_id
@@ -41,8 +46,9 @@ def inputs(plan_path, expected_plan_id, data):
         if split == "reserve":
             continue
         path = data / relative
-        if path.is_symlink() or not path.resolve().is_relative_to(data.resolve()):
-            raise ValueError("chapter must remain inside its prepared corpus directory")
+        if (path.is_symlink() or path.parent.is_symlink()
+                or path.resolve() != data.resolve() / relative):
+            raise ValueError("chapter must retain its canonical split without symbolic links")
         raw = api["read_bounded"](path, 5_000_000)
         if len(raw) != doc["bytes"] or hashlib.sha256(raw).hexdigest() != doc["sha256"]:
             raise ValueError("prepared chapter changed")
@@ -55,13 +61,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, default=Path(__file__).with_name("plan.json"))
     parser.add_argument("--expected-plan-id", required=True)
+    parser.add_argument("--expected-manifest-id", required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
         parser.error("preflight output must be a new private directory")
-    plan, manifest, selected, texts, manifest_id = inputs(args.plan, args.expected_plan_id, args.data)
+    plan, manifest, selected, texts, manifest_id = inputs(
+        args.plan, args.expected_plan_id, args.data, args.expected_manifest_id)
     root = Path(__file__).resolve().parents[3]
     example = root / "bindings/st-py/examples/hf_geometry_finetune.py"
     example_api = runpy.run_path(str(example))
@@ -98,12 +106,14 @@ def main():
         stack.zero_grad(set_to_none=True)
         artifacts[arm["name"]] = stack.export_artifact(base_model_identity=runtime["observed_identity_id"])
         stacks[arm["name"]] = stack
-    ordinary = gradients["ordinary"]
-    if not all(len(g) == len(ordinary) and all(torch.equal(a, b) for a, b in zip(ordinary, g))
-               for g in gradients.values()):
-        raise ValueError("initial branch parameter gradients differ")
+    for left, right in plan["paired_contrasts"]:
+        a, b = gradients[left], gradients[right]
+        if len(a) != len(b) or not all(torch.equal(x, y) for x, y in zip(a, b)):
+            raise ValueError("initial branch parameter gradients differ within a declared pair")
+    cross_path_difference = max(float((a - b).abs().max())
+                                for a, b in zip(gradients["ordinary"], gradients["wave_gate_radius1"]))
     # Revalidate selected inputs after tokenization; never open reserve files.
-    if inputs(args.plan, args.expected_plan_id, args.data)[4] != manifest_id:
+    if inputs(args.plan, args.expected_plan_id, args.data, args.expected_manifest_id)[4] != manifest_id:
         raise ValueError("preparation manifest changed during preflight")
     args.output.mkdir(parents=True, exist_ok=False)
     artifact_info = {}
@@ -111,12 +121,13 @@ def main():
         (args.output / f"{arm}-initial.json").write_text(artifact.to_json(), encoding="utf-8")
         artifact_info[arm] = {"artifact_id": artifact.artifact_id, "layout_id": artifact.layout_id}
     result = {
-        "schema": "spiraltorch.hf_book_preflight.v1", "plan_id": args.expected_plan_id,
+        "schema": "spiraltorch.hf_book_preflight.v2", "plan_id": args.expected_plan_id,
         "preparation_manifest_id": manifest_id,
         "source_id": manifest["raw_source_id"], "runtime_identity": runtime["observed_identity_id"],
         "tokenized_dataset_identity": dataset_id["observed_identity_id"], "artifacts": artifact_info,
         "window_plans": {split: json.loads(data.plan.to_json()) for split, data in datasets.items()},
-        "identity_start_exact": True, "initial_parameter_gradients_exact": True,
+        "identity_start_exact": True, "initial_parameter_gradients_exact_within_pairs": True,
+        "gradient_pairs": plan["paired_contrasts"], "cross_path_gradient_max_abs_difference": cross_path_difference,
         "reserve_opened": False, "model_loaded": False, "optimizer_updates": 0,
         "versions": {"python": __import__("sys").version.split()[0], "torch": torch.__version__,
                      "transformers": transformers.__version__, "accelerate": accelerate.__version__},
@@ -125,7 +136,8 @@ def main():
     }
     (args.output / "preflight.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: result[key] for key in ("plan_id", "tokenized_dataset_identity",
-                     "identity_start_exact", "initial_parameter_gradients_exact", "reserve_opened", "optimizer_updates")}))
+                     "identity_start_exact", "initial_parameter_gradients_exact_within_pairs",
+                     "cross_path_gradient_max_abs_difference", "reserve_opened", "optimizer_updates")}))
 
 
 if __name__ == "__main__":

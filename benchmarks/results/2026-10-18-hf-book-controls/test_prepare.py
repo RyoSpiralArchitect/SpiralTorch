@@ -17,6 +17,14 @@ def fixture():
 
 
 class PreparationTests(unittest.TestCase):
+    def test_nested_illustrations_are_balanced_and_other_brackets_survive(self):
+        text, count = API["remove_illustrations"](
+            "before [kept] [Illustration: caption [_Copyright_]] after")
+        self.assertEqual(text, "before [kept]  after")
+        self.assertEqual(count, 1)
+        with self.assertRaises(ValueError):
+            API["remove_illustrations"]("before [Illustration: nested [inner] after")
+
     def test_bounded_reads_and_changed_policy_reject_before_writing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

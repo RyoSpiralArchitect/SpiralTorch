@@ -9,7 +9,7 @@ import re
 START = "*** START OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***"
 END = "*** END OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***"
 HEADING = re.compile(r"^chapter[ \t]+([IVXLCDM]+)\.?\]?[ \t]*$", re.I | re.M)
-ILLUSTRATION = re.compile(r"\[Illustration\b.*?\]", re.S)
+ILLUSTRATION_START = re.compile(r"\[Illustration\b")
 DATA_POLICY = {"normalization":"utf8_bom_optional_crlf_to_lf","body":"numbered_chapters_only_drop_illustration_blocks_and_final_colophon","expected_chapters":61,"train_chapters":[1,49],"development_chapters":[50,55],"reserve_chapters":[56,61],"reserve_policy":"write_only_no_tokenization_training_evaluation_or_selection","window_policy":"Rust HfGeometryDataset disjoint full contexts per chapter; drop tails"}
 
 
@@ -34,6 +34,25 @@ def roman(number):
     return result
 
 
+def remove_illustrations(text):
+    pieces, cursor, removed = [], 0, 0
+    while match := ILLUSTRATION_START.search(text, cursor):
+        pieces.append(text[cursor:match.start()])
+        depth, end = 1, match.end()
+        while depth and end < len(text):
+            if text[end] == "[":
+                depth += 1
+            elif text[end] == "]":
+                depth -= 1
+            end += 1
+        if depth:
+            raise ValueError("unterminated illustration block")
+        cursor = end
+        removed += 1
+    pieces.append(text[cursor:])
+    return "".join(pieces), removed
+
+
 def chapters(raw, expected_hash):
     if len(raw) > 5_000_000 or sha(raw) != expected_hash:
         raise ValueError("source differs from the pinned bounded corpus")
@@ -48,7 +67,7 @@ def chapters(raw, expected_hash):
     for i, match in enumerate(headings):
         end = headings[i + 1].start() if i + 1 < len(headings) else len(body)
         content = body[match.end():end]
-        content, removed = ILLUSTRATION.subn("", content)
+        content, removed = remove_illustrations(content)
         if i == 60:
             marker = "CHISWICK PRESS:--"
             if content.count(marker) != 1:
@@ -68,7 +87,7 @@ def prepare(raw_path, plan_path, destination):
     plan = json.loads(plan_bytes)
     policy = plan["data_policy"]
     expected = {"train": [1, 49], "development": [50, 55], "reserve": [56, 61]}
-    if (plan["schema"] != "spiraltorch.hf_book_control_plan.v1"
+    if (plan["schema"] != "spiraltorch.hf_book_control_plan.v2"
             or policy != DATA_POLICY):
         raise ValueError("this preparation only implements the declared 49/6/6 chapter policy")
     records = chapters(raw, plan["source"]["raw_sha256"])

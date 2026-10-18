@@ -1,0 +1,140 @@
+{
+  "schema": "spiraltorch.hf_book_public_preflight.v1",
+  "plan_id": "sha256:f90fe89f9b9824365f46be056ca7bf3a15fef6079a141c8ea3172b987ee4c3bb",
+  "preparation_manifest_id": "sha256:b94af83d84c537cc7ed2d54c92853f64c2de09c8cdb287189eabe1ec6bd5a862",
+  "source_id": "sha256:3f6bb9d6f78e0293b56acd4714dd68cb7d6d1d293402031ce9d5a216bcaf9d75",
+  "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+  "tokenized_dataset_identity": "sha256:7ce0848a50ab3adc42bf325b6878ff09084e0604bd3c9606055f39914edd8513",
+  "artifacts": {
+    "ordinary": {
+      "artifact_id": "sha256:08f889a082a4626d72b8a84f067621f47490b0b7712a979c1f6cb207e4b17131",
+      "layout_id": "sha256:c513e065e0bd130d648978e529cffe8c4a0c17ca319499c8ca3c0d659b7c476e"
+    },
+    "wave_gate": {
+      "artifact_id": "sha256:45323999355a867d92df5b2015c925ec8f79d3b2e819c489aa8528e39af2678c",
+      "layout_id": "sha256:4f98e1314b99cd8e128f2852677f06aa50183af28ff419f049ae9c6628cedda2"
+    },
+    "wave_gate_radius1": {
+      "artifact_id": "sha256:cb23b9a03f6bc2ed4de0045ce56b295770a79483792fd06b045fcffccd87efda",
+      "layout_id": "sha256:bf50f6bc91d1455060b63a674b43b18bddeb3488e4d7d234712e4815f6be63dc"
+    },
+    "wave_gate_radius4": {
+      "artifact_id": "sha256:297842875dbb7f649dd3825535dbe191e17f9d07167d74f499d0541797da0c0b",
+      "layout_id": "sha256:bf50f6bc91d1455060b63a674b43b18bddeb3488e4d7d234712e4815f6be63dc"
+    }
+  },
+  "window_plans": {
+    "train": {
+      "schema": "spiraltorch.causal_document_windows.v1",
+      "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+      "context_length": 128,
+      "document_lengths": [
+        1294,
+        1288,
+        2417,
+        1494,
+        1505,
+        3400,
+        3032,
+        3001,
+        2618,
+        3351,
+        2388,
+        902,
+        2599,
+        1615,
+        2387,
+        4961,
+        1797,
+        7398,
+        2662,
+        2393,
+        2805,
+        2392,
+        2254,
+        2751,
+        2187,
+        3399,
+        1845,
+        2006,
+        3405,
+        1642,
+        2289,
+        2145,
+        2737,
+        2945,
+        4016,
+        2763,
+        1936,
+        1445,
+        2350,
+        2408,
+        3301,
+        2507,
+        6903,
+        3163,
+        2431,
+        4214,
+        5896,
+        3275,
+        3487
+      ],
+      "total_tokens": 137399,
+      "dropped_tokens": 3383,
+      "target_tokens": 132969,
+      "windows": 1047
+    },
+    "development": {
+      "schema": "spiraltorch.causal_document_windows.v1",
+      "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+      "context_length": 128,
+      "document_lengths": [
+        3019,
+        2958,
+        4792,
+        4265,
+        2300,
+        3406
+      ],
+      "total_tokens": 20740,
+      "dropped_tokens": 388,
+      "target_tokens": 20193,
+      "windows": 159
+    }
+  },
+  "identity_start_exact": true,
+  "initial_parameter_gradients_exact_within_pairs": true,
+  "gradient_pairs": [
+    [
+      "ordinary",
+      "wave_gate"
+    ],
+    [
+      "wave_gate_radius1",
+      "wave_gate_radius4"
+    ]
+  ],
+  "cross_path_gradient_max_abs_difference": 5.960464477539063e-8,
+  "reserve_opened": false,
+  "model_loaded": false,
+  "optimizer_updates": 0,
+  "versions": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0"
+  },
+  "sources": {
+    "benchmarks/results/2026-10-18-hf-book-controls/preflight.py": "sha256:33a9ab1d1ba81ab2729cd44ba8d4e4a0584e84c1ba77fab647877d4881eca6d0",
+    "benchmarks/results/2026-10-18-hf-book-controls/prepare.py": "sha256:5654973498a87fd8820544b2c55dd30dc7f0f05adbd9e030bf8f7fb132f0878e",
+    "bindings/st-py/examples/hf_geometry_finetune.py": "sha256:cc7a0df7d54404bdccc70bab0991f1df66c09d711925a0edff9df05025ca56cb"
+  },
+  "private_preflight_id": "sha256:a035c3ff6bfc329200012d4b24a9cb91cbfbdb36cc4f83eada04080a4cb2f5b6",
+  "status": "qualified_before_training",
+  "stdlib_tests": {
+    "prepare": 5,
+    "preflight": 6,
+    "replay": 6,
+    "shared_case_retention": 4
+  }
+}
