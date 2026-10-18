@@ -1,0 +1,1096 @@
+{
+  "schema": "spiraltorch.hf_learned_radius_results.v1",
+  "status": "completed",
+  "plan_id": "sha256:0e549bf927eaba6529477a282c828e682e8d6586d45a8b3d5c9838e5c1ad709e",
+  "execution_id": "sha256:94a90c5f34105e033923761c43c0b2116d0619cd0d3c67ed8265fdf8e20e0d3c",
+  "runs": [
+    {
+      "artifact_id": "sha256:59c666518ec9fbfcffb8a93841c0e3ceb220d910a5716def88da42f2204e1012",
+      "checkpoint_artifact_id": "sha256:6cbddefef749115aef1e2f6608d35c2bcb21b82229a0d1ff77abf50c3433ab16",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.1108903884887695,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "fixed_r1",
+      "seed": 41,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 0,
+        "increased_sites": 0,
+        "log_radius_delta_l2": 0,
+        "radius_multiplier_geometric_mean": 1
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.9117170073790712
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.834904981891139
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.731580523880557
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.6509569790326573
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:64823c35cabdc549940b2abbac0bc355bfdf3010f3310bd3ab7abd9d17ca1424",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:64823c35cabdc549940b2abbac0bc355bfdf3010f3310bd3ab7abd9d17ca1424",
+            "optimizer.pt": "sha256:a461651a37ac2e77d16ce8df197e7c6949135097333abdb3a81525bb4c70b9c3",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:b32218328772ff93bf66eeea273d2cc9a9628ae144c90cedc195023e49cc76f7",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:6cbddefef749115aef1e2f6608d35c2bcb21b82229a0d1ff77abf50c3433ab16",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:6cbddefef749115aef1e2f6608d35c2bcb21b82229a0d1ff77abf50c3433ab16",
+            "optimizer.pt": "sha256:e02fc48a30b0b3c8c0c669a742b2a1d3ecb13ea906ce6a79158f5c5aad92f39b",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:ef21c069e363bb4a86798ef46379aaff4fe2c31f631d31a032689f218165ce3e",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": true,
+      "resume_exact": null,
+      "result_id": "sha256:7fa69c71f68c3aa1e2d07acc39056b1007e414cb4ad5e045f31410b6d3b8090a",
+      "log_id": "sha256:1493356f865e089c8b3840fadf2b3acf2fd9eb2d206fcbc831538dfa91768563"
+    },
+    {
+      "artifact_id": "sha256:93518c6a83cf07a67fba5a12099fc3ffcc239794ed69f20404b776b5982ff17e",
+      "checkpoint_artifact_id": "sha256:0b9fe7bb0b86430328e741071c5a8a2d5f82009784fdfa1d3771ddaf092dfe93",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.1084113121032715,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r1",
+      "seed": 41,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.6674273723345604,
+        "radius_multiplier_geometric_mean": 1.3959031044339965
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.2433307798361857
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.148311548803078
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.015544139807146
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 1.8917976972976496
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:99bad2a666d168150d0ced17e96afb78889e3f8d3ab7cd09ecf10e857f5ffc55",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:99bad2a666d168150d0ced17e96afb78889e3f8d3ab7cd09ecf10e857f5ffc55",
+            "optimizer.pt": "sha256:200f1f9e3b73b8a26360f1d58da8dba8e7ba59b9be6ad1df4767d07fd57ecb35",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:78aeb6fd30362a8cc60457b5a61a52b862d04910332c0b67fdc2a702c2f0862e",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:0b9fe7bb0b86430328e741071c5a8a2d5f82009784fdfa1d3771ddaf092dfe93",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:0b9fe7bb0b86430328e741071c5a8a2d5f82009784fdfa1d3771ddaf092dfe93",
+            "optimizer.pt": "sha256:d6946a2420387d6caae08c22c345c61d3100ce8d2615f575be8c90efc78b041d",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:f249467434f85d7388c7c7424c139b0d79fb2bd7882237dbb1f3231e02de2c08",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": null,
+      "result_id": "sha256:820ca85c877c77c2394ed5fc96b6f340b7805255c3c932a457c5d892186888eb",
+      "log_id": "sha256:0862e64d7d252d210c6bb96ee1e89f1a2fad161ea5a526055b0b2fe3285fc35d"
+    },
+    {
+      "artifact_id": "sha256:fa74f5e181f9dfa5d98626afe12d80929f525d18eb641908eb9c335d26b00692",
+      "checkpoint_artifact_id": "sha256:b406102183a4bb4c3a8dd6b4f8af78fe162b50efaa7902891b9d8d169e5205ca",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.096088409423828,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "fixed_r4",
+      "seed": 41,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 0,
+        "increased_sites": 0,
+        "log_radius_delta_l2": 0,
+        "radius_multiplier_geometric_mean": 1
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.713870908648349
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.516754933063586
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.2674205885513072
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 2.9636804302641053
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:1399443629dfd20a4de3723b24d6f0870814114a4b336e9cff18c4e20852b4aa",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:1399443629dfd20a4de3723b24d6f0870814114a4b336e9cff18c4e20852b4aa",
+            "optimizer.pt": "sha256:a0bfd50a51510d237948fdc96758f1e6d0cbc8a1078dc843fb7402a1a3f06d1c",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:f79c8cb329647f953f84147f49227dcb8ec61add5099c7a30675a0db064b9365",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:b406102183a4bb4c3a8dd6b4f8af78fe162b50efaa7902891b9d8d169e5205ca",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:b406102183a4bb4c3a8dd6b4f8af78fe162b50efaa7902891b9d8d169e5205ca",
+            "optimizer.pt": "sha256:511ce1af73f2be073da8dc40c6c09bd7e46ea40b57b1f9a290b860af9ebd90c0",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:3156f605465b6d995538850611ef457dbe957f1dd4a94513200e3ba15993c472",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": true,
+      "resume_exact": null,
+      "result_id": "sha256:ab677d6a3ccf776553a36755b3d44be4329b85b8c481750bdb14e5c983db88f2",
+      "log_id": "sha256:8957f04aba18192d69377fd62129a397f8b4f95f92f8dc8c6b55fdb344a806fa"
+    },
+    {
+      "artifact_id": "sha256:e38be0437f98550a35ca3ea2872de7d8aa318980292b18be6f061b9806db2cf2",
+      "checkpoint_artifact_id": "sha256:39eb7b6b4a1070c9ad87a52ad5b8c1f4c38a41345465d1c2dafe7c1974ac78fa",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.090939998626709,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r4",
+      "seed": 41,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.7510362279351843,
+        "radius_multiplier_geometric_mean": 1.45394554274196
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 4.0879393779197315
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.8687572562723336
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.5737952041819354
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.1832052211498665
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:f08c25990cdfb2d715e4432d0ef42de87e2bd15868ceb325955b87670ebd9962",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:f08c25990cdfb2d715e4432d0ef42de87e2bd15868ceb325955b87670ebd9962",
+            "optimizer.pt": "sha256:b23dcac0c6b4acb32d0eae7e491f3300e54037547fce514e5451e880fa42cbcc",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:8682b5734c1e2bf274139902a9fb46bc0693c20c05c6948517d59984b127197b",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:30a46a193e4061639901cf48233b7bd778f4acd96a83763d3bb944acd929a26c"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:39eb7b6b4a1070c9ad87a52ad5b8c1f4c38a41345465d1c2dafe7c1974ac78fa",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:39eb7b6b4a1070c9ad87a52ad5b8c1f4c38a41345465d1c2dafe7c1974ac78fa",
+            "optimizer.pt": "sha256:86314fbafc502d9ff602568d1dcd505b1f781ceece921bd170acb3527d300c32",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:03d85da550be0cc2b66cccb196b793685b6c860c68d17bee85e32a9313bf84bc",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": null,
+      "result_id": "sha256:2ba410e5e0c0f598279799b3be8bfcbe94c81b23214afa1eade925c81463a04b",
+      "log_id": "sha256:2275ca834f21f3ea402c934fdad255105c3ee4aee2ac91149c0c1d6935b4cc89"
+    },
+    {
+      "artifact_id": "sha256:b71e447af3f5ccc84b76549f3fc0fa7c94004809e8156ab4b3521a97835bf362",
+      "checkpoint_artifact_id": "sha256:19f8ec26c403b7025d44c8271c2345f7be452ce5746131fb75c8cfba7950bc4a",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.110875606536865,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "fixed_r1",
+      "seed": 43,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 0,
+        "increased_sites": 0,
+        "log_radius_delta_l2": 0,
+        "radius_multiplier_geometric_mean": 1
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.9277281628687208
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.8528928111345846
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.7385131397357763
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.650140859468164
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:418acf759dad8a12457905bb332016141e036bd04a8d1577c30860bf3e79da2b",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:418acf759dad8a12457905bb332016141e036bd04a8d1577c30860bf3e79da2b",
+            "optimizer.pt": "sha256:3db496e88e31726320533c71c23d9d475311dc27dc04e601787f49af57a0fd61",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:d731f4beb5f1a91deedb989899c4b65583477e61590c2ac5dbb194e908a95aed",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:19f8ec26c403b7025d44c8271c2345f7be452ce5746131fb75c8cfba7950bc4a",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:19f8ec26c403b7025d44c8271c2345f7be452ce5746131fb75c8cfba7950bc4a",
+            "optimizer.pt": "sha256:4aa3f525eec4577fc8fce15a723a689d16292623b1c54fbfded6ce86ace02e53",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:50b266c128d9e9ffcc4e0610cf3174d144a44b453814c6f6421eb8a6f72af289",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": true,
+      "resume_exact": null,
+      "result_id": "sha256:359736cbc00e7f3e09c5dd4f9d7254750afa4490f42d0d36a9da70a34e75ded9",
+      "log_id": "sha256:0be8c13be4bdc479904f600ec90206ff71d7607e58a07d30b7f6b9f7ce9beebe"
+    },
+    {
+      "artifact_id": "sha256:eddeeca2b7c47136e6849d20ca5086513c6efea0a22c21f48e42847a088bad4c",
+      "checkpoint_artifact_id": "sha256:d473389d81c45478e86e7585c9eb022da7d60be27a006f0bf8d8589196400311",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.108377933502197,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r1",
+      "seed": 43,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.6692267826664279,
+        "radius_multiplier_geometric_mean": 1.3972051012556181
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.2630028468319194
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.1683279916659965
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.0244319905664283
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 1.8941174032496961
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:6ee97eafada8727cae77b02799082610b16f9ab700f6d2918179dd9fddc4e51a",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:6ee97eafada8727cae77b02799082610b16f9ab700f6d2918179dd9fddc4e51a",
+            "optimizer.pt": "sha256:33eeb5996a21c3d539cf8c68e23e1fb75c4736259ef94b395856ebb4275a95c0",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:67d83b6cd95b9954e4f7b176aa409cc381ebfc1d8c1dffd556b05f35daf63ef7",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:d473389d81c45478e86e7585c9eb022da7d60be27a006f0bf8d8589196400311",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:d473389d81c45478e86e7585c9eb022da7d60be27a006f0bf8d8589196400311",
+            "optimizer.pt": "sha256:02ff1d495a2bc4435b7658d6489277448f41665874798f88d9fc9f6896e79138",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:97fe95d70290ed69d1af7170918b0134f5c6d7fa2fd07cc0019f6a57bc73b074",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": null,
+      "result_id": "sha256:4d5c458e73e30476a7ad6e2ec1fac5975c51f827904ecd567ce83a20c46ee595",
+      "log_id": "sha256:736cf332f053af9bfdf89de12e5984618ad74291ad40e10663ff31e68cd59bfa"
+    },
+    {
+      "artifact_id": "sha256:b625d5b2b8b53ffd461aeecf2198db3c5a9cc6404f127883b3e0abc807511f19",
+      "checkpoint_artifact_id": "sha256:5e51803f03fe9edb10b99829b010d316b515ba2b2b23b31581c88e4cfb6f2fe1",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.095949649810791,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "fixed_r4",
+      "seed": 43,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 0,
+        "increased_sites": 0,
+        "log_radius_delta_l2": 0,
+        "radius_multiplier_geometric_mean": 1
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.7440400390957653
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.5524492509896985
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.278368469749917
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 2.957545742517189
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:e4d73b76926212696fc7cdc612120a85c9d1a0665fee94a752a799876415b0c6",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:e4d73b76926212696fc7cdc612120a85c9d1a0665fee94a752a799876415b0c6",
+            "optimizer.pt": "sha256:13538cce166ae35e269a0bd3c4f8af8f085cbcbda310fc4ea1f9cc272b4c20a2",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:0d409f9d1f287d04233c2075d91c63ecbaef96c1e3ec360ec2c890fcb4beb5c0",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:5e51803f03fe9edb10b99829b010d316b515ba2b2b23b31581c88e4cfb6f2fe1",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:5e51803f03fe9edb10b99829b010d316b515ba2b2b23b31581c88e4cfb6f2fe1",
+            "optimizer.pt": "sha256:266d9285da88cd18b2e0c3d707946cfcec34c6c6de13db2d11d0a8d6d1406db6",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:7a70fb36344f29f3aee898e8afe7743180e7c344027ea637f43bdf0a5596d6f1",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": true,
+      "resume_exact": null,
+      "result_id": "sha256:3811ca57ecf5807db66aa2d229819c4b27a692f3633d8768c8ce2221e85f09af",
+      "log_id": "sha256:f406a91a67b28beac9e6d7802380e33467fba0bfab6c0904f54c0fc3a322cc73"
+    },
+    {
+      "artifact_id": "sha256:e296673d3b26bbc6a3076f5b42da8476a1397f802ac1cf67a56f811ecd5a0bb3",
+      "checkpoint_artifact_id": "sha256:66051113714e1f72fae0aec0cd7d861c299fa92d778dd2ede75df37045a82fd5",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.090726375579834,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r4",
+      "seed": 43,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.749620838476186,
+        "radius_multiplier_geometric_mean": 1.4529760480908434
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 4.1250114273883165
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.9121410429746413
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.589484664655648
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.1785920684810898
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:6df928b022f2f00ff5dc139c6eb40669c8e9c25dc54c36544b9fd0bd40b54622",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:6df928b022f2f00ff5dc139c6eb40669c8e9c25dc54c36544b9fd0bd40b54622",
+            "optimizer.pt": "sha256:69b52785a316afd3def4e419190687d71b35f331becc89da3c19824d0a44f88f",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:b1d3093cf9c67540cdf294706552bd97f0d4928af57308b63d0667d7cd5fe52f",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:f57a4f7d0e367356d234c5a8d6a2379e44d4ab28cdca100cc6b637050bd4026a"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:66051113714e1f72fae0aec0cd7d861c299fa92d778dd2ede75df37045a82fd5",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:66051113714e1f72fae0aec0cd7d861c299fa92d778dd2ede75df37045a82fd5",
+            "optimizer.pt": "sha256:7943a12f6ddb3af35ea787f8ad72d61fe65056bed7ab71c998cb291d2a365f25",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:4d55060bb4b26d0b7773dc0249ce105bd85224f2d735fc2feb66b95e7692c10d",
+            "rng_state.pth": "sha256:fd3a4d836ec511c90e3c286ee861da30a83e9f187b868e9e9eeb3258d7e29add",
+            "spiraltorch-mps-rng.pt": "sha256:d21a9ec2825478909d0aaef02d9d20410bfefb06d973b1f33e2886668c8dc11d"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": null,
+      "result_id": "sha256:ddee8e7d09f3f69e8e9107041c0793b3632fcd1e99bdded4c9a0f15a3ed18e00",
+      "log_id": "sha256:23f952c6c4441bb03252cde0dc55100cbefed3a31160defb2ae63a00e8f8ce86"
+    },
+    {
+      "artifact_id": "sha256:3335bfd9f67ef55a0b465479d51fb3641655cabf670f4401c2d152de2dbd5687",
+      "checkpoint_artifact_id": "sha256:f024cda01d67993d61a40ab2b7199929149be615ced1ddcbc3d69ace9046904a",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.110872268676758,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "fixed_r1",
+      "seed": 47,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 0,
+        "increased_sites": 0,
+        "log_radius_delta_l2": 0,
+        "radius_multiplier_geometric_mean": 1
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.9241644959004842
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.8489132136930637
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.7420789651294168
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 1.6617771082162496
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:4fca2cd7bae2163045f20193c4cf6dec0df940c55dd982721e64f63d6826fe52",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:4fca2cd7bae2163045f20193c4cf6dec0df940c55dd982721e64f63d6826fe52",
+            "optimizer.pt": "sha256:e1212305ba65e1d918d9297e7f20ea65e4d0326d0ad93bbe79498bc4838a1c9f",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:50af2ae441e32534e108ce6f965dd13b4bdd216822d4c4064f3198af81eb9703",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:f024cda01d67993d61a40ab2b7199929149be615ced1ddcbc3d69ace9046904a",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:f024cda01d67993d61a40ab2b7199929149be615ced1ddcbc3d69ace9046904a",
+            "optimizer.pt": "sha256:887e460749d8f1bad8784b8d1d68fcbfe3a2578eb606e5213c007603e4e68841",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:d5b6c901982dde3ac08739d9a95637fe0342861fe9a6542ab0e85ab94cf6fb87",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": true,
+      "resume_exact": null,
+      "result_id": "sha256:73d3421eb2ab910bfeaf2c6fe67241544870df5bbf852c8a3590a74fb1eb8cf5",
+      "log_id": "sha256:09472459483200573ef845997c4581f6c181eb8775328a536c4796718d28682c"
+    },
+    {
+      "artifact_id": "sha256:f22587a2215b99489257caf61ac299354ae2f8350109f3c0264c0efc54e3c510",
+      "checkpoint_artifact_id": "sha256:b4ac1f1476105243842d72aabee31a5127fad4a7f67b4b89161c97d13592e130",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.108366012573242,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r1",
+      "seed": 47,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.6701649124022314,
+        "radius_multiplier_geometric_mean": 1.397788367471689
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.2634701217642337
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.168316923634821
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.0291659154893407
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 1.9067011300111845
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:d19fc927936f0f72bb9c6233fdedcc165284aa8254c5ff2e7e516750dd093b69",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:d19fc927936f0f72bb9c6233fdedcc165284aa8254c5ff2e7e516750dd093b69",
+            "optimizer.pt": "sha256:debc983b8f2d1718a8f0db23d0863960bc7225a4bb18ba0d4c775afe447d10af",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:e7bfa72b1dd6feb5826881b3d99892ee77bad3b8275020e780c766569619f0ca",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:b4ac1f1476105243842d72aabee31a5127fad4a7f67b4b89161c97d13592e130",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:b4ac1f1476105243842d72aabee31a5127fad4a7f67b4b89161c97d13592e130",
+            "optimizer.pt": "sha256:6f7e67c323cba6973be12d8a6596e32449bc21ade7131d084a7db59a8f95ea29",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:77997897e2df905b10d8e923a51082ad81e36a78c66a348ae638974562070fee",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": null,
+      "result_id": "sha256:98c190da84b729a04e8836e31c5c799bb14e77b597126ee7f72c2643ec235412",
+      "log_id": "sha256:cde0903139800c788e268ca8399ef9ca7fa5f4849b4de9a26ee70ff3863a5322"
+    },
+    {
+      "artifact_id": "sha256:3c891037b4511ba8b1e90c54b4f769712a3b20201e96a356919f34d367bda16a",
+      "checkpoint_artifact_id": "sha256:30282eb6187b2a15ec9137e0e0f997b0420d281ef3175fe36c6d857d6d1b4b38",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.095967769622803,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "fixed_r4",
+      "seed": 47,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 0,
+        "increased_sites": 0,
+        "log_radius_delta_l2": 0,
+        "radius_multiplier_geometric_mean": 1
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.749435073203869
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.5562359061506554
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 3.298151437893368
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1536,
+          "parameter_delta_l2": 2.9822102449684937
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:fd99e5f062229339c80b3a4ef6e6729a7b2825998e4313431fcc20723aeb49ef",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:fd99e5f062229339c80b3a4ef6e6729a7b2825998e4313431fcc20723aeb49ef",
+            "optimizer.pt": "sha256:147dcdf421e2a632fde1335cbdcfd2dde13b41ba0b897716d16d012e4452bdbc",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:55f0e3e750a9ac364a4e3169a394d48267b33d2ff79acb4045f20d5470267c42",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:30282eb6187b2a15ec9137e0e0f997b0420d281ef3175fe36c6d857d6d1b4b38",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:30282eb6187b2a15ec9137e0e0f997b0420d281ef3175fe36c6d857d6d1b4b38",
+            "optimizer.pt": "sha256:e304b981629b2f2b5e2a37c1a282769ed0d4462b672361ba76eb2edb42d37e2d",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:b04114b1fbcb4f33c9fffc7b87744b53722a85b54cf537ab16b0c7b7fd9971a5",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+          },
+          "finite_optimizer_values": 6144,
+          "radius_nonzero_first_moments": 0,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": true,
+      "resume_exact": null,
+      "result_id": "sha256:94dc850e3b774d65e5b7d5a04549885e064d4adf375b57232d6c87c69e1ce90d",
+      "log_id": "sha256:7955bb003bde2def662392e5a27182edc3da396d4d97640d0198531d40f49a6d"
+    },
+    {
+      "artifact_id": "sha256:ae1bc63ae26a92a67f3c240a67e57965498e1ae36a62c7ff0093cc7a0f6f83eb",
+      "checkpoint_artifact_id": "sha256:fbf55200d282f7b853f7ec55e5f3ca41e7556ebef10707ccd3f3ca8ea31edf16",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.09074068069458,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r4",
+      "seed": 47,
+      "phase": "full",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.7509920950221449,
+        "radius_multiplier_geometric_mean": 1.453893855896655
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 4.131032854467329
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.917858950354874
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.611307446724514
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.205836192325441
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 256,
+          "artifact_id": "sha256:1775f8a0149cf9bec9febea721a1273b6bd782c79cb42c93e6f3d04918c5b65c",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:1775f8a0149cf9bec9febea721a1273b6bd782c79cb42c93e6f3d04918c5b65c",
+            "optimizer.pt": "sha256:da4a54777f32fbfbd0dca760fa40c8be4af20dbd4b53d6283b81e674db66410b",
+            "scheduler.pt": "sha256:fed5d48ce8dac81652838b762b4efb383136c456a5561531fff003bda13432eb",
+            "trainer_state.json": "sha256:fe17fc916f4e36e97fe6b76ff79c40dc7243b1cccd720c48f3d2244130128f3c",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:69a967db3eb58a405e189ce54c6af1f2a81100c4a42225ca1b2384ba7aec5447"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        },
+        {
+          "step": 512,
+          "artifact_id": "sha256:fbf55200d282f7b853f7ec55e5f3ca41e7556ebef10707ccd3f3ca8ea31edf16",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:fbf55200d282f7b853f7ec55e5f3ca41e7556ebef10707ccd3f3ca8ea31edf16",
+            "optimizer.pt": "sha256:04244121f79e9900b58934a1da456461a133d02a2485ad3c170d4a2684c41dba",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:9ff179bae992ebe19c90b0f46aaefe37be75e21afefb56430efa9e16578c5ed1",
+            "rng_state.pth": "sha256:67efba7a92049a7457e4efe6480b3cbe17331f330c31983375d73e0f3768e80f",
+            "spiraltorch-mps-rng.pt": "sha256:9853683f7757501d5ebf4387be17c726ed1bdd766b91418fe02e6571c5b3f574"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": null,
+      "result_id": "sha256:673fae7a22ec6332a3fb6ececb64b2adfba1c4a3ab33a4119a231dbe933ba740",
+      "log_id": "sha256:164ee8be1b943ab1943c174cf85f20436a767511721a70c79fc507f87a440f8a"
+    },
+    {
+      "artifact_id": "sha256:93518c6a83cf07a67fba5a12099fc3ffcc239794ed69f20404b776b5982ff17e",
+      "checkpoint_artifact_id": "sha256:0b9fe7bb0b86430328e741071c5a8a2d5f82009784fdfa1d3771ddaf092dfe93",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.1084113121032715,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r1",
+      "seed": 41,
+      "phase": "resume",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.6674273723345604,
+        "radius_multiplier_geometric_mean": 1.3959031044339965
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.2433307798361857
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.148311548803078
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 2.015544139807146
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 1.8917976972976496
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 512,
+          "artifact_id": "sha256:0b9fe7bb0b86430328e741071c5a8a2d5f82009784fdfa1d3771ddaf092dfe93",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:0b9fe7bb0b86430328e741071c5a8a2d5f82009784fdfa1d3771ddaf092dfe93",
+            "optimizer.pt": "sha256:d6946a2420387d6caae08c22c345c61d3100ce8d2615f575be8c90efc78b041d",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:f249467434f85d7388c7c7424c139b0d79fb2bd7882237dbb1f3231e02de2c08",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": true,
+      "result_id": "sha256:c236289a543f531ec2044cb1330056f6978d490ba13737a5cd06a30bbca48ca5",
+      "log_id": "sha256:b8d1d19d43fc86b9e105af0b0b293fe033318560e21c435459723aa9ba811f57"
+    },
+    {
+      "artifact_id": "sha256:e38be0437f98550a35ca3ea2872de7d8aa318980292b18be6f061b9806db2cf2",
+      "checkpoint_artifact_id": "sha256:39eb7b6b4a1070c9ad87a52ad5b8c1f4c38a41345465d1c2dafe7c1974ac78fa",
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "trained_geometry_eval_loss": 4.090939998626709,
+      "bare_eval_loss": 4.118154048919678,
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "arm": "learned_r4",
+      "seed": 41,
+      "phase": "resume",
+      "radii": {
+        "sites": 4,
+        "changed_sites": 4,
+        "increased_sites": 4,
+        "log_radius_delta_l2": 0.7510362279351843,
+        "radius_multiplier_geometric_mean": 1.45394554274196
+      },
+      "learned_sites": [
+        {
+          "path": "transformer.h.8.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 4.0879393779197315
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.8687572562723336
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.5737952041819354
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "trainable_values": 1537,
+          "parameter_delta_l2": 3.1832052211498665
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 512,
+          "artifact_id": "sha256:39eb7b6b4a1070c9ad87a52ad5b8c1f4c38a41345465d1c2dafe7c1974ac78fa",
+          "private_file_ids": {
+            "spiraltorch-geometry.json": "sha256:39eb7b6b4a1070c9ad87a52ad5b8c1f4c38a41345465d1c2dafe7c1974ac78fa",
+            "optimizer.pt": "sha256:86314fbafc502d9ff602568d1dcd505b1f781ceece921bd170acb3527d300c32",
+            "scheduler.pt": "sha256:0e42b9649bfa9e7a43f451f92abde1c1e4aecf52bc1e708935cbd22af6587742",
+            "trainer_state.json": "sha256:03d85da550be0cc2b66cccb196b793685b6c860c68d17bee85e32a9313bf84bc",
+            "rng_state.pth": "sha256:8c70c875f0b3b4f7d0dba6fb0d07378254be0b7ae200359e4a5d80305cee7dc0",
+            "spiraltorch-mps-rng.pt": "sha256:48815db712c7aa08cbca535b0ffeb29ec243c3cda69eb98af87a8a4f5ba453f0"
+          },
+          "finite_optimizer_values": 6148,
+          "radius_nonzero_first_moments": 4,
+          "optimizer_scheduler_step_exact": true
+        }
+      ],
+      "fixed_replay_exact": null,
+      "resume_exact": true,
+      "result_id": "sha256:e8dfb52bc84884f44bdfd94bffe289605ee824cdb7eb2e7400939d3cb31162df",
+      "log_id": "sha256:7a2c05a007200d4e77051e11bde73388adefcba03ac630173c10f2f0d9719d0a"
+    }
+  ],
+  "paired_differences": [
+    {
+      "seed": 41,
+      "contrast": "learned_r1_minus_fixed_r1",
+      "development_loss_difference": -0.002479076385498047
+    },
+    {
+      "seed": 41,
+      "contrast": "learned_r4_minus_fixed_r4",
+      "development_loss_difference": -0.005148410797119141
+    },
+    {
+      "seed": 43,
+      "contrast": "learned_r1_minus_fixed_r1",
+      "development_loss_difference": -0.0024976730346679688
+    },
+    {
+      "seed": 43,
+      "contrast": "learned_r4_minus_fixed_r4",
+      "development_loss_difference": -0.005223274230957031
+    },
+    {
+      "seed": 47,
+      "contrast": "learned_r1_minus_fixed_r1",
+      "development_loss_difference": -0.002506256103515625
+    },
+    {
+      "seed": 47,
+      "contrast": "learned_r4_minus_fixed_r4",
+      "development_loss_difference": -0.005227088928222656
+    }
+  ],
+  "reserve_opened": false,
+  "quality_status": "exploratory_one_corpus_not_matched_energy_or_equal_parameter_budget",
+  "publication": {
+    "schema": "spiraltorch.hf_learned_radius_publication.v1",
+    "private_source_results_id": "sha256:c871fcbc0ddc8d79cb2921e106936eb08d7903ece668d4f9d8877c0540d2e116",
+    "projection": "omit_per_site_parameter_delta_max_abs_from_every_run",
+    "reason": "a_per_site_maximum_can_reveal_an_individual_learned_scalar_weight"
+  }
+}
