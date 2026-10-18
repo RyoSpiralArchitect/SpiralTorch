@@ -91,7 +91,7 @@ impl ResidentByteDecoderForward {
     pub fn parameter_revision(&self) -> u64 {
         self.parameters.revision()
     }
-    /// This forward's internal geometry scores [batch,heads,time,time], before
+    /// This forward's internal geometry scores `[batch,heads,time,time]`, before
     /// external biases or QK content. No readback or normalization is implicit.
     /// Ordinary models and out-of-range blocks return None.
     pub fn geometry_pair_bias(&self, block: usize) -> Option<&ResidentTensor> {
@@ -99,7 +99,7 @@ impl ResidentByteDecoderForward {
     }
     /// Resident softmax masses from this exact forward's router.
     /// Fixed-routing and ordinary models return None; reading is explicit.
-    /// Shared weights are [H,K]; contextual weights are [B,H,Q,K].
+    /// Shared weights are `[H,K]`; contextual weights are `[B,H,Q,K]`.
     pub fn geometry_mixture_weights(&self, block: usize) -> Option<&ResidentTensor> {
         self.geometry.as_ref()?.mixture_weights(block)
     }

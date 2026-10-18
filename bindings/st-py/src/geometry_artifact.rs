@@ -21,7 +21,7 @@ fn window_integer(value: &Bound<'_, PyAny>) -> PyResult<u32> {
 
 #[pyclass(name = "GeometryAdapterArtifact", module = "spiraltorch", frozen)]
 pub struct PyGeometryAdapterArtifact {
-    inner: GeometryAdapterArtifact,
+    pub(crate) inner: GeometryAdapterArtifact,
 }
 
 #[pymethods]

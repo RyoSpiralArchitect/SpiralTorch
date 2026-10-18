@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+0.4.32 is prepared in source; this does not confirm PyPI publication.
+
+- Add `NativeGeometryRuntime` and immutable `NativeGeometryBatch` to execute
+  portable channel-affine and WaveGate v1/v2 placements without Torch, NumPy or
+  Transformers. Rust owns residual composition, first-order pullbacks, mean-MSE
+  and atomic stateless SGD, sharing existing kernels and artifact validators.
+  Stale snapshots and invalid updates fail without changing the current state;
+  fixed buffers and frozen parameters remain unchanged. This is an f32 CPU
+  adapter runtime, not a whole HF model loader or resident-GPU speed claim.
+- Gate the installed package on native learning/save/reload tests with Torch
+  imports forbidden, while keeping optional Torch transport parity separate.
+
 - Add Rust-owned `ByteCorpusServingGate`, `ResidentByteServing` and
   `ResidentByteCandidate`: fixed evaluation windows/limits, actual paired loss
   and geometry/router measurements, slot/generation-bound activation and exact

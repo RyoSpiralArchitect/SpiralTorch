@@ -571,6 +571,7 @@ jobs:
           python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
       - name: Portable byte corpus study contracts
         run: |
+          python -I -B bindings/st-py/tests/test_native_geometry_runtime.py -v
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
       - name: Resident classifier surface and handoff verifier
@@ -855,6 +856,7 @@ jobs:
             bindings/st-py/tests/test_geometry_adapters.py \
             bindings/st-py/tests/test_geometry_artifact.py \
             bindings/st-py/tests/test_channel_affine.py \
+            bindings/st-py/tests/test_native_geometry_parity.py \
             bindings/st-py/tests/test_hf_geometry_trainer.py \
             bindings/st-py/tests/test_hf_geometry_dataset.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \
