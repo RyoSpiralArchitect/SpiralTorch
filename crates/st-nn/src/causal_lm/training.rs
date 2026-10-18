@@ -96,6 +96,8 @@ struct Checkpoint {
     geometry_id: String,
     optimizer_json: String,
     optimizer_id: String,
+    #[serde(default, skip_serializing_if = "CausalLmReadoutAccumulator::is_f32")]
+    readout_accumulator: CausalLmReadoutAccumulator,
 }
 
 /// Verified checkpoint owners, before the separately retained corpus is supplied.
@@ -393,6 +395,7 @@ impl NativeCausalLmTrainer {
             geometry_id: geometry.artifact_id().into(),
             optimizer_json: self.optimizer.to_json()?,
             optimizer_id: self.optimizer.checkpoint_id()?,
+            readout_accumulator: self.model.readout_accumulator,
         };
         let json = serde_json::to_string(&checkpoint)?;
         if json.len() > MAX_CHECKPOINT_BYTES {
@@ -417,8 +420,11 @@ impl NativeCausalLmTrainer {
             return Err("training checkpoint differs from pinned identity".into());
         }
         let checkpoint: Checkpoint = serde_json::from_slice(bytes)?;
-        if checkpoint.schema != SCHEMA || checkpoint.base_model_identity != base.base_id {
-            return Err("training checkpoint schema or base mismatch".into());
+        if checkpoint.schema != SCHEMA
+            || checkpoint.base_model_identity != base.base_id
+            || checkpoint.readout_accumulator != base.readout_accumulator
+        {
+            return Err("training checkpoint schema, base or readout accumulator mismatch".into());
         }
         checkpoint.config.validate()?;
         Ok(checkpoint)

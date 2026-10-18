@@ -127,7 +127,16 @@ fn scalar_block_with_packed(
     for local_row in 0..height {
         let global_row = row_start + local_row;
         let lhs_row = &lhs[global_row * inner..(global_row + 1) * inner];
-        for local_col in 0..width {
+        let panels = width / 8 * 8;
+        for local_col in (0..panels).step_by(8) {
+            let sums =
+                packed_row_panel::<8>(lhs_row, &packed[local_col * inner..(local_col + 8) * inner]);
+            let start = global_row * cols + col_start + local_col;
+            for (value, sum) in dst[start..start + 8].iter_mut().zip(sums) {
+                *value += sum;
+            }
+        }
+        for local_col in panels..width {
             let mut acc = 0.0f32;
             let packed_column = &packed[local_col * inner..(local_col + 1) * inner];
             for k in 0..inner {
@@ -137,6 +146,54 @@ fn scalar_block_with_packed(
             dst[dst_index] += acc;
         }
     }
+}
+
+#[inline]
+fn packed_row_panel<const WIDTH: usize>(lhs: &[f32], rhs: &[f32]) -> [f32; WIDTH] {
+    let inner = lhs.len();
+    let columns: [&[f32]; WIDTH] = std::array::from_fn(|i| &rhs[i * inner..(i + 1) * inner]);
+    let mut sums = [0.0; WIDTH];
+    // Independent output lanes, never a reassociation of an individual K reduction.
+    for (k, &a) in lhs.iter().enumerate() {
+        for lane in 0..WIDTH {
+            sums[lane] += a * columns[lane][k];
+        }
+    }
+    sums
+}
+
+/// Column-major RHS, f32 operands/output and fixed four-lane f64 accumulators.
+/// This is an explicit wide path; the ordinary sequential-f32 contract is unchanged.
+pub fn matmul_packed_wide_into(
+    dst: &mut [f32],
+    lhs: &[f32],
+    packed_rhs: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<(), String> {
+    validate_matmul_lengths(dst, lhs, packed_rhs, rows, inner, cols, "packed rhs")?;
+    if rows == 0 || cols == 0 || inner == 0 {
+        dst.fill(0.0);
+        return Ok(());
+    }
+    for (out, row) in dst.chunks_exact_mut(cols).zip(lhs.chunks_exact(inner)) {
+        for (value, column) in out.iter_mut().zip(packed_rhs.chunks_exact(inner)) {
+            let mut sums = [0.0f64; 4];
+            let full = inner / 4 * 4;
+            for k in (0..full).step_by(4) {
+                for lane in 0..4 {
+                    sums[lane] += f64::from(row[k + lane]) * f64::from(column[k + lane]);
+                }
+            }
+            let mut sum = (sums[0] + sums[1]) + (sums[2] + sums[3]);
+            for k in full..inner {
+                sum += f64::from(row[k]) * f64::from(column[k]);
+            }
+            *value = sum as f32;
+        }
+    }
+    Ok(())
 }
 
 #[inline]
@@ -791,7 +848,7 @@ pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, S
     Ok(packed)
 }
 
-const CPU_AUTOTUNE_REVISION: u64 = 6;
+const CPU_AUTOTUNE_REVISION: u64 = 7;
 const CPU_AUTOTUNE_MIN_VOLUME: usize = 64 * 64 * 32;
 const CPU_AUTOTUNE_SAMPLE_MAX_DIM: usize = 2048;
 const CPU_AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -1320,6 +1377,9 @@ mod tests {
     fn public_paths_preserve_sequential_reduction_and_overwrite_destination() {
         for (rows, inner, cols) in [
             (1, 31, 8),
+            (1, 769, 17),
+            (2, 1025, 8),
+            (3, 2049, 33),
             (3, 37, 13),
             (4, 5, 16),
             (7, 31, 8),
@@ -1362,6 +1422,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn wide_packed_dot_matches_fixed_f64_grouping_and_validates_before_write() {
+        for inner in [0, 1, 3, 4, 5, 769] {
+            let lhs: Vec<_> = (0..2 * inner).map(|i| (i as f32 * 0.3).sin()).collect();
+            let rhs: Vec<_> = (0..inner * 9).map(|i| (i as f32 * 0.7).cos()).collect();
+            let packed = prepack_rhs(&rhs, inner, 9).unwrap();
+            let mut actual = vec![f32::NAN; 18];
+            matmul_packed_wide_into(&mut actual, &lhs, &packed, 2, inner, 9).unwrap();
+            for row in 0..2 {
+                for col in 0..9 {
+                    let mut lanes = [0.0f64; 4];
+                    for k in 0..inner / 4 * 4 {
+                        lanes[k % 4] +=
+                            f64::from(lhs[row * inner + k]) * f64::from(rhs[k * 9 + col]);
+                    }
+                    let mut expected = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3]);
+                    for k in inner / 4 * 4..inner {
+                        expected += f64::from(lhs[row * inner + k]) * f64::from(rhs[k * 9 + col]);
+                    }
+                    assert_eq!(actual[row * 9 + col].to_bits(), (expected as f32).to_bits());
+                }
+            }
+        }
+        let mut dst = [7.0];
+        assert!(matmul_packed_wide_into(&mut dst, &[1.0], &[2.0], 1, 2, 1).is_err());
+        assert_eq!(dst, [7.0]);
+        assert!(matmul_packed_wide_into(&mut dst, &[], &[], usize::MAX, 2, 2).is_err());
+        assert_eq!(dst, [7.0]);
     }
 
     #[test]

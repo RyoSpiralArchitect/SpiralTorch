@@ -14,6 +14,11 @@ pub struct PyNativeCausalLmAccumulator {
 #[pymethods]
 impl PyNativeCausalLmAccumulator {
     #[getter]
+    fn readout_accumulator(&self) -> &'static str {
+        self.inner.readout_accumulator().as_str()
+    }
+
+    #[getter]
     fn base_model_identity(&self) -> &str {
         self.inner.base_model_identity()
     }

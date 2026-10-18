@@ -35,7 +35,7 @@ def metric(row):
 
 
 def timing(value):
-    fields(value, "contract extension_sha256 torch transformers python platform torch_threads torch_interop_threads rows")
+    fields(value, "contract extension_sha256 torch transformers python platform torch_threads torch_interop_threads rows accuracy")
     if value["contract"] != Q["contract"]():
         raise ValueError("timing protocol changed")
     sha(value["extension_sha256"])
@@ -64,6 +64,51 @@ def timing(value):
         metric(row)
     if seen != expected:
         raise ValueError("missing conditions")
+    seen = set()
+    expected = {(n, arm, i) for n in Q["LENGTHS"] for arm in Q["ARMS"] for i in range(Q["APPENDS"]+1)}
+    for row in value["accuracy"]:
+        fields(row, "length arm step max_logit_abs argmax_exact within_gate")
+        if type(row["length"]) is not int or type(row["step"]) is not int or type(row["arm"]) is not str:
+            raise ValueError("invalid accuracy condition")
+        key = (row["length"], row["arm"], row["step"])
+        if key not in expected or key in seen:
+            raise ValueError("invalid/duplicate accuracy prefix")
+        seen.add(key)
+        metric(row)
+    if seen != expected:
+        raise ValueError("missing accuracy prefix")
+
+
+def public_runtime(value):
+    # Free-form runtime metadata stays in hashed private records, never the public envelope.
+    return {key: item for key, item in value.items() if key not in {"torch", "transformers", "python", "platform"}}
+
+
+def validate_seals(before, after, baseline_seal, candidate_seal):
+    expected = Q["contract"]()
+    if any(value != expected for value in (before["contract"], after["contract"], baseline_seal, candidate_seal)):
+        raise ValueError("saved protocol seals differ from records or current executable closure")
+
+
+def summaries(times):
+    result = []
+    for length in Q["LENGTHS"]:
+        for arm in Q["ARMS"]:
+            samples = [r for r in times["rows"] if r["length"] == length and r["arm"] == arm and not r["warmup"]]
+            accuracy = [r for r in times["accuracy"] if r["length"] == length and r["arm"] == arm]
+            result.append({"length": length, "arm": arm,
+                **{name: statistics.median(r[name] for r in samples) for name in ("prefill_ms", "decode_ms", "total_ms")},
+                "max_logit_abs": max(r["max_logit_abs"] for r in [*samples, *accuracy]),
+                "all_logit_gates_pass": all(r["within_gate"] for r in [*samples, *accuracy])})
+    return result
+
+
+def status(equal, cache_exact, resume_exact, rows):
+    wide = all(r["within_gate"] for r in rows if not r["arm"].startswith("f32"))
+    control = all(r["within_gate"] for r in rows if r["arm"].startswith("f32"))
+    if not (equal and cache_exact and resume_exact and wide):
+        return "UNQUALIFIED", control
+    return ("SCOPED_READOUT_PASS" if control else "SCOPED_WIDE_READOUT_PASS_WITH_F32_FAILING_CONTROL"), control
 
 
 def native(value, *, baseline=False):
@@ -135,6 +180,8 @@ def main():
     native(before, baseline=True)
     native(after)
     timing(times)
+    validate_seals(before, after, load(args.baseline.parent / "contract.json"),
+                   load(args.cohort / "contract.json"))
     equal = [r for r in after["rows"] if r["policy"] == "f32"] == before["rows"]
     if after["baseline_sha256"] != digest(args.baseline) or after["f32_bitwise_compatible"] is not equal:
         raise ValueError("baseline evidence changed or flag disagrees")
@@ -171,24 +218,19 @@ def main():
             raise ValueError("wrong continuation length")
     if seen != expected or len(raw["cases"]) != len(expected):
         raise ValueError("incomplete resume evidence")
-    medians = []
-    for length in Q["LENGTHS"]:
-        for arm in Q["ARMS"]:
-            samples = [r for r in times["rows"] if r["length"] == length and r["arm"] == arm and not r["warmup"]]
-            medians.append({"length": length, "arm": arm,
-                **{name: statistics.median(r[name] for r in samples) for name in ("prefill_ms", "decode_ms", "total_ms")},
-                "max_logit_abs": max(r["max_logit_abs"] for r in samples),
-                "all_logit_gates_pass": all(r["within_gate"] for r in samples)})
+    medians = summaries(times)
     cache_exact = all(p["full_sha256"] == p["cache_sha256"] and p["within_gate"] for row in after["rows"] for p in row["projections"])
     resume_exact = all(r["steps_exact"] and r["checkpoint_exact"] for r in resumed["rows"])
-    wide_gate = all(r["within_gate"] for r in times["rows"] if not r["arm"].startswith("f32"))
+    qualified, control = status(equal, cache_exact, resume_exact, [*times["rows"], *times["accuracy"]])
     save(args.output, {"schema": "spiraltorch.native_readout_comparison.v1", "contract": Q["contract"](),
         "publisher_sha256": digest(Path(__file__)),
-        "status": "SCOPED_WIDE_READOUT_PASS_WITH_F32_FAILING_CONTROL" if equal and cache_exact and resume_exact and wide_gate else "UNQUALIFIED",
+        "status": qualified, "f32_control_all_gates_pass": control,
         "f32_bitwise_compatible": equal, "cache_full_exact": cache_exact, "resume_exact": resume_exact,
-        "baseline": before, "native": after, "resume": resumed, "timing": times, "medians": medians,
-        "raw_sha256": {name: digest(args.cohort / name) for name in ("native.json", "resume.json", "resume-inputs.json", "timing.json")},
-        "baseline_sha256": digest(args.baseline)})
+        "baseline": public_runtime(before), "native": public_runtime(after), "resume": resumed,
+        "timing": public_runtime(times), "medians": medians,
+        "raw_sha256": {name: digest(args.cohort / name) for name in ("contract.json", "native.json", "resume.json", "resume-inputs.json", "timing.json")},
+        "baseline_sha256": digest(args.baseline),
+        "baseline_contract_sha256": digest(args.baseline.parent / "contract.json")})
 
 
 if __name__ == "__main__":

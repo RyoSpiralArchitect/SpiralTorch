@@ -141,8 +141,7 @@ impl NativeCausalLm {
 
     fn context_readout(&self, hidden: &Tensor) -> CausalLmResult<Tensor> {
         let normalized = self.final_norm.forward(hidden, self.config.norm_epsilon)?;
-        let logits =
-            normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?;
+        let logits = self.project_readout(&normalized)?;
         if logits.data().iter().any(|v| !v.is_finite()) {
             return Err("cached readout produced non-finite logits".into());
         }
@@ -197,6 +196,9 @@ impl NativeCausalLmContext {
     }
     pub fn geometry_artifact_id(&self) -> Option<&str> {
         self.model.geometry_artifact_id()
+    }
+    pub fn readout_accumulator(&self) -> CausalLmReadoutAccumulator {
+        self.model.readout_accumulator()
     }
     pub fn max_cache_values(&self) -> usize {
         self.max_cache_values

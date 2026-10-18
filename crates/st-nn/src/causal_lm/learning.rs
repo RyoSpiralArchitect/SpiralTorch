@@ -15,6 +15,7 @@ pub use accumulation::NativeCausalLmAccumulator;
 #[derive(Debug)]
 pub struct NativeCausalLmGradients {
     base_id: String,
+    readout_accumulator: CausalLmReadoutAccumulator,
     geometry_id: String,
     shape: [usize; 2],
     target_tokens: usize,
@@ -29,6 +30,9 @@ impl NativeCausalLmGradients {
     }
     pub fn base_model_identity(&self) -> &str {
         &self.base_id
+    }
+    pub fn readout_accumulator(&self) -> CausalLmReadoutAccumulator {
+        self.readout_accumulator
     }
     pub fn geometry_artifact_id(&self) -> &str {
         &self.geometry_id
@@ -51,6 +55,7 @@ fn frozen_pullback(
     weight: &PackedB,
     cache: &OnceLock<Result<PackedB, String>>,
     upstream: &Tensor,
+    accumulator: CausalLmReadoutAccumulator,
 ) -> CausalLmResult<Tensor> {
     // Serialize construction, not just publication: concurrent first calls must
     // not each allocate a vocabulary-sized transpose. Frozen layout errors are
@@ -59,12 +64,22 @@ fn frozen_pullback(
         .get_or_init(|| weight.transposed().map_err(|e| e.to_string()))
         .as_ref()
         .map_err(|e| e.clone())?;
-    Ok(upstream.matmul_prepacked_with_backend(weight, MatmulBackend::CpuSimd)?)
+    Ok(match accumulator {
+        CausalLmReadoutAccumulator::F32 => {
+            upstream.matmul_prepacked_with_backend(weight, MatmulBackend::CpuSimd)?
+        }
+        CausalLmReadoutAccumulator::F64 => upstream.matmul_prepacked_wide(weight)?,
+    })
 }
 
 impl Dense {
     fn backward_input(&self, upstream: &Tensor) -> CausalLmResult<Tensor> {
-        frozen_pullback(&self.weight, &self.backward_weight, upstream)
+        frozen_pullback(
+            &self.weight,
+            &self.backward_weight,
+            upstream,
+            CausalLmReadoutAccumulator::F32,
+        )
     }
 }
 
@@ -211,15 +226,19 @@ impl NativeCausalLm {
             None => hidden.clone(),
         };
         let normalized = self.final_norm.forward(&selected, c.norm_epsilon)?;
-        let logits =
-            normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?;
+        let logits = self.project_readout(&normalized)?;
         let loss = logits
             .cross_entropy_with_logits(&labels, objective.kernel_config())?
             .data()[0];
         let seed = Tensor::from_vec(1, 1, vec![1.])?;
         let d_logits =
             logits.cross_entropy_with_logits_backward(&labels, objective.kernel_config(), &seed)?;
-        let d_normalized = frozen_pullback(&self.head, &self.backward_head, &d_logits)?;
+        let d_normalized = frozen_pullback(
+            &self.head,
+            &self.backward_head,
+            &d_logits,
+            self.readout_accumulator,
+        )?;
         let d_selected = selected.layer_norm_input_backward(
             &self.final_norm.gamma,
             &d_normalized,
@@ -313,6 +332,7 @@ impl NativeCausalLm {
         }
         Ok(NativeCausalLmGradients {
             base_id: self.base_id.clone(),
+            readout_accumulator: self.readout_accumulator,
             geometry_id: runtime.artifact().artifact_id().to_owned(),
             shape: window_shape,
             target_tokens,
@@ -331,6 +351,7 @@ impl NativeCausalLm {
     ) -> CausalLmResult<Self> {
         self.with_geometry_sgd(
             &gradients.base_id,
+            gradients.readout_accumulator,
             &gradients.geometry_id,
             &gradients.parameters,
             learning_rate,
@@ -340,12 +361,15 @@ impl NativeCausalLm {
     fn with_geometry_sgd(
         &self,
         base_id: &str,
+        accumulator: CausalLmReadoutAccumulator,
         geometry_id: &str,
         parameters: &Parameters,
         learning_rate: f32,
     ) -> CausalLmResult<Self> {
-        if base_id != self.base_id {
-            return Err("LM gradients belong to a different base model".into());
+        if base_id != self.base_id || accumulator != self.readout_accumulator {
+            return Err(
+                "LM gradients belong to a different base model or readout accumulator".into(),
+            );
         }
         let runtime = self
             .geometry
@@ -367,6 +391,7 @@ impl NativeCausalLm {
     ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
         self.with_geometry_adamw(
             &gradients.base_id,
+            gradients.readout_accumulator,
             &gradients.geometry_id,
             &gradients.parameters,
             optimizer,
@@ -377,13 +402,16 @@ impl NativeCausalLm {
     fn with_geometry_adamw(
         &self,
         base_id: &str,
+        accumulator: CausalLmReadoutAccumulator,
         geometry_id: &str,
         parameters: &Parameters,
         optimizer: &crate::geometry_runtime::NativeGeometryAdamW,
         step: crate::geometry_runtime::AdamWStep,
     ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
-        if base_id != self.base_id {
-            return Err("LM gradients belong to a different base model".into());
+        if base_id != self.base_id || accumulator != self.readout_accumulator {
+            return Err(
+                "LM gradients belong to a different base model or readout accumulator".into(),
+            );
         }
         let runtime = self
             .geometry

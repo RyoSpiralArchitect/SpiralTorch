@@ -18,7 +18,11 @@ POLICIES = ["f32", "f64"]
 
 
 def contract():
-    return {"schema": "spiraltorch.native_readout_experiment.v1",
+    helpers = [ROOT / "benchmarks/results/2026-10-18-native-lm-cache/qualify.py",
+        ROOT / "benchmarks/results/2026-10-18-native-lm-generation/qualify.py",
+        PRIOR["TRAINING"], PRIOR["PRIOR"]["HELPER"], PRIOR["PRIOR"]["EXAMPLE"]]
+    return {"schema": "spiraltorch.native_readout_experiment.v2",
+        "helper_sha256": {str(p.relative_to(ROOT)): digest(p) for p in helpers},
         "script_sha256": digest(Path(__file__)), "model_sha256": PRIOR["PRIOR"]["MODEL"],
         "data_sha256": PRIOR["DATA"], "checkpoint_sha256": PRIOR["CHECKPOINT"],
         "base_model_identity": OLD["BASE"], "geometry_artifact_id": PRIOR["GEOMETRY"],
@@ -26,11 +30,14 @@ def contract():
         "lengths": LENGTHS, "appends": APPENDS, "warmups": WARMUPS, "repeats": REPEATS,
         "arms": ARMS, "timing_order": "listed on even rounds, reversed on odd rounds",
         "timing_scope": "CPU batch1, last-row readout; precreated input IDs; model loading excluded",
+        "accuracy_scope": "separate untimed reference comparison at every prefill/append prefix for all six arms",
         "native_scope": "base/learned, two lengths, nine full/cache comparisons; three decoding recipes; two training updates",
         "claim_ceiling": "one pinned train chapter; not model quality, arbitrary HF architectures, GPU or full-weight FT"}
 
 
 def checked(args):
+    if load(args.output / "contract.json") != contract():
+        raise ValueError("protocol or executable helper changed after sealing")
     PRIOR["PRIOR"]["check_model"](args.model_dir)
     if digest(args.data) != PRIOR["DATA"] or digest(args.checkpoint) != PRIOR["CHECKPOINT"]:
         raise ValueError("only previously admitted data/checkpoint are permitted")
@@ -48,6 +55,8 @@ def vector_hash(values):
 def native(args):
     PRIOR["PRIOR"]["forbid_ml"]()
     data = checked(args)
+    if args.mode != "baseline" and load(args.baseline)["contract"] != contract():
+        raise ValueError("baseline protocol differs; recapture rather than reuse")
     import spiraltorch as st
     models = PRIOR["model"](args, st)
     policies = ["f32"] if args.mode == "baseline" else POLICIES
@@ -156,14 +165,39 @@ def benchmark(args):
     models = {p: base.with_readout_accumulator(p) for p in POLICIES}
     reference = transformers.GPT2LMHeadModel.from_pretrained(args.model_dir, local_files_only=True,
         dtype=torch.float32, attn_implementation="eager").eval().requires_grad_(False)
-    rows = []
+    rows, accuracy = [], []
     with torch.inference_mode():
         for length in LENGTHS:
             prefixes = [data[:length+i] for i in range(APPENDS+1)]
             inputs = [torch.tensor([ids]) for ids in prefixes]
             singles = [torch.tensor([[data[length+i]]]) for i in range(APPENDS)]
-            hidden = reference.transformer(inputs[-1], use_cache=False).last_hidden_state
-            expected = reference.lm_head(hidden[:, -1:]).flatten().tolist()
+            expected_prefixes = []
+            for ids in inputs:
+                hidden = reference.transformer(ids, use_cache=False).last_hidden_state
+                expected_prefixes.append(reference.lm_head(hidden[:, -1:]).flatten().tolist())
+            for arm in ARMS:
+                context = cache = None
+                native_arm, cached = not arm.startswith("torch"), arm.endswith("cache")
+                model = models[arm[:3]] if native_arm else None
+                for i, prefix in enumerate(prefixes):
+                    if native_arm:
+                        if cached:
+                            if i == 0:
+                                context = st.NativeCausalLmContext(model, prefix)
+                                logits = context.logits()
+                            else:
+                                logits = context.append(data[length+i-1])
+                        else:
+                            logits = model.forward(prefix, [1, length+i], last_only=True)
+                    else:
+                        output = reference.transformer(singles[i-1] if cached and i else inputs[i],
+                            past_key_values=cache if cached else None, use_cache=cached)
+                        cache = output.past_key_values
+                        logits = reference.lm_head(output.last_hidden_state[:, -1:])
+                    values = logits.values() if native_arm else logits.flatten().tolist()
+                    accuracy.append({"length": length, "arm": arm, "step": i,
+                        **OLD["metrics"](values, expected_prefixes[i])})
+            expected = expected_prefixes[-1]
             for repeat in range(WARMUPS + REPEATS):
                 for arm in ARMS if repeat % 2 == 0 else reversed(ARMS):
                     context = cache = logits = output = None
@@ -201,9 +235,9 @@ def benchmark(args):
         "extension_sha256": digest(Path(st._rs.__file__)), "torch": torch.__version__,
         "transformers": transformers.__version__, "python": platform.python_version(),
         "platform": platform.platform(), "torch_threads": torch.get_num_threads(),
-        "torch_interop_threads": torch.get_num_interop_threads(), "rows": rows})
+        "torch_interop_threads": torch.get_num_interop_threads(), "rows": rows, "accuracy": accuracy})
     # The unchanged f32 path is a deliberately retained failing control.
-    if not all(r["within_gate"] for r in rows if not r["arm"].startswith("f32")):
+    if not all(r["within_gate"] for r in [*rows, *accuracy] if not r["arm"].startswith("f32")):
         raise ValueError("wide/torch logit gate failed; retain all timings as unqualified")
 
 
@@ -218,6 +252,7 @@ def main():
         p.error("native phase requires the old binary baseline")
     if args.mode in {"baseline", "native"}:
         args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
+        save(args.output / "contract.json", contract())
         native(args)
     else:
         (resume if args.mode == "resume" else benchmark)(args)

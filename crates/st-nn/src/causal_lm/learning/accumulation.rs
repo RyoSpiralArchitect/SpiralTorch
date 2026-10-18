@@ -10,6 +10,7 @@ type Means = BTreeMap<String, BTreeMap<String, Vec<f64>>>;
 #[derive(Debug)]
 pub struct NativeCausalLmAccumulator {
     base_id: String,
+    readout_accumulator: CausalLmReadoutAccumulator,
     geometry_id: String,
     objective: CausalLmObjective,
     means: Means,
@@ -46,6 +47,7 @@ impl NativeCausalLm {
             .collect();
         Ok(NativeCausalLmAccumulator {
             base_id: self.base_id.clone(),
+            readout_accumulator: self.readout_accumulator,
             geometry_id: artifact.artifact_id().into(),
             objective,
             means,
@@ -59,6 +61,9 @@ impl NativeCausalLm {
 impl NativeCausalLmAccumulator {
     pub fn base_model_identity(&self) -> &str {
         &self.base_id
+    }
+    pub fn readout_accumulator(&self) -> CausalLmReadoutAccumulator {
+        self.readout_accumulator
     }
     pub fn geometry_artifact_id(&self) -> &str {
         &self.geometry_id
@@ -79,6 +84,7 @@ impl NativeCausalLmAccumulator {
     /// Identity check can run before a binding copies tokens from foreign memory.
     pub fn validate_model(&self, model: &NativeCausalLm) -> CausalLmResult<()> {
         if model.base_model_identity() != self.base_id
+            || model.readout_accumulator != self.readout_accumulator
             || model.geometry_artifact_id() != Some(self.geometry_id.as_str())
         {
             return Err("LM accumulation belongs to another model or geometry snapshot".into());
@@ -155,6 +161,7 @@ impl NativeCausalLmAccumulator {
     /// f64 online means avoid f32 sum overflow and retain tiny contributions.
     pub fn add(&mut self, batch: &NativeCausalLmGradients) -> CausalLmResult<()> {
         if batch.base_id != self.base_id
+            || batch.readout_accumulator != self.readout_accumulator
             || batch.geometry_id != self.geometry_id
             || batch.objective != self.objective
         {
@@ -221,6 +228,7 @@ impl NativeCausalLmAccumulator {
         self.validate_model(model)?;
         model.with_geometry_sgd(
             &self.base_id,
+            self.readout_accumulator,
             &self.geometry_id,
             &self.parameter_gradients()?,
             rate,
@@ -237,6 +245,7 @@ impl NativeCausalLmAccumulator {
         self.validate_model(model)?;
         model.with_geometry_adamw(
             &self.base_id,
+            self.readout_accumulator,
             &self.geometry_id,
             &self.parameter_gradients()?,
             optimizer,
