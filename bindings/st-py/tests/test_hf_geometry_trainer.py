@@ -160,6 +160,31 @@ print('FINAL_ID=' + t.geometry.export_artifact(base_model_identity=t._geometry_b
     assert "FINAL_ID=" + expected in run.stdout
 
 
+@pytest.mark.parametrize("device", ["cpu", "mps"])
+def test_geometry_observation_preserves_actual_hf_training_and_rng(tmp_path, device):
+    if device == "mps" and not torch.backends.mps.is_available():
+        pytest.skip("MPS is unavailable")
+    baseline = make_trainer(tmp_path / "baseline", use_cpu=device == "cpu")
+    baseline.train()
+    expected_rng = torch.get_rng_state().clone()
+    expected_mps_rng = torch.mps.get_rng_state().clone() if device == "mps" else None
+    observed = make_trainer(tmp_path / "observed", use_cpu=device == "cpu")
+    with observed.geometry.observe(max_events=64) as trace:
+        observed.train()
+    assert equal(baseline.geometry.state_dict(), observed.geometry.state_dict())
+    assert equal(baseline.optimizer.state_dict(), observed.optimizer.state_dict())
+    assert equal(baseline.lr_scheduler.state_dict(), observed.lr_scheduler.state_dict())
+    assert equal(baseline.base_model.state_dict(), observed.base_model.state_dict())
+    assert torch.equal(expected_rng, torch.get_rng_state())
+    if expected_mps_rng is not None:
+        assert torch.equal(expected_mps_rng, torch.mps.get_rng_state())
+    report = trace.to_dict()
+    assert report["coverage_complete"] and report["calls_seen"] == 32
+    assert sum(bool(e["native_reports"]) for e in report["events"]) == 8
+    assert all(e["training"] and e["grad_enabled"] for e in report["events"])
+    assert observed.geometry._observation is None
+
+
 @pytest.fixture
 def checkpoint(tmp_path):
     trainer = make_trainer(tmp_path / "partial", callbacks=[StopAtTwo()])

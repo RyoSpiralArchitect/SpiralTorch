@@ -14,6 +14,7 @@ from .byte_corpus_runs import (
     run_byte_corpus_segments as run_byte_corpus_segments,
 )
 from .geometry_adapters import GeometryAdapterStack as GeometryAdapterStack
+from .geometry_observation import GeometryObservation as GeometryObservation
 from .hf_geometry_trainer import hf_geometry_trainer_class as hf_geometry_trainer_class
 
 from .hf_geometry_dataset import HfGeometryDataset as HfGeometryDataset
