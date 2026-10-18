@@ -60,6 +60,9 @@ language-quality, speed, unseen-corpus or cross-platform conclusion.
 Tests now include vocabulary-sized smoothed gradients against an independent
 f64 distribution and the optional f64 Torch oracle. Native arithmetic was not
 changed to imitate the f32 difference.
+`verification.json` records test counts, review fixes, diagnostic errors,
+source/binary hashes and the retained failure-log hashes. Raw gradients and
+checkpoint contents are not included in that public record.
 
 ## Replay And Retention
 

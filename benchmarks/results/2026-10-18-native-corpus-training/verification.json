@@ -1,0 +1,190 @@
+{
+  "source_commit": "efc8f795eff7679e58db51e9e86ce97841eed36e",
+  "source_tree": "6761398f72f2202972717906165546306149968e",
+  "test_counts": {
+    "rust_causal_lm": 35,
+    "rust_geometry_runtime": 27,
+    "rust_classification": 17,
+    "native_python_no_foreign_ml": 54,
+    "optional_comparison": 419,
+    "release_contract_and_smoke": 32,
+    "qualification_comparator": 5
+  },
+  "checks": {
+    "wasm32_st_nn": "passed",
+    "clippy_binding": "passed with 26 st-nn and 20 binding warnings plus vendored/dependency warnings",
+    "rustfmt_changed_files": "passed",
+    "ruff_touched_python": "passed",
+    "python_3_8": "syntax/source compatibility only locally; actual installed-wheel gate remains in CI"
+  },
+  "reviews": [
+    {
+      "agent": "01a14f20-01c6-7f32-ba29-f723cd23f62d",
+      "scope": "read-only independent review",
+      "resolved": [
+        "per-placement optimizer clocks at resume (red/green retained)",
+        "private POSIX output directories"
+      ],
+      "final_findings": 0,
+      "agent_ran_tests": false
+    }
+  ],
+  "retained_failures": {
+    "rust-training-1.log": "test-fixture assumption corrected; LR alone did not overflow",
+    "clock-review-red.log": "reproduced clock-reset acceptance before fix",
+    "wheel-build-2.log": "ambiguous Bound::len fixed with typed closure",
+    "release_learning_smoke-final.log": "wrong stdlib-only interpreter; native-env rerun passed",
+    "reference-corpus.log": "relative runpy __file__ mismatch before reference training; fixed invocation and final source resolves path",
+    "diagnose-head.log": "misaligned safetensors DLPack view; aligned diagnostic copy used",
+    "ruff-final.log": "pre-existing deliberate optional import E402 annotated",
+    "compare-corpus.log": "original f32 parameter gate failure retained, not overwritten"
+  },
+  "initial_f32_comparison": {
+    "passed": false,
+    "loss_max_abs": 3.504753112792969e-05,
+    "parameter_max_abs": 0.0032677099999999966,
+    "report_sha256": "3dbbdaa50dd2f82cfd4a6fceaade0f137ee4240dd409553d721043e72cad356a"
+  },
+  "posthoc_f64_ce_control": {
+    "passed": true,
+    "loss_max_abs": 1.966343753601052e-06,
+    "parameter_max_abs": 3.7429999999970265e-06,
+    "report_sha256": "5ed41400cf69983ad78dcd348e21dcb70e45a013d957b97b7fbf740ec8a1cc1c",
+    "native_math_changed": false,
+    "gates_relaxed": false
+  },
+  "native_continuation": {
+    "each_cohort_remaining_updates": 18,
+    "step_records_and_final_checkpoint_exact": true,
+    "cross_cohort_checkpoint_bytes_exact": true,
+    "final_checkpoint_sha256": "1ed13924961efe03330d1e16407382e3fcb0b3255504939215215a9375f62e6e"
+  },
+  "claim_ceiling": "one admitted train chapter, frozen GPT-2 geometry CPU learning and within-runtime resume; no quality, speed, arbitrary-HF, full-model FT, or cross-platform bitwise claim",
+  "release": "PyPI 0.4.32 unchanged; local wheels are development artifacts and must not be uploaded under 0.4.32",
+  "schema": "spiraltorch.native_corpus_verification.v1",
+  "source_commit_scope": "functional code before this evidence-only publication",
+  "first_update_f64_ce_diagnostic": [
+    {
+      "site": "transformer.h.0.mlp",
+      "parameter": "bias",
+      "maximum_absolute_error": 8.149072527885437e-09,
+      "relative_l2_error": 5.661956752983046e-06
+    },
+    {
+      "site": "transformer.h.0.mlp",
+      "parameter": "gate",
+      "maximum_absolute_error": 7.2177499532699585e-09,
+      "relative_l2_error": 6.146660495008055e-06
+    },
+    {
+      "site": "transformer.h.0.mlp",
+      "parameter": "log_radius",
+      "maximum_absolute_error": 4.433786671143025e-12,
+      "relative_l2_error": 1.1214420364352205e-05
+    },
+    {
+      "site": "transformer.h.11.mlp",
+      "parameter": "gate",
+      "maximum_absolute_error": 1.3969838619232178e-08,
+      "relative_l2_error": 1.2534162021196932e-06
+    },
+    {
+      "site": "transformer.h.6.attn",
+      "parameter": "gate",
+      "maximum_absolute_error": 3.6961864680051804e-09,
+      "relative_l2_error": 6.7634961518791844e-06
+    },
+    {
+      "site": "transformer.h.6.attn",
+      "parameter": "history_angle",
+      "maximum_absolute_error": 2.660272002685815e-11,
+      "relative_l2_error": 2.1962905591042436e-05
+    },
+    {
+      "site": "transformer.h.6.attn",
+      "parameter": "local_gate",
+      "maximum_absolute_error": 2.240994945168495e-09,
+      "relative_l2_error": 6.523718402254188e-06
+    },
+    {
+      "site": "transformer.h.6.attn",
+      "parameter": "log_gain",
+      "maximum_absolute_error": 2.7284841053187847e-11,
+      "relative_l2_error": 2.1584929574850275e-06
+    }
+  ],
+  "private_evidence_sha256": {
+    "classification-reference.log": "538f37dd2ab004e2dbde64ec37dceb09ddb878fabbd3b2de9ebf74db1739e9bf",
+    "classification-rust.log": "9d05a08be98a824a0820eb8c895f9b1a9d871991ac57b193aebc4f346ad3d2c2",
+    "clippy-binding.log": "ec6b480f3eaecc18f233f9bbee0289b06d4532bb5ef9412c6101ce37bd49a771",
+    "clock-review-green.log": "e50679385e8b9ac3a8adeb5add6dcef053139d93249a7a4d5e9540c78f9cbece",
+    "clock-review-red.log": "a9b57341a3f6429cf5edf81cb4bf39c0a83ffa702e805392ea35951cafd386df",
+    "compare-control.log": "eeb58c11fe1208e948293c15e29e6ce282a3da6fec873ecf04ec7dec4a2e169e",
+    "compare-corpus.log": "e91e339d0276b050b875bd1004839fe3bfb7c2707429ecfce1f1559be845cd3c",
+    "diagnose-head-aligned.log": "457ddf9338dd781ea0b6c4ccc19a66df685e538d27cca5b6a2e8a1c3bcd72de8",
+    "diagnose-head-f64-ce.log": "7864db31c4780c5ca7e48556419dd8e3f0161f6e710ca14ea2dd415ba3504bfd",
+    "diagnose-head.log": "3b47f64a186a8126f98d3d5dce90102e78d48c2aa133977a13d0189ac4eb1076",
+    "diagnose-native.log": "e7203887d3508b3d39617cca41132c63ce016e018e1cbf1de867d6419d9ef653",
+    "diagnose-reference-f64-ce.log": "80df61f4ad8945ddce23bab7e994d103e1a335c0d80bfd2c88f74b3114ee71cf",
+    "diagnose-reference.log": "80df61f4ad8945ddce23bab7e994d103e1a335c0d80bfd2c88f74b3114ee71cf",
+    "dist-dev/spiraltorch-0.4.32-cp38-abi3-macosx_14_0_arm64.whl": "aa2844d19d30fb332e881ca7dd1d9100ce2a048922f3bcd951eba96ba9aee3cd",
+    "dist-dev-final/spiraltorch-0.4.32-cp38-abi3-macosx_14_0_arm64.whl": "0bf83458e67510a69aead8935afcc959b54c64eac81d639b2744a61fb7db1024",
+    "install-dev.log": "0667b2a334cf605e91473dd5041cb80ec6e8eee92293a9cec0bd053f507fd0ab",
+    "install-final.log": "03bca8693a863418e22b8296444df11ec92e8e2b7ddc291f73a8b84d0275a02d",
+    "native-control-full.log": "1d41956baf68e516694f41e95e8a80e754c476b5f3df66af24de024aa4f56258",
+    "native-control-resumed.log": "2ab53fd18684f367a013de81586deefea4195f135e7c861bf17387a83968bc03",
+    "native-corpus-full.log": "1d41956baf68e516694f41e95e8a80e754c476b5f3df66af24de024aa4f56258",
+    "native-corpus-resumed.log": "2ab53fd18684f367a013de81586deefea4195f135e7c861bf17387a83968bc03",
+    "native-minimum-helper-final.log": "31fee74ca91764ff428912a09870cbe01b998b86899b47ff32b2bbbf7fdc0d92",
+    "native-private-output-test.log": "d828de626873b7b17b6bb8e19cdc2cc948004899de39f2883182a0d95ca7ed40",
+    "native_causal_lm-final.log": "670a39115e7523a8984e4842e16547cb2094b03fad392b037b4b9dc8b2656e62",
+    "native_causal_lm_accumulation-final.log": "d094b1bd2c8318c96097f80c50da282add5b2972970a77046de8db6c8935f6ca",
+    "native_causal_lm_objective-final.log": "65378dcad145da2497120819bebfc3c46534dce9714ce064b3d809a56654aca2",
+    "native_causal_lm_training-example-final.log": "a1247490ec014bc7d0f8b741fb823c183276eab6e5290db8f018dd171b972638",
+    "native_causal_lm_training-final.log": "9ec9e3c52e7908b746c625587944c7e1eb71f90fc834fbb4527d510523684dd2",
+    "native_geometry_adamw-final.log": "e73c3805f810fdcf3d0167ced7085c48306c9482a952ffb710551d230cdb3e51",
+    "native_geometry_runtime-final.log": "65bdfd7bd329ce1a1332cb4c87debefe340b8a42705cb8843110a73dd70e0b8c",
+    "native_weights-final.log": "75ff54e727b57e4bd7b88956ed0c92c4b9a416e6f0976707e8fb54aa385ac0bd",
+    "optional-comparison-1.log": "b2781572a2f6f4d410ad7beec658a7fcbb6a47ea7f19148f7da34ce38c4808ca",
+    "optional-comparison-final.log": "33ceb01cdc95a359d4704deb81bc595dbd488e411fb869772042474d91116bae",
+    "prepare-control.log": "8374249579492be784422f2fc7ebd2b9ffe07689d9dfcf705999ba8d35a9f48a",
+    "prepare-corpus.log": "23cf5c542cb393fe21c2f80598a6845159a94934e242c6b10f6f5f972770d2ab",
+    "python_compatibility-final.log": "df929de0ac24d3b8626fd6a878b5b3dff0d915ef854dcd1e63b86c6b22b8b502",
+    "qualification-tests-final.log": "ff6ce01f479eed94ea519b980b6438b6cd3e3867d3a8780341d1d117833a917e",
+    "real-corpus/first-gradient-native.json": "37c284f5b0d06e3c9e4327a36980192a08bc64360a1075291e7635b1682295cc",
+    "real-corpus/first-gradient-reference-f64-ce.json": "b17d06b4b791961d407329a904ca6101e9ed53a2e36596b2396f0fcb46718de4",
+    "real-corpus/first-gradient-reference.json": "7abea3e36a806c33af07269abbad33749b2f9677cf15a8f178134b51338c96ca",
+    "real-corpus/head-diagnostic.json": "c12d56b34d15b449f101d2c8cbb27f1e754f83248e9c189d3ea045cf3ecf59c7",
+    "real-corpus/head-f64-diagnostic.json": "813ce32c653dae661acdc97d0bb211b9fcf0c3cf6575be981bf5babfb5f1d985",
+    "reference-control.log": "eb0dbe83fd3cb2897a01414725318e8966c3e6db70703e9ab4160a3143e4932b",
+    "reference-corpus-absolute-path.log": "34e7e8a06a00f157130a3126867108cd33ca9f8bbc4f4149e0d66f21c863a1b6",
+    "reference-corpus.log": "3e0677941a8c70f5ba2f7b1c90a988f33bac03c0c2d73849b62c21f15115440d",
+    "release_learning_smoke-final-native.log": "81f560108a3049945e6edf426af469af6fef7ff61f032bcf3318f39c251696a8",
+    "release_learning_smoke-final.log": "3e912572bba79b660e68d7afa3cdceee0f3f891ea09f1d5a1550b89bac8de9cf",
+    "release_runbook-final.log": "fe008aab760eb03ccac7578e2b84665b1b50b0d7f855b17a0c7a8d039435b658",
+    "release_workflows-final.log": "87bbd46904eb1613ceb226fd29ca30f0e5253bee3b9d190b44943065f8ab7a5c",
+    "ruff-closeout.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "ruff-final.log": "e8cd8cd22f2f3aac090ebad835860cc9e66731cf2fbf3f95b7574ec14f4b90b6",
+    "rust-geometry-1.log": "aaf1d3851b286cf3b241b68a405744ada3263315db1d6fa2caaeaeeb876b5483",
+    "rust-training-1.log": "a060268ec27e6ec5915c8478fe6d262919713963718b2ebc991d4e82f727693e",
+    "rust-training-2.log": "e5dc4bfd526637b85d1d86b6b3e883c678ab6b52bd936bd746157b680a6e0b68",
+    "rust-training-final.log": "798ede4ead901b6c67237d82154404e161066ff41306e9e94a34931e94f1d25c",
+    "test_native_causal_lm-1.log": "21c7e48d0b1ec908feef784bbce1fa55f2c9a7acf76382fa7578754a78bd1ed8",
+    "test_native_causal_lm_accumulation-1.log": "d094b1bd2c8318c96097f80c50da282add5b2972970a77046de8db6c8935f6ca",
+    "test_native_causal_lm_objective-1.log": "65378dcad145da2497120819bebfc3c46534dce9714ce064b3d809a56654aca2",
+    "test_native_causal_lm_training-1.log": "1e43b905e11ca028139fe5078016515111aaf7cebf8d6a3e224b7d03b9cb6ac9",
+    "test_native_geometry_adamw-1.log": "b6a161abed43b9a0dba9259cd451b39b20b10425ac13cc14786554c0e6fac7f1",
+    "test_native_geometry_runtime-1.log": "1ed838ae4c40037b8e3467531d9a74025b2a092c67d4b6267b905d47f3d5722e",
+    "test_native_weights-1.log": "75ff54e727b57e4bd7b88956ed0c92c4b9a416e6f0976707e8fb54aa385ac0bd",
+    "test_python_compatibility-1.log": "da18bd10a2b89679474b452641a57c109d63be1fa9cca048dd17339e325e898a",
+    "test_release_learning_smoke-1.log": "97be623b4d6028e8344f7e6334accc0e53abca2d1fbdee20c221c9de86a6f27d",
+    "test_release_runbook-1.log": "fe008aab760eb03ccac7578e2b84665b1b50b0d7f855b17a0c7a8d039435b658",
+    "test_release_workflows-1.log": "92c1b999d3008558eecdcd11e8ba84a513c36dde8447642dca47865558f9b00f",
+    "wasm-check.log": "0c471d2294a95ef0ef4cc3516904bdc7a0416a8d136963fcaff3b666ce6463d8",
+    "weights-comparison-final.log": "c0d1680563c3b44ed950e6c5ba65832bf8fce6acf687994915e6a96b357a2ea9",
+    "wheel-build-1.log": "4f8dedf738fb60c151f141afd700514ffb627ba90736c27719ce8925cd599398",
+    "wheel-build-2.log": "744d98b4b6c06cd7c510bcf5e221fc2ccbf81b3169f0193feeaa0517cf09d17a",
+    "wheel-build-3.log": "218ee6b7043d4fb927d7321e5b9eb6a59c0589f22c1342631e223521abaa7287"
+  },
+  "private_validation_receipt_sha256": "b61946c8c72af1b9922f93596884fddd1df24de731816a8b295d34d2fc387585"
+}
