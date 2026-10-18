@@ -9574,7 +9574,7 @@ def __getattr__(name: str) -> _Any:
         value = getattr(module, name)
         globals()[name] = value
         return value
-    if name == "GeometryAdapterStack":
+    if name in {"GeometryAdapterStack", "GeometryObservation"}:
         module = import_module("spiraltorch.geometry_adapters")
         value = getattr(module, name)
         globals()[name] = value
@@ -9667,7 +9667,7 @@ for _name in [
         _EXPORTED.add(_name)
 
 _EXPORTED.update(
-    ["hg", "rg", "z", "__version__", "model_zoo", "GeometryAdapterStack", "hf_geometry_trainer_class", "HfGeometryDataset",
+    ["hg", "rg", "z", "__version__", "model_zoo", "GeometryAdapterStack", "GeometryObservation", "hf_geometry_trainer_class", "HfGeometryDataset",
      "FractionalMemoryAdapter", "fractional_gl_autograd",
      "FractionalHistoryAdapter", "fractional_gl_history_autograd",
      "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd",

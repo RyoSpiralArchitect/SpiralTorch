@@ -11,6 +11,8 @@ For source-candidate portable weights plus recipes and placement, use the
 built-in adapters without pickle; optimizer/RNG/cursor remain separate.
 The [HF geometry Trainer](python/hf-geometry-training.md) connects these owners
 to HF's actual optimizer, clipping, evaluation and checkpoint lifecycle.
+Its optional [observation scope](python/hf-geometry-training.md#observe-without-replaying)
+measures actual residuals and native conditioning without a second forward.
 
 The [captured Topos tape](topos_learning.md) avoids backward recomputation and
 reupload of saved inputs without changing placement, optimizer or derivative

@@ -11,6 +11,7 @@ import json
 import math
 from typing import Any
 
+from ._geometry_conditioning_capture import native_conditioning_sink
 from ._torch_transport import (
     _buffer_transport_available, _buffer_values, _transport_output, torch,
 )
@@ -368,10 +369,13 @@ def wave_gate_autograd(
         raise TypeError("kernel must be an immutable Rust WaveGateKernel")
     if max(value.numel(), value.shape[-1]) > kernel.max_values:
         raise ValueError("input exceeds the geometric kernel's value budget")
-    conditioning = {} if return_conditioning else None
+    sink = native_conditioning_sink()
+    conditioning = {} if return_conditioning or sink is not None else None
     output = _WaveGateFunction.apply(
         value, gate, bias, log_radius, kernel, conditioning
     )
+    if sink is not None:
+        sink(conditioning)
     return (output, conditioning) if return_conditioning else output
 
 

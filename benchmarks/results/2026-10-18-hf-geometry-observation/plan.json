@@ -1,0 +1,30 @@
+{
+  "schema": "spiraltorch.hf_geometry_observation_plan.v1",
+  "purpose": "Post-hoc mechanism diagnosis of every saved book arm; no tuning, training or quality promotion",
+  "book_plan_id": "sha256:f90fe89f9b9824365f46be056ca7bf3a15fef6079a141c8ea3172b987ee4c3bb",
+  "book_manifest_id": "sha256:b94af83d84c537cc7ed2d54c92853f64c2de09c8cdb287189eabe1ec6bd5a862",
+  "book_preflight_id": "sha256:f7c6539567cb970bb5a3c9b54855c17e28228867b6402a495db182acefcdb467",
+  "book_results_id": "sha256:13859b95203cff827aa741ad8c8e81a43916da33db393bbda625ad22367b13f9",
+  "book_saved_state_check_id": "sha256:b17df61a5ff8fd8b84373329fc46a6922e02c49e155639ca6d7efd6965162047",
+  "states": "4 shared initial artifacts, then step 256 and final export 512 of all 12 runs",
+  "case_count": 28,
+  "split": "all 159 complete development windows; no reserve",
+  "context_length": 128,
+  "eval_batch_size": 2,
+  "max_events": 320,
+  "max_values": 1048576,
+  "device": "mps",
+  "dtype": "float32",
+  "attention": "eager",
+  "kv_cache": false,
+  "optimizer_updates": 0,
+  "checks": [
+    "all-development HF evaluation loss exact with and without observation",
+    "initial and final loss exact against published book result",
+    "first development window logits exact with and without observation",
+    "evaluation RNG identical with and without observation",
+    "base and adapter states unchanged, no optimizer or gradients",
+    "all planned sites and values observed; input artifact bytes unchanged"
+  ],
+  "publication": "All case/layer scalars, verification, hashes and replay; no corpus, tokens, activations, generated text or learned weights"
+}

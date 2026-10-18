@@ -9,8 +9,9 @@ from typing import Any
 from weakref import WeakKeyDictionary
 
 from .geometry_autograd import _input, _require_torch, torch
+from .geometry_observation import GeometryObservation
 
-__all__ = ["GeometryAdapterStack"]
+__all__ = ["GeometryAdapterStack", "GeometryObservation"]
 _SCHEMA = "spiraltorch.geometry_adapter_stack.v1"
 _ACTIVE_TARGETS: Any = WeakKeyDictionary()
 
@@ -49,6 +50,7 @@ else:
             self._paths = paths
             self.adapters = torch.nn.ModuleList(placements.values())
             self._active_token: Any = None
+            self._observation: Any = None
             self._validate_ownership()
 
         @property
@@ -143,10 +145,14 @@ else:
                         or self.adapters[index] is not adapter):
                     raise RuntimeError("geometry attachment changed during execution")
                 _input(value)
-                result = adapter(value)
-                if (not isinstance(result, torch.Tensor) or result.shape != value.shape
-                        or result.dtype != value.dtype or result.device != value.device):
-                    raise ValueError("geometry adapters must preserve tensor shape, dtype and device")
+                def invoke():
+                    result = adapter(value)
+                    if (not isinstance(result, torch.Tensor) or result.shape != value.shape
+                            or result.dtype != value.dtype or result.device != value.device):
+                        raise ValueError("geometry adapters must preserve tensor shape, dtype and device")
+                    return result
+                result = (invoke() if self._observation is None else
+                          self._observation._call(self.paths[index], adapter, value, invoke))
                 executed.add(index)
                 if result.requires_grad:
                     def in_scope(gradient: Any) -> Any:
@@ -157,6 +163,32 @@ else:
                 return result
 
             return apply
+
+        @contextmanager
+        def observe(self, *, max_events: int = 128,
+                    max_values: int = 1_048_576) -> Iterator[GeometryObservation]:
+            """Observe actual calls without replay or changing hooks/gradients.
+
+            Wrap attach(), trainer.evaluate() or trainer.train(). Event/value
+            limits skip diagnostics, never model execution, and report gaps.
+            Extra host copies/reductions are opt-in overhead, not a speed probe.
+            No activation tensors, token IDs or learned values are retained.
+            Nested observation of the same stack and concurrent use are unsupported.
+            """
+            if self._observation is not None:
+                raise RuntimeError("this geometry stack is already observed")
+            observation = GeometryObservation(max_events=max_events, max_values=max_values)
+            self._observation = observation
+            observation._status = "recording"
+            try:
+                yield observation
+            except BaseException:
+                observation._status = "failed"
+                raise
+            else:
+                observation._status = "completed"
+            finally:
+                self._observation = None
 
         @contextmanager
         def attach(self, model: Any, *, require_all: bool = False) -> Iterator[GeometryAdapterStack]:

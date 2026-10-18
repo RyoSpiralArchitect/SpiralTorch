@@ -78,6 +78,39 @@ target count so unequal label masks accumulate correctly. At least one shifted
 target must remain in each labeled batch. Custom `compute_loss_func` and
 pre-shifted targets are not supported in this slice.
 
+## Observe Without Replaying
+
+```python
+with trainer.geometry.observe(max_events=320) as observation:
+    metrics = trainer.evaluate()  # Or trainer.train(); normal hooks still run.
+report = observation.to_dict()
+assert report["coverage_complete"]  # A bounded trace may intentionally be partial.
+```
+
+This opt-in scope observes each actual adapter invocation exactly once, not a
+second diagnostic forward. It records path, shape, mode, actual residual norms
+and, for WaveGate, scalar conditioning from the same Rust-owned forward snapshot.
+The report never retains activation tensors, token IDs or learned weights; it
+does not write files automatically. `to_dict()` returns an owned JSON-compatible
+copy. The same scope wraps standalone `geometry.attach(model)`.
+
+At most `max_events` calls (1..4096) and `max_values` elements per call
+(1..1,048,576) are measured; each call retains at most 16 native reports from a
+composite adapter. Exceeding a budget skips diagnostics, **never execution**, and
+sets `coverage_complete=False`. A zero input norm produces a `None` relative
+residual; nonfinite custom output is reported without replacing it. Coverage
+means measurement coverage, not finiteness, correctness or language quality.
+Other adapter types receive generic residual statistics, not invented native
+conditioning. Exception types are recorded without exception messages, and the
+original exception propagates. Same-stack nested/concurrent scopes are unsupported.
+
+Residual norms use actual float32 input/output with CPU float64 reductions;
+MPS values move to CPU before conversion. Extra copies, synchronization and
+Rust diagnostics are observation overhead, **not** normal-run timing. Native
+radial/tangential gains describe the local projected map, not the complete
+residual adapter or end-to-end LM loss Jacobian. Observation does not change
+radius, gradients, optimizer policy, checkpoints or deployment decisions.
+
 ## Save, Resume, Infer
 
 `checkpoint-N/spiraltorch-geometry.json` is the Rust-validated portable geometry
