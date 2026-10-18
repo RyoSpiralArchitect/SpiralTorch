@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.32
+
 0.4.32 is prepared in source; this does not confirm PyPI publication.
 
 - Add `NativeGeometryRuntime` and immutable `NativeGeometryBatch` to execute
