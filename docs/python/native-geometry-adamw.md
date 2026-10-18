@@ -58,11 +58,13 @@ reduction without exporting parameter arrays. Alternatively,
 sealed native gradient batch. `step_sgd(model, learning_rate)` uses the same
 mean with the existing stateless update path.
 
-Each window contributes `B * (T - 1)` next-token targets. The group loss and
+Without explicit labels, each window contributes `B * (T - 1)` targets. With
+[selected causal labels](native-causal-lm.md#selected-targets-and-label-smoothing),
+only non-ignored shifted targets count. The group loss and
 gradient are target-weighted means, **not** equally weighted microbatch means.
 For lengths three and five with batch size one, the weights are two and four.
-There is no fabricated concatenated shape and no padding or ignored-label
-semantics. SGD runs once, or AdamW clips the combined gradient once and advances
+There is no fabricated concatenated shape or inferred padding. SGD runs once,
+or AdamW clips the combined gradient once and advances
 its clocks once, irrespective of microbatch count.
 
 The Rust owner retains f64 parameter/loss means and integer counters, not token
@@ -80,7 +82,9 @@ boundary. Updates do not clear or consume the accumulation. Start a new one
 for each new model snapshot; applying an old one to changed geometry rejects.
 Pending accumulations are **not serialized**: checkpoint the model/optimizer
 pair at completed update boundaries and save the external data cursor/schedule
-separately. Mid-group fault recovery must replay that whole group.
+and objective/label policy separately. Mid-group fault recovery must replay
+that whole group. A group seals its smoothing policy at construction;
+`add()` rejects a batch with a different policy before modifying means.
 
 ## Standalone Geometry
 

@@ -1,5 +1,5 @@
 //! Thin transport for the Rust-owned token-weighted mean and update boundary.
-use super::{error, shape, tokens, PyNativeCausalLm, PyNativeCausalLmGradients};
+use super::{error, loss_labels, shape, tokens, PyNativeCausalLm, PyNativeCausalLmGradients};
 use crate::channel_affine::reject_bool;
 use crate::geometry_runtime::{adamw_step, PyNativeGeometryAdamW};
 use pyo3::prelude::*;
@@ -33,24 +33,34 @@ impl PyNativeCausalLmAccumulator {
     fn loss(&self) -> Option<f64> {
         self.inner.loss()
     }
+    #[getter]
+    fn label_smoothing(&self) -> f64 {
+        self.inner.objective().label_smoothing
+    }
 
     fn add(&mut self, py: Python<'_>, gradients: &PyNativeCausalLmGradients) -> PyResult<()> {
         py.detach(|| self.inner.add(&gradients.inner))
             .map_err(error)
     }
 
+    #[pyo3(signature = (model, windows, window_shape, *, labels=None))]
     fn accumulate_loss(
         &mut self,
         py: Python<'_>,
         model: &PyNativeCausalLm,
         windows: &Bound<'_, PyAny>,
         window_shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<f32> {
         let shape = shape(window_shape)?;
         let count = self.inner.input_count(&model.inner, shape).map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.accumulate_loss(&model.inner, &windows, shape))
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner
+                .accumulate_loss_with_labels(&model.inner, &windows, shape, labels.as_deref())
+        })
+        .map_err(error)
     }
 
     fn parameter_gradients(

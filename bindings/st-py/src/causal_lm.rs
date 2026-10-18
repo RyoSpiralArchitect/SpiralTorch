@@ -5,7 +5,9 @@ use crate::geometry_runtime::{adamw_step, PyNativeGeometryAdamW};
 use crate::weights::{PyNdTensor, PySafeTensorArchive};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use st_nn::causal_lm::{CausalLmLimits, NativeCausalLm, NativeCausalLmGradients};
+use st_nn::causal_lm::{
+    CausalLmLimits, CausalLmObjective, NativeCausalLm, NativeCausalLmGradients,
+};
 use std::collections::BTreeMap;
 
 mod accumulation;
@@ -35,6 +37,34 @@ fn tokens(value: &Bound<'_, PyAny>, count: usize) -> PyResult<Vec<usize>> {
         result.push(dimension(&value.get_item(i)?)?);
     }
     Ok(result)
+}
+
+fn loss_objective(value: Option<&Bound<'_, PyAny>>) -> PyResult<CausalLmObjective> {
+    let label_smoothing = match value {
+        Some(value) => {
+            reject_bool(value)?;
+            value.extract::<f64>()?
+        }
+        None => 0.,
+    };
+    let objective = CausalLmObjective { label_smoothing };
+    objective.validate().map_err(error)?;
+    Ok(objective)
+}
+
+fn loss_labels(value: Option<&Bound<'_, PyAny>>, count: usize) -> PyResult<Option<Vec<i64>>> {
+    let Some(value) = value else { return Ok(None) };
+    if value.len()? != count {
+        return Err(error("label count differs from window shape"));
+    }
+    let mut result = Vec::new();
+    result.try_reserve_exact(count).map_err(error)?;
+    for i in 0..count {
+        let item = value.get_item(i)?;
+        reject_bool(&item)?;
+        result.push(item.extract::<i64>()?);
+    }
+    Ok(Some(result))
 }
 
 fn limit(value: Option<&Bound<'_, PyAny>>, default: usize) -> PyResult<usize> {
@@ -74,6 +104,14 @@ impl PyNativeCausalLmGradients {
     #[getter]
     fn window_shape(&self) -> Vec<usize> {
         self.inner.window_shape().to_vec()
+    }
+    #[getter]
+    fn target_tokens(&self) -> usize {
+        self.inner.target_tokens()
+    }
+    #[getter]
+    fn label_smoothing(&self) -> f64 {
+        self.inner.objective().label_smoothing
     }
     fn parameter_gradients(&self) -> BTreeMap<String, BTreeMap<String, Vec<f32>>> {
         self.inner.parameters().clone()
@@ -139,27 +177,45 @@ impl PyNativeCausalLm {
             .map(|inner| PyGeometryAdapterArtifact { inner })
     }
 
-    fn geometry_accumulator(&self, py: Python<'_>) -> PyResult<PyNativeCausalLmAccumulator> {
-        py.detach(|| self.inner.geometry_accumulator())
+    #[pyo3(signature = (*, label_smoothing=None))]
+    fn geometry_accumulator(
+        &self,
+        py: Python<'_>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyNativeCausalLmAccumulator> {
+        let objective = loss_objective(label_smoothing)?;
+        py.detach(|| self.inner.geometry_accumulator_with_objective(objective))
             .map(|inner| PyNativeCausalLmAccumulator { inner })
             .map_err(error)
     }
 
+    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None))]
     fn geometry_loss_gradients(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmGradients> {
+        let objective = loss_objective(label_smoothing)?;
         let shape = self::shape(shape)?;
         let count = self
             .inner
             .geometry_gradient_input_count(shape)
             .map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.geometry_loss_gradients(&windows, shape))
-            .map(|inner| PyNativeCausalLmGradients { inner })
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner.geometry_loss_gradients_with_objective(
+                &windows,
+                shape,
+                labels.as_deref(),
+                objective,
+            )
+        })
+        .map(|inner| PyNativeCausalLmGradients { inner })
+        .map_err(error)
     }
 
     fn step_geometry_sgd(
@@ -235,26 +291,25 @@ impl PyNativeCausalLm {
             .map_err(error)
     }
 
+    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None))]
     fn next_token_loss(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<f32> {
+        let objective = loss_objective(label_smoothing)?;
         let shape = self::shape(shape)?;
-        let steps = shape[1]
-            .checked_sub(1)
-            .filter(|&n| n > 0)
-            .ok_or_else(|| error("next-token loss needs at least two IDs per window"))?;
-        self.inner
-            .input_count([shape[0], steps], false)
-            .map_err(error)?;
-        let count = shape[0]
-            .checked_mul(shape[1])
-            .ok_or_else(|| error("window shape overflow"))?;
+        let count = self.inner.loss_input_count(shape).map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.next_token_loss(&windows, shape))
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner
+                .next_token_loss_with_objective(&windows, shape, labels.as_deref(), objective)
+        })
+        .map_err(error)
     }
 }
 

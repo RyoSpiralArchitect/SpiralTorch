@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "objective_tests.rs"]
+mod objective;
+
 fn trainable(model: &NativeCausalLm) -> GeometryAdapterArtifact {
     let mut record = artifact(model, "transformer.h.0.attn", 0.2)
         .record()
@@ -23,7 +26,14 @@ fn trainable(model: &NativeCausalLm) -> GeometryAdapterArtifact {
 }
 
 fn objective(model: &NativeCausalLm, windows: &[usize], shape: [usize; 2]) -> f64 {
-    let (input, labels, shape) = model.shift_windows(windows, shape).unwrap();
+    let PreparedCausalWindow {
+        input,
+        labels,
+        shape,
+        ..
+    } = model
+        .prepare_objective(windows, shape, None, CausalLmObjective::default())
+        .unwrap();
     let logits = model.logits(&input, shape, false).unwrap();
     logits
         .data()

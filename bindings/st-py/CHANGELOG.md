@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add optional unshifted causal `labels` and `label_smoothing` to native LM
+  loss/geometry learning. Shared Rust CE/VJP handles `-100` exclusions and
+  uniform smoothing; input context is not removed. Accumulation weights by
+  non-ignored shifted targets and rejects mixed smoothing objectives. Default
+  full-target behavior is unchanged. No padding/attention mask is inferred,
+  and fully ignored microbatches fail before decoder execution. Source-only
+  after 0.4.32; the optional HF Trainer remains an explicit foreign client.
+
 - Add Rust-owned `NativeCausalLmAccumulator` for token-weighted geometry
   learning over variable-length, unpadded microbatches. Loss and parameter
   means accumulate without Python tensor arithmetic or retained decoder tapes;

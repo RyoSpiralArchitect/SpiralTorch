@@ -17,6 +17,8 @@ pub struct NativeCausalLmGradients {
     base_id: String,
     geometry_id: String,
     shape: [usize; 2],
+    target_tokens: usize,
+    objective: CausalLmObjective,
     loss: f32,
     parameters: Parameters,
 }
@@ -33,6 +35,12 @@ impl NativeCausalLmGradients {
     }
     pub fn window_shape(&self) -> [usize; 2] {
         self.shape
+    }
+    pub fn target_tokens(&self) -> usize {
+        self.target_tokens
+    }
+    pub fn objective(&self) -> CausalLmObjective {
+        self.objective
     }
     pub fn parameters(&self) -> &Parameters {
         &self.parameters
@@ -147,8 +155,39 @@ impl NativeCausalLm {
         windows: &[usize],
         window_shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmGradients> {
+        self.geometry_loss_gradients_with_objective(
+            windows,
+            window_shape,
+            None,
+            CausalLmObjective::default(),
+        )
+    }
+
+    pub fn geometry_loss_gradients_with_objective(
+        &self,
+        windows: &[usize],
+        window_shape: [usize; 2],
+        labels: Option<&[i64]>,
+        objective: CausalLmObjective,
+    ) -> CausalLmResult<NativeCausalLmGradients> {
+        objective.validate()?;
         self.geometry_gradient_input_count(window_shape)?;
-        let (ids, labels, shape) = self.shift_windows(windows, window_shape)?;
+        let prepared = self.prepare_objective(windows, window_shape, labels, objective)?;
+        self.geometry_loss_gradients_prepared(prepared)
+    }
+
+    fn geometry_loss_gradients_prepared(
+        &self,
+        prepared: PreparedCausalWindow,
+    ) -> CausalLmResult<NativeCausalLmGradients> {
+        let PreparedCausalWindow {
+            input: ids,
+            labels,
+            shape,
+            window_shape,
+            target_tokens,
+            objective,
+        } = prepared;
         let runtime = self.geometry.as_ref().unwrap();
         let c = &self.config;
         let (first_layer, first_site) = self.first_geometry_site()?;
@@ -165,14 +204,11 @@ impl NativeCausalLm {
         let logits =
             normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?;
         let loss = logits
-            .cross_entropy_with_logits(&labels, CrossEntropyConfig::default())?
+            .cross_entropy_with_logits(&labels, objective.kernel_config())?
             .data()[0];
         let seed = Tensor::from_vec(1, 1, vec![1.])?;
-        let d_logits = logits.cross_entropy_with_logits_backward(
-            &labels,
-            CrossEntropyConfig::default(),
-            &seed,
-        )?;
+        let d_logits =
+            logits.cross_entropy_with_logits_backward(&labels, objective.kernel_config(), &seed)?;
         let d_normalized = frozen_pullback(&self.head, &self.backward_head, &d_logits)?;
         let mut gradient = hidden.layer_norm_input_backward(
             &self.final_norm.gamma,
@@ -265,6 +301,8 @@ impl NativeCausalLm {
             base_id: self.base_id.clone(),
             geometry_id: runtime.artifact().artifact_id().to_owned(),
             shape: window_shape,
+            target_tokens,
+            objective,
             loss,
             parameters,
         })

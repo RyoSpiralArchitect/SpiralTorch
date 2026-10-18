@@ -268,6 +268,7 @@ jobs:
           python -I -B ../../bindings/st-py/tests/test_native_weights.py -v
           python -I -B ../../bindings/st-py/tests/test_native_causal_lm.py -v
           python -I -B ../../bindings/st-py/tests/test_native_causal_lm_accumulation.py -v
+          python -I -B ../../bindings/st-py/tests/test_native_causal_lm_objective.py -v
           python -I -B ../../bindings/st-py/examples/native_weights_geometry.py
       - name: Select minimum supported CPython (Linux)
         if: runner.os == 'Linux'
@@ -283,6 +284,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py -v
           python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v7

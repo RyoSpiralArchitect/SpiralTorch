@@ -4,6 +4,7 @@ fn accumulator() -> NativeCausalLmAccumulator {
     NativeCausalLmAccumulator {
         base_id: "base".into(),
         geometry_id: "geometry".into(),
+        objective: CausalLmObjective::default(),
         loss: 0.,
         target_tokens: 0,
         microbatches: 0,
@@ -19,6 +20,8 @@ fn batch(shape: [usize; 2], values: [f32; 2], loss: f32) -> NativeCausalLmGradie
         base_id: "base".into(),
         geometry_id: "geometry".into(),
         shape,
+        target_tokens: shape[0].saturating_mul(shape[1].saturating_sub(1)),
+        objective: CausalLmObjective::default(),
         loss,
         parameters: BTreeMap::from([(
             "site".into(),
@@ -125,5 +128,28 @@ fn finite_extremes_do_not_overflow_f32_sums_and_counters_fail_closed() {
     state.microbatches = u64::MAX;
     let before = format!("{state:?}");
     assert!(state.add(&batch([1, 2], [1.; 2], 1.)).is_err());
+    assert_eq!(format!("{state:?}"), before);
+}
+
+#[test]
+fn masked_count_budget_and_objective_mismatch_are_atomic() {
+    let mut state = accumulator();
+    state.target_tokens = MAX_TARGET_TOKENS - 1;
+    let mut selected = batch([1, 4], [1., 2.], 3.);
+    selected.target_tokens = 1;
+    state.add(&selected).unwrap();
+    assert_eq!(state.target_tokens(), MAX_TARGET_TOKENS);
+    let before = format!("{state:?}");
+    assert!(state.add(&selected).is_err());
+    assert_eq!(format!("{state:?}"), before);
+    let mut state = accumulator();
+    let before = format!("{state:?}");
+    for count in [0, 4] {
+        selected.target_tokens = count;
+        assert!(state.add(&selected).is_err());
+    }
+    selected.target_tokens = 1;
+    selected.objective.label_smoothing = 0.2;
+    assert!(state.add(&selected).is_err());
     assert_eq!(format!("{state:?}"), before);
 }

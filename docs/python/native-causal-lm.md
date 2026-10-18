@@ -154,6 +154,55 @@ It accepts different unpadded window lengths, weights each loss/gradient by its
 number of shifted targets, and applies one update after the group. Token
 extraction, forward/backward admission and snapshot checks remain native.
 
+### Selected Targets and Label Smoothing
+
+Source builds also accept HF-style **unshifted** `labels` with the same flat
+`[B,T]` layout as the input windows. This enables completion-only supervision:
+prompt tokens remain context, but their loss terms can be excluded. Python
+only passes integer labels and configuration to Rust; `st-tensor` owns mean
+cross entropy, uniform smoothing and the matching VJP.
+
+```python
+ids = [464, 3616, 286, 1204, 318, 407]
+labels = [-100, -100, -100, 1204, 318, 407]
+gradients = model.geometry_loss_gradients(
+    ids, [1, len(ids)], labels=labels, label_smoothing=0.1
+)
+assert gradients.target_tokens == 3
+score = model.next_token_loss(
+    ids, [1, len(ids)], labels=labels, label_smoothing=0.1
+)
+
+group = model.geometry_accumulator(label_smoothing=0.1)
+group.accumulate_loss(model, ids, [1, len(ids)], labels=labels)
+model, optimizer = group.step_adamw(model, optimizer, 0.001)
+```
+
+Each row's first label is never predicted; every other `-100` label excludes
+one loss term. All labels, including the first, must be valid vocabulary IDs or
+`-100`. Non-ignored labels need not equal input IDs. With `labels=None`, input
+IDs supply all shifted targets as before. Smoothing is finite in `[0,1]`, with
+default zero, and is **not** a generation temperature or a change to geometry.
+Mean reduction divides by the non-ignored shifted target count. A row can be
+fully ignored, but an entire microbatch with no targets rejects before decoder
+execution; it does not silently trigger decay or advance optimizer clocks.
+
+Label exclusion is not an attention/padding mask: the complete unpadded prefix
+still runs, masked prompt positions can receive gradients through later
+predictions, and no EOS or document boundary is invented. Input and label
+budgets are checked before foreign array extraction. Invalid inputs do not
+change an existing accumulation. Its `label_smoothing` policy is sealed at
+creation, and adding a sealed gradient batch with another policy rejects.
+Different label selections under the same policy are expected and combine by
+their actual target counts, not by context lengths.
+
+For Rust callers, `CausalLmObjective` and the `*_with_objective` methods expose
+the same contract; default method signatures are unchanged. Preserve the
+objective, labels/data cursor and schedule alongside the artifact/optimizer
+pair for continuation. They are not inferred from optimizer moments or saved
+inside a pending accumulation. These entries do not silently replace
+`HfGeometryTrainer` or enable arbitrary HF architecture execution.
+
 Learning saves block-boundary activations from the earliest participating
 geometry layer and replays one block at a time, preserving the full `[B,T]`
 partition. Reverse execution stops immediately after collecting that earliest
@@ -185,10 +234,12 @@ comparison after integration with the optional HF observation/Trainer client.
 cargo test -p st-nn --lib causal_lm:: --locked
 python -I -B bindings/st-py/tests/test_native_causal_lm.py
 python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py
+python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py
 # Optional comparison environment only:
 python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_parity.py
 python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_learning_parity.py
 python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_accumulation_parity.py
+python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_objective_parity.py
 ```
 
 The no-framework test exercises a complete small synthetic decoder, batch
@@ -213,3 +264,8 @@ Wave, fractional and Topos placements without Torch. It compares every parameter
 gradient/update against the optional HF reference and verifies exact native
 artifact continuation. These short-window checks establish mechanism agreement,
 not held-out quality or whole-model fine-tuning.
+
+The [selected-target follow-up](../../benchmarks/results/2026-10-18-native-gpt2-objective/README.md)
+uses explicit suffix labels, smoothing and native target-weighted accumulation
+on the same real GPT-2. It records every window, update and next-group
+continuation check; it is not a new matched real-model Torch or quality study.
