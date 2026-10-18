@@ -5,6 +5,7 @@
 
 use half::{bf16, f16};
 use safetensors::{tensor::Metadata, Dtype, SafeTensors};
+use sha2::{Digest, Sha256};
 use st_tensor::{NdTensor, NdTensorError};
 use std::collections::BTreeMap;
 use thiserror::Error;
@@ -207,7 +208,27 @@ impl SafeTensorArchive {
         })
     }
 
+    /// Identity of the owned source bytes, not authentication or model semantics.
+    pub fn content_id(&self) -> String {
+        format!("sha256:{:x}", Sha256::digest(&self.bytes))
+    }
+
+    pub(crate) fn tensor_bytes(&self, name: &str) -> Result<&[u8], WeightLoadError> {
+        let info = self
+            .metadata
+            .info(name)
+            .ok_or_else(|| WeightLoadError::Missing(name.into()))?;
+        Ok(&self.bytes
+            [self.data_start + info.data_offsets.0..self.data_start + info.data_offsets.1])
+    }
+
     pub fn tensor(&self, name: &str) -> Result<NdTensor, WeightLoadError> {
+        let values = self.f32_values(name)?;
+        let shape = &self.metadata.info(name).unwrap().shape;
+        Ok(NdTensor::from_vec(shape, values)?)
+    }
+
+    pub(crate) fn f32_values(&self, name: &str) -> Result<Vec<f32>, WeightLoadError> {
         let info = self
             .metadata
             .info(name)
@@ -244,7 +265,7 @@ impl SafeTensorArchive {
             }
             values.push(value);
         }
-        Ok(NdTensor::from_vec(&info.shape, values)?)
+        Ok(values)
     }
 }
 

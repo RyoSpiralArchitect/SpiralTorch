@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add `NativeCausalLm` with an explicit GPT-2 safetensors importer: complete
+  frozen token-ID-to-logits/NLL/greedy execution in Rust, prepacked CPU
+  projections, tied/untied output heads and validated native geometry output
+  placements. Config/checkpoint identity and work budgets are enforced before
+  execution. This does not convert arbitrary HF architectures or provide
+  padding, KV cache, dropout or full-model backward/FT. Source-only after the
+  fixed 0.4.32 release candidate.
+
 - Add Rust-owned bounded safetensors ingress and Python `SafeTensorArchive` /
   `NdTensor` handles. F32/F16/BF16 weights reach native host tensors with shapes
   preserved, explicit rank-two conversion, strict header validation and finite

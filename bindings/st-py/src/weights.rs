@@ -70,12 +70,12 @@ fn dimensions(value: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
 
 #[pyclass(name = "SafeTensorArchive", module = "spiraltorch", frozen)]
 pub struct PySafeTensorArchive {
-    inner: SafeTensorArchive,
+    pub(crate) inner: SafeTensorArchive,
 }
 
 #[pyclass(name = "NdTensor", module = "spiraltorch", frozen)]
 pub struct PyNdTensor {
-    inner: NdTensor,
+    pub(crate) inner: NdTensor,
 }
 
 #[pymethods]
@@ -129,6 +129,11 @@ impl PySafeTensorArchive {
 
     fn names(&self) -> Vec<String> {
         self.inner.names()
+    }
+
+    #[getter]
+    fn content_id(&self, py: Python<'_>) -> String {
+        py.detach(|| self.inner.content_id())
     }
 
     fn metadata(&self) -> BTreeMap<String, String> {

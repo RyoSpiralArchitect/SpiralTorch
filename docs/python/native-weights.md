@@ -8,6 +8,11 @@ Python safetensors package, Torch, NumPy, Transformers, pickle or remote code.
 `NdTensor` preserves its shape and explicitly bridges to existing ST tensors.
 This is weight ingress, **not automatic HF model loading or full-model FT**.
 
+The subsequent [native causal LM](native-causal-lm.md) extension explicitly
+imports standard GPT-2 into a complete frozen Rust decoder. Other architectures
+and full-model native FT remain separate work; the archive itself does not
+infer or execute a model.
+
 ## Use a Local Checkpoint
 
 ```python

@@ -8,6 +8,8 @@ use pyo3::IntoPyObjectExt;
 
 mod autograd;
 #[cfg(feature = "nn")]
+mod causal_lm;
+#[cfg(feature = "nn")]
 mod channel_affine;
 mod compat;
 mod dataset;
@@ -307,6 +309,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     #[cfg(feature = "nn")]
     weights::register(m)?;
     #[cfg(feature = "nn")]
+    causal_lm::register(m)?;
+    #[cfg(feature = "nn")]
     channel_affine::register(m)?;
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
@@ -533,6 +537,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     #[cfg(feature = "nn")]
     exports.extend_from_slice(&[
         "SafeTensorArchive",
+        "NativeCausalLm",
         "NdTensor",
         "ChannelAffineKernel",
         "ChannelAffineLearningBatch",

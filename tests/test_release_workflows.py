@@ -158,12 +158,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
         for filename in ("ci.yml", "release_wheels.yml"):
             workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
             self.assertIn("bindings/st-py/tests/test_native_weights.py -v", workflow)
+            self.assertIn("bindings/st-py/tests/test_native_causal_lm.py -v", workflow)
             self.assertIn("bindings/st-py/examples/native_weights_geometry.py", workflow)
         test = (ROOT / "bindings/st-py/tests/test_native_weights.py").read_text(encoding="utf-8")
         self.assertIn("NoForeignML()", test)
         self.assertIn('"safetensors"', test)
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("bindings/st-py/tests/test_native_weights_parity.py", ci)
+        self.assertIn("bindings/st-py/tests/test_native_causal_lm_parity.py", ci)
 
     def test_official_actions_use_node24_generation(self) -> None:
         workflow_dir = ROOT / ".github" / "workflows"

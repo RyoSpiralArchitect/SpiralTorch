@@ -30,6 +30,7 @@ pub(crate) fn test_backend_policy(
     )
 }
 
+pub mod causal_lm;
 pub mod cloud;
 pub mod dataset;
 pub mod discovery;
