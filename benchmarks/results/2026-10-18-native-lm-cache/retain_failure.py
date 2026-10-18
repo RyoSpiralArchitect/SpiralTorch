@@ -8,9 +8,9 @@ import statistics
 Q = runpy.run_path(str(Path(__file__).with_name("qualify.py")))
 
 
-def failure_receipt(cases, teacher, resumed, timing):
+def failure_receipt(cases, teacher, resumed, timing, identities, hashes, old_continued):
     try:
-        Q["validate"](cases, teacher, resumed, timing)
+        Q["validate"](cases, teacher, resumed, timing, identities, hashes, old_continued)
     except ValueError as error:
         # Unexpected/incomplete results must not be mislabeled as the observed logit failure.
         if str(error) != "logit gate failed":
@@ -41,6 +41,7 @@ def failure_receipt(cases, teacher, resumed, timing):
                 **{key: statistics.median(r[key] for r in rows) for key in ["prefill_ms", "decode_ms", "total_ms"]}})
     return {"status": "UNQUALIFIED_LOGIT_GATE_FAILED", "failed_rows": failures,
             "medians_not_overall_qualified": summaries, "teacher_forcing": teacher,
+            "teacher_all_pass": all(r["within_gate"] for case in teacher for r in case["steps"]),
             "resume": resumed, "timing": timing}
 
 
@@ -50,20 +51,20 @@ def main():
         parser.add_argument("--" + name, required=True, type=Path)
     args = parser.parse_args()
     args.mode = "retain_failure"
-    Q["checked"](args)
-    cases = {p.stem: Q["load"](p) for p in (args.cohort / "native").glob("*.json")}
+    cases, identities, hashes, old_continued = Q["publication_inputs"](args)
     teacher, resumed, timing = [Q["load"](args.cohort / name) for name in ["teacher.json", "resume.json", "timing.json"]]
-    result = failure_receipt(cases, teacher, resumed, timing)
+    result = failure_receipt(cases, teacher, resumed, timing, identities, hashes, old_continued)
     runtime = Q["load"](args.cohort / "native-runtime.json")
+    Q["exact_fields"](runtime, "python platform extension_sha256 optional_ml_imports_forbidden")
     if runtime["extension_sha256"] != timing["extension_sha256"]:
         raise ValueError("extensions differ")
     Q["save"](args.output, {**result, "contract": Q["load"](args.cohort / "contract.json"), "native_runtime": runtime,
         "retention_script_sha256": Q["digest"](Path(__file__)),
         "cases": [{"case": name, "generated_tokens": len(case["generated"]),
-                   "final_checkpoint_id": case["pin"], "raw_sha256": Q["digest"](args.cohort / "native" / (name + ".json"))}
+                   "final_checkpoint_id": case["pin"], "raw_sha256": hashes["cached"][name]}
                   for name, case in sorted(cases.items())],
         "raw_sha256": {name: Q["digest"](args.cohort / name) for name in ["contract.json", "teacher.json", "resume.json", "timing.json"]},
-        "claim_ceiling": "native cache mechanics pass; the complete PyTorch timing comparison fails its sealed raw-logit gate; no quality or general performance claim"})
+        "claim_ceiling": "unqualified numerical comparison; consult each validated subgroup result; no overall parity, quality or general performance claim"})
 
 
 if __name__ == "__main__":

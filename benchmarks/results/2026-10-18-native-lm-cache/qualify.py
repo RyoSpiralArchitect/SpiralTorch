@@ -213,36 +213,97 @@ def benchmark(args):
         raise ValueError("benchmark logit gate failed; retain timings as unqualified")
 
 
-def validate(cases, teacher, resumed, timing):
+def exact_fields(value, fields):
+    if not isinstance(value, dict) or set(value) != set(fields.split()):
+        raise ValueError("unknown or missing receipt fields")
+
+
+def publication_inputs(args):
+    PRIOR["PRIOR"]["forbid_ml"]()
+    data = checked(args)
+    import spiraltorch as st
+    models = PRIOR["model"](args, st)
+    cases, hashes, identities = {}, {}, {}
+    for path in (args.cohort / "native").glob("*.json"):
+        raw = path.read_bytes()
+        cases[path.stem] = json.loads(raw)
+        hashes[path.stem] = hashlib.sha256(raw).hexdigest()
+    for owner, model in models.items():
+        for offset in [0, 128, 512]:
+            for kind, config in CONFIGS.items():
+                name = f"{owner}-{offset}-{kind}"
+                prompt = data[offset:offset+8]
+                fresh = st.NativeCausalLmGenerator(model, prompt, json.dumps(config))
+                identities[name] = {"owner": owner, "offset": offset, "kind": kind, "prompt": prompt,
+                    "config": json.loads(fresh.config_json()), "geometry": model.geometry_artifact_id}
+                case = cases[name]
+                # Rust remains the authority for checkpoint/config validity, not this publisher.
+                for payload, pin in [(case["payload"], case["pin"]), (case["mid"]["payload"], case["mid"]["pin"])]:
+                    restored = st.NativeCausalLmGenerator.from_json(model, payload, pin)
+                    if restored.to_json() != payload or restored.config_json() != fresh.config_json():
+                        raise ValueError("checkpoint/config does not match the declared native execution")
+    old = {r["case"]: r for r in load(PREVIOUS / "comparison.json")["cases"]}
+    return cases, identities, {"cached": hashes, "old_full_prefix": {name: r["raw_sha256"] for name, r in old.items()}}, {
+        name: r["generated_tokens"] - 3 for name, r in old.items()}
+
+
+def validate(cases, teacher, resumed, timing, identities, hashes, old_continued):
     names = {f"{owner}-{offset}-{kind}" for owner in ["base", "learned"] for offset in [0, 128, 512] for kind in CONFIGS}
-    if set(cases) != names or len(teacher) != 6 or {(r["owner"], r["length"]) for r in teacher} != {
+    if set(cases) != names or set(identities) != names or any(set(hashes[m]) != names for m in ["cached", "old_full_prefix"]) or set(old_continued) != names:
+        raise ValueError("incomplete native identities")
+    if len(teacher) != 6 or {(r["owner"], r["length"]) for r in teacher} != {
             (owner, length) for owner in ["base", "learned"] for length in LENGTHS}:
         raise ValueError("incomplete native cases")
     for name, case in cases.items():
+        exact_fields(case, "owner offset kind prompt steps mid tokens generated payload pin")
+        expected = identities[name]
+        if any(case[key] != expected[key] for key in ["owner", "offset", "kind", "prompt"]):
+            raise ValueError("case identity mismatch")
         n = len(case["generated"])
         if not 3 <= n <= 8 or len(case["steps"]) != n or case["tokens"] != case["prompt"] + case["generated"]:
             raise ValueError("invalid native token accounting")
+        if any(type(token) is not int or not 0 <= token < 50257 for token in case["tokens"]):
+            raise ValueError("invalid token IDs")
         if n < 8 and case["generated"][-1] != 50256:
             raise ValueError("invalid early stop")
         if any(r["step"] != i or r["token_id"] != case["generated"][i-1] for i, r in enumerate(case["steps"], 1)):
             raise ValueError("invalid native step identity")
-        if case["pin"] != "sha256:" + hashlib.sha256(case["payload"].encode()).hexdigest():
-            raise ValueError("invalid checkpoint pin")
+        exact_fields(case["mid"], "payload pin")
+        for payload, pin, tokens in [(case["payload"], case["pin"], case["tokens"]),
+                                     (case["mid"]["payload"], case["mid"]["pin"], case["prompt"] + case["generated"][:3])]:
+            if pin != "sha256:" + hashlib.sha256(payload.encode()).hexdigest():
+                raise ValueError("invalid checkpoint pin")
+            state = json.loads(payload)
+            exact_fields(state, "schema rng base_model_identity geometry_artifact_id config prompt_length tokens")
+            if state != {"schema": "spiraltorch.native_causal_lm_generation.v1",
+                         "rng": "rand_chacha_0_3_chacha20_seed_u64_top53.v1", "base_model_identity": BASE,
+                         "geometry_artifact_id": expected["geometry"], "config": expected["config"],
+                         "prompt_length": len(expected["prompt"]), "tokens": tokens}:
+                raise ValueError("checkpoint does not represent this case or midpoint")
     if len(resumed) != 36 or {(r["mode"], r["case"]) for r in resumed} != {
             (mode, name) for mode in ["cached", "old_full_prefix"] for name in names}:
         raise ValueError("incomplete resumes")
     for row in resumed:
+        exact_fields(row, "mode case before_exact steps_exact checkpoint_exact continued_tokens source_sha256")
+        if row["source_sha256"] != hashes[row["mode"]][row["case"]]:
+            raise ValueError("replay source hash mismatch")
         if any(row[k] is not True for k in ["before_exact", "steps_exact", "checkpoint_exact"]):
             raise ValueError("resume failed")
-        if not 0 <= row["continued_tokens"] <= 5:
+        if type(row["continued_tokens"]) is not int or not 0 <= row["continued_tokens"] <= 5:
             raise ValueError("invalid resumed step count")
         if row["mode"] == "cached" and row["continued_tokens"] != len(cases[row["case"]]["steps"]) - 3:
             raise ValueError("incomplete resumed sequence")
+        if row["mode"] == "old_full_prefix" and row["continued_tokens"] != old_continued[row["case"]]:
+            raise ValueError("incomplete old checkpoint continuation")
+    exact_fields(timing, "torch transformers python platform torch_threads torch_interop_threads extension_sha256 rows")
+    if timing["torch_threads"] != 2 or timing["torch_interop_threads"] != 1:
+        raise ValueError("unexpected reference thread policy")
     rows = timing["rows"]
     expected = {(length, arm, r) for length in TIMING_LENGTHS for arm in ARMS for r in range(WARMUP+REPEATS)}
     if len(rows) != len(expected) or {(r["length"], r["arm"], r["round"]) for r in rows} != expected:
         raise ValueError("incomplete timing conditions")
     for row in rows:
+        exact_fields(row, "length arm round warmup prefill_ms decode_ms total_ms max_logit_abs argmax_exact within_gate")
         if row["warmup"] is not (row["round"] < WARMUP):
             raise ValueError("warmup classification mismatch")
         values = [row[k] for k in ["prefill_ms", "decode_ms", "total_ms"]]
@@ -251,22 +312,34 @@ def validate(cases, teacher, resumed, timing):
         if abs(values[0] + values[1] - values[2]) > 1e-6:
             raise ValueError("timing accounting mismatch")
     for case in teacher:
+        exact_fields(case, "owner length steps")
         if [r["step"] for r in case["steps"]] != list(range(APPENDS+1)):
             raise ValueError("incomplete teacher-forced steps")
+        for row in case["steps"]:
+            exact_fields(row, "step max_logit_abs argmax_exact within_gate cache_values")
+            if type(row["cache_values"]) is not int or row["cache_values"] <= 0:
+                raise ValueError("invalid cache accounting")
+    failures = False
     for row in rows + [r for case in teacher for r in case["steps"]]:
         value = row["max_logit_abs"]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= GATES["logit_atol"]:
-            raise ValueError("logit gate failed")
-        if row["within_gate"] is not True or row["argmax_exact"] is not True:
-            raise ValueError("argmax gate failed")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError("invalid logit metric")
+        if type(row["argmax_exact"]) is not bool or type(row["within_gate"]) is not bool:
+            raise ValueError("invalid metric flags")
+        passed = value <= GATES["logit_atol"] and row["argmax_exact"]
+        if passed != row["within_gate"]:
+            raise ValueError("metric/decision mismatch")
+        failures |= not passed
+    if failures:
+        raise ValueError("logit gate failed")
 
 
 def report(args):
-    checked(args)
-    cases = {p.stem: load(p) for p in (args.cohort / "native").glob("*.json")}
+    cases, identities, hashes, old_continued = publication_inputs(args)
     teacher, resumed, timing = [load(args.cohort / name) for name in ["teacher.json", "resume.json", "timing.json"]]
-    validate(cases, teacher, resumed, timing)
+    validate(cases, teacher, resumed, timing, identities, hashes, old_continued)
     native_runtime = load(args.cohort / "native-runtime.json")
+    exact_fields(native_runtime, "python platform extension_sha256 optional_ml_imports_forbidden")
     if timing["extension_sha256"] != native_runtime["extension_sha256"]:
         raise ValueError("native/reference extensions differ")
     summaries = []
@@ -278,7 +351,7 @@ def report(args):
     save(args.output, {"contract": load(args.cohort / "contract.json"), "teacher_forcing": teacher,
         "native_runtime": native_runtime, "timing": timing, "medians": summaries, "resume": resumed,
         "cases": [{"case": name, "generated_tokens": len(case["generated"]),
-                   "final_checkpoint_id": case["pin"], "raw_sha256": digest(args.cohort / "native" / (name + ".json"))}
+                   "final_checkpoint_id": case["pin"], "raw_sha256": hashes["cached"][name]}
                   for name, case in sorted(cases.items())],
         "raw_sha256": {name: digest(args.cohort / name) for name in ["contract.json", "teacher.json", "resume.json", "timing.json"]},
         "claim_ceiling": "CPU KV mechanics and last-row readout timing on one local GPT-2 train chapter; not quality, GPU, serving, or arbitrary-HF support"})
