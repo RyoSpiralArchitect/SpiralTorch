@@ -89,7 +89,8 @@ jobs:
           )
           float(loss)
           partial_loss = trainer.step_partial(
-              {"speed": 0.15, "memory": 0.1, "stability": 0.92, "gradient": [0.1, 0.0, 0.0, 0.0]}
+              {"speed": 0.15, "memory": 0.1, "stability": 0.92, "gradient": [0.1, 0.0, 0.0, 0.0]},
+              gradient_basis="spiraltorch.release.smoke.control.v1",
           )
           float(partial_loss)
           assert trainer.last_inference is not None
@@ -185,6 +186,7 @@ jobs:
           python -I ../../tools/smoke_dlpack_interop.py
           python -I ../../tools/smoke_autograd.py
           python -I ../../tools/smoke_learning_stack.py
+          python -I -B ../../bindings/st-py/tests/test_native_causal_lm_readout.py -v
       - name: Select minimum supported CPython (Linux)
         if: runner.os == 'Linux'
         uses: actions/setup-python@v6
@@ -196,6 +198,7 @@ jobs:
           python -I -c 'import sys; assert sys.version_info[:2] == (3, 8)'
           python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
           python -I tools/smoke_learning_stack.py
+          python -I -B bindings/st-py/tests/test_native_causal_lm_readout.py -v
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
