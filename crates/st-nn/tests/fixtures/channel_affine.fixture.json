@@ -1,0 +1,33 @@
+{
+  "max_values": 6,
+  "rows": 2,
+  "features": 3,
+  "input": [1, 2, 3, 4, 5, 6],
+  "gate": [2, -1, 0.5],
+  "bias": [1, 2, 3],
+  "upstream": [1, 2, 3, 4, 5, 6],
+  "output": [3, 0, 4.5, 9, -3, 6],
+  "grad_input": [2, -2, 1.5, 8, -5, 3],
+  "grad_gate": [17, 29, 45],
+  "grad_bias": [5, 7, 9],
+  "artifact": {
+    "schema": "spiraltorch.geometry_adapter_artifact.v1",
+    "base_model_identity": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policy": "full_prefix_f32_no_cache.v1",
+    "training": true,
+    "placements": [{
+      "path": "blocks.0.mlp",
+      "recipe": {
+        "schema": "spiraltorch.channel_affine_adapter.v1",
+        "features": 3,
+        "strength": 0.5,
+        "max_values": 6
+      },
+      "training": true,
+      "tensors": [
+        {"name": "gate", "shape": [3], "values": [2, -1, 0.5], "requires_grad": true, "role": "parameter"},
+        {"name": "bias", "shape": [3], "values": [1, 2, 3], "requires_grad": true, "role": "parameter"}
+      ]
+    }]
+  }
+}

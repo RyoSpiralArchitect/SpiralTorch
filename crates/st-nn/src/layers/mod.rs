@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub mod activation;
+pub mod channel_affine;
 pub mod coherence_scan;
 pub mod coherence_wave;
 pub mod continuous_wavelet;

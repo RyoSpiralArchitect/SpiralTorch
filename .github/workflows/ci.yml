@@ -32,6 +32,7 @@ jobs:
           python3 -I -S -B benchmarks/results/2026-10-15-language-budget-512/test_run_once.py
           python3 -I -S -B benchmarks/results/2026-10-15-language-budget-512/test_qualify.py
           python3 -I -S -B tools/test_run_byte_corpus_segments.py
+          python3 -I -S -B tools/test_hf_affine_replay.py
           python3 -I -S -B bindings/st-py/tests/test_byte_corpus_runs.py
           python3 -I -S -B tools/test_qualify_byte_corpus_runs.py
           python3 -I -S -B tools/test_owned_process.py
@@ -203,6 +204,7 @@ jobs:
           cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
           cargo test --locked -p st-nn --release --no-default-features --lib resident::byte_study
           cargo test --locked -p st-nn --release --no-default-features --lib geometry_artifact
+          cargo test --locked -p st-nn --release --no-default-features --lib channel_affine
           cargo test --locked -p st-nn --release --no-default-features --lib language_windows
           cargo test --locked -p st-frac --release --lib recipe_preflight
           cargo build -p st-spiral-rl --release
@@ -443,6 +445,7 @@ jobs:
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/geometry_artifact.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/causal_document_windows.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/channel_affine.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/residual_attention_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           python3 -I -S -B bindings/st-wasm/tests/byte_lm_fixture.py > "$RUNNER_TEMP/byte-corpus-transport.json"
           node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js" \
@@ -850,6 +853,7 @@ jobs:
             bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \
             bindings/st-py/tests/test_geometry_artifact.py \
+            bindings/st-py/tests/test_channel_affine.py \
             bindings/st-py/tests/test_hf_geometry_trainer.py \
             bindings/st-py/tests/test_hf_geometry_dataset.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \

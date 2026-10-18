@@ -70,6 +70,17 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                     raise AssertionError(name + ' did not reject missing PyTorch')
             # Native snapshots remain usable without the optional AD client.
             from array import array
+            assert 'ChannelAffineAdapter' in namespace and 'channel_affine_autograd' in namespace
+            for invoke in [lambda: st.ChannelAffineAdapter(2),
+                           lambda: st.channel_affine_autograd(None, None, None)]:
+                try:
+                    invoke()
+                except RuntimeError as error:
+                    assert 'PyTorch is required' in str(error)
+                else:
+                    raise AssertionError('affine transport did not reject missing PyTorch')
+            affine = st.ChannelAffineKernel().forward([1.], [2.], [3.], 1, 1)
+            assert affine.output == [5.] and affine.vjp([1.]) == ([2.], [1.], [1.])
             assert 'ToposResonatorLearningBatch' in namespace
             topos = st.ToposResonatorKernel().capture_buffer(array('f', [1.]), array('f', [0.]), 1, 1)
             assert isinstance(topos, namespace['ToposResonatorLearningBatch'])

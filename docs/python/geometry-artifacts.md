@@ -71,10 +71,13 @@ Matching hashes establish neither authentication nor model quality.
 
 ## Contract And Limits
 
-Supported exact built-ins: WaveGate (including fixed/learned radius), Topos,
+Supported exact built-ins: ChannelAffine (ordinary non-geometric control),
+WaveGate (including fixed/learned radius), Topos,
 all four Elliptic residual variants, FractionalMemory, History, L2History,
 GainHistory and AngleGainHistory, including configured lag windows. Custom
 subclasses and arbitrary code imports are rejected; no pickle is used.
+See the [matched-control guide](channel-affine-control.md) for comparing
+WaveGate with a portable 2F ordinary residual using the same Trainer route.
 
 - `full_prefix_f32_no_cache.v1` keeps existing full-prefix requirements. No
   padding/packed documents, KV cache, AMP, distributed or compiled path is added.

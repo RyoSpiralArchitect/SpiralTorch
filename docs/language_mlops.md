@@ -56,6 +56,11 @@ and WASM exposes the identical plan. The offline pretrained-model example
 connects those rows to geometric FT, checkpoint continuation and reconstructed
 inference without introducing a second geometry or training implementation.
 
+The [ordinary channel-affine control](python/channel-affine-control.md) now
+uses that identical route. This makes a matched WaveGate ablation possible
+without a separate Python-only training or checkpoint implementation. It is a
+non-geometric adapter control, not full-model FT or a claimed quality win.
+
 ## Start With One Explicit Run
 
 Build a [WGPU source wheel](python/build-and-validation.md). Pin a request and

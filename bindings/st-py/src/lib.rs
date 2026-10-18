@@ -7,6 +7,8 @@ use pyo3::types::PyModule;
 use pyo3::IntoPyObjectExt;
 
 mod autograd;
+#[cfg(feature = "nn")]
+mod channel_affine;
 mod compat;
 mod dataset;
 mod elliptic;
@@ -296,6 +298,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     fractional_learning::register(m)?;
     #[cfg(feature = "nn")]
     geometry_artifact::register(m)?;
+    #[cfg(feature = "nn")]
+    channel_affine::register(m)?;
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;
@@ -520,6 +524,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 
     #[cfg(feature = "nn")]
     exports.extend_from_slice(&[
+        "ChannelAffineKernel",
+        "ChannelAffineLearningBatch",
         "WaveGateKernel",
         "WaveGateLearningBatch",
         "Identity",

@@ -11,8 +11,10 @@ from .geometry_autograd import _require_torch, torch
 def _types() -> dict[str, type]:
     from . import fractional_autograd as f
     from . import geometry_autograd as g
+    from .channel_affine import ChannelAffineAdapter
 
     return {
+        "spiraltorch.channel_affine_adapter.v1": ChannelAffineAdapter,
         "spiraltorch.wave_gate_adapter.v1": g.WaveGateAdapter,
         "spiraltorch.wave_gate_adapter.v2": g.WaveGateAdapter,
         "spiraltorch.topos_resonator_adapter.v1": g.ToposResonatorAdapter,
