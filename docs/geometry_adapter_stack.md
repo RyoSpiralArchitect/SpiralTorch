@@ -9,6 +9,8 @@ Python implementation of their mathematics.
 For source-candidate portable weights plus recipes and placement, use the
 [Rust-owned geometry artifact](python/geometry-artifacts.md). It reconstructs
 built-in adapters without pickle; optimizer/RNG/cursor remain separate.
+The [HF geometry Trainer](python/hf-geometry-training.md) connects these owners
+to HF's actual optimizer, clipping, evaluation and checkpoint lifecycle.
 
 The [captured Topos tape](topos_learning.md) avoids backward recomputation and
 reupload of saved inputs without changing placement, optimizer or derivative
@@ -57,6 +59,9 @@ optimizer.load_state_dict(saved["optimizer"])
 - `attach` is a context manager, not a persistent global patch. It removes only
   its own hooks after success, exceptions or partial installation failure.
   Existing user hooks and keyword-based module interfaces are preserved.
+- Optional `attach(model, require_all=True)` rejects a scope that succeeds
+  without executing every configured placement. The HF Trainer uses this strict
+  mode per step; default standalone attachment keeps optional branches usable.
 - Backward must complete inside the same scope. Reusing an old graph after
   detach or in a later attachment raises rather than silently replaying a graph
   with missing placement. `torch.no_grad()` inference inside a scope is supported.

@@ -94,6 +94,11 @@ spiral-hf-run-ops = "spiraltorch.hf_cli:finetune_run_ops_main"
 spiral-hf-semantic-review = "spiraltorch.semantic_review:main"
 
 [project.optional-dependencies]
+hf-geometry = [
+  "transformers==4.57.6",
+  "torch>=2.6",
+  "accelerate>=0.27",
+]
 hf-runtime = [
   "transformers>=4.40",
   "torch>=2.2",

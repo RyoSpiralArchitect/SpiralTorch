@@ -15,10 +15,18 @@ assert.equal(loaded.baseModelIdentity, base);
 assert.equal(JSON.parse(loaded.stateJson()).placements.length, 13);
 const issued = GeometryAdapterArtifact.createJson(input);
 assert.equal(issued.artifactId, expected.canonical_artifact_id);
+assert.equal(issued.layoutId, expected.layout_id);
 assert.equal(issued.artifactId, digest(issued.toJson()));
 const roundtrip = GeometryAdapterArtifact.fromJson(issued.toJson(), issued.artifactId, base);
 assert.equal(roundtrip.toJson(), issued.toJson());
 assert.equal(roundtrip.stateJson(), issued.stateJson());
+assert.equal(roundtrip.layoutId, issued.layoutId);
+const changed = JSON.parse(issued.toJson());
+changed.placements[0].tensors[0].values[0] += 0.01;
+const changedWeights = GeometryAdapterArtifact.createJson(JSON.stringify(changed));
+assert.notEqual(changedWeights.artifactId, issued.artifactId);
+assert.equal(changedWeights.layoutId, issued.layoutId);
+changedWeights.free();
 assert.throws(() => GeometryAdapterArtifact.fromJson(input + ' ', digest(input), base), /pinned identity/);
 assert.throws(() => GeometryAdapterArtifact.fromJson(input, digest(input), 'sha256:' + 'b'.repeat(64)), /different base/);
 for (const mutate of [
@@ -38,6 +46,7 @@ for (const mutate of [
 }
 console.log(JSON.stringify({schema:'spiraltorch.geometry_adapter_portability_check.v1',
   fixture_id:digest(input), canonical_artifact_id:issued.artifactId, placements:13,
+  layout_id:issued.layoutId, weights_independent_layout:true,
   pinned_load:true, canonical_roundtrip:true, invalid_records_rejected:true,
   hf_execution:false}));
 roundtrip.free(); issued.free(); loaded.free();

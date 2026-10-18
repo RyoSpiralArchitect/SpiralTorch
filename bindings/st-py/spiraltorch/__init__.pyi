@@ -14,6 +14,7 @@ from .byte_corpus_runs import (
     run_byte_corpus_segments as run_byte_corpus_segments,
 )
 from .geometry_adapters import GeometryAdapterStack as GeometryAdapterStack
+from .hf_geometry_trainer import hf_geometry_trainer_class as hf_geometry_trainer_class
 
 class GeometryAdapterArtifact:
     @staticmethod
@@ -24,6 +25,8 @@ class GeometryAdapterArtifact:
     def state_json(self) -> str: ...
     @property
     def artifact_id(self) -> str: ...
+    @property
+    def layout_id(self) -> str: ...
     @property
     def base_model_identity(self) -> str: ...
 from .fractional_autograd import (

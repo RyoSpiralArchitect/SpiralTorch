@@ -22,6 +22,7 @@ older installed wheel.
 - [Geometric learning bridge](geometric_learning_bridge.md): connect mechanisms to an actual learning path.
 - [Durable byte-LM runs](python/byte-study-runs.md): sealed geometric checkpoints and explicit recovery through the Rust owner.
 - [Geometry adapter stack](geometry_adapter_stack.md): composing geometric interventions.
+- [HF geometry Trainer](python/hf-geometry-training.md): train geometric adapters through HF clipping, checkpoints and resume.
 - [Training reference](reference/learning.md): language models, GoldenRetriever, RL, Rec, coherence, and Rust training examples.
 - [Geometric toolkits](reference/geometry.md): topos, GNNs, desire, quantum overlays, and telemetry.
 - [SpiralK and kernel heuristics](reference/kernels.md): optional tuning and execution machinery.

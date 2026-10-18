@@ -259,6 +259,30 @@ impl GeometryAdapterArtifact {
     pub fn artifact_id(&self) -> &str {
         &self.artifact_id
     }
+    /// Resume compatibility without weights or train/eval mode. Includes exact
+    /// ordered placement, recipes, tensor shapes/roles/trainability and base ID.
+    pub fn layout_id(&self) -> Result<String> {
+        let placements: Vec<_> = self
+            .record
+            .placements
+            .iter()
+            .map(|p| {
+                let tensors: Vec<_> = p
+                    .tensors
+                    .iter()
+                    .map(|t| (&t.name, &t.shape, t.role, t.requires_grad))
+                    .collect();
+                (&p.path, &p.recipe, tensors)
+            })
+            .collect();
+        let bytes = serde_json::to_vec(&(
+            "spiraltorch.geometry_adapter_layout.v1",
+            &self.record.base_model_identity,
+            self.record.policy,
+            placements,
+        ))?;
+        Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    }
     pub fn record(&self) -> &GeometryAdapterRecord {
         &self.record
     }

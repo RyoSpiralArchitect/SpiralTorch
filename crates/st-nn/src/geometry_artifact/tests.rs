@@ -17,7 +17,38 @@ fn shared_client_fixture_has_all_thirteen_variants() {
     assert_eq!(artifact.to_json().as_bytes(), input);
     let canonical = GeometryAdapterArtifact::create_json(input).unwrap();
     assert_eq!(canonical.artifact_id(), expected["canonical_artifact_id"]);
+    assert_eq!(canonical.layout_id().unwrap(), expected["layout_id"]);
     assert_eq!(canonical.state_json().unwrap(), canonical.to_json());
+}
+
+#[test]
+fn layout_identity_excludes_weights_and_modes_but_binds_recipes_and_trainability() {
+    let a = create(&record()).unwrap();
+    let mut value = record();
+    value["placements"][0]["tensors"][0]["values"][0] = json!(0.7);
+    value["training"] = json!(false);
+    value["placements"][0]["training"] = json!(false);
+    let b = create(&value).unwrap();
+    assert_ne!(a.artifact_id(), b.artifact_id());
+    assert_eq!(a.layout_id().unwrap(), b.layout_id().unwrap());
+    for pointer in [
+        "/placements/0/tensors/0/requires_grad",
+        "/placements/0/recipe/strength",
+        "/placements/0/path",
+    ] {
+        let mut value = record();
+        *value.pointer_mut(pointer).unwrap() = if pointer.ends_with("requires_grad") {
+            json!(false)
+        } else if pointer.ends_with("strength") {
+            json!(0.2)
+        } else {
+            json!("other")
+        };
+        assert_ne!(
+            a.layout_id().unwrap(),
+            create(&value).unwrap().layout_id().unwrap()
+        );
+    }
 }
 
 fn record() -> Value {

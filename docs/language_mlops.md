@@ -43,6 +43,13 @@ This is separate from the byte decoder's artifact, not an interchangeable model
 format. HF base weights, optimizer, data/RNG and promotion decisions remain
 owned by the existing HF experiment lifecycle.
 
+The [HF geometry Trainer](python/hf-geometry-training.md) puts that stack into
+the actual HF optimizer/accumulation/clipping/checkpoint path for frozen-base
+float32 fine-tuning. Geometric weights are trained and restored, not merely
+reported. Rust supplies a shared layout identity; HF retains its own optimizer,
+scheduler, data cursor and RNG companions. This bounded integration does not
+turn those files into a sealed multi-file artifact or prove a quality gain.
+
 ## Start With One Explicit Run
 
 Build a [WGPU source wheel](python/build-and-validation.md). Pin a request and

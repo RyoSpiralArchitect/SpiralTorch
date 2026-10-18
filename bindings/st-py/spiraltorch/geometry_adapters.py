@@ -135,7 +135,7 @@ else:
             ):
                 raise ValueError("cached model calls are not supported by geometry attachment")
 
-        def _hook(self, index: int, token: Any) -> Any:
+        def _hook(self, index: int, token: Any, executed: set[int]) -> Any:
             adapter = self.adapters[index]
 
             def apply(_module: Any, _args: Any, value: Any) -> Any:
@@ -147,6 +147,7 @@ else:
                 if (not isinstance(result, torch.Tensor) or result.shape != value.shape
                         or result.dtype != value.dtype or result.device != value.device):
                     raise ValueError("geometry adapters must preserve tensor shape, dtype and device")
+                executed.add(index)
                 if result.requires_grad:
                     def in_scope(gradient: Any) -> Any:
                         if self._active_token is not token:
@@ -158,13 +159,15 @@ else:
             return apply
 
         @contextmanager
-        def attach(self, model: Any) -> Iterator[GeometryAdapterStack]:
+        def attach(self, model: Any, *, require_all: bool = False) -> Iterator[GeometryAdapterStack]:
             """Install forward hooks and remove only these hooks on every exit.
 
             Target module call signatures, including keyword arguments, are
             unchanged. Existing user hooks remain installed. Tensor-valued
             targets must be chosen explicitly; tuple/dict extraction, padding,
             packed-document boundaries and model/data identity are caller-owned.
+            require_all rejects a successful scope that never executed one or
+            more insertion sites; HF Trainer uses this for static placements.
             """
             if not isinstance(model, torch.nn.Module):
                 raise TypeError("model must be a torch.nn.Module")
@@ -183,14 +186,18 @@ else:
                 if target in _ACTIVE_TARGETS:
                     raise RuntimeError("an insertion module already has an active geometry stack")
             token, handles, reserved = object(), [], []
+            executed: set[int] = set()
             self._active_token = token
             try:
                 for index, target in enumerate(targets):
                     _ACTIVE_TARGETS[target] = token
                     reserved.append(target)
-                    handles.append(target.register_forward_hook(self._hook(index, token)))
+                    handles.append(target.register_forward_hook(self._hook(index, token, executed)))
                 handles.append(model.register_forward_pre_hook(self._check_call, with_kwargs=True))
                 yield self
+                if require_all and len(executed) != len(self.paths):
+                    missing = [path for i, path in enumerate(self.paths) if i not in executed]
+                    raise RuntimeError(f"geometry placements were not executed: {missing}")
             finally:
                 self._active_token = None
                 for handle in reversed(handles):
