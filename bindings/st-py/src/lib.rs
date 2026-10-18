@@ -18,6 +18,8 @@ mod f32_buffer;
 mod fractional_learning;
 #[cfg(feature = "nn")]
 mod geometry_artifact;
+#[cfg(feature = "nn")]
+mod geometry_runtime;
 mod hpo;
 mod inference;
 mod introspect;
@@ -298,6 +300,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     fractional_learning::register(m)?;
     #[cfg(feature = "nn")]
     geometry_artifact::register(m)?;
+    #[cfg(feature = "nn")]
+    geometry_runtime::register(m)?;
     #[cfg(feature = "nn")]
     channel_affine::register(m)?;
     scale_stack::register(py, m)?;

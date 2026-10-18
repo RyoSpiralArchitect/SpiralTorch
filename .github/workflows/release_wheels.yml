@@ -262,6 +262,8 @@ jobs:
           python -I ../../tools/smoke_autograd.py
           python -I ../../tools/smoke_learning_stack.py
           python -I ../../tools/smoke_fft.py
+          python -I -B ../../bindings/st-py/tests/test_native_geometry_runtime.py -v
+          python -I -B ../../bindings/st-py/examples/native_geometry_training.py
       - name: Select minimum supported CPython (Linux)
         if: runner.os == 'Linux'
         uses: actions/setup-python@v6

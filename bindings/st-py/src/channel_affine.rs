@@ -8,7 +8,7 @@ fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
 }
 
-fn reject_bool(value: &Bound<'_, PyAny>) -> PyResult<()> {
+pub(crate) fn reject_bool(value: &Bound<'_, PyAny>) -> PyResult<()> {
     let boolean_dtype = value
         .getattr("dtype")
         .and_then(|dtype| dtype.str()?.extract::<String>())
@@ -21,12 +21,16 @@ fn reject_bool(value: &Bound<'_, PyAny>) -> PyResult<()> {
     Ok(())
 }
 
-fn dimension(value: &Bound<'_, PyAny>) -> PyResult<usize> {
+pub(crate) fn dimension(value: &Bound<'_, PyAny>) -> PyResult<usize> {
     reject_bool(value)?;
     Ok(value.extract::<u32>()? as usize)
 }
 
-fn sequence(value: &Bound<'_, PyAny>, budget: usize, expected: usize) -> PyResult<Vec<f32>> {
+pub(crate) fn sequence(
+    value: &Bound<'_, PyAny>,
+    budget: usize,
+    expected: usize,
+) -> PyResult<Vec<f32>> {
     let count = value.len()?;
     if count > budget || count != expected {
         return Err(error(

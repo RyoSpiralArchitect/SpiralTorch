@@ -12,7 +12,7 @@ making NumPy, PyTorch, Transformers, or provider SDKs mandatory dependencies.
 python -m pip install -U spiraltorch
 ```
 
-Package version: **Version 0.4.31**. Wheels target CPython 3.8+, Linux x86_64,
+Package version: **Version 0.4.32**. Wheels target CPython 3.8+, Linux x86_64,
 Windows x86_64, and macOS 14+ universal2. The default wheel includes WGPU with
 CPU fallback; a compatible GPU and the appropriate execution route are still
 required for GPU use.
@@ -75,6 +75,11 @@ or [direct Rust use](https://github.com/RyoSpiralArchitect/SpiralTorch#native-au
 - [DLPack interoperability](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/dlpack_interop.md): ownership and copy policies for tensor exchange.
 
 ## Optional HF Integration
+
+Portable affine/WaveGate adapters can also execute and learn directly through
+`NativeGeometryRuntime`, without Torch, Transformers or NumPy. See
+[native geometry training](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-geometry-runtime.md)
+for saved-state reuse, Rust-owned updates and the still-optional HF boundary.
 
 ```bash
 python -m pip install 'spiraltorch[hf-runtime]'
