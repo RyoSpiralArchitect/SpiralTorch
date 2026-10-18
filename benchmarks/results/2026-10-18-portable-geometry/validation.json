@@ -1,0 +1,76 @@
+{
+  "schema": "spiraltorch.portable_geometry_qualification.v1",
+  "base_commit": "312557b339f6f1db3281e63979a8cf46dc1062a8",
+  "environment": {
+    "os": "Darwin",
+    "machine": "arm64",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "spiraltorch_candidate": "0.4.31",
+    "rust": "1.99.0",
+    "node": "24.14.0",
+    "wasm_bindgen": "0.2.129"
+  },
+  "outcomes": {
+    "rust_tests_passed": 5,
+    "python_artifact_tests_passed": 27,
+    "python_existing_stack_tests_passed": 31,
+    "wasm_fixture_placements": 13,
+    "tiny_hf_architectures": [
+      "gpt2",
+      "llama"
+    ],
+    "completed_updates_before_export": 2,
+    "exact_next_update_with_separate_adamw_state": true,
+    "base_weights_unchanged": true,
+    "reconstruction_preserves_cpu_rng": true,
+    "fresh_isolated_python_process": true,
+    "language_quality": "not_assessed",
+    "performance": "not_assessed",
+    "browser_hf_execution": false,
+    "full_training_resume_artifact": false,
+    "clippy_warnings": 24,
+    "strict_warning_free_lint": false,
+    "rust_fractional_learning_tests_passed": 23
+  },
+  "fixture_id": "sha256:e911eeaf6a1858e6e755f418508077232283d3124bc0a0be61de0fa15ed3c9ff",
+  "canonical_artifact_id": "sha256:c8f9af48b39284b68706dc3d00ad878c8b4c24d9943fdc626684e59a9a6b8460",
+  "binary_sha256": {
+    "wheel": "056aa81fe9d74f7867d33b278c8546a4da804842a3f096308439aa688aa79206",
+    "wasm": "a170061f0fe04ca67a386eca0e7d8a347cb2632dd0fcdf8d352c8625fdb75683",
+    "wasm_node_js": "fef84306ccb3c985acc55931fd66a4b4da7a5007cdbb9a32e0c4ab4664e10a4f"
+  },
+  "post_qualification_changes": {
+    "bindings/st-py/src/lib.rs": {
+      "change": "gate geometry artifact registration on optional nn feature; minimal extension-module,text cargo check passes",
+      "qualified_binary_source_sha256": "ef2db0edefe12d67b6c100fc16072b3a2a0b0f7cfff3778c05aeb27fddb6d5b4"
+    },
+    "bindings/st-wasm/src/lib.rs": {
+      "change": "rustfmt module ordering only; CI lint follow-up",
+      "qualified_binary_source_sha256": "8578c6258f5c08011aa775377466c6540f053455016af5258c98957380ccfd43"
+    }
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "afbac205ad05dee055ea71b381ed3533b037dc403c085c3c6991f5ca94b0c94d",
+    "crates/st-frac/src/learning.rs": "d8c53c1e2db16c34d7d8c5ebfb3e0e73a1af39d9d90c16592d5e07d3d383b373",
+    "crates/st-nn/src/lib.rs": "220d18c1b9d2845e6bff5a0109950b62efc4d13d3942c1b715523e1ee17cda81",
+    "crates/st-nn/src/geometry_artifact.rs": "821788eda4f23709a015767b7ed7a7794eb1cf17569dda69012a93a49768090d",
+    "crates/st-nn/src/geometry_artifact/tests.rs": "8e62dcedea3c6d903f657fb883013d3604a8115f7b73d36e6c0fbe4c7c25865e",
+    "bindings/st-py/src/lib.rs": "1ff1eaf19e0a58355f446dbc60f04a630b59c1eb2cc4ba35afe8ea868ad13713",
+    "bindings/st-py/src/geometry_artifact.rs": "b6cae66dd06b595389a8dd88dd36837fc3b72727ce092bea8781b3bb88c38628",
+    "bindings/st-py/spiraltorch/__init__.py": "7a5382dc2827c7d1f5bfd8d29656f761ddea167f70da6fe36cabb1fe8ca41e0b",
+    "bindings/st-py/spiraltorch/__init__.pyi": "6bc28f8a2b4a9800c6403b615655111775bebcfed769ea191e38d271b6a95ea2",
+    "bindings/st-py/spiraltorch/geometry_artifact.py": "bcdd41c5f251a1aaff93308f6e0d6d2273192f3064c84d0c0fa25ad432989a63",
+    "bindings/st-py/spiraltorch/geometry_adapters.py": "ba470b312cac89c27cf6608c78d9951f3a62a49a0e81929abeda27b6fe29e944",
+    "bindings/st-py/tests/test_geometry_artifact.py": "a104d738e5facfab21c206cc2852a747cc1fc0c68400c4edb87dc199ef39e553",
+    "bindings/st-wasm/src/lib.rs": "86c9616a7f8f4ef3485ea90ce19a01b1dd3444b3782d6ff43487c460a155ef21",
+    "bindings/st-wasm/src/geometry_artifact.rs": "1d6d324f4c6f916f0781ff4b74401e2a2162becd31ec9c14185e46128b45bbcd",
+    "bindings/st-wasm/tests/geometry_artifact.cjs": "bc9568e1cb186f3951494cedf5e310de044b7fcf99c1375bb1dd153b2784dac0",
+    "crates/st-nn/tests/fixtures/geometry_adapter_artifact.json": "e911eeaf6a1858e6e755f418508077232283d3124bc0a0be61de0fa15ed3c9ff",
+    "crates/st-nn/tests/fixtures/geometry_adapter_artifact.expected.json": "67f9002341fc7a8830db794fc5fd962e01a4cd7a1e0c70da8964203eed8f49cb",
+    "docs/python/geometry-artifacts.md": "e722a2587c0bce191134f487044212929b9a192bd59bc349562d98a63bf8611c",
+    "docs/language_mlops.md": "2bc57cff5c6cc643190773e7278eb669561fb76b5a18abbd8b46bf0df40f259c",
+    "docs/geometry_adapter_stack.md": "82f1105ced61f9cabb0221d02195e9fd35d6a9e816cbfd775b14916c354ecd58"
+  }
+}

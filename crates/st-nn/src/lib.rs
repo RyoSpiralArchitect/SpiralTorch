@@ -34,6 +34,7 @@ pub mod cloud;
 pub mod dataset;
 pub mod discovery;
 pub mod execution;
+pub mod geometry_artifact;
 pub mod gnn;
 #[cfg(feature = "golden")]
 pub mod golden;

@@ -9666,7 +9666,7 @@ _EXPORTED.update(
      "EllipticAnchoredResidualAdapter", "elliptic_anchored_autograd",
      "WaveGateAdapter", "wave_gate_autograd"]
 )
-for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch"):
+for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact"):
     if _resolve_rs_attr(_name) is not None:
         _EXPORTED.add(_name)
 _EXPORTED.update(

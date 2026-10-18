@@ -78,6 +78,31 @@ else:
             if state != self.get_extra_state():
                 raise ValueError("incompatible geometry adapter placements or types")
 
+        def export_artifact(self, *, base_model_identity: str) -> Any:
+            """Export built-in f32 adapters with recipes and explicit base identity.
+
+            This is not an optimizer/RNG/cursor checkpoint. The identity must
+            come from the caller's pinned HF runtime, not a model path or name.
+            """
+            from .geometry_artifact import export_stack
+
+            return export_stack(self, base_model_identity=base_model_identity)
+
+        @classmethod
+        def from_artifact(cls, artifact: Any, *, expected_base_model_identity: str,
+                          device: Any = "cpu") -> GeometryAdapterStack:
+            """Reconstruct a detached stack without consuming the CPU RNG.
+
+            The caller must load/verify the expected base model separately.
+            Loading this state does not certify a live model or resume training.
+            """
+            from .geometry_artifact import restore_stack
+
+            if cls is not GeometryAdapterStack:
+                raise TypeError("portable artifacts reconstruct GeometryAdapterStack, not subclasses")
+            return restore_stack(artifact, expected_base_model_identity=expected_base_model_identity,
+                                 device=device)
+
         def _load_from_state_dict(self, state_dict: Any, prefix: str, local_metadata: Any,
                                   strict: bool, missing_keys: Any, unexpected_keys: Any,
                                   error_msgs: Any) -> None:

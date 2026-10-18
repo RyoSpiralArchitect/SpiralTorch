@@ -41,6 +41,17 @@ pub struct FractionalGlKernel {
     max_products: usize,
 }
 
+/// The existing learning maps' input-independent coefficient/scale contract.
+#[derive(Clone, Debug)]
+pub enum FractionalGlRecipe {
+    Memory,
+    History,
+    NormalizedHistory {
+        gain: f32,
+        lags: Option<std::ops::Range<usize>>,
+    },
+}
+
 /// Captures the exact recipe and alpha differential, not live input/parameters.
 #[derive(Clone, Debug)]
 pub struct FractionalGlLearningBatch {
@@ -75,6 +86,38 @@ pub struct FractionalGlGainGradients {
 }
 
 impl FractionalGlKernel {
+    /// Check representability using the same coefficient builders as forward.
+    /// Allocates O(kernel_len), within the caller-configured kernel budget.
+    /// Input-dependent overflow is still checked by the actual forward/VJP.
+    pub fn validate_recipe(&self, alpha: f32, recipe: FractionalGlRecipe) -> Result<()> {
+        validate_alpha(alpha)?;
+        match recipe {
+            FractionalGlRecipe::Memory | FractionalGlRecipe::History => {
+                if matches!(recipe, FractionalGlRecipe::History) && self.kernel_len == 1 {
+                    return Ok(());
+                }
+                let config = FracdiffGlConfig::new(alpha, 0, self.kernel_len, Pad::Zero)
+                    .with_step(self.step);
+                gl_coeffs_and_scaled_alpha_derivative(config)?;
+            }
+            FractionalGlRecipe::NormalizedHistory { gain, lags } => {
+                if !gain.is_finite() || gain <= 0.0 {
+                    return Err(FractionalLearningError::NormalizationGain);
+                }
+                if let Some(lags) = lags {
+                    self.validate_history_window(lags.clone())?;
+                    if lags.is_empty() {
+                        return Ok(());
+                    }
+                }
+                if self.kernel_len > 1 {
+                    history_l2_coefficients(alpha, self.kernel_len, gain)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn new(
         kernel_len: usize,
         step: f32,
@@ -619,6 +662,51 @@ impl FractionalGlGainLearningBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recipe_preflight_rejects_intrinsic_overflow_without_rejecting_zero_maps() {
+        let raw = FractionalGlKernel::new(4, 1e-30, 16, 1024).unwrap();
+        assert!(raw.validate_recipe(2., FractionalGlRecipe::Memory).is_err());
+        assert!(raw.forward(&[0.; 2], &[2], 0, 2.).is_err());
+        assert!(raw
+            .validate_recipe(2., FractionalGlRecipe::History)
+            .is_err());
+        assert!(raw
+            .validate_recipe(
+                2.,
+                FractionalGlRecipe::NormalizedHistory {
+                    gain: 1.,
+                    lags: None
+                }
+            )
+            .is_ok());
+        let huge = FractionalGlKernel::new(256, 1., 16, 4096).unwrap();
+        assert!(huge
+            .validate_recipe(200., FractionalGlRecipe::Memory)
+            .is_err());
+        assert!(huge
+            .validate_recipe(
+                200.,
+                FractionalGlRecipe::NormalizedHistory {
+                    gain: 1.,
+                    lags: None
+                }
+            )
+            .is_err());
+        assert!(huge
+            .validate_recipe(
+                200.,
+                FractionalGlRecipe::NormalizedHistory {
+                    gain: 1.,
+                    lags: Some(2..2)
+                }
+            )
+            .is_ok());
+        let zero = FractionalGlKernel::new(1, 1e-30, 16, 1024).unwrap();
+        assert!(zero
+            .validate_recipe(200., FractionalGlRecipe::History)
+            .is_ok());
+    }
 
     fn reference(
         input: &[f32],

@@ -12,6 +12,8 @@ mod fractional_learning;
 mod free_energy;
 mod generation_control;
 mod generation_evidence;
+#[cfg(feature = "nn")]
+mod geometry_artifact;
 mod imaginary_time_schrodinger;
 mod periodicity;
 mod rank_adaptation;
@@ -105,6 +107,8 @@ pub use fractional_learning::*;
 pub use free_energy::*;
 pub use generation_control::*;
 pub use generation_evidence::*;
+#[cfg(feature = "nn")]
+pub use geometry_artifact::*;
 pub use imaginary_time_schrodinger::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
