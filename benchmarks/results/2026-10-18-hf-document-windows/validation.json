@@ -1,0 +1,546 @@
+{
+  "schema": "spiraltorch.hf_document_windows_qualification.v1",
+  "base_commit": "77a89e8a84121187bff67b4479fc313d1ed83c16",
+  "candidate_version": "0.4.31 (source candidate, not a new PyPI release)",
+  "environment": {
+    "os": "Darwin",
+    "machine": "arm64",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "rust": "1.99.0",
+    "node": "24.14.0",
+    "wasm_bindgen": "0.2.129"
+  },
+  "outcomes": {
+    "python_tests_passed": 117,
+    "python_tests_skipped": 0,
+    "trainer_tests": 38,
+    "dataset_tests": 20,
+    "rust_window_tests_passed": 3,
+    "real_wasm32_node_checked": true,
+    "spawned_dataloader_worker_checked": true,
+    "independent_review_findings_fixed": true,
+    "final_narrow_review_residual_findings": 0,
+    "reviewer_reran_training": false,
+    "source_overlay_used": false,
+    "mps_exercised": true,
+    "cuda_exercised": false,
+    "wgpu_language_training_exercised": false,
+    "wasm_hf_execution": false,
+    "geometry_execution": "Rust CPU operators and VJPs with Torch buffer transfers",
+    "language_quality": "not_established",
+    "matched_ordinary_ft_ablation": false,
+    "performance": "not_assessed",
+    "all_companion_files_authenticated": false,
+    "checkpoint_bundle_crash_atomic": false,
+    "raw_input_weights_generated_text_published": false
+  },
+  "data_source": {
+    "repository_commit": "a2c73f38e7296ae98650239dcfa9cbe8f2d63921",
+    "path": "models/samples/spiral_corpus_en",
+    "train_files": [
+      "00_spiral_torch_intro.txt",
+      "01_char_language_basics.txt",
+      "02_z_space_notes.txt",
+      "03_wgpu_and_traces.txt",
+      "04_geometry_maxwell.txt",
+      "05_roadmap.txt"
+    ],
+    "eval_files": [
+      "06_spiral_longform.txt"
+    ],
+    "source_file_sha256": {
+      "00_spiral_torch_intro.txt": "3462ab052910c7ac171b26c72cf9d792f10e6a916126599b7260e8244996a884",
+      "01_char_language_basics.txt": "974e7be91e5d75a5a2b635951fff7ecc09997b10bfe6cf7bea1002ac156bd859",
+      "02_z_space_notes.txt": "8ca181b255a4e9926931ccc73414bc7188501df7366c6ccb2222be408b64a206",
+      "03_wgpu_and_traces.txt": "5605e2889925bd1215fe4212a919b5bedee1816441947735ec0fd885158994e2",
+      "04_geometry_maxwell.txt": "1076066f1882cc09c5f9ca0113307f2ca2db6b8f760cfdf33f7a2c09ee17136e",
+      "05_roadmap.txt": "8498727134f572fddb5a3d1f00aeb928ac73db2634b97f85ba852372cbc704d3",
+      "06_spiral_longform.txt": "6f106b1f8e7b044f5110c5e9dc321da94391b22eff60994e0084c3e6308164c5"
+    }
+  },
+  "hf_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "comparison": {
+    "schema": "spiraltorch.geometry_continuation_comparison.v1",
+    "full_id": "sha256:4c907c65189b1543eeca56e61f6cf8bff257adeb9385ccd8cdc06150a61fe131",
+    "resumed_id": "sha256:4c907c65189b1543eeca56e61f6cf8bff257adeb9385ccd8cdc06150a61fe131",
+    "exact_checks": {
+      "optimizer.pt": true,
+      "scheduler.pt": true,
+      "rng_state.pth": true,
+      "spiraltorch-mps-rng.pt": true,
+      "geometry_checkpoint_bytes": true,
+      "geometry_export_id": true,
+      "base_parameter_hash": true
+    },
+    "placement_updates": [
+      {
+        "path": "transformer.h.8.mlp",
+        "schema": "spiraltorch.wave_gate_adapter.v2",
+        "changed_trainable_tensors": [
+          "bias",
+          "gate",
+          "log_radius"
+        ],
+        "trainable_values": 1537
+      },
+      {
+        "path": "transformer.h.9.mlp",
+        "schema": "spiraltorch.topos_resonator_adapter.v1",
+        "changed_trainable_tensors": [
+          "gate"
+        ],
+        "trainable_values": 768
+      },
+      {
+        "path": "transformer.h.10.mlp",
+        "schema": "spiraltorch.elliptic_anchored_residual_adapter.v1",
+        "changed_trainable_tensors": [
+          "orientation.bias",
+          "orientation.weight",
+          "raw_mix",
+          "readout.weight"
+        ],
+        "trainable_values": 8451
+      },
+      {
+        "path": "transformer.h.11.mlp",
+        "schema": "spiraltorch.fractional_angle_gain_history_adapter.v1",
+        "changed_trainable_tensors": [
+          "gate",
+          "history_angle",
+          "local_gate",
+          "log_gain"
+        ],
+        "trainable_values": 1538
+      }
+    ],
+    "old_uninterrupted_preserved": true,
+    "old_resume_diverged": true,
+    "losses": {
+      "bare": 5.142389297485352,
+      "initial_geometry": 5.142389297485352,
+      "trained": 5.140507221221924,
+      "resumed": 5.140507221221924
+    },
+    "train_plan": {
+      "total_tokens": 476,
+      "dropped_tokens": 60,
+      "target_tokens": 403
+    },
+    "eval_plan": {
+      "total_tokens": 991,
+      "dropped_tokens": 31,
+      "target_tokens": 930
+    }
+  },
+  "runs": {
+    "gpt2-full": {
+      "raw_result_sha256": "c83b0ef9e09d8db121e7a4bb5758baa97aa7fb8557aa7a93bf5f966a4db84928",
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:09e24c97726c2b33d34330592ec53d990d3b7cb9e2af39534df01f68b218c11b",
+      "initial_layout_id": "sha256:e5ee3fc2852ce025b6e853f84ea76ca90c1e0e21eff008ec47d88c02eaf78791",
+      "checkpoint_artifact_id": "sha256:05d08178d69426161cf5cba96237beee997104a3971b104e2d4781382854596c",
+      "artifact_id": "sha256:4c907c65189b1543eeca56e61f6cf8bff257adeb9385ccd8cdc06150a61fe131",
+      "step": 16,
+      "max_steps": 16,
+      "seed": 41,
+      "context_length": 32,
+      "batch_size": 2,
+      "learning_rate": 0.001,
+      "max_grad_norm": 0.1,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.140507221221924,
+      "quality_status": "small_local_workflow_probe_not_general_quality_evidence",
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "windows": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "windows": 30
+      }
+    },
+    "gpt2-partial": {
+      "raw_result_sha256": "5dddfb176a11bf68f1cb9139bddf81a292067fe26da19948c697663c4e516a0f",
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:09e24c97726c2b33d34330592ec53d990d3b7cb9e2af39534df01f68b218c11b",
+      "initial_layout_id": "sha256:e5ee3fc2852ce025b6e853f84ea76ca90c1e0e21eff008ec47d88c02eaf78791",
+      "checkpoint_artifact_id": "sha256:705a56368925c7838b1c0ba9a6cf7a0e7bed628d55aaab6bca3c229ede26c522",
+      "artifact_id": "sha256:65331fb647ea33d6a2189f9c35f2efdd16c19a9652c6469a4aeef0cd5ea690c6",
+      "step": 8,
+      "max_steps": 16,
+      "seed": 41,
+      "context_length": 32,
+      "batch_size": 2,
+      "learning_rate": 0.001,
+      "max_grad_norm": 0.1,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.141064167022705,
+      "quality_status": "small_local_workflow_probe_not_general_quality_evidence",
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "windows": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "windows": 30
+      }
+    },
+    "gpt2-resumed": {
+      "raw_result_sha256": "974ab6293ae96da969afe09406c0a72bbee99e98a710fcb8b5648240eb76b44f",
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:09e24c97726c2b33d34330592ec53d990d3b7cb9e2af39534df01f68b218c11b",
+      "initial_layout_id": "sha256:e5ee3fc2852ce025b6e853f84ea76ca90c1e0e21eff008ec47d88c02eaf78791",
+      "checkpoint_artifact_id": "sha256:d5326f246fc06a62169c372a8c6f11ad5b72fc839cbb72b67259f8e31abcc8ae",
+      "artifact_id": "sha256:ecbd8d7aa07a6e7a7c3c6b6146281562d8a593f1cb9171dc3a0382789b5b4b80",
+      "step": 16,
+      "max_steps": 16,
+      "seed": 41,
+      "context_length": 32,
+      "batch_size": 2,
+      "learning_rate": 0.001,
+      "max_grad_norm": 0.1,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.1405110359191895,
+      "quality_status": "small_local_workflow_probe_not_general_quality_evidence",
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "windows": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "windows": 30
+      }
+    },
+    "gpt2-final-full": {
+      "raw_result_sha256": "5c888e33d186016855c470a265e7d2098b2247316c418c486ef7d4f33e52ab12",
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:09e24c97726c2b33d34330592ec53d990d3b7cb9e2af39534df01f68b218c11b",
+      "initial_layout_id": "sha256:e5ee3fc2852ce025b6e853f84ea76ca90c1e0e21eff008ec47d88c02eaf78791",
+      "checkpoint_artifact_id": "sha256:05d08178d69426161cf5cba96237beee997104a3971b104e2d4781382854596c",
+      "artifact_id": "sha256:4c907c65189b1543eeca56e61f6cf8bff257adeb9385ccd8cdc06150a61fe131",
+      "step": 16,
+      "max_steps": 16,
+      "seed": 41,
+      "context_length": 32,
+      "batch_size": 2,
+      "learning_rate": 0.001,
+      "max_grad_norm": 0.1,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.140507221221924,
+      "quality_status": "small_local_workflow_probe_not_general_quality_evidence",
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "windows": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "windows": 30
+      }
+    },
+    "gpt2-final-partial": {
+      "raw_result_sha256": "4a0e33231d97da13295a2b7533a4b2a93d269d28284515eee861ef73295db008",
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:09e24c97726c2b33d34330592ec53d990d3b7cb9e2af39534df01f68b218c11b",
+      "initial_layout_id": "sha256:e5ee3fc2852ce025b6e853f84ea76ca90c1e0e21eff008ec47d88c02eaf78791",
+      "checkpoint_artifact_id": "sha256:705a56368925c7838b1c0ba9a6cf7a0e7bed628d55aaab6bca3c229ede26c522",
+      "artifact_id": "sha256:65331fb647ea33d6a2189f9c35f2efdd16c19a9652c6469a4aeef0cd5ea690c6",
+      "step": 8,
+      "max_steps": 16,
+      "seed": 41,
+      "context_length": 32,
+      "batch_size": 2,
+      "learning_rate": 0.001,
+      "max_grad_norm": 0.1,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.141064167022705,
+      "quality_status": "small_local_workflow_probe_not_general_quality_evidence",
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "windows": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "windows": 30
+      }
+    },
+    "gpt2-final-resumed": {
+      "raw_result_sha256": "748f9e25e75c08d04efda31dd771093167fdab39125ff4e1f536a163fe4febaf",
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:09e24c97726c2b33d34330592ec53d990d3b7cb9e2af39534df01f68b218c11b",
+      "initial_layout_id": "sha256:e5ee3fc2852ce025b6e853f84ea76ca90c1e0e21eff008ec47d88c02eaf78791",
+      "checkpoint_artifact_id": "sha256:05d08178d69426161cf5cba96237beee997104a3971b104e2d4781382854596c",
+      "artifact_id": "sha256:4c907c65189b1543eeca56e61f6cf8bff257adeb9385ccd8cdc06150a61fe131",
+      "step": 16,
+      "max_steps": 16,
+      "seed": 41,
+      "context_length": 32,
+      "batch_size": 2,
+      "learning_rate": 0.001,
+      "max_grad_norm": 0.1,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.140507221221924,
+      "quality_status": "small_local_workflow_probe_not_general_quality_evidence",
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "windows": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "windows": 30
+      }
+    }
+  },
+  "installed_source_matches": {
+    "__init__.py": true,
+    "__init__.pyi": true,
+    "hf_geometry_trainer.py": true,
+    "hf_geometry_dataset.py": true
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "62c15f2872e6296c70cc1016ee839114f5461df956a374dc269895aa6b00d61e",
+    "bindings/st-py/spiraltorch/__init__.py": "62a5caed7cc49d9daa85c3c33ad02532b8fde46407746bad822382cc1f631e38",
+    "bindings/st-py/spiraltorch/__init__.pyi": "f8e27edced80bd8277c7864b059413e49e46a0255bdd48b68613384b43158ec8",
+    "bindings/st-py/spiraltorch/hf_geometry_trainer.py": "f27317b9ad40c1bd29125787e3290990cad447e801a4e76ed42297b9beb71b3c",
+    "bindings/st-py/spiraltorch/hf_geometry_dataset.py": "04cee95f986b043c091ab54fee2aa1e563079e62880f996f3cb5801e063fd469",
+    "bindings/st-py/src/geometry_artifact.rs": "25db2218dffa9ab61a1deac2eaf4cd40e6cc5a3c7d14ffccf546e4361040bfd4",
+    "bindings/st-py/tests/test_geometry_optional_dependency.py": "1d6ff7b498c89c66f6cf8e887804ae10b87e3a5cd98e0b2dc89ec7964c919cef",
+    "bindings/st-py/tests/test_hf_geometry_trainer.py": "45263439ebf88efdc1f27316dab8caaec7f10566b8f396425c5429cb6a11eaf2",
+    "bindings/st-py/tests/test_hf_geometry_dataset.py": "3de50aec9d751f57343571f6d7abc0e11d0f5654cda284951f8155e93b1b1910",
+    "bindings/st-py/examples/hf_geometry_finetune.py": "cc7a0df7d54404bdccc70bab0991f1df66c09d711925a0edff9df05025ca56cb",
+    "bindings/st-wasm/src/geometry_artifact.rs": "859bd43655387576562ab2ee89519fff304b537dda4ecefc22643390764cf043",
+    "bindings/st-wasm/tests/causal_document_windows.cjs": "cce3de41fc38fe932f3f0c87a7bb67aeaff9da0f30ca7857da76b2828f127216",
+    "crates/st-nn/src/lib.rs": "8265260e6827b63b476f5ce39117f688c1ef19fd2de6861123085dff793114a2",
+    "crates/st-nn/src/language_windows.rs": "5ef58923ef3bbb44f13b50b0c8883177a264881eb7688b86e3fde2242f778965",
+    "crates/st-nn/tests/fixtures/causal_document_windows.fixture.json": "cd8d4fee8938a1b6bbd032f8f001b3f5083b29ed7a3ec07cdecc33275716c261",
+    "docs/README.md": "fdd2200b00d0f7de1979f15340fe86a95f140106291e20d79adecb70094de7d3",
+    "docs/language_mlops.md": "2ff5fa4b606dcc27e0bf48bc612158034faa45fd091dc9b4a197999e5efa9ac0",
+    "docs/python/hf-geometry-training.md": "6bf8dc9da796e1d9f09f859f1553c7ee57656fa83e9afbb6b7880dedbc0f3936",
+    "docs/python/hf-geometry-data.md": "80267200db5bd37f729fa71afeb264aa34a4d3d4e701d9c59f11553009942724"
+  },
+  "binary_sha256": {
+    "wheel": "8ca03a46ec5fcebc83786382dc7d43cd06846e0f9026533fef3fdfc1c0328435",
+    "wasm": "6514ad4fb767491bec21577964e3ab30f5f61edcf2d8b428bfda2518f1aff42c",
+    "wasm_node_js": "b80c4a8fa5f87f484d1c4c5ee742d6555df9369cd7ce685b2285ca946cefee2c"
+  },
+  "private_log_sha256": {
+    "python-final.log": "859116580d30d120c68b31871ec26eda62b40454a799ac0ae4f16e498cb3c428",
+    "python-final.xml": "31727413ac996271d7e785e2ce2574b3e7894e995459e45632722955e09f6dc2",
+    "epoch-regression-before.log": "414690e75bf4ce8a5a74a7e164da8e69c81913d160537701a385990d726343b7",
+    "rust-fixed.log": "344e127ce25825ee8d90e1d2e036c1160bf59f5484b91cf306fabd13c9bec47c",
+    "wasm-fixed-build.log": "189298e9bd210692753e2ed144cbc78317a2cf8b5f1b5fa93b155f2f81546780",
+    "wasm-reviewed.json": "5d0008bb302e303789e4ffdee480b137847aeba0a6cd1d02391c99c3a4f99c23",
+    "wasm-artifact-reviewed.json": "9e3b7e2059cb40ef349dff0070bff76ca81910e0e1eb8f72c84aa993b1c8672e",
+    "wheel-final-build.log": "d4cdb921bf30d53c72171e70d5713cec4ded6c63c79ae811e37451ac8f748891",
+    "continuation-final.json": "60ac9e28d44977e3f973d83d06641338e47e74935b663cf54811f43a991aa374",
+    "gpt2-full.log": "6eebe92059ad08c47d0622b3348a49ed1556b464672734202ca5150137d70f9f",
+    "gpt2-partial.log": "ec4b2c138fdd2c66b09b61379684331ad12da3f47c313aad571d79ff79fe399f",
+    "gpt2-resumed.log": "563a409d27277f08a7f852facbc9f04714af21deee6fe1398f75b8ca43d35170",
+    "gpt2-final-full.log": "daae956d08cac5de322006e51d35d94335eb5d9391edd7f07b86f7c165e46121",
+    "gpt2-final-partial.log": "9a8a889b9978900910060e2e55778e4a7ebbef9024ba72f80a9be481137d1ddc",
+    "gpt2-final-resumed.log": "b8c245ee188293b0f306f4208b19fbb682b91836de3a526a45515f6eff214f58"
+  },
+  "private_checkpoint_sha256": {
+    "gpt2-final-full/checkpoint-16": {
+      "merges.txt": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+      "optimizer.pt": "1570a829fb838609e825a97bb0b642f8da85109e246c9a0e9a2ae6c9fec2c5fc",
+      "rng_state.pth": "c3d5f622d9ae59174da10320f26f0e516cb53a39a1b5e69624a81d292f799241",
+      "scheduler.pt": "e00b0ee05ca09a339161dd3db79330db7a0ac5a028c668196ace3940f588d270",
+      "special_tokens_map.json": "6f50ab5a5a509a1c309d6171f339b196a900dc9c99ad0408ff23bb615fdae7ad",
+      "spiraltorch-geometry.json": "05d08178d69426161cf5cba96237beee997104a3971b104e2d4781382854596c",
+      "spiraltorch-mps-rng.pt": "49279acd19d05cbf836e20f7953347ea7ebc33d616f3c210b22cc6af017599b3",
+      "tokenizer.json": "1fe93b6152957cf9cfd6d89002467f789ce8b3f3e000b3a2edf27c808ddd0b9e",
+      "tokenizer_config.json": "f1cb5e31899749cf30935ccea01180ab3cfd484bd2bcf3bfdc1aeb9fdf935f6f",
+      "trainer_state.json": "2d13cc07ecc80e4d4e7721b3a36d9b4db154f39890404f88b442614ed53434e4",
+      "training_args.bin": "a10eca7302da7bb6b5cf9316b41547412ad167da5988f0884b7b67d0a5fb4a44",
+      "vocab.json": "3ba3c3109ff33976c4bd966589c11ee14fcaa1f4c9e5e154c2ed7f99d80709e7"
+    },
+    "gpt2-final-partial/checkpoint-8": {
+      "merges.txt": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+      "optimizer.pt": "bbc657310d477b214a90473d3d600c636bd68b8e2f904a09f391b0bf73ee33fa",
+      "rng_state.pth": "10b9d4be5d6a184fbe08ab631fc48984e09cc1eab424818b1fb5bb9655d01172",
+      "scheduler.pt": "79cf2970c14bdf9fcce6729c136fb1efe6b1402e6cd5ff2cd1b48cd93ad6f538",
+      "special_tokens_map.json": "6f50ab5a5a509a1c309d6171f339b196a900dc9c99ad0408ff23bb615fdae7ad",
+      "spiraltorch-geometry.json": "705a56368925c7838b1c0ba9a6cf7a0e7bed628d55aaab6bca3c229ede26c522",
+      "spiraltorch-mps-rng.pt": "7ffb1cdfa2b6793ef74653f49b97ba5893f0177d6625fbfd45ffd68cee1ac732",
+      "tokenizer.json": "1fe93b6152957cf9cfd6d89002467f789ce8b3f3e000b3a2edf27c808ddd0b9e",
+      "tokenizer_config.json": "f1cb5e31899749cf30935ccea01180ab3cfd484bd2bcf3bfdc1aeb9fdf935f6f",
+      "trainer_state.json": "cf0d8154e2feaf6333cbb5362c79b48630ea0526368b5910fbf9cbbbcd25a195",
+      "training_args.bin": "c64328c1157163dd85886a823f02171cf5e0b630c6f53501c90189ece09a11a9",
+      "vocab.json": "3ba3c3109ff33976c4bd966589c11ee14fcaa1f4c9e5e154c2ed7f99d80709e7"
+    },
+    "gpt2-final-resumed/checkpoint-16": {
+      "merges.txt": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+      "optimizer.pt": "1570a829fb838609e825a97bb0b642f8da85109e246c9a0e9a2ae6c9fec2c5fc",
+      "rng_state.pth": "c3d5f622d9ae59174da10320f26f0e516cb53a39a1b5e69624a81d292f799241",
+      "scheduler.pt": "e00b0ee05ca09a339161dd3db79330db7a0ac5a028c668196ace3940f588d270",
+      "special_tokens_map.json": "6f50ab5a5a509a1c309d6171f339b196a900dc9c99ad0408ff23bb615fdae7ad",
+      "spiraltorch-geometry.json": "05d08178d69426161cf5cba96237beee997104a3971b104e2d4781382854596c",
+      "spiraltorch-mps-rng.pt": "49279acd19d05cbf836e20f7953347ea7ebc33d616f3c210b22cc6af017599b3",
+      "tokenizer.json": "1fe93b6152957cf9cfd6d89002467f789ce8b3f3e000b3a2edf27c808ddd0b9e",
+      "tokenizer_config.json": "f1cb5e31899749cf30935ccea01180ab3cfd484bd2bcf3bfdc1aeb9fdf935f6f",
+      "trainer_state.json": "2d13cc07ecc80e4d4e7721b3a36d9b4db154f39890404f88b442614ed53434e4",
+      "training_args.bin": "8246964d4796ec72bb0eaf193eace5b3b4b96bd4bf458b39766412f31f3a722b",
+      "vocab.json": "3ba3c3109ff33976c4bd966589c11ee14fcaa1f4c9e5e154c2ed7f99d80709e7"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "recipe": {"document_lengths": [0, 3, 5, 12], "context_length": 4},
+  "plan_id": "sha256:8578e7a00e5b652f0cf1866e121e786e03b948d6400e232340384e1b2e9ebe6d",
+  "windows": [[2, 0, 4], [3, 0, 4], [3, 4, 4], [3, 8, 4]],
+  "total_tokens": 20,
+  "dropped_tokens": 4,
+  "target_tokens": 12
+}
