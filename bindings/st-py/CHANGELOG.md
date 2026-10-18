@@ -13,6 +13,13 @@
   Existing pointwise recipes can use the same sequence entry. Full unpadded
   contexts only: no padding mask or KV cache, and no implicit row flattening
   into one causal stream. This extension is also source-only after the candidate.
+- Recover Topos resonance and all five fractional adapter compositions into
+  the same native runtime. Rust owns gates, residuals, log-order/angle controls,
+  complete VJPs and atomic SGD, reusing `st-core`/`st-frac` kernels. Fractional
+  recipes require explicit sequence boundaries and enforce value/product
+  budgets before Python input extraction, including zero-strength calls.
+  This source-only extension does not change the fixed 0.4.32 candidate or
+  imply Torch-free execution of a whole HF model.
 
 ## 0.4.32
 

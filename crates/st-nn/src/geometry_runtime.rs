@@ -18,8 +18,12 @@ use st_tensor::{Tensor, TensorUtilBackend};
 use std::collections::BTreeMap;
 
 mod elliptic;
+mod fractional;
+#[cfg(test)]
+mod memory_tests;
 #[cfg(test)]
 mod sequence_tests;
+mod topos;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -30,6 +34,8 @@ enum Pullback {
     Wave(Box<WaveGateLearningBatch>),
     WaveRadius(Box<WaveGateLearningBatch>),
     Elliptic(Box<elliptic::EllipticRuntimeBatch>),
+    Topos(Box<topos::ToposRuntimeBatch>),
+    Fractional(Box<fractional::FractionalRuntimeBatch>),
 }
 
 #[derive(Debug)]
@@ -87,9 +93,10 @@ impl NativeGeometryRuntime {
             GeometryAdapterRecipe::ChannelAffine { features, max_values, .. } => Ok((*features, *max_values)),
             GeometryAdapterRecipe::Wave { features, kernel, .. }
             | GeometryAdapterRecipe::WaveRadius { features, kernel, .. } => Ok((*features, kernel.max_values)),
+            GeometryAdapterRecipe::Topos { features, kernel, .. } => Ok((*features, kernel.max_values)),
             GeometryAdapterRecipe::Elliptic { features, .. }
             | GeometryAdapterRecipe::EllipticAnchored { features, .. } => Ok((*features, elliptic::value_budget(*features))),
-            _ => Err("native artifact runtime currently supports pointwise channel-affine, WaveGate and elliptic placements only".into()),
+            _ => Err("row-only native runtime currently supports pointwise placements; causal and fractional recipes require explicit sequence axes".into()),
         }
     }
 
@@ -105,6 +112,24 @@ impl NativeGeometryRuntime {
             | GeometryAdapterRecipe::EllipticGated { features, .. } => {
                 Ok((*features, elliptic::sequence_values(*features, shape)?))
             }
+            GeometryAdapterRecipe::Fractional {
+                features, kernel, ..
+            }
+            | GeometryAdapterRecipe::History {
+                features, kernel, ..
+            }
+            | GeometryAdapterRecipe::HistoryL2 {
+                features, kernel, ..
+            }
+            | GeometryAdapterRecipe::HistoryGain {
+                features, kernel, ..
+            }
+            | GeometryAdapterRecipe::HistoryAngle {
+                features, kernel, ..
+            } => Ok((
+                *features,
+                fractional::sequence_values(*features, shape, kernel)?,
+            )),
             _ => {
                 let (features, budget) = self.dimensions(path)?;
                 let count = rows
@@ -129,11 +154,14 @@ impl NativeGeometryRuntime {
             return Err("invalid native sequence input length or values".into());
         }
         let placement = self.placement(path)?;
-        let (warp, strength) = match &placement.recipe {
-            GeometryAdapterRecipe::EllipticCausal { warp, strength, .. }
-            | GeometryAdapterRecipe::EllipticGated { warp, strength, .. } => {
-                (warp, *strength as f32)
-            }
+        let strength = match &placement.recipe {
+            GeometryAdapterRecipe::EllipticCausal { strength, .. }
+            | GeometryAdapterRecipe::EllipticGated { strength, .. }
+            | GeometryAdapterRecipe::Fractional { strength, .. }
+            | GeometryAdapterRecipe::History { strength, .. }
+            | GeometryAdapterRecipe::HistoryL2 { strength, .. }
+            | GeometryAdapterRecipe::HistoryGain { strength, .. }
+            | GeometryAdapterRecipe::HistoryAngle { strength, .. } => *strength as f32,
             _ => {
                 let mut batch = self.forward(path, input, shape[0] * shape[1])?;
                 batch.sequence_shape = Some([shape[0], shape[1], features]);
@@ -145,12 +173,27 @@ impl NativeGeometryRuntime {
         let pullback = if strength == 0. {
             Pullback::Identity
         } else {
-            Pullback::Elliptic(Box::new(elliptic::EllipticRuntimeBatch::forward(
-                placement,
-                warp,
-                &input,
-                Some(shape),
-            )?))
+            match &placement.recipe {
+                GeometryAdapterRecipe::EllipticCausal { warp, .. }
+                | GeometryAdapterRecipe::EllipticGated { warp, .. } => {
+                    Pullback::Elliptic(Box::new(elliptic::EllipticRuntimeBatch::forward(
+                        placement,
+                        warp,
+                        &input,
+                        Some(shape),
+                    )?))
+                }
+                GeometryAdapterRecipe::Fractional { kernel, .. }
+                | GeometryAdapterRecipe::History { kernel, .. }
+                | GeometryAdapterRecipe::HistoryL2 { kernel, .. }
+                | GeometryAdapterRecipe::HistoryGain { kernel, .. }
+                | GeometryAdapterRecipe::HistoryAngle { kernel, .. } => {
+                    Pullback::Fractional(Box::new(fractional::FractionalRuntimeBatch::forward(
+                        placement, kernel, &input, shape,
+                    )?))
+                }
+                _ => unreachable!(),
+            }
         };
         let mut batch = self.finish_forward(placement, input, strength, pullback)?;
         batch.sequence_shape = Some([shape[0], shape[1], features]);
@@ -171,6 +214,7 @@ impl NativeGeometryRuntime {
             GeometryAdapterRecipe::ChannelAffine { strength, .. }
             | GeometryAdapterRecipe::Wave { strength, .. }
             | GeometryAdapterRecipe::WaveRadius { strength, .. }
+            | GeometryAdapterRecipe::Topos { strength, .. }
             | GeometryAdapterRecipe::Elliptic { strength, .. }
             | GeometryAdapterRecipe::EllipticAnchored { strength, .. } => strength as f32,
             _ => unreachable!(),
@@ -190,6 +234,9 @@ impl NativeGeometryRuntime {
                         features,
                     )?))
                 }
+                GeometryAdapterRecipe::Topos { kernel, .. } => Pullback::Topos(Box::new(
+                    topos::ToposRuntimeBatch::forward(placement, kernel, &input_tensor)?,
+                )),
                 GeometryAdapterRecipe::Wave { kernel, .. }
                 | GeometryAdapterRecipe::WaveRadius { kernel, .. } => {
                     let native = WaveGateKernel::new(
@@ -244,6 +291,8 @@ impl NativeGeometryRuntime {
             Pullback::Affine(batch) => Some(batch.output()),
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) => Some(batch.output()),
             Pullback::Elliptic(batch) => Some(batch.output()),
+            Pullback::Topos(batch) => Some(batch.output()),
+            Pullback::Fractional(batch) => Some(batch.output()),
         };
         let output = if let Some(residual) = residual {
             input.add_with_backend(
@@ -402,6 +451,20 @@ impl NativeGeometryBatch {
                 (g.grad_input, g.grad_gate, g.grad_bias, Some(radius))
             }
             Pullback::Elliptic(batch) => {
+                let gradient = batch.vjp(&scaled)?;
+                return Ok(NativeGeometryVjp {
+                    input: direction.add_with_backend(&gradient.input, TensorUtilBackend::Cpu)?,
+                    parameters: gradient.parameters,
+                });
+            }
+            Pullback::Topos(batch) => {
+                let gradient = batch.vjp(&scaled)?;
+                return Ok(NativeGeometryVjp {
+                    input: direction.add_with_backend(&gradient.input, TensorUtilBackend::Cpu)?,
+                    parameters: gradient.parameters,
+                });
+            }
+            Pullback::Fractional(batch) => {
                 let gradient = batch.vjp(&scaled)?;
                 return Ok(NativeGeometryVjp {
                     input: direction.add_with_backend(&gradient.input, TensorUtilBackend::Cpu)?,
@@ -597,7 +660,11 @@ mod tests {
         }
     }
 
-    fn artifact(wave: bool, radius: Option<bool>, strength: f64) -> GeometryAdapterArtifact {
+    pub(super) fn artifact(
+        wave: bool,
+        radius: Option<bool>,
+        strength: f64,
+    ) -> GeometryAdapterArtifact {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../tests/fixtures/channel_affine.fixture.json"
         ))

@@ -23,6 +23,7 @@ import spiraltorch as st  # noqa: E402 - install the forbidden-import guard firs
 
 FIXTURE = json.loads((Path(__file__).resolve().parents[3] /
                      "crates/st-nn/tests/fixtures/channel_affine.fixture.json").read_text())
+FRACTIONAL_KINDS = ("fractional", "history", "history_l2", "history_gain", "history_angle")
 
 
 def artifact(kind="affine", *, frozen_gate=False):
@@ -45,6 +46,26 @@ def artifact(kind="affine", *, frozen_gate=False):
         ]
         if kind in {"anchored", "gated"}:
             p["tensors"].append({"name": "raw_mix", "shape": [], "values": [.3], "requires_grad": True, "role": "parameter"})
+    elif kind == "topos":
+        p["recipe"] = {"schema": "spiraltorch.topos_resonator_adapter.v1", "features": 3, "strength": .5,
+                       "kernel": {"coupling": .2, "iterations": 4, "saturation": 1., "porosity": .05, "max_values": 96}}
+        p["tensors"] = [t for t in p["tensors"] if t["name"] == "gate"]
+    elif kind in FRACTIONAL_KINDS:
+        names = dict(zip(FRACTIONAL_KINDS, ("fractional_memory", "fractional_history", "fractional_l2_history",
+                                          "fractional_gain_history", "fractional_angle_gain_history")))
+        p["recipe"] = {"schema": "spiraltorch." + names[kind] + "_adapter.v1", "features": 3, "strength": .5,
+                       "kernel": {"kernel_len": 5, "step": .8, "max_values": 96, "max_products": 480}}
+        p["tensors"] = [t for t in p["tensors"] if t["name"] == "gate"]
+        parameters = [("history_angle" if kind == "history_angle" else "log_alpha", [], [-.2])]
+        if kind != "fractional":
+            parameters.append(("local_gate", [3], [.2, -.1, .15]))
+        if kind in {"history_gain", "history_angle"}:
+            p["recipe"]["lag_window"] = [1, 4]
+            parameters.append(("log_gain", [], [.1]))
+        if kind == "history_l2":
+            p["recipe"]["gain"] = .8
+        p["tensors"].extend({"name": name, "shape": shape, "values": values, "requires_grad": True, "role": "parameter"}
+                            for name, shape, values in parameters)
     elif kind != "affine":
         p["recipe"] = {"schema": "spiraltorch.wave_gate_adapter.v1" if kind == "wave" else "spiraltorch.wave_gate_adapter.v2",
                        "features": 3, "strength": .5,
@@ -85,7 +106,7 @@ class NativeGeometryTests(unittest.TestCase):
 
     def test_native_learning_and_exact_save_reload_continuation(self):
         x, y = array("f", [.2, -.3, .4, .5, .1, -.2]), array("f", [.1] * 6)
-        for kind in ("affine", "wave", "fixed", "learned", "elliptic", "anchored"):
+        for kind in ("affine", "wave", "fixed", "learned", "elliptic", "anchored", "topos"):
             with self.subTest(kind=kind):
                 runtime = st.NativeGeometryRuntime(artifact(kind))
                 first = runtime.train_mse_buffer("site", x, y, 2, .2)
@@ -147,7 +168,7 @@ class NativeGeometryTests(unittest.TestCase):
             self.assertTrue(all(x == 0. for v in empty.vjp([])[1].values() for x in v))
 
     def test_elliptic_causal_recipe_is_not_silently_flattened(self):
-        for kind in ("causal", "gated"):
+        for kind in ("causal", "gated", *FRACTIONAL_KINDS):
             runtime = st.NativeGeometryRuntime(artifact(kind))
             with self.assertRaisesRegex(ValueError, "currently supports"):
                 runtime.forward("site", [.2] * 6, 2)
@@ -158,7 +179,7 @@ class NativeGeometryTests(unittest.TestCase):
     def test_native_sequence_learning_and_saved_context_continuation(self):
         x = array("f", [(i * 7 % 19) * .05 - .3 for i in range(18)])
         y = array("f", [.1] * 18)
-        for kind in ("causal", "gated"):
+        for kind in ("causal", "gated", *FRACTIONAL_KINDS):
             runtime = st.NativeGeometryRuntime(artifact(kind))
             snapshot = runtime.forward_sequence_buffer("site", x, (2, 3))
             first = runtime.train_sequence_mse_buffer("site", x, y, (2, 3), .2)
@@ -205,7 +226,7 @@ class NativeGeometryTests(unittest.TestCase):
 
     def test_sequence_causality_and_cross_batch_isolation(self):
         values = [(i * 7 % 19) * .05 - .3 for i in range(18)]
-        for kind in ("causal", "gated"):
+        for kind in ("causal", "gated", *FRACTIONAL_KINDS):
             runtime = st.NativeGeometryRuntime(artifact(kind))
             batch = runtime.forward_sequence("site", values, (2, 3))
             changed = values[:6] + [v + 3. for v in values[6:]]
@@ -237,7 +258,7 @@ class NativeGeometryTests(unittest.TestCase):
             runtime.step_sgd(batch, [1e30] * 6, 1e30)
         self.assertEqual(runtime.artifact().artifact_id, before)
 
-    def test_all_frozen_and_unsupported_recipes_fail_without_fallback(self):
+    def test_all_frozen_placements_cannot_update(self):
         state = json.loads(artifact().state_json())
         for tensor in state["placements"][0]["tensors"]:
             tensor["requires_grad"] = False
@@ -247,13 +268,60 @@ class NativeGeometryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no trainable"):
             runtime.step_sgd(batch, [1.] * 6, .1)
         self.assertEqual(runtime.artifact().artifact_id, before)
-        p = state["placements"][0]
-        p["recipe"] = {"schema": "spiraltorch.topos_resonator_adapter.v1", "features": 3, "strength": .1,
-                       "kernel": {"coupling": .1, "iterations": 1, "saturation": 1., "porosity": .05, "max_values": 64}}
-        p["tensors"] = [t for t in p["tensors"] if t["name"] == "gate"]
+
+    def test_memory_budgets_precede_input_extraction_even_with_zero_strength(self):
+        class MustNotRead:
+            def __len__(self): raise AssertionError("native budget must precede values")
+        for strength in (0., .5):
+            for kind in FRACTIONAL_KINDS:
+                state = json.loads(artifact(kind).state_json())
+                recipe = state["placements"][0]["recipe"]
+                recipe["strength"] = strength
+                recipe["kernel"]["max_products"] = 90
+                runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+                for shape in ((0, 1), (1, 0), (2, 4), (1, 33), (2**32, 2)):
+                    for method in (runtime.forward_sequence, runtime.forward_sequence_buffer):
+                        with self.assertRaises((ValueError, OverflowError)):
+                            method("site", MustNotRead(), shape)
+                self.assertEqual(runtime.forward_sequence("site", [.2] * 18, (2, 3)).sequence_shape, (2, 3, 3))
+        topos = st.NativeGeometryRuntime(artifact("topos"))
+        for method in (topos.forward, topos.forward_buffer):
+            with self.assertRaises(ValueError):
+                method("site", MustNotRead(), 33)
+        empty = topos.forward("site", [], 0)
+        self.assertEqual(empty.output, [])
+        self.assertEqual(empty.vjp([]), ([], {"gate": [0., 0., 0.]}))
+
+    def test_history_order_domain_failure_is_atomic_and_frozen_controls_stay_fixed(self):
+        runtime = st.NativeGeometryRuntime(artifact("history_angle"))
+        x = [(i * 7 % 19) * .05 - .3 for i in range(18)]
+        batch = runtime.forward_sequence("site", x, (2, 3))
+        self.assertNotEqual(batch.vjp(x)[1]["history_angle"], [0.])
+        before = runtime.artifact().artifact_id
+        with self.assertRaises(ValueError):
+            runtime.step_sgd(batch, x, 1e10)
+        self.assertEqual(runtime.artifact().artifact_id, before)
+        state = json.loads(runtime.artifact().state_json())
+        for tensor in state["placements"][0]["tensors"]:
+            if not tensor["name"].endswith("gate"):
+                tensor["requires_grad"] = False
         runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
-        with self.assertRaisesRegex(ValueError, "currently supports"):
-            runtime.forward("site", [.2] * 6, 2)
+        runtime.train_sequence_mse("site", x, [.1] * 18, (2, 3), .2)
+        current = {t["name"]: t for t in json.loads(runtime.artifact().state_json())["placements"][0]["tensors"]}
+        for tensor in state["placements"][0]["tensors"]:
+            if not tensor["requires_grad"]:
+                self.assertEqual(tensor, current[tensor["name"]])
+
+    def test_empty_history_window_keeps_only_local_gate(self):
+        for kind in ("history_gain", "history_angle"):
+            state = json.loads(artifact(kind).state_json())
+            state["placements"][0]["recipe"]["lag_window"] = [2, 2]
+            runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+            x = [.2, -.3, .4, .5, .1, -.2]
+            batch = runtime.forward_sequence("site", x, (1, 2))
+            parameters = batch.vjp(x)[1]
+            self.assertTrue(any(parameters["local_gate"]))
+            self.assertTrue(all(v == 0. for name, values in parameters.items() if name != "local_gate" for v in values))
 
     def test_shape_and_value_budgets_precede_foreign_sequence_reads(self):
         class Oversized:
