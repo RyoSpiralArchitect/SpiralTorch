@@ -42,6 +42,10 @@
     "wasm_node_js": "fef84306ccb3c985acc55931fd66a4b4da7a5007cdbb9a32e0c4ab4664e10a4f"
   },
   "post_qualification_changes": {
+    "bindings/st-py/src/lib.rs": {
+      "change": "gate geometry artifact registration on optional nn feature; minimal extension-module,text cargo check passes",
+      "qualified_binary_source_sha256": "ef2db0edefe12d67b6c100fc16072b3a2a0b0f7cfff3778c05aeb27fddb6d5b4"
+    },
     "bindings/st-wasm/src/lib.rs": {
       "change": "rustfmt module ordering only; CI lint follow-up",
       "qualified_binary_source_sha256": "8578c6258f5c08011aa775377466c6540f053455016af5258c98957380ccfd43"
@@ -53,7 +57,7 @@
     "crates/st-nn/src/lib.rs": "220d18c1b9d2845e6bff5a0109950b62efc4d13d3942c1b715523e1ee17cda81",
     "crates/st-nn/src/geometry_artifact.rs": "821788eda4f23709a015767b7ed7a7794eb1cf17569dda69012a93a49768090d",
     "crates/st-nn/src/geometry_artifact/tests.rs": "8e62dcedea3c6d903f657fb883013d3604a8115f7b73d36e6c0fbe4c7c25865e",
-    "bindings/st-py/src/lib.rs": "ef2db0edefe12d67b6c100fc16072b3a2a0b0f7cfff3778c05aeb27fddb6d5b4",
+    "bindings/st-py/src/lib.rs": "1ff1eaf19e0a58355f446dbc60f04a630b59c1eb2cc4ba35afe8ea868ad13713",
     "bindings/st-py/src/geometry_artifact.rs": "b6cae66dd06b595389a8dd88dd36837fc3b72727ce092bea8781b3bb88c38628",
     "bindings/st-py/spiraltorch/__init__.py": "7a5382dc2827c7d1f5bfd8d29656f761ddea167f70da6fe36cabb1fe8ca41e0b",
     "bindings/st-py/spiraltorch/__init__.pyi": "6bc28f8a2b4a9800c6403b615655111775bebcfed769ea191e38d271b6a95ea2",

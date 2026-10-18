@@ -52,6 +52,12 @@ follow-up changes only rustfmt ordering; the qualification record retains the
 original binary-source hash as well as the corrected source hash. The recorded
 binaries precede that formatting-only edit.
 
+The next CI stage caught an unconditional Python artifact registration in a
+minimal build without the optional `nn` dependency. Module and class registration
+now use the same `nn` gate. `cargo check --locked -p spiraltorch-py
+--no-default-features --features extension-module,text` passes locally; the
+recorded default-wheel binary has `nn` and predates this registration-only fix.
+
 ## Reproduce
 
 Build/install the source wheel in an isolated environment with Torch and
