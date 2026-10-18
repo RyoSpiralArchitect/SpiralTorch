@@ -1,0 +1,98 @@
+{
+  "schema": "spiraltorch.native_generation_verification.v1",
+  "functional_source": "6b9779d0be85d915faae896314635e6710ce68d1",
+  "observed_at_utc": "2026-10-18T14:20:12.846826+00:00",
+  "rust_tests": {
+    "selection": 6,
+    "existing_control": 7,
+    "causal_lm": 40
+  },
+  "python_no_foreign_ml_tests": 55,
+  "optional_torch_generation_tests": 45,
+  "qualification_comparator_tests": 4,
+  "release_workflow_tests": 18,
+  "release_learning_smoke_tests": 9,
+  "rustfmt": "pass targeted files",
+  "ruff": "pass new Python files",
+  "python38": "grammar only; actual local runtime Python 3.12",
+  "wasm": "cargo +1.99.0 check -p st-nn --target wasm32-unknown-unknown --no-default-features; no browser execution",
+  "clippy": {
+    "passed": true,
+    "st_nn_warnings": 26,
+    "python_binding_warnings": 20,
+    "vendor_warnings_retained": true
+  },
+  "independent_review": {
+    "mode": "read-only local agent",
+    "findings": 0,
+    "scope": "core token selection, native generator and Python transport",
+    "not_claimed": [
+      "cross-platform execution",
+      "quality",
+      "causality"
+    ]
+  },
+  "qualification": {
+    "comparison_sha256": "f1e61ab2876dcb5ae05f8816d1d1c68760e4534cf39c6aa7bc50a1daacb0e480",
+    "native_cases": 18,
+    "native_tokens": 144,
+    "fresh_process_resume_cases": 18,
+    "ordinary_reference_steps": 96,
+    "first_sealed_gates_passed": true,
+    "final_rebuild_replayed_cases_exact": 18,
+    "final_rebuild_replay_sha256": "4b2bc3a102ce6b0427471d9033bf2c672df69c5bb08ed1a536df0cd21557cb27"
+  },
+  "development_wheel": {
+    "filename": "spiraltorch-0.4.32-cp38-abi3-macosx_14_0_arm64.whl",
+    "sha256": "fbaa62f433264373eb849957f5d62a6329ffdf337fc5a7aa2c854beb8288d651",
+    "extension_sha256": "ddcf654d1b1007a120c86cbe5e379e85f1368a63f888d4948bf4815cea6ab73a",
+    "published": false,
+    "warning": "Development artifact retains immutable published version 0.4.32; never upload it"
+  },
+  "preserved_tracked_deletions": {
+    "count": 8234,
+    "sha256": "bc8917dfba59592756119508ad01d973e5062cebffbbc585d3aaa3b6c5adb04a"
+  },
+  "retained_failures": [
+    {
+      "test": "ordinary_softmax_and_sampling_boundaries_are_normalized",
+      "cause": "Exact assertion ignored 1 ULP from a second normalization; corrected to abs<1e-15, no production arithmetic changed",
+      "log": "core-initial.log"
+    },
+    {
+      "test": "test_public_example_full_and_resumed_private_outputs_match",
+      "cause": "Test setUp omitted self.weights; retained in conversation tool output, fixed fixture only"
+    }
+  ],
+  "raw_log_sha256": {
+    "clippy.log": "1fd72c4a18030ba679c2188a053af8cc220d72d765a38861cf61baaa5be67425",
+    "core-fixed.log": "826de97d0804a0bc48e5422b387b81504aebb004f92e81a8c085c21a55546d62",
+    "core-initial.log": "f745a0a166a4d2a8de594be8f23589bdaf7ed461ae7e2739b106995fcbdcbefa",
+    "existing-control.log": "195ed8fc36f6267f55692491e36a81a183d13aa5408ae13bc711264ea78ef6de",
+    "generation-parity.log": "32097e164726347a4a834ae63115d44aa3f1e39ca6f8832535194b1542b18157",
+    "install-final.log": "5677ebca6bc1c9c240d8f87fd3299ca511c75cf494d0d0e7d27e9378e026daf6",
+    "install.log": "2e133a4da230686c16e7f3cf938f0548b4a6522fc5ca2f5384c82cd489def68a",
+    "native-final.log": "c0d24bb9aba719fb47176d72c639d1a21a220d6449d83a2535f1ba3842df62f6",
+    "nn-initial.log": "f0b1725dda547a4281f76a723b059a5e0e19b4b6daa5e5f2aea61f5836af2116",
+    "python-example-fixed.log": "c0d24bb9aba719fb47176d72c639d1a21a220d6449d83a2535f1ba3842df62f6",
+    "python-native.log": "44f8c82176fcb99d8c85a55683e152eb1c4a924cd548766526ae1420fdc999d4",
+    "real-native.log": "32cfa6fdfc7281a78bfb05dcdefff4dbd020894927d5ca165d7f0ee19558a783",
+    "real-prepare.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "real-rebuilt-replay.log": "2ca521a1e035386b779b0ef5d8079e3b9ae5acb440f0c9ce5c469a7df2160c1c",
+    "real-reference.log": "8c681015c4a15caa4ca714d4b7f5438e7414aca75356306b3d9fc2d3e94d884f",
+    "real-report.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "real-resume.log": "aec2f2ce9c28133069af0a35bbfbe8abbc45c8a0fbc698b102864d3111770212",
+    "release-smoke.log": "6a11d541360f0e74f94dcb5e8097a29ae4b43e7780994f7249b5b3ae4c08da86",
+    "release-workflows.log": "52728e532df4c10df971e92cc715d4848b3c34ff781a871c8b8dbd3bf5280b30",
+    "test_native_causal_lm.log": "089ae5ede5e8b0435a494235d5144d543012ac747c91fc557ce0ce1d26ce7e02",
+    "test_native_causal_lm_accumulation.log": "04fefb35856ccb135dc5dea76ef625c026a802f50385cefdc8dff4bae81f6947",
+    "test_native_causal_lm_objective.log": "502089fd9852e15df6fc26a0017085a3dcfbad4b64a1fbbd76db7a6981434b22",
+    "test_native_causal_lm_training.log": "b3d89bc05191c806f6a55c0a8dfe17743b47140f402dd5c321fd6086ea55e62b",
+    "test_native_geometry_adamw.log": "398f09e2f34eb165d4e21aef8203b100999e8ff815b138851b855f78416d1c06",
+    "test_native_geometry_runtime.log": "6796f3e7e98ae05c10c6e515a2a05d4ead3a8443141d74fd7cd0970a3c2d20c4",
+    "wasm.log": "e42956bbc02032c08bd5a7ee92fd1614f0c9585e813d7e9bafe5588610f3a360",
+    "wheel-final.log": "429b46cac37f0a94e6a79e4d84efc75defd0b107a259d1aa580cd44f9efd8677",
+    "wheel-initial.log": "82c4ac3e746eac9115bcd8f371b9d75950608de08403f355196b355cec5beb39"
+  },
+  "release_status": "No new tag or PyPI upload; parent PR2283 real GPU CI still in progress at last check"
+}
