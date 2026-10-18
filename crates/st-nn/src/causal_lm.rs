@@ -12,10 +12,12 @@ use st_tensor::{
 use std::sync::{Arc, OnceLock};
 
 mod decoder;
+mod generation;
 mod gpt2;
 mod learning;
 mod objective;
 mod training;
+pub use generation::{CausalLmGenerationConfig, CausalLmGenerationStep, NativeCausalLmGenerator};
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;

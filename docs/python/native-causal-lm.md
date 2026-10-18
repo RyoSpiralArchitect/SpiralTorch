@@ -159,6 +159,10 @@ reuses this accumulator and Rust's document boundaries. It owns the model/optimi
 pair, fixed recipe and data cursor, so whole runs can continue without HF Trainer
 or a Python reimplementation of the loss/optimizer loop.
 
+The learned model also feeds [native generation](native-generation.md): Rust owns
+greedy/sampled decoding, EOS, Z-Space control and pinned random continuation.
+Python no longer needs a Torch generation loop for this supported model family.
+
 ### Selected Targets and Label Smoothing
 
 Source builds also accept HF-style **unshifted** `labels` with the same flat

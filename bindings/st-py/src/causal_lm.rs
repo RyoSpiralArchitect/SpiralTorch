@@ -11,6 +11,7 @@ use st_nn::causal_lm::{
 use std::collections::BTreeMap;
 
 mod accumulation;
+mod generation;
 mod training;
 use accumulation::PyNativeCausalLmAccumulator;
 
@@ -121,6 +122,24 @@ impl PyNativeCausalLmGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
+    #[staticmethod]
+    fn from_training_checkpoint(
+        py: Python<'_>,
+        base: &Self,
+        payload: &str,
+        expected_id: &str,
+    ) -> PyResult<Self> {
+        py.detach(|| {
+            NativeCausalLm::from_training_checkpoint(
+                base.inner.clone(),
+                payload.as_bytes(),
+                expected_id,
+            )
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
+    }
+
     #[staticmethod]
     #[pyo3(signature = (config_json, weights, *, max_parameter_elements=None, max_activation_elements=None, max_attention_pairs=None, max_logit_elements=None, max_training_checkpoint_elements=None))]
     fn from_gpt2(
@@ -322,5 +341,6 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;
     training::register(module)?;
+    generation::register(module)?;
     Ok(())
 }

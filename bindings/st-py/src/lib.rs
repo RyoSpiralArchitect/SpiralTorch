@@ -542,6 +542,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "NativeCausalLmAccumulator",
         "NativeCausalLmTrainer",
         "NativeCausalLmTrainingStep",
+        "NativeCausalLmGenerator",
+        "NativeCausalLmGenerationStep",
         "NativeGeometryAdamW",
         "NdTensor",
         "ChannelAffineKernel",
