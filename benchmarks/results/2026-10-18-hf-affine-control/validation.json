@@ -1,0 +1,170 @@
+{
+  "schema": "spiraltorch.hf_affine_qualification.v1",
+  "parent_commit": "bc88586a806e766a1654be5f447771c6da661ccb",
+  "python": {
+    "passed": 182,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 3
+  },
+  "stdlib_replay_tests": {
+    "passed": 4,
+    "failed": 0
+  },
+  "rust": {
+    "channel_affine": 4,
+    "geometry_artifact": 6,
+    "failed": 0
+  },
+  "python_no_default_features_extension_cpu_check": "passed",
+  "wasm_nn_build": "wasm32-unknown-unknown release",
+  "wasm_affine": {
+    "schema": "spiraltorch.channel_affine_check.v1",
+    "forward_exact": true,
+    "vjp_exact": true,
+    "owned_snapshot": true,
+    "empty_rows": true,
+    "invalid_inputs_rejected": true,
+    "artifact_id": "sha256:9c52c9887961525103e9cc27565016284d1a350bc388d438879faf14fc933cfd",
+    "layout_id": "sha256:6e7da5f86bcbba5e7b5881b24806cccb67a96d887e4c73cdf52f66f9b6f82331",
+    "hf_execution": false
+  },
+  "wasm_legacy_artifact": {
+    "schema": "spiraltorch.geometry_adapter_portability_check.v1",
+    "fixture_id": "sha256:e911eeaf6a1858e6e755f418508077232283d3124bc0a0be61de0fa15ed3c9ff",
+    "canonical_artifact_id": "sha256:c8f9af48b39284b68706dc3d00ad878c8b4c24d9943fdc626684e59a9a6b8460",
+    "placements": 13,
+    "layout_id": "sha256:da09a8a0fd87eae97c9bbb77e0168a5bc807f8ec61e91162cd7a590015afd020",
+    "weights_independent_layout": true,
+    "pinned_load": true,
+    "canonical_roundtrip": true,
+    "invalid_records_rejected": true,
+    "hf_execution": false
+  },
+  "wasm_windows": {
+    "schema": "spiraltorch.causal_windows_check.v1",
+    "plan_id": "sha256:8578e7a00e5b652f0cf1866e121e786e03b948d6400e232340384e1b2e9ebe6d",
+    "windows": 4,
+    "no_cross_document_packing": true,
+    "invalid_inputs_rejected": true
+  },
+  "native_wasm_identity": {
+    "artifact_id": "sha256:9c52c9887961525103e9cc27565016284d1a350bc388d438879faf14fc933cfd",
+    "layout_id": "sha256:6e7da5f86bcbba5e7b5881b24806cccb67a96d887e4c73cdf52f66f9b6f82331",
+    "native_wasm_identity_exact": true
+  },
+  "wheel": {
+    "wheel_sha256": "4f600dfc7682fa7d06c1075e520acc44cdfc9cf0c96bea7c6e6dd2f007db4e83",
+    "python_source_matches": {
+      "__init__.py": true,
+      "geometry_artifact.py": true,
+      "channel_affine.py": true,
+      "hf_geometry_trainer.py": true,
+      "hf_geometry_dataset.py": true
+    }
+  },
+  "continuation": {
+    "schema": "spiraltorch.hf_affine_continuation_check.v1",
+    "exact_checks": {
+      "device": true,
+      "runtime_identity": true,
+      "tokenized_dataset_identity": true,
+      "initial_artifact_id": true,
+      "seed": true,
+      "max_steps": true,
+      "context_length": true,
+      "batch_size": true,
+      "learning_rate": true,
+      "max_grad_norm": true,
+      "run_config": true,
+      "base_parameter_hash": true,
+      "steps": true,
+      "base_and_inference": true,
+      "stop/spiraltorch-geometry.json": true,
+      "stop/optimizer.pt": true,
+      "stop/scheduler.pt": true,
+      "stop/rng_state.pth": true,
+      "stop/spiraltorch-mps-rng.pt": true,
+      "final/spiraltorch-geometry.json": true,
+      "final/optimizer.pt": true,
+      "final/scheduler.pt": true,
+      "final/rng_state.pth": true,
+      "final/spiraltorch-mps-rng.pt": true,
+      "final_export": true,
+      "final_eval_loss": true
+    },
+    "full_artifact_id": "sha256:0281c0aa61a604e00008ceca08d64072eef8961a27c6b4ea40cd17d86dc63255",
+    "resumed_artifact_id": "sha256:0281c0aa61a604e00008ceca08d64072eef8961a27c6b4ea40cd17d86dc63255",
+    "loss": 5.139740467071533,
+    "private_result_ids": [
+      "sha256:12f1dcda89529460e8f7be32478b35ac5df1ac800af9940c40c2067a49209955",
+      "sha256:e55b09cc1bf01899b906c2e8a523bc7a89578aad36a50bb78af39b5abcf1aa91",
+      "sha256:87ba600523a7cef7f50cad71cfcaab7bace5f45d1f4c323b241d89d9fc9b5440"
+    ]
+  },
+  "repaired_driver_replay": {
+    "revised_driver_same_six_artifacts_and_metrics": true,
+    "run_manifest_status": "completed"
+  },
+  "private_log_ids": {
+    "python-final.log": "sha256:5381a9357cf437b5cc0a7961bed09de0b5980b24d9c0c4aac0e1fdf34f92f0b6",
+    "python-final.xml": "sha256:7cf72171e2044d67cae68d71efb56b4ab484964334e8d25b785daeafe7993369",
+    "replay-tests-final.log": "sha256:5d8a174d448d59185fd227bcbab9c964e39b10a9c2e28965972cfb0c833dd854",
+    "rust-tests-final.log": "sha256:e5861daaef67cba3d078f61504535d43c31185f9d995d9f17620f673c917dff0",
+    "rust-artifact.log": "sha256:99b440ab308ee30da3913e26aa4332167e3ebffe9531f6f580d97ddddb960d79",
+    "python-minimal-check.log": "sha256:7ed12ca28563ff384e75e7850d0fb41d7da02c2440971cf93d83c0676f4ccf47",
+    "wheel-build-final.log": "sha256:9b543ae7610fedfe7f769a5df418a274756400147ca9515e284514b4dc1cd032",
+    "wasm-build-final.log": "sha256:647554a7f9f9402c442c8d6a28b4991fb9464ec8138f91b43f3db04bf6e73351",
+    "wasm-bindgen.log": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matched-gpt2.log": "sha256:bff27c8fae7d4b9ce44ab5e91a3ed971893b696efb53a5455790ed5a9b172e3a",
+    "matched-gpt2-final.log": "sha256:bff27c8fae7d4b9ce44ab5e91a3ed971893b696efb53a5455790ed5a9b172e3a",
+    "ordinary-partial.log": "sha256:8d45341ec12197fe37cf804ed5c05640adbefe492b406ad9936978f8b83d07f8",
+    "ordinary-resumed.log": "sha256:cc209eacd12371736842b33b6584adc4e5cedc04644502e1f817d911a76c12e9"
+  },
+  "publication_source_ids": {
+    ".github/workflows/ci.yml": "sha256:4e5b512759ec5499ca53fd06d35954d18102905e31f5a4a5998c1017662b4b39",
+    "bindings/st-py/spiraltorch/__init__.py": "sha256:84549bbfdd788e770152a6734e0eb65d5ca00ad332f60e6421431a0da65e1b63",
+    "bindings/st-py/spiraltorch/__init__.pyi": "sha256:3a2d823bb0c1fa98565ab8c64c7eb2ff6c3fc26d5526943f7a5ea25cd08ab4e8",
+    "bindings/st-py/spiraltorch/channel_affine.py": "sha256:b65cefc080b7bce664af9e9fddd32b485c448150df5626a4f79b73d819f8d1da",
+    "bindings/st-py/spiraltorch/geometry_artifact.py": "sha256:fc9a5c8c9fa4ecc966410ae7fd043714a9713650505d85ddf8eb702a27abfe41",
+    "bindings/st-py/src/channel_affine.rs": "sha256:d89921bc6255f75505d81f31aab19d93013841d9ae553365723273069f458e25",
+    "bindings/st-py/src/lib.rs": "sha256:0e119c88f376ca83ee404e4d91fe98e4fed4cb6fb03b03666d07af641e6ef71d",
+    "bindings/st-py/tests/test_channel_affine.py": "sha256:9a8e603afc695443fc4b52ad49fb7b9cbf9b4773b0b2848e2d7003785c48649d",
+    "bindings/st-py/tests/test_geometry_artifact.py": "sha256:c84e547930bf02fd9220c6139d33d1655d2ab9d6e2b77b02857df06beef1e92b",
+    "bindings/st-py/tests/test_geometry_optional_dependency.py": "sha256:c4b1764284777740e1f1102bcfd63708f2cc072d16f96536b7c78325f0639cb1",
+    "bindings/st-py/tests/test_hf_geometry_trainer.py": "sha256:a34e382aed32c907bb2ba2a92f20eb35116031f8387708278159afdb2d12e334",
+    "bindings/st-wasm/src/channel_affine.rs": "sha256:7de900224ba71a7a3e7e972aa329100f4e0f131fc96dd2b1fd4193d0faccf6e9",
+    "bindings/st-wasm/src/lib.rs": "sha256:5552b06d90ee0b990f9a0726df819865b56acd55ac40e820e7b63a70d93a1746",
+    "bindings/st-wasm/tests/channel_affine.cjs": "sha256:fc73ab4ad8c50065119dc1fa51769b4983994236b2aad03cb8d53e9f0fcfd459",
+    "crates/st-nn/src/geometry_artifact.rs": "sha256:e68e19b632f711d08716e6529dfb6e4add07cf64de7b684c1579e1488a759ebe",
+    "crates/st-nn/src/layers/channel_affine.rs": "sha256:379a173dfeb9771e167fd37a06825049fead2f8fe4f713684c7bf75e41db64cf",
+    "crates/st-nn/src/layers/mod.rs": "sha256:42c3068dc93010aef709dc0f0f3579f1c098b7eb7f162295bcc6909c5177552a",
+    "crates/st-nn/src/lib.rs": "sha256:e8ce52d904006c7a0179e3c3856942b2f5f9ce3d1f03cda11743904f8b7d2880",
+    "crates/st-nn/tests/fixtures/channel_affine.fixture.json": "sha256:cc7458814e38902c137f3a4d7fd9860eea661e9e743c41578a2c8c791d8d6ae5",
+    "docs/language_mlops.md": "sha256:68c022f15ad35275c0ab3b01fb13b79269a25efdcab8255ab2ab0eccc5e519c6",
+    "docs/python/geometry-artifacts.md": "sha256:05989caa27eb71de6612cae04a568daef49e2a3c369028c5e7e004ae2b1d8914",
+    "docs/python/channel-affine-control.md": "sha256:34879ca05d5c05d7b151aac9e2771adbc5a2b899b22011584c7430deeb6e705a",
+    "tools/test_hf_affine_replay.py": "sha256:ade2263025b8cfcf3ac888d626bca426fc48d287f738587d9dd34ef7978c612e",
+    "benchmarks/results/2026-10-18-hf-affine-control/replay.py": "sha256:ab3f58543c6fa51bdd84e3e59c20bdf1b78db99b1800351cb31386d950814d41",
+    "benchmarks/results/2026-10-18-hf-affine-control/verify_continuation.py": "sha256:3e02b0194b4fd20f63e8ef1b667655848f7ee104055d03babf0ef4301d55979a"
+  },
+  "source_identity_scope": "Publication sources; installed Python package members checked against wheel. Rust production code built/tested; later cfg(test)-only edits compiled in Rust test build.",
+  "intentional_deleted_files": 8234,
+  "deleted_path_list_sha256": "bc8917dfba59592756119508ad01d973e5062cebffbbc585d3aaa3b6c5adb04a",
+  "release_status": "source_candidate_after_0.4.31_not_pypi_release",
+  "claims": {
+    "quality_advantage": false,
+    "gpu_speed": false,
+    "production_distributed_service": false
+  },
+  "installed_wheel": {
+    "installed_wheel_members_match": {
+      "spiraltorch/__init__.py": true,
+      "spiraltorch/geometry_artifact.py": true,
+      "spiraltorch/channel_affine.py": true,
+      "spiraltorch/hf_geometry_trainer.py": true,
+      "spiraltorch/hf_geometry_dataset.py": true,
+      "spiraltorch/spiraltorch.abi3.so": true
+    }
+  }
+}

@@ -1,0 +1,429 @@
+{
+  "schema": "spiraltorch.hf_affine_public_results.v1",
+  "status": "six_runs_completed",
+  "quality_status": "workflow_probe_not_quality_evidence",
+  "versions": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0"
+  },
+  "recipe": {
+    "model": "local_gpt2_small",
+    "sites": [
+      "transformer.h.8.mlp",
+      "transformer.h.9.mlp",
+      "transformer.h.10.mlp",
+      "transformer.h.11.mlp"
+    ],
+    "trainable_values_per_arm": 6144,
+    "geometry_backend": "rust_f32_cpu",
+    "hf_device": "mps",
+    "strength": 0.1,
+    "wave_curvature": -1,
+    "wave_learnable_radius": false,
+    "context_length": 32,
+    "batch_size": 2,
+    "max_steps": 32,
+    "save_steps": 16,
+    "learning_rate": 0.001,
+    "max_grad_norm": 0.1,
+    "seeds": [
+      41,
+      43,
+      47
+    ],
+    "attention": "eager",
+    "dtype": "float32",
+    "cache": false,
+    "optimizer": "adamw_torch",
+    "scheduler": "linear",
+    "warmup_steps": 0,
+    "weight_decay": 0,
+    "gradient_accumulation_steps": 1
+  },
+  "documents": [
+    {
+      "split": "train",
+      "sha256": "sha256:3462ab052910c7ac171b26c72cf9d792f10e6a916126599b7260e8244996a884"
+    },
+    {
+      "split": "train",
+      "sha256": "sha256:974e7be91e5d75a5a2b635951fff7ecc09997b10bfe6cf7bea1002ac156bd859"
+    },
+    {
+      "split": "train",
+      "sha256": "sha256:8ca181b255a4e9926931ccc73414bc7188501df7366c6ccb2222be408b64a206"
+    },
+    {
+      "split": "train",
+      "sha256": "sha256:5605e2889925bd1215fe4212a919b5bedee1816441947735ec0fd885158994e2"
+    },
+    {
+      "split": "train",
+      "sha256": "sha256:1076066f1882cc09c5f9ca0113307f2ca2db6b8f760cfdf33f7a2c09ee17136e"
+    },
+    {
+      "split": "train",
+      "sha256": "sha256:8498727134f572fddb5a3d1f00aeb928ac73db2634b97f85ba852372cbc704d3"
+    },
+    {
+      "split": "eval",
+      "sha256": "sha256:6f106b1f8e7b044f5110c5e9dc321da94391b22eff60994e0084c3e6308164c5"
+    }
+  ],
+  "runs": [
+    {
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:08f889a082a4626d72b8a84f067621f47490b0b7712a979c1f6cb207e4b17131",
+      "initial_layout_id": "sha256:c513e065e0bd130d648978e529cffe8c4a0c17ca319499c8ca3c0d659b7c476e",
+      "artifact_id": "sha256:0281c0aa61a604e00008ceca08d64072eef8961a27c6b4ea40cd17d86dc63255",
+      "checkpoint_artifact_id": "sha256:b978b59e519ae56aa76ce0316a7a6c8d481f96c68795fb8f46c94aad1d00a135",
+      "seed": 41,
+      "step": 32,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.139740467071533,
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "window_count": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "window_count": 30
+      },
+      "arm": "ordinary",
+      "trained_sites": 4,
+      "private_result_id": "sha256:12f1dcda89529460e8f7be32478b35ac5df1ac800af9940c40c2067a49209955",
+      "private_artifact_id": "sha256:0281c0aa61a604e00008ceca08d64072eef8961a27c6b4ea40cd17d86dc63255"
+    },
+    {
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:45323999355a867d92df5b2015c925ec8f79d3b2e819c489aa8528e39af2678c",
+      "initial_layout_id": "sha256:4f98e1314b99cd8e128f2852677f06aa50183af28ff419f049ae9c6628cedda2",
+      "artifact_id": "sha256:2c449983e2f851891fe95179e631463f441b7dc0132adbcaaf4ccd1543245898",
+      "checkpoint_artifact_id": "sha256:ba99194c56eaf3ce327682b3c2b3bd8f174ab98eb147a8e5506e29dd20404950",
+      "seed": 41,
+      "step": 32,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.1407318115234375,
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "window_count": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "window_count": 30
+      },
+      "arm": "wave_gate",
+      "trained_sites": 4,
+      "private_result_id": "sha256:5932c3e63a28cc0ceba406c13484ce77205b8db244f2bc7ccc0510c4f48baf0b",
+      "private_artifact_id": "sha256:2c449983e2f851891fe95179e631463f441b7dc0132adbcaaf4ccd1543245898"
+    },
+    {
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:08f889a082a4626d72b8a84f067621f47490b0b7712a979c1f6cb207e4b17131",
+      "initial_layout_id": "sha256:c513e065e0bd130d648978e529cffe8c4a0c17ca319499c8ca3c0d659b7c476e",
+      "artifact_id": "sha256:50fdf0a33f26d8d2813b3f96c01533cd1d8ad1a59ae77478da945f832f39117a",
+      "checkpoint_artifact_id": "sha256:a5b16f70fbaf298fd51da7144065cdf5ebde237613a1b7d514711382a624dbff",
+      "seed": 43,
+      "step": 32,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.139693737030029,
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "window_count": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "window_count": 30
+      },
+      "arm": "ordinary",
+      "trained_sites": 4,
+      "private_result_id": "sha256:ad010f5e88d0e22c7b46cacba5922c71c26398aa586935f0d3ea78b629855d95",
+      "private_artifact_id": "sha256:50fdf0a33f26d8d2813b3f96c01533cd1d8ad1a59ae77478da945f832f39117a"
+    },
+    {
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:45323999355a867d92df5b2015c925ec8f79d3b2e819c489aa8528e39af2678c",
+      "initial_layout_id": "sha256:4f98e1314b99cd8e128f2852677f06aa50183af28ff419f049ae9c6628cedda2",
+      "artifact_id": "sha256:96b1765afb30ce582dea95a8951288f32463b971813248a525f7ff9d269f9cd6",
+      "checkpoint_artifact_id": "sha256:8b4c751bfc3f1e015afd8a434890e124981570ad18c03956a97a047d6c7a606e",
+      "seed": 43,
+      "step": 32,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.1407084465026855,
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "window_count": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "window_count": 30
+      },
+      "arm": "wave_gate",
+      "trained_sites": 4,
+      "private_result_id": "sha256:8999e03b24b2d52d253b8081bddaebb52cf462aa8d48a8d7d3ee64ab793583b0",
+      "private_artifact_id": "sha256:96b1765afb30ce582dea95a8951288f32463b971813248a525f7ff9d269f9cd6"
+    },
+    {
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:08f889a082a4626d72b8a84f067621f47490b0b7712a979c1f6cb207e4b17131",
+      "initial_layout_id": "sha256:c513e065e0bd130d648978e529cffe8c4a0c17ca319499c8ca3c0d659b7c476e",
+      "artifact_id": "sha256:28374a2d05fb59c0e405b2352f7495a56ab5bdbe8951ba13356a7e1e822533a2",
+      "checkpoint_artifact_id": "sha256:a4b20d206dfdfd648dcbdfc00b1069eb8e629c4ac7ef9d64776102ec74d6bff3",
+      "seed": 47,
+      "step": 32,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.1399149894714355,
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "window_count": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "window_count": 30
+      },
+      "arm": "ordinary",
+      "trained_sites": 4,
+      "private_result_id": "sha256:9c66c4b5710dc93fd3b2b1420640188034c24da8da8ee72c9edbcae44807852d",
+      "private_artifact_id": "sha256:28374a2d05fb59c0e405b2352f7495a56ab5bdbe8951ba13356a7e1e822533a2"
+    },
+    {
+      "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+      "tokenized_dataset_identity": "sha256:736c60cd90836657882c3a4671fa83ea7def1eaad8588f2af8bc6492a58ea0c7",
+      "initial_artifact_id": "sha256:45323999355a867d92df5b2015c925ec8f79d3b2e819c489aa8528e39af2678c",
+      "initial_layout_id": "sha256:4f98e1314b99cd8e128f2852677f06aa50183af28ff419f049ae9c6628cedda2",
+      "artifact_id": "sha256:aabd7edd1afdb2bb7b20bf2cc457bfb70ec1b6d90dcb5fca32bf19620ca7b977",
+      "checkpoint_artifact_id": "sha256:d63164b4e7f6c10fccaf64d1a3c70f13e2140eff6bc3f3141e951e13c87ea91c",
+      "seed": 47,
+      "step": 32,
+      "base_parameter_hash": "sha256:e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+      "base_unchanged": true,
+      "restored_logits_exact": true,
+      "bare_eval_loss": 5.142389297485352,
+      "initial_geometry_eval_loss": 5.142389297485352,
+      "trained_geometry_eval_loss": 5.140870094299316,
+      "train_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          105,
+          74,
+          72,
+          76,
+          79,
+          70
+        ],
+        "total_tokens": 476,
+        "dropped_tokens": 60,
+        "target_tokens": 403,
+        "window_count": 13
+      },
+      "eval_window_plan": {
+        "schema": "spiraltorch.causal_document_windows.v1",
+        "policy": "disjoint_full_contexts_drop_tail_per_document.v1",
+        "context_length": 32,
+        "document_lengths": [
+          991
+        ],
+        "total_tokens": 991,
+        "dropped_tokens": 31,
+        "target_tokens": 930,
+        "window_count": 30
+      },
+      "arm": "wave_gate",
+      "trained_sites": 4,
+      "private_result_id": "sha256:5818f73fe7b088831d9c8fc9754cb40cd2f87390203847be080164efb413485c",
+      "private_artifact_id": "sha256:aabd7edd1afdb2bb7b20bf2cc457bfb70ec1b6d90dcb5fca32bf19620ca7b977"
+    }
+  ],
+  "paired_differences": [
+    {
+      "seed": 41,
+      "wave_minus_ordinary_eval_loss": 0.0009913444519042969
+    },
+    {
+      "seed": 43,
+      "wave_minus_ordinary_eval_loss": 0.00101470947265625
+    },
+    {
+      "seed": 47,
+      "wave_minus_ordinary_eval_loss": 0.0009551048278808594
+    }
+  ],
+  "claims": {
+    "general_language_quality": false,
+    "gpu_speed": false,
+    "promoted_default": false
+  },
+  "private_summary_id": "sha256:cd0c7a3214f17e7c1d0a407f26bc406c4b73916d69e9896465f86319a9d6526c",
+  "private_run_manifest_id": "sha256:c5cf722f615f399b1ec0f0049fb4726f53146b2154a9a050c6c14199361da237",
+  "run_manifest": {
+    "schema": "spiraltorch.hf_affine_run_manifest.v1",
+    "status": "completed",
+    "replay_source_id": "sha256:ab3f58543c6fa51bdd84e3e59c20bdf1b78db99b1800351cb31386d950814d41",
+    "runs": [
+      {
+        "arm": "ordinary",
+        "seed": 41,
+        "status": "completed"
+      },
+      {
+        "arm": "wave_gate",
+        "seed": 41,
+        "status": "completed"
+      },
+      {
+        "arm": "ordinary",
+        "seed": 43,
+        "status": "completed"
+      },
+      {
+        "arm": "wave_gate",
+        "seed": 43,
+        "status": "completed"
+      },
+      {
+        "arm": "ordinary",
+        "seed": 47,
+        "status": "completed"
+      },
+      {
+        "arm": "wave_gate",
+        "seed": 47,
+        "status": "completed"
+      }
+    ]
+  }
+}

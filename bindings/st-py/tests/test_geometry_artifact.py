@@ -27,6 +27,7 @@ def equal(left, right):
 
 
 CASES = [
+    ("ChannelAffineAdapter", {}),
     ("WaveGateAdapter", {}),
     ("WaveGateAdapter", {"log_radius": .2, "learnable_radius": True}),
     ("WaveGateAdapter", {"log_radius": .2}),

@@ -113,6 +113,9 @@ pub use language::{
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
+pub use layers::channel_affine::{
+    ChannelAffineKernel, ChannelAffineLearningBatch, ChannelAffineVjp,
+};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv3d, Conv4d, Conv6da, MaxPool2d};
 pub use layers::linear::Linear;
 pub use layers::lora_linear::LoraLinear;

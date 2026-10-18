@@ -9565,6 +9565,10 @@ def __getattr__(name: str) -> _Any:
         value = getattr(import_module("spiraltorch.hf_geometry_dataset"), name)
         globals()[name] = value
         return value
+    if name in {"ChannelAffineAdapter", "channel_affine_autograd"}:
+        value = getattr(import_module("spiraltorch.channel_affine"), name)
+        globals()[name] = value
+        return value
     if name == "hf_geometry_trainer_class":
         module = import_module("spiraltorch.hf_geometry_trainer")
         value = getattr(module, name)
@@ -9673,7 +9677,7 @@ _EXPORTED.update(
      "EllipticCausalResidualAdapter", "elliptic_causal_autograd",
      "EllipticGatedCausalResidualAdapter", "elliptic_gated_causal_autograd",
      "EllipticAnchoredResidualAdapter", "elliptic_anchored_autograd",
-     "WaveGateAdapter", "wave_gate_autograd"]
+     "WaveGateAdapter", "wave_gate_autograd", "ChannelAffineAdapter", "channel_affine_autograd"]
 )
 for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact"):
     if _resolve_rs_attr(_name) is not None:

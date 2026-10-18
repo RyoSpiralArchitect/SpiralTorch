@@ -2,6 +2,8 @@
 
 mod api_llm_policy;
 mod autograd;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+mod channel_affine;
 mod cobol;
 mod concept_diffusion;
 mod cosmology;
@@ -92,6 +94,8 @@ pub use api_llm_policy::*;
 pub use autograd::*;
 #[cfg(target_arch = "wasm32")]
 pub use canvas::*;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+pub use channel_affine::*;
 pub use cobol::*;
 #[cfg(target_arch = "wasm32")]
 pub use cobol_bridge::*;

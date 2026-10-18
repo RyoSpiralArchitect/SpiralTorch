@@ -58,6 +58,12 @@ pub struct FractionalRecipe {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "schema", deny_unknown_fields)]
 pub enum GeometryAdapterRecipe {
+    #[serde(rename = "spiraltorch.channel_affine_adapter.v1")]
+    ChannelAffine {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+    },
     #[serde(rename = "spiraltorch.wave_gate_adapter.v1")]
     Wave {
         features: usize,
@@ -357,7 +363,10 @@ impl GeometryAdapterPlacement {
     fn validate(&self) -> Result<usize> {
         use GeometryAdapterRecipe::*;
         let (features, strength) = match &self.recipe {
-            Wave {
+            ChannelAffine {
+                features, strength, ..
+            }
+            | Wave {
                 features, strength, ..
             }
             | WaveRadius {
@@ -402,7 +411,7 @@ impl GeometryAdapterPlacement {
         }
         let mut shapes = BTreeMap::new();
         match &self.recipe {
-            Wave { .. } | WaveRadius { .. } => {
+            ChannelAffine { .. } | Wave { .. } | WaveRadius { .. } => {
                 shapes.insert("gate", vec![features]);
                 shapes.insert("bias", vec![features]);
             }
@@ -489,6 +498,15 @@ impl GeometryAdapterPlacement {
             return Err("missing geometry tensors".into());
         }
         match &self.recipe {
+            ChannelAffine { max_values, .. } => {
+                crate::ChannelAffineKernel::new(*max_values)?.forward(
+                    &[],
+                    self.tensor("gate"),
+                    self.tensor("bias"),
+                    0,
+                    features,
+                )?;
+            }
             Wave { kernel, .. } | WaveRadius { kernel, .. } => {
                 u32::try_from(kernel.max_values).map_err(|_| "wave budget exceeds portable u32")?;
                 let native = WaveGateKernel::new(

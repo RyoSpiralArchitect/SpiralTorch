@@ -55,7 +55,7 @@ class StopAtTwo(hf.TrainerCallback):
             control.should_training_stop = True
 
 
-def make_trainer(output, architecture="gpt2", callbacks=(), **options):
+def make_trainer(output, architecture="gpt2", callbacks=(), adapter_kind="geometry", **options):
     torch.set_num_threads(2)
     torch.manual_seed(123)
     if architecture == "gpt2":
@@ -81,6 +81,8 @@ def make_trainer(output, architecture="gpt2", callbacks=(), **options):
         st.ToposResonatorAdapter(8), st.EllipticAnchoredResidualAdapter(8),
         st.FractionalAngleGainHistoryAdapter(8, kernel_len=5, initial_angle=.2),
     ))))
+    if adapter_kind == "channel_affine":
+        geometry = st.GeometryAdapterStack({path: st.ChannelAffineAdapter(8) for path in paths})
     config = dict(output_dir=str(output), use_cpu=True, report_to=[], disable_tqdm=True,
                   max_steps=4, per_device_train_batch_size=2, gradient_accumulation_steps=2,
                   per_device_eval_batch_size=2, learning_rate=.01, optim="adamw_torch",
@@ -93,9 +95,10 @@ def make_trainer(output, architecture="gpt2", callbacks=(), **options):
 
 
 @pytest.mark.parametrize("architecture", ["gpt2", "llama"])
-def test_actual_hf_loop_clips_updates_and_exactly_resumes(tmp_path, architecture):
+@pytest.mark.parametrize("adapter_kind", ["geometry", "channel_affine"])
+def test_actual_hf_loop_clips_updates_and_exactly_resumes(tmp_path, architecture, adapter_kind):
     clipped = CheckClipping()
-    full = make_trainer(tmp_path / "full", architecture, [clipped])
+    full = make_trainer(tmp_path / "full", architecture, [clipped], adapter_kind)
     base_before = copy.deepcopy(full.base_model.state_dict())
     geometry_before = copy.deepcopy(full.geometry.state_dict())
     full.train()
@@ -112,7 +115,7 @@ def test_actual_hf_loop_clips_updates_and_exactly_resumes(tmp_path, architecture
     expected_scheduler = copy.deepcopy(full.lr_scheduler.state_dict())
     expected_predictions = full.predict(TinyData()).predictions
 
-    partial = make_trainer(tmp_path / "partial", architecture, [StopAtTwo()])
+    partial = make_trainer(tmp_path / "partial", architecture, [StopAtTwo()], adapter_kind)
     partial.train()
     assert partial.state.global_step == 2
     checkpoint = tmp_path / "partial/checkpoint-2"
@@ -121,7 +124,7 @@ def test_actual_hf_loop_clips_updates_and_exactly_resumes(tmp_path, architecture
     assert not (checkpoint / "model.safetensors").exists()
     assert not (checkpoint / "pytorch_model.bin").exists()
     pin = partial.last_geometry_artifact_id
-    resumed = make_trainer(tmp_path / "resumed", architecture)
+    resumed = make_trainer(tmp_path / "resumed", architecture, adapter_kind=adapter_kind)
     resumed.train(resume_from_checkpoint=str(checkpoint), geometry_checkpoint_id=pin)
     assert resumed.state.global_step == 4
     assert torch.equal(expected_rng, torch.get_rng_state())
