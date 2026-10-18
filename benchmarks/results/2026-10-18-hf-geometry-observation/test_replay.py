@@ -105,6 +105,38 @@ class ReplayTests(unittest.TestCase):
                 API["cases_for"](results, saved, preflight)
             source.update(original)
 
+    def test_published_results_retain_every_case_and_qualified_boundary(self):
+        results = json.loads((HERE / "results.json").read_text())
+        execution = json.loads((HERE / "execution.json").read_text())
+        self.assertEqual(results["status"], "completed")
+        self.assertEqual(results["execution_id"], API["digest"](HERE / "execution.json"))
+        self.assertEqual(results["plan_id"], API["digest"](HERE / "plan.json"))
+        self.assertFalse(results["reserve_opened"])
+        self.assertEqual(results["optimizer_updates"], 0)
+        self.assertEqual(results["quality_status"], "posthoc_mechanism_diagnosis_not_quality_confirmation")
+        declared = API["cases_for"](
+            json.loads((BOOK / "results.json").read_text()),
+            json.loads((BOOK / "saved-state-check.json").read_text()),
+            json.loads((BOOK / "preflight-qualified.json").read_text()))
+        self.assertEqual(len(results["cases"]), len(declared))
+        self.assertEqual(len(execution["cases"]), len(declared))
+        sites = json.loads((BOOK / "plan.json").read_text())["sites"]
+        for expected, case, original in zip(declared, results["cases"], execution["cases"]):
+            self.assertEqual({k: case[k] for k in expected}, expected)
+            self.assertEqual({k: original[k] for k in expected}, expected)
+            self.assertTrue(math.isfinite(case["eval_loss"]))
+            if expected["expected_loss"] is not None:
+                self.assertEqual(case["eval_loss"], expected["expected_loss"])
+            for field in ("observed_loss_exact", "first_window_logits_exact", "rng_exact",
+                          "base_and_geometry_unchanged", "coverage_complete"):
+                self.assertIs(case[field], True)
+            self.assertEqual(case["optimizer_updates"], 0)
+            self.assertEqual([layer["path"] for layer in case["layers"]], sites)
+            for layer in case["layers"]:
+                self.assertEqual((layer["calls"], layer["rows"]), (80, 20352))
+                self.assertEqual(layer["native_conditioning"] is None, case["arm"] == "ordinary")
+        json.dumps(results, allow_nan=False)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,2503 @@
+{
+  "schema": "spiraltorch.hf_geometry_observation_study.v1",
+  "status": "completed",
+  "plan_id": "sha256:9053c62d8c72b763fd74f7f315525d212b1f0ed63168f8260a47157a539bd3d5",
+  "execution_id": "sha256:fc89b1dc6caf47df9127640ed80aa648352c3ae612b3f79634a1702e4a16b7dd",
+  "cases": [
+    {
+      "arm": "ordinary",
+      "seed": null,
+      "step": 0,
+      "artifact_id": "sha256:08f889a082a4626d72b8a84f067621f47490b0b7712a979c1f6cb207e4b17131",
+      "expected_loss": 4.118154048919678,
+      "key": "ordinary-seed-None-step-0",
+      "eval_loss": 4.118154048919678,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": null
+        }
+      ],
+      "trace_id": "sha256:9c3a5cdab787826fa35adb8d6162d57961cfa824714ecaf2060ff5419d2f8462",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate",
+      "seed": null,
+      "step": 0,
+      "artifact_id": "sha256:45323999355a867d92df5b2015c925ec8f79d3b2e819c489aa8528e39af2678c",
+      "expected_loss": 4.118154048919678,
+      "key": "wave_gate-seed-None-step-0",
+      "eval_loss": 4.118154048919678,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        }
+      ],
+      "trace_id": "sha256:a189bbda5d45fb56913f356dc04f83150796fdadaa69cd8e4149ce534e4bffe7",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": null,
+      "step": 0,
+      "artifact_id": "sha256:cb23b9a03f6bc2ed4de0045ce56b295770a79483792fd06b045fcffccd87efda",
+      "expected_loss": 4.118154048919678,
+      "key": "wave_gate_radius1-seed-None-step-0",
+      "eval_loss": 4.118154048919678,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        }
+      ],
+      "trace_id": "sha256:5b78d422bc51495b68e72386c935ea6b74d0d5b0a7265c16a8f8d9486e5fa394",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": null,
+      "step": 0,
+      "artifact_id": "sha256:297842875dbb7f649dd3825535dbe191e17f9d07167d74f499d0541797da0c0b",
+      "expected_loss": 4.118154048919678,
+      "key": "wave_gate_radius4-seed-None-step-0",
+      "eval_loss": 4.118154048919678,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0,
+          "residual_max_abs": 0.0,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 0.0,
+            "relative_radial_gain_mean": 1.0,
+            "relative_tangential_gain_mean": 1.0,
+            "relative_radial_gain_min": 1.0,
+            "relative_tangential_gain_min": 1.0,
+            "dimensionless_norm_max": 0.0,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        }
+      ],
+      "trace_id": "sha256:551b2bfe87a7f3e8c437bbfe23a4003f8f2cf103e48ba10b8a642069cfe82fa6",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "ordinary",
+      "seed": 41,
+      "step": 256,
+      "artifact_id": "sha256:011b9a574db6c347d6afb271f652475ab8b6710884a91dad168cbff817f7f0aa",
+      "expected_loss": null,
+      "key": "ordinary-seed-41-step-256",
+      "eval_loss": 4.078342437744141,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.012891952486783721,
+          "residual_max_abs": 0.5046844482421875,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.011929151683915836,
+          "residual_max_abs": 0.5754318237304688,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.006704425245626896,
+          "residual_max_abs": 0.8021163940429688,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.014164516418548339,
+          "residual_max_abs": 5.30279541015625,
+          "native_conditioning": null
+        }
+      ],
+      "trace_id": "sha256:3148a48f92d40cc3eaa327f64e9dd6db2bf1fde4b925403e510ee4ecf31fd672",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "ordinary",
+      "seed": 41,
+      "step": 512,
+      "artifact_id": "sha256:0d2307385b0c51cfc9e64ace901c49e476d8aa2997ba30f77663c7db1ba1482e",
+      "expected_loss": 4.065830230712891,
+      "key": "ordinary-seed-41-step-512",
+      "eval_loss": 4.065830230712891,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.017109475314094576,
+          "residual_max_abs": 0.6638736724853516,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.01575689135382796,
+          "residual_max_abs": 0.759735107421875,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.008856768651472256,
+          "residual_max_abs": 1.0412750244140625,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.01878755019424799,
+          "residual_max_abs": 7.025115966796875,
+          "native_conditioning": null
+        }
+      ],
+      "trace_id": "sha256:e48924260da2c7d39e63f9a1269273eca5cca46a4cff8ee09d5df71460f8fecf",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 41,
+      "step": 256,
+      "artifact_id": "sha256:b686b9d050c6a389915d9cab6aa5da9c1c6adee0992da91a51fb7ddcb3e05e2d",
+      "expected_loss": null,
+      "key": "wave_gate-seed-41-step-256",
+      "eval_loss": 4.111126899719238,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002962875375475983,
+          "residual_max_abs": 0.02740001678466797,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7244121890974948,
+            "relative_radial_gain_mean": 0.12086736318075122,
+            "relative_tangential_gain_mean": 0.5447633088139352,
+            "relative_radial_gain_min": 0.03274823781308145,
+            "relative_tangential_gain_min": 0.4107610404912453,
+            "dimensionless_norm_max": 2.394310772516206,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0022655393059435947,
+          "residual_max_abs": 0.03357696533203125,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7377716632198723,
+            "relative_radial_gain_mean": 0.11834005040145187,
+            "relative_tangential_gain_mean": 0.5416695954985769,
+            "relative_radial_gain_min": 0.02683671224600992,
+            "relative_tangential_gain_min": 0.39532961975112,
+            "dimensionless_norm_max": 2.495361692616106,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0011859159801306742,
+          "residual_max_abs": 0.048130035400390625,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999975808725867,
+            "dimensionless_norm_mean": 1.776838588010191,
+            "relative_radial_gain_mean": 0.11325328370126059,
+            "relative_tangential_gain_mean": 0.5338480245793675,
+            "relative_radial_gain_min": 0.003872203148550968,
+            "relative_tangential_gain_min": 0.28769695114300264,
+            "dimensionless_norm_max": 3.469143543504015,
+            "affine_outside_fraction": 2.431169745807128e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0006869428895192235,
+          "residual_max_abs": 0.054290771484375,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998162171388768,
+            "dimensionless_norm_mean": 1.7722515401419139,
+            "relative_radial_gain_mean": 0.12706211292888894,
+            "relative_tangential_gain_mean": 0.5435013685297071,
+            "relative_radial_gain_min": 6.480566350564043e-05,
+            "relative_tangential_gain_min": 0.18131154874214328,
+            "dimensionless_norm_max": 5.515189758074303,
+            "affine_outside_fraction": 0.00018464094437893082,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        }
+      ],
+      "trace_id": "sha256:a19b687fa47b8257bdafabc42beb7507fb5dfcb3ccab3cdf10849711b914b51d",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 41,
+      "step": 512,
+      "artifact_id": "sha256:6b194e18fd4a572b0916711e4672e2805fccc87a5e9ec4cb2b2edb4964fcca51",
+      "expected_loss": 4.110889911651611,
+      "key": "wave_gate-seed-41-step-512",
+      "eval_loss": 4.110889911651611,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.003026101567357447,
+          "residual_max_abs": 0.02828216552734375,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.9238144247135676,
+            "relative_radial_gain_mean": 0.08294657529816182,
+            "relative_tangential_gain_mean": 0.49867353514641277,
+            "relative_radial_gain_min": 0.020489438051670805,
+            "relative_tangential_gain_min": 0.37603985558279646,
+            "dimensionless_norm_max": 2.6319078803706497,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002311869280389103,
+          "residual_max_abs": 0.03515768051147461,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.931975781799438,
+            "relative_radial_gain_mean": 0.08187151059585918,
+            "relative_tangential_gain_mean": 0.49701353003058707,
+            "relative_radial_gain_min": 0.01899210742473001,
+            "relative_tangential_gain_min": 0.37092613859759327,
+            "dimensionless_norm_max": 2.6702308691700307,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.001207953068746714,
+          "residual_max_abs": 0.04559898376464844,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999975806293863,
+            "dimensionless_norm_mean": 1.9590928469965818,
+            "relative_radial_gain_mean": 0.08008043756684835,
+            "relative_tangential_gain_mean": 0.4926264442126631,
+            "relative_radial_gain_min": 0.0027399390167364146,
+            "relative_tangential_gain_min": 0.27417004168661896,
+            "dimensionless_norm_max": 3.642371298674049,
+            "affine_outside_fraction": 2.431169745807128e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0007006813360845068,
+          "residual_max_abs": 0.05082511901855469,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9997936716354017,
+            "dimensionless_norm_mean": 1.9421371998274093,
+            "relative_radial_gain_mean": 0.09189690416922815,
+            "relative_tangential_gain_mean": 0.5035726748287617,
+            "relative_radial_gain_min": 4.905359271412113e-05,
+            "relative_tangential_gain_min": 0.17684803901472215,
+            "dimensionless_norm_max": 5.654433481276025,
+            "affine_outside_fraction": 0.00020728920990566039,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        }
+      ],
+      "trace_id": "sha256:375b66d7099d78860906a75d2006c012ef8bb4abc055197579e79c076adcd04c",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 41,
+      "step": 256,
+      "artifact_id": "sha256:64823c35cabdc549940b2abbac0bc355bfdf3010f3310bd3ab7abd9d17ca1424",
+      "expected_loss": null,
+      "key": "wave_gate_radius1-seed-41-step-256",
+      "eval_loss": 4.11112642288208,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002962875382751869,
+          "residual_max_abs": 0.02740001678466797,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7244122112331186,
+            "relative_radial_gain_mean": 0.12086735814221232,
+            "relative_tangential_gain_mean": 0.5447633033466013,
+            "relative_radial_gain_min": 0.032748230077563556,
+            "relative_tangential_gain_min": 0.4107610215317088,
+            "dimensionless_norm_max": 2.394310892604796,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0022655393086257946,
+          "residual_max_abs": 0.03357696533203125,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7377716666577359,
+            "relative_radial_gain_mean": 0.11834004957494175,
+            "relative_tangential_gain_mean": 0.5416695946311983,
+            "relative_radial_gain_min": 0.026836709812193438,
+            "relative_tangential_gain_min": 0.3953296129632839,
+            "dimensionless_norm_max": 2.4953617385820017,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0011859159897245992,
+          "residual_max_abs": 0.048130035400390625,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999975808725916,
+            "dimensionless_norm_mean": 1.7768386285437074,
+            "relative_radial_gain_mean": 0.11325327568040655,
+            "relative_tangential_gain_mean": 0.533848015141013,
+            "relative_radial_gain_min": 0.003872199887346106,
+            "relative_tangential_gain_min": 0.28769691662381475,
+            "dimensionless_norm_max": 3.46914396542646,
+            "affine_outside_fraction": 2.431169745807128e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0006869428952977196,
+          "residual_max_abs": 0.054290771484375,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998162171388777,
+            "dimensionless_norm_mean": 1.7722515671327668,
+            "relative_radial_gain_mean": 0.1270621073250127,
+            "relative_tangential_gain_mean": 0.5435013623931011,
+            "relative_radial_gain_min": 6.48058653311967e-05,
+            "relative_tangential_gain_min": 0.1813115999170024,
+            "dimensionless_norm_max": 5.515188200865746,
+            "affine_outside_fraction": 0.00018464094437893082,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        }
+      ],
+      "trace_id": "sha256:ea1772955756b8d1562bd1e509c206b63fd31f81a47b9d92dc2521120ff94b4c",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 41,
+      "step": 512,
+      "artifact_id": "sha256:59c666518ec9fbfcffb8a93841c0e3ceb220d910a5716def88da42f2204e1012",
+      "expected_loss": 4.1108903884887695,
+      "key": "wave_gate_radius1-seed-41-step-512",
+      "eval_loss": 4.1108903884887695,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0030261015821835325,
+          "residual_max_abs": 0.02828216552734375,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.9238144809179596,
+            "relative_radial_gain_mean": 0.08294656646212833,
+            "relative_tangential_gain_mean": 0.49867352300916407,
+            "relative_radial_gain_min": 0.02048943071895215,
+            "relative_tangential_gain_min": 0.376039831157999,
+            "dimensionless_norm_max": 2.6319080611715084,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002311869285058483,
+          "residual_max_abs": 0.03515768051147461,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.931975816191034,
+            "relative_radial_gain_mean": 0.0818715051686403,
+            "relative_tangential_gain_mean": 0.4970135225970724,
+            "relative_radial_gain_min": 0.018992100397967726,
+            "relative_tangential_gain_min": 0.3709261139809762,
+            "dimensionless_norm_max": 2.670231055943826,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.001207953069834494,
+          "residual_max_abs": 0.04559898376464844,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999975806293909,
+            "dimensionless_norm_mean": 1.9590928738068023,
+            "relative_radial_gain_mean": 0.08008043396236848,
+            "relative_tangential_gain_mean": 0.4926264387820777,
+            "relative_radial_gain_min": 0.002739934015672185,
+            "relative_tangential_gain_min": 0.27416997358437656,
+            "dimensionless_norm_max": 3.6423722125509945,
+            "affine_outside_fraction": 2.431169745807128e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0007006813424979201,
+          "residual_max_abs": 0.05082511901855469,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9997936716355392,
+            "dimensionless_norm_mean": 1.942137197624339,
+            "relative_radial_gain_mean": 0.09189690321076543,
+            "relative_tangential_gain_mean": 0.5035726743568956,
+            "relative_radial_gain_min": 4.9053649936681154e-05,
+            "relative_tangential_gain_min": 0.1768480572523315,
+            "dimensionless_norm_max": 5.6544328979958784,
+            "affine_outside_fraction": 0.00020728920990566039,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        }
+      ],
+      "trace_id": "sha256:6087007f99679e0c08bdec7bd1d93065e81f8426efc6ff5f699fed7fb24617b4",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 41,
+      "step": 256,
+      "artifact_id": "sha256:1399443629dfd20a4de3723b24d6f0870814114a4b336e9cff18c4e20852b4aa",
+      "expected_loss": null,
+      "key": "wave_gate_radius4-seed-41-step-256",
+      "eval_loss": 4.098418712615967,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.008321609373920702,
+          "residual_max_abs": 0.0814371109008789,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999999364181282,
+            "dimensionless_norm_mean": 0.7908281086199072,
+            "relative_radial_gain_mean": 0.566566672979531,
+            "relative_tangential_gain_mean": 0.8330067863989791,
+            "relative_radial_gain_min": 0.3068834396499984,
+            "relative_tangential_gain_min": 0.6959000352303158,
+            "dimensionless_norm_max": 1.1963445602771148,
+            "affine_outside_fraction": 6.397815120545074e-08,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.006501143166695212,
+          "residual_max_abs": 0.08229923248291016,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999893750057218,
+            "dimensionless_norm_mean": 0.819719742294662,
+            "relative_radial_gain_mean": 0.5459826198690413,
+            "relative_tangential_gain_mean": 0.8231672318066475,
+            "relative_radial_gain_min": 0.22621146221109012,
+            "relative_tangential_gain_min": 0.6401059968814908,
+            "dimensionless_norm_max": 1.3742294463214184,
+            "affine_outside_fraction": 1.0684351251310272e-05,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0034817233995599493,
+          "residual_max_abs": 0.08533620834350586,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998727407415509,
+            "dimensionless_norm_mean": 0.8573327324078305,
+            "relative_radial_gain_mean": 0.52264355057692,
+            "relative_tangential_gain_mean": 0.8107025621453735,
+            "relative_radial_gain_min": 0.057949411166616005,
+            "relative_tangential_gain_min": 0.46165358034665527,
+            "dimensionless_norm_max": 2.102426900044615,
+            "affine_outside_fraction": 0.00012795630241090148,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0019754191949430933,
+          "residual_max_abs": 0.08905792236328125,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9981160236476827,
+            "dimensionless_norm_mean": 0.8294704220356814,
+            "relative_radial_gain_mean": 0.5531432428540116,
+            "relative_tangential_gain_mean": 0.821857394759884,
+            "relative_radial_gain_min": 0.02294676738918522,
+            "relative_tangential_gain_min": 0.38392021779347046,
+            "dimensionless_norm_max": 2.57464958876766,
+            "affine_outside_fraction": 0.0018910661933307128,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        }
+      ],
+      "trace_id": "sha256:0dd0c10cb9eff2660331cf4ac7f39e0ae4ba3d704a2a013ce1598b81bad3c6d8",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 41,
+      "step": 512,
+      "artifact_id": "sha256:fa74f5e181f9dfa5d98626afe12d80929f525d18eb641908eb9c335d26b00692",
+      "expected_loss": 4.096088409423828,
+      "key": "wave_gate_radius4-seed-41-step-512",
+      "eval_loss": 4.096088409423828,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.009389390320166361,
+          "residual_max_abs": 0.07851600646972656,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999973924126805,
+            "dimensionless_norm_mean": 0.9588800520743043,
+            "relative_radial_gain_mean": 0.4481990595671155,
+            "relative_tangential_gain_mean": 0.7757419484702245,
+            "relative_radial_gain_min": 0.20802278180926737,
+            "relative_tangential_gain_min": 0.6260091931562227,
+            "dimensionless_norm_max": 1.4215941690813465,
+            "affine_outside_fraction": 2.62310419942348e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.007265595052205547,
+          "residual_max_abs": 0.07966804504394531,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999646898957659,
+            "dimensionless_norm_mean": 0.9841224468585473,
+            "relative_radial_gain_mean": 0.43273690019069433,
+            "relative_tangential_gain_mean": 0.7672025790735317,
+            "relative_radial_gain_min": 0.15579370735446219,
+            "relative_tangential_gain_min": 0.5810398625636347,
+            "dimensionless_norm_max": 1.5813149035521463,
+            "affine_outside_fraction": 3.5507873919025156e-05,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0038560814816685995,
+          "residual_max_abs": 0.0811457633972168,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9997364734547624,
+            "dimensionless_norm_mean": 1.0201684489669582,
+            "relative_radial_gain_mean": 0.4145369990747747,
+            "relative_tangential_gain_mean": 0.7557441864328184,
+            "relative_radial_gain_min": 0.03859128834527992,
+            "relative_tangential_gain_min": 0.4243327095147196,
+            "dimensionless_norm_max": 2.3107210256341366,
+            "affine_outside_fraction": 0.0002649335241417715,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002172446483240054,
+          "residual_max_abs": 0.085235595703125,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9978799350278165,
+            "dimensionless_norm_mean": 0.9640862137862033,
+            "relative_radial_gain_mean": 0.4602837276458405,
+            "relative_tangential_gain_mean": 0.777001810246791,
+            "relative_radial_gain_min": 0.017295782576943308,
+            "relative_tangential_gain_min": 0.36479699520439246,
+            "dimensionless_norm_max": 2.7174412120227647,
+            "affine_outside_fraction": 0.002128041265395702,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        }
+      ],
+      "trace_id": "sha256:0c2ee76ba3bf459f80519b7804541f58f633bd20b3b556cc5ab9deefbbf2aa4b",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "ordinary",
+      "seed": 43,
+      "step": 256,
+      "artifact_id": "sha256:0374def8482d6532a56f249f9f741eaca5aa8a88dce30fc95b6ad6df98ab5878",
+      "expected_loss": null,
+      "key": "ordinary-seed-43-step-256",
+      "eval_loss": 4.077384948730469,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.013149097124398075,
+          "residual_max_abs": 0.5257377624511719,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.012030715438401576,
+          "residual_max_abs": 0.5990943908691406,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.006897382919152848,
+          "residual_max_abs": 0.8754043579101562,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.014458213816858434,
+          "residual_max_abs": 5.381988525390625,
+          "native_conditioning": null
+        }
+      ],
+      "trace_id": "sha256:589c52293645053a09718d7c2dd1549de8cf8f7fb5aeab98f91befcb8760d24f",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "ordinary",
+      "seed": 43,
+      "step": 512,
+      "artifact_id": "sha256:743f686f21f5f3a120d2543ec1c0a0a9720f74c9ec84b3cc8248125528af7f25",
+      "expected_loss": 4.064968109130859,
+      "key": "ordinary-seed-43-step-512",
+      "eval_loss": 4.064968109130859,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.01746560953268457,
+          "residual_max_abs": 0.7004299163818359,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.01585544942218347,
+          "residual_max_abs": 0.7977790832519531,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.009103437574904593,
+          "residual_max_abs": 1.16302490234375,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.01899022286156613,
+          "residual_max_abs": 7.011749267578125,
+          "native_conditioning": null
+        }
+      ],
+      "trace_id": "sha256:a9cb7cb5fcab8592a56cbb458c625e1425ac910c9411900218c3edb48a40200e",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 43,
+      "step": 256,
+      "artifact_id": "sha256:704eaaec0a20c131243a0626749265085338069e7521f49e8da018d003497b2b",
+      "expected_loss": null,
+      "key": "wave_gate-seed-43-step-256",
+      "eval_loss": 4.11103630065918,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0029664667001174667,
+          "residual_max_abs": 0.02793741226196289,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7338425679828555,
+            "relative_radial_gain_mean": 0.11873485175063103,
+            "relative_tangential_gain_mean": 0.5424393134118499,
+            "relative_radial_gain_min": 0.03253070243381273,
+            "relative_tangential_gain_min": 0.4102267208456437,
+            "dimensionless_norm_max": 2.3976989347979947,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0022707584166653753,
+          "residual_max_abs": 0.03213167190551758,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7564102788748714,
+            "relative_radial_gain_mean": 0.11432669180464004,
+            "relative_tangential_gain_mean": 0.5371609416082107,
+            "relative_radial_gain_min": 0.02594007484012728,
+            "relative_tangential_gain_min": 0.39280112365894426,
+            "dimensionless_norm_max": 2.5125812612628686,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0011868000247721514,
+          "residual_max_abs": 0.04398345947265625,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999999364160232,
+            "dimensionless_norm_mean": 1.7834676995702858,
+            "relative_radial_gain_mean": 0.1120300001243877,
+            "relative_tangential_gain_mean": 0.532353172614088,
+            "relative_radial_gain_min": 0.003558032296514524,
+            "relative_tangential_gain_min": 0.28426905544131165,
+            "dimensionless_norm_max": 3.5115302896101617,
+            "affine_outside_fraction": 6.397815120545074e-08,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.000685620381895916,
+          "residual_max_abs": 0.05438423156738281,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998583757561728,
+            "dimensionless_norm_mean": 1.7509689479047954,
+            "relative_radial_gain_mean": 0.13055723245640702,
+            "relative_tangential_gain_mean": 0.5477081935290676,
+            "relative_radial_gain_min": 8.238388924941553e-05,
+            "relative_tangential_gain_min": 0.18534275517229265,
+            "dimensionless_norm_max": 5.3951869134426165,
+            "affine_outside_fraction": 0.00014228740828092242,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        }
+      ],
+      "trace_id": "sha256:91af80426e68b0ab7f8fe605b1e1ffbc63322714ccd8413b2da8c7861abbea60",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 43,
+      "step": 512,
+      "artifact_id": "sha256:6df6a5a1b2a9058031e33ceeb585cd1802fa58d21a486c8982ad326de3a9bcf6",
+      "expected_loss": 4.110875606536865,
+      "key": "wave_gate-seed-43-step-512",
+      "eval_loss": 4.110875606536865,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0030299377583827723,
+          "residual_max_abs": 0.028998851776123047,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.9387682618691926,
+            "relative_radial_gain_mean": 0.08061999804235531,
+            "relative_tangential_gain_mean": 0.49545677203724686,
+            "relative_radial_gain_min": 0.019169627248263987,
+            "relative_tangential_gain_min": 0.3715461117803514,
+            "dimensionless_norm_max": 2.6655340347541245,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002315037897313432,
+          "residual_max_abs": 0.03472423553466797,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.947913722014066,
+            "relative_radial_gain_mean": 0.07942566583007177,
+            "relative_tangential_gain_mean": 0.49360356285091506,
+            "relative_radial_gain_min": 0.019125144626860324,
+            "relative_tangential_gain_min": 0.3713911201461633,
+            "dimensionless_norm_max": 2.6667069029300676,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0012087144900236014,
+          "residual_max_abs": 0.04482460021972656,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999979002226564,
+            "dimensionless_norm_mean": 1.9668033913192868,
+            "relative_radial_gain_mean": 0.07896214914903732,
+            "relative_tangential_gain_mean": 0.49102828197834,
+            "relative_radial_gain_min": 0.002548341530715259,
+            "relative_tangential_gain_min": 0.2714911021252026,
+            "dimensionless_norm_max": 3.6786657412533863,
+            "affine_outside_fraction": 2.111278989779874e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0007005844855954058,
+          "residual_max_abs": 0.05074882507324219,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.999799273116061,
+            "dimensionless_norm_mean": 1.9383857927681536,
+            "relative_radial_gain_mean": 0.09231285412699698,
+            "relative_tangential_gain_mean": 0.5042694977921492,
+            "relative_radial_gain_min": 5.1606227711165076e-05,
+            "relative_tangential_gain_min": 0.17764470587474177,
+            "dimensionless_norm_max": 5.629068379095534,
+            "affine_outside_fraction": 0.0002016591325995807,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        }
+      ],
+      "trace_id": "sha256:02ce9382096be3e44bb54d5b0a626819d3e8132732dd3cfa889045820486a36d",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 43,
+      "step": 256,
+      "artifact_id": "sha256:418acf759dad8a12457905bb332016141e036bd04a8d1577c30860bf3e79da2b",
+      "expected_loss": null,
+      "key": "wave_gate_radius1-seed-43-step-256",
+      "eval_loss": 4.11103630065918,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0029664666951542606,
+          "residual_max_abs": 0.02793741226196289,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7338425462275664,
+            "relative_radial_gain_mean": 0.11873485642736241,
+            "relative_tangential_gain_mean": 0.5424393186745788,
+            "relative_radial_gain_min": 0.03253070349961029,
+            "relative_tangential_gain_min": 0.4102267234691398,
+            "dimensionless_norm_max": 2.397698918143454,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002270758412853968,
+          "residual_max_abs": 0.03213167190551758,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7564102640069181,
+            "relative_radial_gain_mean": 0.11432669463568879,
+            "relative_tangential_gain_mean": 0.5371609450480525,
+            "relative_radial_gain_min": 0.02594007958259048,
+            "relative_tangential_gain_min": 0.3928011371825146,
+            "dimensionless_norm_max": 2.5125811686417836,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0011868000276203004,
+          "residual_max_abs": 0.04398345947265625,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999999364160235,
+            "dimensionless_norm_mean": 1.7834677075988874,
+            "relative_radial_gain_mean": 0.11202999767323249,
+            "relative_tangential_gain_mean": 0.5323531703284871,
+            "relative_radial_gain_min": 0.0035580281834355354,
+            "relative_tangential_gain_min": 0.28426900915374004,
+            "dimensionless_norm_max": 3.5115308686406306,
+            "affine_outside_fraction": 6.397815120545074e-08,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0006856203730880163,
+          "residual_max_abs": 0.05438423156738281,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998583757562055,
+            "dimensionless_norm_mean": 1.7509689237742985,
+            "relative_radial_gain_mean": 0.1305572349435127,
+            "relative_tangential_gain_mean": 0.5477081973879605,
+            "relative_radial_gain_min": 8.238374711233565e-05,
+            "relative_tangential_gain_min": 0.18534272554924427,
+            "dimensionless_norm_max": 5.395187776130666,
+            "affine_outside_fraction": 0.00014228740828092242,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        }
+      ],
+      "trace_id": "sha256:c8881e12928e1086c5d5c5241a2d042fbb74a225fa3041cac2133d88b5624eb5",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 43,
+      "step": 512,
+      "artifact_id": "sha256:b71e447af3f5ccc84b76549f3fc0fa7c94004809e8156ab4b3521a97835bf362",
+      "expected_loss": 4.110875606536865,
+      "key": "wave_gate_radius1-seed-43-step-512",
+      "eval_loss": 4.110875606536865,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.003029937757921396,
+          "residual_max_abs": 0.028998851776123047,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.938768252714938,
+            "relative_radial_gain_mean": 0.08061999941863629,
+            "relative_tangential_gain_mean": 0.49545677398036725,
+            "relative_radial_gain_min": 0.019169628371602188,
+            "relative_tangential_gain_min": 0.37154611569139373,
+            "dimensionless_norm_max": 2.6655340051692433,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0023150378976284536,
+          "residual_max_abs": 0.03472423553466797,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.9479137107119515,
+            "relative_radial_gain_mean": 0.07942566728491583,
+            "relative_tangential_gain_mean": 0.49360356512324755,
+            "relative_radial_gain_min": 0.019125154705666114,
+            "relative_tangential_gain_min": 0.3713911552911099,
+            "dimensionless_norm_max": 2.6667066368775103,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0012087144921707588,
+          "residual_max_abs": 0.04482460021972656,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999979002226511,
+            "dimensionless_norm_mean": 1.966803398393135,
+            "relative_radial_gain_mean": 0.07896214762331152,
+            "relative_tangential_gain_mean": 0.4910282801995544,
+            "relative_radial_gain_min": 0.0025483409437935256,
+            "relative_tangential_gain_min": 0.2714910936954216,
+            "dimensionless_norm_max": 3.678665856558023,
+            "affine_outside_fraction": 2.111278989779874e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.000700584477398731,
+          "residual_max_abs": 0.05074882507324219,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9997992731160871,
+            "dimensionless_norm_mean": 1.9383857775037394,
+            "relative_radial_gain_mean": 0.09231285531543787,
+            "relative_tangential_gain_mean": 0.5042695000308075,
+            "relative_radial_gain_min": 5.160628812617141e-05,
+            "relative_tangential_gain_min": 0.17764472434246367,
+            "dimensionless_norm_max": 5.629067793734623,
+            "affine_outside_fraction": 0.0002016591325995807,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        }
+      ],
+      "trace_id": "sha256:d1876037e9074838232160cd527375f16c02705f93ebadb247122f00109b3e21",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 43,
+      "step": 256,
+      "artifact_id": "sha256:e4d73b76926212696fc7cdc612120a85c9d1a0665fee94a752a799876415b0c6",
+      "expected_loss": null,
+      "key": "wave_gate_radius4-seed-43-step-256",
+      "eval_loss": 4.098158359527588,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.008365255495223508,
+          "residual_max_abs": 0.08184051513671875,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999998728144727,
+            "dimensionless_norm_mean": 0.7970296468888091,
+            "relative_radial_gain_mean": 0.5620081096537122,
+            "relative_tangential_gain_mean": 0.8309134731119446,
+            "relative_radial_gain_min": 0.2999541872949578,
+            "relative_tangential_gain_min": 0.6914621141965266,
+            "dimensionless_norm_max": 1.2100263879044588,
+            "affine_outside_fraction": 1.2795630241090147e-07,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.006557337744737644,
+          "residual_max_abs": 0.08340883255004883,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999845403110524,
+            "dimensionless_norm_mean": 0.8305710285951131,
+            "relative_radial_gain_mean": 0.5381709222086294,
+            "relative_tangential_gain_mean": 0.8194906406502723,
+            "relative_radial_gain_min": 0.2206904150634802,
+            "relative_tangential_gain_min": 0.635898112863562,
+            "dimensionless_norm_max": 1.3882493306426336,
+            "affine_outside_fraction": 1.5546690742924528e-05,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.003489226078433833,
+          "residual_max_abs": 0.08560514450073242,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998748380481557,
+            "dimensionless_norm_mean": 0.8603292174781881,
+            "relative_radial_gain_mean": 0.520694034738127,
+            "relative_tangential_gain_mean": 0.8097006778846016,
+            "relative_radial_gain_min": 0.05631253772360656,
+            "relative_tangential_gain_min": 0.458834512725048,
+            "dimensionless_norm_max": 2.1171811332468122,
+            "affine_outside_fraction": 0.0001258450234211216,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0019678185624534077,
+          "residual_max_abs": 0.08916473388671875,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9981762155081766,
+            "dimensionless_norm_mean": 0.8241401122975914,
+            "relative_radial_gain_mean": 0.5566428160531792,
+            "relative_tangential_gain_mean": 0.8235672395665806,
+            "relative_radial_gain_min": 0.02340501941879125,
+            "relative_tangential_gain_min": 0.38532729085324385,
+            "dimensionless_norm_max": 2.5646462790017237,
+            "affine_outside_fraction": 0.0018306068404415619,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        }
+      ],
+      "trace_id": "sha256:d86639f9fe4b75210b6e88799a5b950c8c947454665b50a5476ebe064261dabd",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 43,
+      "step": 512,
+      "artifact_id": "sha256:b625d5b2b8b53ffd461aeecf2198db3c5a9cc6404f127883b3e0abc807511f19",
+      "expected_loss": 4.095949649810791,
+      "key": "wave_gate_radius4-seed-43-step-512",
+      "eval_loss": 4.095949649810791,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.009429800463323586,
+          "residual_max_abs": 0.07910490036010742,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999961201450903,
+            "dimensionless_norm_mean": 0.9661455034125088,
+            "relative_radial_gain_mean": 0.4434391489141041,
+            "relative_tangential_gain_mean": 0.7732625851162475,
+            "relative_radial_gain_min": 0.2016674893041266,
+            "relative_tangential_gain_min": 0.6209171385274966,
+            "dimensionless_norm_max": 1.4389916052503384,
+            "affine_outside_fraction": 3.902667223532495e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.007306823498742347,
+          "residual_max_abs": 0.08006811141967773,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999500586196256,
+            "dimensionless_norm_mean": 0.9940806983463272,
+            "relative_radial_gain_mean": 0.4264310054418714,
+            "relative_tangential_gain_mean": 0.7638253009312951,
+            "relative_radial_gain_min": 0.15248109310750368,
+            "relative_tangential_gain_min": 0.5779086182882351,
+            "dimensionless_norm_max": 1.5929990860148409,
+            "affine_outside_fraction": 5.0222848696278824e-05,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.003864204720424566,
+          "residual_max_abs": 0.08131694793701172,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9997231073522633,
+            "dimensionless_norm_mean": 1.0242221098685018,
+            "relative_radial_gain_mean": 0.4121809080036965,
+            "relative_tangential_gain_mean": 0.7544069181492689,
+            "relative_radial_gain_min": 0.0377362640674439,
+            "relative_tangential_gain_min": 0.4224331435451848,
+            "dimensionless_norm_max": 2.3221436096996726,
+            "affine_outside_fraction": 0.0002783689358949161,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002171075492998837,
+          "residual_max_abs": 0.08524322509765625,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9979385695151733,
+            "dimensionless_norm_mean": 0.9626461001460275,
+            "relative_radial_gain_mean": 0.46111251724003377,
+            "relative_tangential_gain_mean": 0.7774631746171916,
+            "relative_radial_gain_min": 0.01742133691278458,
+            "relative_tangential_gain_min": 0.3652640777335353,
+            "dimensionless_norm_max": 2.7137928966761504,
+            "affine_outside_fraction": 0.002069181366286688,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        }
+      ],
+      "trace_id": "sha256:d8bf03eb160d481183ebb99c2c53100f105647918ea997354ccee85b06502d0e",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "ordinary",
+      "seed": 47,
+      "step": 256,
+      "artifact_id": "sha256:c4b52e2a2c3c32653483e82a727aa624fdacae61d903f0717f0dd91a960be2cf",
+      "expected_loss": null,
+      "key": "ordinary-seed-47-step-256",
+      "eval_loss": 4.077223777770996,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.013196111583207208,
+          "residual_max_abs": 0.5109844207763672,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.012043484446829532,
+          "residual_max_abs": 0.5814056396484375,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.006903395466312413,
+          "residual_max_abs": 0.82464599609375,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.01463961516490073,
+          "residual_max_abs": 5.50469970703125,
+          "native_conditioning": null
+        }
+      ],
+      "trace_id": "sha256:69b4fc9aac0eacab82779092dac70ba9c4191c99d3723bb3230e290c5493b7b9",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "ordinary",
+      "seed": 47,
+      "step": 512,
+      "artifact_id": "sha256:0ddeb1a6d8ad731db830c00399d119a4a06ce005d7cc34ce169f6c44506ce8d5",
+      "expected_loss": 4.065067291259766,
+      "key": "ordinary-seed-47-step-512",
+      "eval_loss": 4.065067291259766,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.017344614771000525,
+          "residual_max_abs": 0.6767978668212891,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.015723220970180987,
+          "residual_max_abs": 0.7625350952148438,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.009075540243411747,
+          "residual_max_abs": 1.1009445190429688,
+          "native_conditioning": null
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.019000440840345866,
+          "residual_max_abs": 7.0992431640625,
+          "native_conditioning": null
+        }
+      ],
+      "trace_id": "sha256:16b4c2da0c3c18985cf0c853de3d0fa6c744fc9fff1aae3f897ff13b33c1a67f",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 47,
+      "step": 256,
+      "artifact_id": "sha256:07af3bae4732412ccd9da53148e2bbb3bbe5dd4a8e30f3a3ee4d8a7d18047b25",
+      "expected_loss": null,
+      "key": "wave_gate-seed-47-step-256",
+      "eval_loss": 4.111100196838379,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002968329231318419,
+          "residual_max_abs": 0.02682209014892578,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7392977047999256,
+            "relative_radial_gain_mean": 0.1176278796579768,
+            "relative_tangential_gain_mean": 0.5411468060503063,
+            "relative_radial_gain_min": 0.030005442870052135,
+            "relative_tangential_gain_min": 0.4038477643507687,
+            "dimensionless_norm_max": 2.438748221276967,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0022704279646251955,
+          "residual_max_abs": 0.033440589904785156,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7551380625921171,
+            "relative_radial_gain_mean": 0.11457272311766366,
+            "relative_tangential_gain_mean": 0.5374574151521883,
+            "relative_radial_gain_min": 0.02561915087411315,
+            "relative_tangential_gain_min": 0.391882249954537,
+            "dimensionless_norm_max": 2.51888753318078,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0011874744894676324,
+          "residual_max_abs": 0.04859733581542969,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999974520538429,
+            "dimensionless_norm_mean": 1.7877556414118103,
+            "relative_radial_gain_mean": 0.11099365557478531,
+            "relative_tangential_gain_mean": 0.5312664753235324,
+            "relative_radial_gain_min": 0.0037076356267795596,
+            "relative_tangential_gain_min": 0.2859275897812664,
+            "dimensionless_norm_max": 3.4908994316955946,
+            "affine_outside_fraction": 2.5591260482180295e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0006874188285954101,
+          "residual_max_abs": 0.05408287048339844,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998250572513002,
+            "dimensionless_norm_mean": 1.7742610845720381,
+            "relative_radial_gain_mean": 0.1259589406270919,
+            "relative_tangential_gain_mean": 0.5426334467893542,
+            "relative_radial_gain_min": 7.291427361943992e-05,
+            "relative_tangential_gain_min": 0.18326964569759766,
+            "dimensionless_norm_max": 5.45624202192536,
+            "affine_outside_fraction": 0.00017574798136137316,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        }
+      ],
+      "trace_id": "sha256:28486be4bf40264f3da3b464973d8d479a940a9e438c528ceb025c3c32e24106",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate",
+      "seed": 47,
+      "step": 512,
+      "artifact_id": "sha256:a0b334e9fb6bee80aa67f085f51ed1b8dc92ca12c3fa78bf3d2242ea3b620167",
+      "expected_loss": 4.110872268676758,
+      "key": "wave_gate-seed-47-step-512",
+      "eval_loss": 4.110872268676758,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.003028738864686851,
+          "residual_max_abs": 0.027472496032714844,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.9343208499983575,
+            "relative_radial_gain_mean": 0.08134742879485214,
+            "relative_tangential_gain_mean": 0.4964319731055945,
+            "relative_radial_gain_min": 0.01869896840310814,
+            "relative_tangential_gain_min": 0.36989386778708533,
+            "dimensionless_norm_max": 2.678082775001964,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0023142018373461673,
+          "residual_max_abs": 0.03478193283081055,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.9433680537137983,
+            "relative_radial_gain_mean": 0.08010056939461081,
+            "relative_tangential_gain_mean": 0.49456446087065664,
+            "relative_radial_gain_min": 0.018862085263081863,
+            "relative_tangential_gain_min": 0.3704695936330761,
+            "dimensionless_norm_max": 2.673698672383543,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0012086935242479788,
+          "residual_max_abs": 0.04565238952636719,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999974521979877,
+            "dimensionless_norm_mean": 1.965610944228949,
+            "relative_radial_gain_mean": 0.07903471972665758,
+            "relative_tangential_gain_mean": 0.49121533422540664,
+            "relative_radial_gain_min": 0.002702376078780544,
+            "relative_tangential_gain_min": 0.2736559328599967,
+            "dimensionless_norm_max": 3.6492828327659064,
+            "affine_outside_fraction": 2.5591260482180295e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0007008329252764056,
+          "residual_max_abs": 0.05059814453125,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998112479455175,
+            "dimensionless_norm_mean": 1.9397123216811876,
+            "relative_radial_gain_mean": 0.0916461728220855,
+            "relative_tangential_gain_mean": 0.5036431272323633,
+            "relative_radial_gain_min": 5.698182439373145e-05,
+            "relative_tangential_gain_min": 0.17922171494896724,
+            "dimensionless_norm_max": 5.579522040432789,
+            "affine_outside_fraction": 0.000189631240172956,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v1",
+            "projection_radius": null,
+            "log_radius": null
+          }
+        }
+      ],
+      "trace_id": "sha256:5ba84ec386693727a7e77b235eb36796633faa3b290f22ec4d79327f4c87d6ab",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 47,
+      "step": 256,
+      "artifact_id": "sha256:4fca2cd7bae2163045f20193c4cf6dec0df940c55dd982721e64f63d6826fe52",
+      "expected_loss": null,
+      "key": "wave_gate_radius1-seed-47-step-256",
+      "eval_loss": 4.111100196838379,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.00296832920782945,
+          "residual_max_abs": 0.02682209014892578,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.739297642047058,
+            "relative_radial_gain_mean": 0.11762789339374055,
+            "relative_tangential_gain_mean": 0.5411468213318682,
+            "relative_radial_gain_min": 0.030005445763112926,
+            "relative_tangential_gain_min": 0.4038477718542773,
+            "dimensionless_norm_max": 2.438748172328074,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0022704279543501404,
+          "residual_max_abs": 0.03344011306762695,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.7551380351380563,
+            "relative_radial_gain_mean": 0.11457272908375726,
+            "relative_tangential_gain_mean": 0.5374574218127544,
+            "relative_radial_gain_min": 0.02561916249102314,
+            "relative_tangential_gain_min": 0.3918822833521822,
+            "dimensionless_norm_max": 2.518887303496419,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0011874744772665717,
+          "residual_max_abs": 0.04859733581542969,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999974520538365,
+            "dimensionless_norm_mean": 1.7877555542974608,
+            "relative_radial_gain_mean": 0.11099367376326191,
+            "relative_tangential_gain_mean": 0.5312664960580533,
+            "relative_radial_gain_min": 0.0037076361171800576,
+            "relative_tangential_gain_min": 0.28592759513776334,
+            "dimensionless_norm_max": 3.4908993654387928,
+            "affine_outside_fraction": 2.5591260482180295e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0006874188218773561,
+          "residual_max_abs": 0.05408287048339844,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998250572512771,
+            "dimensionless_norm_mean": 1.774261096577248,
+            "relative_radial_gain_mean": 0.1259589407705427,
+            "relative_tangential_gain_mean": 0.54263344588753,
+            "relative_radial_gain_min": 7.291430177747138e-05,
+            "relative_tangential_gain_min": 0.1832696521809023,
+            "dimensionless_norm_max": 5.456241828829786,
+            "affine_outside_fraction": 0.00017574798136137316,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        }
+      ],
+      "trace_id": "sha256:d1b66ebb11eb6f75d88a554d5ada6b4d83cfd16d30a45fed508133836b7040ea",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius1",
+      "seed": 47,
+      "step": 512,
+      "artifact_id": "sha256:3335bfd9f67ef55a0b465479d51fb3641655cabf670f4401c2d152de2dbd5687",
+      "expected_loss": 4.110872268676758,
+      "key": "wave_gate_radius1-seed-47-step-512",
+      "eval_loss": 4.110872268676758,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0030287388525291154,
+          "residual_max_abs": 0.027472496032714844,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.9343207948455852,
+            "relative_radial_gain_mean": 0.08134743730909365,
+            "relative_tangential_gain_mean": 0.4964319849375682,
+            "relative_radial_gain_min": 0.018698971329422442,
+            "relative_tangential_gain_min": 0.3698938781455742,
+            "dimensionless_norm_max": 2.6780826960119506,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.002314201834273065,
+          "residual_max_abs": 0.03478193283081055,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 1.0,
+            "dimensionless_norm_mean": 1.943367988417341,
+            "relative_radial_gain_mean": 0.08010057915880676,
+            "relative_tangential_gain_mean": 0.49456447470915826,
+            "relative_radial_gain_min": 0.01886209381018289,
+            "relative_tangential_gain_min": 0.37046962371320735,
+            "dimensionless_norm_max": 2.67369844364781,
+            "affine_outside_fraction": 0.0,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0012086935150311003,
+          "residual_max_abs": 0.04565238952636719,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999974521979832,
+            "dimensionless_norm_mean": 1.9656108507242198,
+            "relative_radial_gain_mean": 0.0790347335729402,
+            "relative_tangential_gain_mean": 0.4912153538807888,
+            "relative_radial_gain_min": 0.002702378878975953,
+            "relative_tangential_gain_min": 0.2736559713800889,
+            "dimensionless_norm_max": 3.649282313965956,
+            "affine_outside_fraction": 2.5591260482180295e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0007008329222147418,
+          "residual_max_abs": 0.05059814453125,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998112479455005,
+            "dimensionless_norm_mean": 1.9397123050366316,
+            "relative_radial_gain_mean": 0.09164617659316233,
+            "relative_tangential_gain_mean": 0.5036431315544813,
+            "relative_radial_gain_min": 5.698180340651948e-05,
+            "relative_tangential_gain_min": 0.1792217090353462,
+            "dimensionless_norm_max": 5.579522224593922,
+            "affine_outside_fraction": 0.000189631240172956,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 1.0,
+            "log_radius": 0.0
+          }
+        }
+      ],
+      "trace_id": "sha256:6d58a5848a1d50da60b0713610901dae9f53ecb1acad6bb3103b5f6d1778d1b1",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 47,
+      "step": 256,
+      "artifact_id": "sha256:fd99e5f062229339c80b3a4ef6e6729a7b2825998e4313431fcc20723aeb49ef",
+      "expected_loss": null,
+      "key": "wave_gate_radius4-seed-47-step-256",
+      "eval_loss": 4.098224639892578,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.00841640434620392,
+          "residual_max_abs": 0.08104133605957031,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999999364080706,
+            "dimensionless_norm_mean": 0.8043101784253612,
+            "relative_radial_gain_mean": 0.556635583455988,
+            "relative_tangential_gain_mean": 0.8284537968946176,
+            "relative_radial_gain_min": 0.2946849730701121,
+            "relative_tangential_gain_min": 0.6880485292368966,
+            "dimensionless_norm_max": 1.220597560136629,
+            "affine_outside_fraction": 6.397815120545074e-08,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.006579894377132571,
+          "residual_max_abs": 0.08220291137695312,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999844118530986,
+            "dimensionless_norm_mean": 0.8350413230727431,
+            "relative_radial_gain_mean": 0.5349356847883022,
+            "relative_tangential_gain_mean": 0.8179784972535852,
+            "relative_radial_gain_min": 0.21343179310934868,
+            "relative_tangential_gain_min": 0.6302729145296865,
+            "dimensionless_norm_max": 1.4071472622198793,
+            "affine_outside_fraction": 1.567464704533543e-05,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.003514366317268535,
+          "residual_max_abs": 0.0851278305053711,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9998612800257562,
+            "dimensionless_norm_mean": 0.8702917954909198,
+            "relative_radial_gain_mean": 0.5137285879200036,
+            "relative_tangential_gain_mean": 0.8063498620338179,
+            "relative_radial_gain_min": 0.053834260508383136,
+            "relative_tangential_gain_min": 0.4544673088823793,
+            "dimensionless_norm_max": 2.140331092352772,
+            "affine_outside_fraction": 0.0001394723696278826,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0019811322791150267,
+          "residual_max_abs": 0.08887481689453125,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9981317196574316,
+            "dimensionless_norm_mean": 0.8325610473063771,
+            "relative_radial_gain_mean": 0.5505413240546573,
+            "relative_tangential_gain_mean": 0.8207764230497573,
+            "relative_radial_gain_min": 0.02379212824952115,
+            "relative_tangential_gain_min": 0.38650185514092994,
+            "dimensionless_norm_max": 2.556345616688845,
+            "affine_outside_fraction": 0.0018753915462853773,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        }
+      ],
+      "trace_id": "sha256:2d252294605a649b9c976329be5d058a348fb9db409d675f6a3022e62dd7d29d",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    },
+    {
+      "arm": "wave_gate_radius4",
+      "seed": 47,
+      "step": 512,
+      "artifact_id": "sha256:3c891037b4511ba8b1e90c54b4f769712a3b20201e96a356919f34d367bda16a",
+      "expected_loss": 4.095967769622803,
+      "key": "wave_gate_radius4-seed-47-step-512",
+      "eval_loss": 4.095967769622803,
+      "layers": [
+        {
+          "path": "transformer.h.8.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.00943787800705609,
+          "residual_max_abs": 0.07808256149291992,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999968199520861,
+            "dimensionless_norm_mean": 0.967597405318362,
+            "relative_radial_gain_mean": 0.4424852409829393,
+            "relative_tangential_gain_mean": 0.7727657465318292,
+            "relative_radial_gain_min": 0.20101786112380693,
+            "relative_tangential_gain_min": 0.6203914535081286,
+            "dimensionless_norm_max": 1.4407967794770586,
+            "affine_outside_fraction": 3.1989075602725365e-06,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.9.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.007310569132607914,
+          "residual_max_abs": 0.07939481735229492,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9999536827051713,
+            "dimensionless_norm_mean": 0.9949731067785964,
+            "relative_radial_gain_mean": 0.42581290824787593,
+            "relative_tangential_gain_mean": 0.7635175613887341,
+            "relative_radial_gain_min": 0.15306374707294967,
+            "relative_tangential_gain_min": 0.5784622412652595,
+            "dimensionless_norm_max": 1.5909273415110496,
+            "affine_outside_fraction": 4.657609407756813e-05,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.10.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.003875227535063527,
+          "residual_max_abs": 0.0810232162475586,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9997209340074978,
+            "dimensionless_norm_mean": 1.029575731826383,
+            "relative_radial_gain_mean": 0.4088486692377561,
+            "relative_tangential_gain_mean": 0.7526057540669877,
+            "relative_radial_gain_min": 0.03689400476184046,
+            "relative_tangential_gain_min": 0.42053483263874586,
+            "dimensionless_norm_max": 2.333646496138142,
+            "affine_outside_fraction": 0.0002805441930359015,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        },
+        {
+          "path": "transformer.h.11.mlp",
+          "calls": 80,
+          "rows": 20352,
+          "relative_residual_energy": 0.0021732768383230785,
+          "residual_max_abs": 0.0848846435546875,
+          "native_conditioning": {
+            "affine_abs_slope_mean": 0.9980042075877181,
+            "dimensionless_norm_mean": 0.9639235888867939,
+            "relative_radial_gain_mean": 0.45993315538786156,
+            "relative_tangential_gain_mean": 0.776961256910366,
+            "relative_radial_gain_min": 0.017996975183675823,
+            "relative_tangential_gain_min": 0.3673771813519786,
+            "dimensionless_norm_max": 2.6973930550215455,
+            "affine_outside_fraction": 0.0020032838705450733,
+            "gate_outside_values_max": 0,
+            "schema": "spiraltorch.wave_gate_conditioning.v2",
+            "projection_radius": 4.000000015237235,
+            "log_radius": 1.3862944
+          }
+        }
+      ],
+      "trace_id": "sha256:d0eb570a4dd9aa72897c42d4564b009a5ed31aaa6107b3fec405b1eb82d57c5a",
+      "observed_loss_exact": true,
+      "first_window_logits_exact": true,
+      "rng_exact": true,
+      "base_and_geometry_unchanged": true,
+      "coverage_complete": true,
+      "optimizer_updates": 0
+    }
+  ],
+  "reserve_opened": false,
+  "optimizer_updates": 0,
+  "quality_status": "posthoc_mechanism_diagnosis_not_quality_confirmation"
+}

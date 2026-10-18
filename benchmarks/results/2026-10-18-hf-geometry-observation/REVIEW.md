@@ -36,3 +36,17 @@ actual Torch `mps:0` device spelling, verified before model measurements.
 These are engineering and scoped source checks, not a security audit of all
 dependencies, a speed qualification, or evidence that a geometry improves LM
 quality. Actual saved-state measurement and publication are recorded separately.
+
+## Completed Publication Review
+
+A separate read-only follow-up compared the public results, execution record,
+README and publication-test source with the private results, execution and case
+manifest. It reported no findings: public/private result and execution bytes
+match, all 28 cases and 112 layer aggregates remain, receipt hashes and displayed
+CE/ranges agree, and the reviewed public files contain no corpus text, token
+sequences or weights. It did not run tests or models.
+
+The main agent separately rehashed all 28 private traces and recomputed every
+layer aggregate exactly, confirmed unchanged implementation hashes, and ran all
+seven model-free tests including complete-publication coverage. Those checks
+and `validation.json` were outside the independent publication review scope.
