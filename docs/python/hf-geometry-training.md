@@ -22,6 +22,10 @@ all-one attention masks. Do not pack unrelated documents into a sequence.
 Route to explicitly selected tensor-returning modules; the GPT-2 path below is
 an example, not an architecture heuristic.
 
+Use [HfGeometryDataset](hf-geometry-data.md) for Rust-planned, document-safe
+contexts instead of packing text rows together. It plugs directly into the
+default collator below and reports dropped tails and actual target coverage.
+
 ```python
 import spiraltorch as st
 from transformers import TrainingArguments, default_data_collator
@@ -102,6 +106,16 @@ train/eval mode. It is available from Rust, Python and WASM (`layoutId`). Missin
 optimizer/scheduler/RNG/trainer-state companions fail instead of silently
 restarting part of the run. HF then restores its ordinary optimizer, cursor and
 RNG state. `ignore_data_skip=True` is rejected for resume.
+
+Training uses a finite map-style dataset with epoch-seeded random permutations:
+`data_seed` (or `seed`) plus the epoch restored in HF's Trainer cursor. This
+preserves the epoch even when Accelerate rebuilds a dataloader to skip batches
+inside a later epoch. `group_by_length` and streaming training are rejected;
+data/collators must be deterministic for exact replay, including worker output.
+Callbacks may stop the whole run at an update boundary; skipping the rest of an
+epoch while continuing training is rejected before checkpoint save because it
+would invalidate HF's step-derived resume cursor. Arbitrary cursor mutations
+and stochastic worker/collator state are outside this replay contract.
 
 For inference, use the [portable artifact loading recipe](geometry-artifacts.md),
 reload/verify the same base, put it and the restored geometry into evaluation

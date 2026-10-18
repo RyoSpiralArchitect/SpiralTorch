@@ -19,6 +19,8 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
             namespace = {}
             exec('from spiraltorch import *', namespace)
             assert 'hf_geometry_trainer_class' in namespace
+            data = namespace['HfGeometryDataset']([[0, 1, 2, 3]], 4)
+            assert data[0]['labels'] == [-100, 1, 2, 3]
             try:
                 namespace['hf_geometry_trainer_class']()
             except RuntimeError as error:

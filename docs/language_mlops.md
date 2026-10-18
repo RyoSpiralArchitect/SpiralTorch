@@ -50,6 +50,12 @@ reported. Rust supplies a shared layout identity; HF retains its own optimizer,
 scheduler, data cursor and RNG companions. This bounded integration does not
 turn those files into a sealed multi-file artifact or prove a quality gain.
 
+[Document-safe HF inputs](python/hf-geometry-data.md) keep geometric history
+inside one document window. Rust plans the boundaries; Python supplies HF rows
+and WASM exposes the identical plan. The offline pretrained-model example
+connects those rows to geometric FT, checkpoint continuation and reconstructed
+inference without introducing a second geometry or training implementation.
+
 ## Start With One Explicit Run
 
 Build a [WGPU source wheel](python/build-and-validation.md). Pin a request and
