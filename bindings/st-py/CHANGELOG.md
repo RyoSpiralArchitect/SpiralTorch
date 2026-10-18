@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add native `vjp_parameters` / `vjp_parameters_buffer` for all 14 geometry
+  recipe configurations. Shared Rust pullbacks omit unused input adjoints in
+  standalone SGD and at the earliest frozen-GPT-2 geometry site, preventing
+  discarded input-gradient overflow from suppressing valid learning. Complete
+  VJPs remain available for preceding-site propagation; required parameter
+  validation and atomic updates are unchanged. Source-only after the fixed
+  0.4.32 candidate, not a new Torch dependency or measured speedup.
+
 - Add end-to-end native language-loss gradients for geometry fine-tuning on
   the frozen GPT-2 decoder. Rust owns full decoder pullback and atomic
   multi-placement SGD, with sealed snapshot-bound gradients, artifact restore,

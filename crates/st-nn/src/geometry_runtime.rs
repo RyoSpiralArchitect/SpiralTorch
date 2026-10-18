@@ -54,6 +54,27 @@ pub struct NativeGeometryVjp {
     pub parameters: BTreeMap<String, Vec<f32>>,
 }
 
+struct NativeGeometryPullback {
+    input: Option<Tensor>,
+    parameters: BTreeMap<String, Vec<f32>>,
+}
+
+fn channel_pullback(
+    input: Option<Tensor>,
+    gate: Tensor,
+    bias: Tensor,
+    radius: Option<f32>,
+) -> NativeGeometryPullback {
+    let mut parameters = BTreeMap::from([
+        ("gate".into(), gate.data().to_vec()),
+        ("bias".into(), bias.data().to_vec()),
+    ]);
+    if let Some(radius) = radius {
+        parameters.insert("log_radius".into(), vec![radius]);
+    }
+    NativeGeometryPullback { input, parameters }
+}
+
 #[derive(Debug)]
 pub struct NativeGeometryRuntime {
     artifact: GeometryAdapterArtifact,
@@ -325,10 +346,10 @@ impl NativeGeometryRuntime {
         if !learning_rate.is_finite() || learning_rate <= 0. {
             return Err("learning rate must be finite and positive".into());
         }
-        let gradient = batch.vjp(upstream)?;
+        let parameters = batch.vjp_parameters(upstream)?;
         let next = self.with_gradients_sgd(
             &batch.source_id,
-            &BTreeMap::from([(batch.placement.path.clone(), gradient.parameters)]),
+            &BTreeMap::from([(batch.placement.path.clone(), parameters)]),
             learning_rate,
         )?;
         self.artifact = next.artifact;
@@ -459,16 +480,30 @@ impl NativeGeometryBatch {
     /// First-order residual pullback. Parameter gradients are row sums; fixed
     /// buffers are omitted, and SGD additionally respects requires_grad flags.
     pub fn vjp(&self, upstream: &[f32]) -> Result<NativeGeometryVjp> {
+        let gradient = self.pullback(upstream, true)?;
+        Ok(NativeGeometryVjp {
+            input: gradient.input.unwrap(),
+            parameters: gradient.parameters,
+        })
+    }
+
+    /// Parameter-only pullback with the same sums and finite/shape guards.
+    /// Omit the unused input adjoint, including its allocations and errors.
+    pub fn vjp_parameters(&self, upstream: &[f32]) -> Result<BTreeMap<String, Vec<f32>>> {
+        Ok(self.pullback(upstream, false)?.parameters)
+    }
+
+    fn pullback(&self, upstream: &[f32], need_input: bool) -> Result<NativeGeometryPullback> {
         let (rows, features) = self.output.shape();
         if upstream.len() != self.output.data().len() || upstream.iter().any(|v| !v.is_finite()) {
             return Err("invalid native geometry upstream shape or values".into());
         }
         let direction = Tensor::from_vec(rows, features, upstream.to_vec())?;
         let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
-        let (input, gate, bias, radius) = match &self.pullback {
+        let mut gradient = match &self.pullback {
             Pullback::Identity => {
-                return Ok(NativeGeometryVjp {
-                    input: direction,
+                return Ok(NativeGeometryPullback {
+                    input: need_input.then_some(direction),
                     parameters: self
                         .placement
                         .tensors
@@ -479,57 +514,24 @@ impl NativeGeometryBatch {
                 });
             }
             Pullback::Affine(batch) => {
-                let g = batch.vjp(scaled.data())?;
-                (g.grad_input, g.grad_gate, g.grad_bias, None)
+                let (input, gate, bias) = batch.vjp_requested(scaled.data(), need_input)?;
+                channel_pullback(input, gate, bias, None)
             }
-            Pullback::Wave(batch) => {
-                let g = batch.vjp(scaled.data())?;
-                (g.grad_input, g.grad_gate, g.grad_bias, None)
-            }
-            Pullback::WaveRadius(batch) => {
-                let (g, radius) = batch.vjp_with_log_radius(scaled.data())?;
-                (g.grad_input, g.grad_gate, g.grad_bias, Some(radius))
-            }
-            Pullback::Elliptic(batch) => {
-                let gradient = batch.vjp(&scaled)?;
-                return Ok(NativeGeometryVjp {
-                    input: direction.add_with_backend(&gradient.input, TensorUtilBackend::Cpu)?,
-                    parameters: gradient.parameters,
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => {
+                let need_radius = self.placement.tensors.iter().any(|t| {
+                    t.name == "log_radius" && t.role == GeometryAdapterTensorRole::Parameter
                 });
+                let (g, radius) = batch.vjp_requested(scaled.data(), need_input, need_radius)?;
+                channel_pullback(g.grad_input, g.grad_gate, g.grad_bias, radius)
             }
-            Pullback::Topos(batch) => {
-                let gradient = batch.vjp(&scaled)?;
-                return Ok(NativeGeometryVjp {
-                    input: direction.add_with_backend(&gradient.input, TensorUtilBackend::Cpu)?,
-                    parameters: gradient.parameters,
-                });
-            }
-            Pullback::Fractional(batch) => {
-                let gradient = batch.vjp(&scaled)?;
-                return Ok(NativeGeometryVjp {
-                    input: direction.add_with_backend(&gradient.input, TensorUtilBackend::Cpu)?,
-                    parameters: gradient.parameters,
-                });
-            }
+            Pullback::Elliptic(batch) => batch.vjp(&scaled, need_input)?,
+            Pullback::Topos(batch) => batch.vjp(&scaled, need_input)?,
+            Pullback::Fractional(batch) => batch.vjp(&scaled, need_input)?,
         };
-        let mut parameters = BTreeMap::from([
-            ("gate".into(), gate.data().to_vec()),
-            ("bias".into(), bias.data().to_vec()),
-        ]);
-        if let Some(radius) = radius {
-            if self
-                .placement
-                .tensors
-                .iter()
-                .any(|t| t.name == "log_radius" && t.role == GeometryAdapterTensorRole::Parameter)
-            {
-                parameters.insert("log_radius".into(), vec![radius]);
-            }
+        if let Some(input) = gradient.input.take() {
+            gradient.input = Some(direction.add_with_backend(&input, TensorUtilBackend::Cpu)?);
         }
-        Ok(NativeGeometryVjp {
-            input: direction.add_with_backend(&input, TensorUtilBackend::Cpu)?,
-            parameters,
-        })
+        Ok(gradient)
     }
 }
 
@@ -571,6 +573,7 @@ mod tests {
             let runtime = NativeGeometryRuntime::new(elliptic_artifact(anchored, 0.4));
             let batch = runtime.forward("site", &x, 2).unwrap();
             let gradient = batch.vjp(&seed).unwrap();
+            assert_eq!(batch.vjp_parameters(&seed).unwrap(), gradient.parameters);
             let objective = |runtime: &NativeGeometryRuntime, input: &[f32]| {
                 runtime
                     .forward("site", input, 2)
@@ -768,6 +771,42 @@ mod tests {
     }
 
     #[test]
+    fn parameter_only_pullback_skips_unused_overflow_but_keeps_validation() {
+        let mut record = artifact(false, None, 0.5).record().clone();
+        record.placements[0]
+            .tensors
+            .iter_mut()
+            .find(|t| t.name == "gate")
+            .unwrap()
+            .values
+            .fill(f32::MAX);
+        let mut runtime =
+            NativeGeometryRuntime::new(GeometryAdapterArtifact::create(record).unwrap());
+        let batch = runtime.forward("site", &[0.; 3], 1).unwrap();
+        assert!(batch.vjp(&[4.; 3]).is_err());
+        let parameters = batch.vjp_parameters(&[4.; 3]).unwrap();
+        assert_eq!(parameters["gate"], [0.; 3]);
+        assert_eq!(parameters["bias"], [2.; 3]);
+        assert!(batch.vjp_parameters(&[]).is_err());
+        assert!(batch.vjp_parameters(&[f32::NAN; 3]).is_err());
+        let before = runtime.artifact().artifact_id().to_owned();
+        runtime.step_sgd(&batch, &[4.; 3], 0.1).unwrap();
+        assert_ne!(runtime.artifact().artifact_id(), before);
+
+        let mut record = artifact(false, None, 0.5).record().clone();
+        record.placements[0]
+            .tensors
+            .iter_mut()
+            .find(|t| t.name == "gate")
+            .unwrap()
+            .values
+            .fill(-0.1);
+        let runtime = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(record).unwrap());
+        let batch = runtime.forward("site", &[f32::MAX; 3], 1).unwrap();
+        assert!(batch.vjp_parameters(&[4.; 3]).is_err());
+    }
+
+    #[test]
     fn residual_pullback_matches_finite_differences_for_all_supported_recipes() {
         let x = [0.2, -0.3, 0.4, 0.5, 0.1, -0.2];
         let upstream = [0.3, 0.5, -0.4, 0.2, -0.1, 0.6];
@@ -780,6 +819,10 @@ mod tests {
             let runtime = NativeGeometryRuntime::new(artifact(wave, radius, 0.4));
             let batch = runtime.forward("site", &x, 2).unwrap();
             let gradient = batch.vjp(&upstream).unwrap();
+            assert_eq!(
+                batch.vjp_parameters(&upstream).unwrap(),
+                gradient.parameters
+            );
             let objective = |runtime: &NativeGeometryRuntime, input: &[f32]| -> f32 {
                 runtime
                     .forward("site", input, 2)

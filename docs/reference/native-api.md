@@ -35,6 +35,13 @@ For day-to-day Python use, though, the first handles are ordinary:
   dependencies.
 - `SpiralSession(backend="auto" | "cpu" | "wgpu")` for one object that records
   the requested runtime route and device preflight evidence.
+- `SafeTensorArchive`, `NdTensor` and `NativeCausalLm` for the
+  [Torch-free language path](../python/native-causal-lm.md): explicit GPT-2
+  checkpoint import, f32 CPU inference and language-loss geometry learning
+  through a frozen base. This is source-only after the fixed 0.4.32 candidate,
+  not arbitrary HF import or base-weight FT. The standalone
+  [native geometry runtime](../python/native-geometry-runtime.md) does not
+  require a language model.
 - `spiraltorch.ecosystem` for PyTorch/JAX/CuPy/TensorFlow tensor handoff when
   you do want to co-run another stack.
 - `bindings/st-py/examples/checkpoint_preflight.py` for HF/PyTorch-style state

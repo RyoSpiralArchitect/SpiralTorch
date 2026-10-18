@@ -1,6 +1,8 @@
 //! Native gates and parameter charts around the existing bounded GL operator.
 
-use super::{tensor, GeometryAdapterPlacement, GeometryAdapterRecipe, NativeGeometryVjp, Result};
+use super::{
+    tensor, GeometryAdapterPlacement, GeometryAdapterRecipe, NativeGeometryPullback, Result,
+};
 use crate::geometry_artifact::FractionalRecipe;
 use st_frac::learning::{
     FractionalGlAngleChart, FractionalGlGainLearningBatch, FractionalGlKernel,
@@ -170,20 +172,35 @@ impl FractionalRuntimeBatch {
         &self.output
     }
 
-    pub(super) fn vjp(&self, upstream: &Tensor) -> Result<NativeGeometryVjp> {
+    pub(super) fn vjp(
+        &self,
+        upstream: &Tensor,
+        need_input: bool,
+    ) -> Result<NativeGeometryPullback> {
         let direction = upstream.mul_row_with_backend(&self.gate, CPU)?;
         let (input, alpha, log_gain) = match &self.map {
-            Map::Plain(batch) => {
+            Map::Plain(batch) if need_input => {
                 let gradient = batch.vjp(direction.data())?;
-                (gradient.input, gradient.alpha, None)
+                (Some(gradient.input), gradient.alpha, None)
             }
-            Map::Gain(batch) => {
+            Map::Gain(batch) if need_input => {
                 let gradient = batch.vjp(direction.data())?;
-                (gradient.input, gradient.alpha, Some(gradient.log_gain))
+                (
+                    Some(gradient.input),
+                    gradient.alpha,
+                    Some(gradient.log_gain),
+                )
+            }
+            Map::Plain(batch) => (None, batch.vjp_alpha(direction.data())?, None),
+            Map::Gain(batch) => {
+                let (alpha, gain) = batch.vjp_parameters(direction.data())?;
+                (None, alpha, Some(gain))
             }
         };
         let (rows, features) = self.input.shape();
-        let mut input = Tensor::from_vec(rows, features, input)?;
+        let mut input = input
+            .map(|data| Tensor::from_vec(rows, features, data))
+            .transpose()?;
         let (name, order) = self.order.vjp(alpha)?;
         let mut parameters = BTreeMap::from([
             (
@@ -196,12 +213,15 @@ impl FractionalRuntimeBatch {
             parameters.insert("log_gain".into(), vec![gain]);
         }
         if let Some(local) = &self.local_gate {
-            input = input.add_with_backend(&upstream.mul_row_with_backend(local, CPU)?, CPU)?;
+            if let Some(value) = &mut input {
+                *value =
+                    value.add_with_backend(&upstream.mul_row_with_backend(local, CPU)?, CPU)?;
+            }
             parameters.insert(
                 "local_gate".into(),
                 gate_gradient(upstream, &self.input, local)?,
             );
         }
-        Ok(NativeGeometryVjp { input, parameters })
+        Ok(NativeGeometryPullback { input, parameters })
     }
 }

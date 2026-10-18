@@ -43,6 +43,7 @@ fn full_sequence_vjp_matches_finite_differences_including_the_context_gate() {
         assert_eq!(batch.sequence_shape(), Some([2, 3, 3]));
         assert_eq!(batch.output().shape(), (6, 3));
         let gradient = batch.vjp(&seed).unwrap();
+        assert_eq!(batch.vjp_parameters(&seed).unwrap(), gradient.parameters);
         let objective = |runtime: &NativeGeometryRuntime, values: &[f32]| {
             runtime
                 .forward_sequence("site", values, [2, 3])

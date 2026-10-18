@@ -61,7 +61,7 @@ fn legacy_vjp<const ELEMENTWISE_RMS: bool>(
 }
 
 fn compare_legacy<const ELEMENTWISE_RMS: bool>(batch: &ToposResonatorLearningBatch, dy: &[f32]) {
-    let actual = batch.vjp_with_gate_statistics::<ELEMENTWISE_RMS>(dy);
+    let actual = batch.vjp_with_gate_statistics::<ELEMENTWISE_RMS, true>(dy);
     let expected = legacy_vjp::<ELEMENTWISE_RMS>(batch, dy);
     match (actual, expected) {
         (Ok((actual, squares)), Ok((expected, expected_squares))) => {

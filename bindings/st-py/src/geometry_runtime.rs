@@ -281,6 +281,34 @@ impl PyNativeGeometryBatch {
             parameters,
         ))
     }
+
+    fn vjp_parameters(
+        &self,
+        py: Python<'_>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<BTreeMap<String, Vec<f32>>> {
+        let count = self.inner.output().data().len();
+        let upstream = sequence(upstream, count, count)?;
+        py.detach(|| self.inner.vjp_parameters(&upstream))
+            .map_err(error)
+    }
+
+    fn vjp_parameters_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let count = self.inner.output().data().len();
+        let upstream = read_f32(upstream, count, Some(count))?;
+        let result = py
+            .detach(|| self.inner.vjp_parameters(&upstream))
+            .map_err(error)?;
+        let parameters = PyDict::new(py);
+        for (name, values) in result {
+            parameters.set_item(name, write_f32(py, values.into_iter())?)?;
+        }
+        Ok(parameters)
+    }
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {

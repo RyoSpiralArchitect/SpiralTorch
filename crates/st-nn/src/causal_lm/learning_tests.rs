@@ -202,8 +202,7 @@ fn training_admission_and_invalid_updates_fail_without_changes() {
     assert!(other.step_geometry_sgd(&gradient, 0.1).is_err());
 }
 
-#[test]
-fn valid_geometry_gradients_do_not_differentiate_unused_overflowing_base_paths() {
+fn overflowing_frozen_base_fixture() -> NativeCausalLm {
     let mut p = parameters();
     for (name, (_, values)) in &mut p {
         values.fill(if name.contains("ln_") && name.ends_with("weight") {
@@ -219,12 +218,17 @@ fn valid_geometry_gradients_do_not_differentiate_unused_overflowing_base_paths()
     p.insert("lm_head.weight".into(), (vec![11, 4], head));
     let mut c = config();
     c["tie_word_embeddings"] = json!(false);
-    let base = NativeCausalLm::from_gpt2_json(
+    NativeCausalLm::from_gpt2_json(
         &serde_json::to_vec(&c).unwrap(),
         &archive(&p),
         Default::default(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn valid_geometry_gradients_do_not_differentiate_unused_overflowing_base_paths() {
+    let base = overflowing_frozen_base_fixture();
     let mut record = artifact(&base, "transformer.h.1", 0.).record().clone();
     for parameter in &mut record.placements[0].tensors {
         parameter.requires_grad = true;
@@ -234,6 +238,30 @@ fn valid_geometry_gradients_do_not_differentiate_unused_overflowing_base_paths()
         .unwrap();
     let gradient = model.geometry_loss_gradients(&[0, 0], [1, 2]).unwrap();
     assert!((gradient.loss() - 11f32.ln()).abs() < 1e-6);
+    assert_eq!(gradient.parameters()["transformer.h.1"]["gate"], [0.; 4]);
+    assert!(gradient.parameters()["transformer.h.1"]["bias"]
+        .iter()
+        .all(|v| v.is_finite()));
+    assert!(gradient.parameters()["transformer.h.1"]["bias"]
+        .iter()
+        .any(|v| v.abs() > 1.));
+}
+
+#[test]
+fn first_geometry_site_skips_its_unused_overflowing_input_gradient() {
+    let base = overflowing_frozen_base_fixture();
+    let mut record = artifact(&base, "transformer.h.1", 0.).record().clone();
+    for parameter in &mut record.placements[0].tensors {
+        parameter.requires_grad = true;
+        if parameter.name == "gate" {
+            parameter.values[0] = f32::MAX;
+        }
+    }
+    let model = base
+        .with_geometry(GeometryAdapterArtifact::create(record).unwrap())
+        .unwrap();
+    assert!((model.next_token_loss(&[0, 0], [1, 2]).unwrap() - 11f32.ln()).abs() < 1e-6);
+    let gradient = model.geometry_loss_gradients(&[0, 0], [1, 2]).unwrap();
     assert_eq!(gradient.parameters()["transformer.h.1"]["gate"], [0.; 4]);
     assert!(gradient.parameters()["transformer.h.1"]["bias"]
         .iter()

@@ -62,15 +62,21 @@ fn geometry_pullback(
     batch: Option<NativeGeometryBatch>,
     upstream: Tensor,
     parameters: &mut Parameters,
-) -> CausalLmResult<Tensor> {
+    first_site: &str,
+) -> CausalLmResult<Option<Tensor>> {
     if let Some(batch) = batch {
-        let gradient = batch.vjp(upstream.data())?;
-        if parameters.insert(path, gradient.parameters).is_some() {
+        let (input, gradient) = if path == first_site {
+            (None, batch.vjp_parameters(upstream.data())?)
+        } else {
+            let gradient = batch.vjp(upstream.data())?;
+            (Some(gradient.input), gradient.parameters)
+        };
+        if parameters.insert(path, gradient).is_some() {
             return Err("duplicate geometry gradient placement".into());
         }
-        return Ok(gradient.input);
+        return Ok(input);
     }
-    Ok(upstream)
+    Ok(Some(upstream))
 }
 
 impl NativeCausalLm {
@@ -181,24 +187,26 @@ impl NativeCausalLm {
                 .unwrap();
             let block = &self.blocks[index];
             let path = format!("transformer.h.{index}");
-            let residual = geometry_pullback(
+            let Some(residual) = geometry_pullback(
                 path.clone(),
                 cache.block_geometry,
                 gradient,
                 &mut parameters,
-            )?;
-            if path == first_site {
+                &first_site,
+            )?
+            else {
                 break;
-            }
-            let mlp = geometry_pullback(
+            };
+            let Some(mlp) = geometry_pullback(
                 format!("{path}.mlp"),
                 cache.mlp_geometry,
                 residual.clone(),
                 &mut parameters,
-            )?;
-            if format!("{path}.mlp") == first_site {
+                &first_site,
+            )?
+            else {
                 break;
-            }
+            };
             let d_gelu = block.contract.backward_input(&mlp)?;
             let d_expand = cache
                 .pre_gelu
@@ -210,15 +218,16 @@ impl NativeCausalLm {
                 c.norm_epsilon,
             )?;
             let residual = residual.add_with_backend(&d_residual, TensorUtilBackend::Cpu)?;
-            let attention = geometry_pullback(
+            let Some(attention) = geometry_pullback(
                 format!("{path}.attn"),
                 cache.attention_geometry,
                 residual.clone(),
                 &mut parameters,
-            )?;
-            if format!("{path}.attn") == first_site {
+                &first_site,
+            )?
+            else {
                 break;
-            }
+            };
             let d_merge = block.output.backward_input(&attention)?;
             let [d_heads] = self.split_heads::<1>(&d_merge, shape)?;
             let d_qkv = attention_vjp_reference(

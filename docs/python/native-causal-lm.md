@@ -148,6 +148,9 @@ geometry layer and replays one block at a time, preserving the full `[B,T]`
 partition. Reverse execution stops immediately after collecting that earliest
 site, including frozen sites whose parameter gradients are exposed. Unused
 frozen-prefix derivatives are neither computed nor allowed to cause failures.
+That earliest site uses a parameter-only geometry pullback, so an unrequested
+input adjoint cannot overflow and suppress otherwise valid parameter gradients.
+Earlier-site propagation still requests the complete input derivative.
 Forward and replay use the same code,
 not separate Python or Rust decoder implementations. The checkpoint budget
 is checked before Python ID extraction; ordinary activation/attention/geometry
@@ -162,6 +165,10 @@ See [selected-site geometry learning](native-geometry-runtime.md) for the
 standalone VJP/MSE entry, which remains available without loading a decoder.
 
 ## Reproduce Checks
+
+The [integration follow-up](native-runtime-integration-validation.md) records
+parameter-only pullbacks, independent review and the repeated real-model
+comparison after integration with the optional HF observation/Trainer client.
 
 ```sh
 cargo test -p st-nn --lib causal_lm:: --locked

@@ -228,35 +228,49 @@ impl WaveGateLearningBatch {
 
     /// Sum-reduced parameter derivatives, without mutation or optimizer policy.
     pub fn vjp(&self, upstream: &[f32]) -> PureResult<WaveGateVjp> {
-        if self.radius.is_some() {
-            return self.vjp_with_log_radius(upstream).map(|(vjp, _)| vjp);
-        }
-        let (rows, cols) = self.input.shape();
-        let upstream = Tensor::from_vec(rows, cols, upstream.to_vec())?;
-        let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
-        self.kernel
-            .layer(&self.gate, &self.bias)?
-            .vjp(&self.input, &upstream)
+        self.vjp_requested(upstream, true, false)
+            .map(|(vjp, _)| vjp.into_full())
     }
 
     /// Sum-reduced input/gate/bias derivatives plus the shared log-radius derivative.
     /// Rejects legacy snapshots rather than inventing a radius parameter for them.
     pub fn vjp_with_log_radius(&self, upstream: &[f32]) -> PureResult<(WaveGateVjp, f32)> {
-        let radius = self.radius.ok_or(TensorError::InvalidValue {
-            label: "wave_gate_snapshot_has_no_log_radius",
-        })?;
+        self.vjp_requested(upstream, true, true)
+            .map(|(vjp, radius)| (vjp.into_full(), radius.unwrap()))
+    }
+
+    pub(crate) fn vjp_requested(
+        &self,
+        upstream: &[f32],
+        need_input: bool,
+        need_radius: bool,
+    ) -> PureResult<(WaveGatePartialVjp, Option<f32>)> {
+        if need_radius && self.radius.is_none() {
+            return Err(TensorError::InvalidValue {
+                label: "wave_gate_snapshot_has_no_log_radius",
+            });
+        }
         let (rows, cols) = self.input.shape();
         let upstream = Tensor::from_vec(rows, cols, upstream.to_vec())?;
-        self.kernel
-            .topos
-            .guard_tensor("wave_gate_radius_upstream", &upstream)?;
-        radius.vjp(
-            &self.kernel.topos,
-            &self.input,
-            &self.gate,
-            &self.bias,
-            &upstream,
-        )
+        let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+        if let Some(radius) = self.radius {
+            self.kernel
+                .topos
+                .guard_tensor("wave_gate_radius_upstream", &upstream)?;
+            radius.vjp(
+                &self.kernel.topos,
+                &self.input,
+                &self.gate,
+                &self.bias,
+                &upstream,
+                [need_input, need_radius],
+            )
+        } else {
+            self.kernel
+                .layer(&self.gate, &self.bias)?
+                .pullback(&self.input, &upstream, Some(1.), false, need_input)
+                .map(|vjp| (vjp, None))
+        }
     }
 }
 

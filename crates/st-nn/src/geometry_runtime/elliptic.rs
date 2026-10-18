@@ -1,6 +1,8 @@
 //! Native composition of the existing linear primitives and elliptic pullback.
 
-use super::{tensor, GeometryAdapterPlacement, GeometryAdapterRecipe, NativeGeometryVjp, Result};
+use super::{
+    tensor, GeometryAdapterPlacement, GeometryAdapterRecipe, NativeGeometryPullback, Result,
+};
 use crate::geometry_artifact::{EllipticRecipe, GEOMETRY_ADAPTER_MAX_VALUES};
 use st_core::theory::microlocal::{
     EllipticAnchoredLearningBatch, EllipticCausalLearningBatch, EllipticGatedCausalLearningBatch,
@@ -143,7 +145,11 @@ impl EllipticRuntimeBatch {
         &self.output
     }
 
-    pub(super) fn vjp(&self, upstream: &Tensor) -> Result<NativeGeometryVjp> {
+    pub(super) fn vjp(
+        &self,
+        upstream: &Tensor,
+        need_input: bool,
+    ) -> Result<NativeGeometryPullback> {
         let grad_readout = finite(upstream.matmul_lhs_transpose_scaled_with_backend(
             &self.features,
             1.0,
@@ -178,8 +184,13 @@ impl EllipticRuntimeBatch {
         )?)?;
         let grad_bias =
             grad_coordinates.try_sum_axis0_scaled_with_backend(1.0, TensorUtilBackend::Cpu)?;
-        let input =
-            finite(grad_coordinates.matmul_with_backend(&self.orientation_weight, MATMUL)?)?;
+        let input = if need_input {
+            Some(finite(
+                grad_coordinates.matmul_with_backend(&self.orientation_weight, MATMUL)?,
+            )?)
+        } else {
+            None
+        };
         let mut parameters = BTreeMap::from([
             (
                 "orientation.weight".into(),
@@ -191,6 +202,6 @@ impl EllipticRuntimeBatch {
         if let Some(raw_mix) = raw_mix {
             parameters.insert("raw_mix".into(), vec![raw_mix]);
         }
-        Ok(NativeGeometryVjp { input, parameters })
+        Ok(NativeGeometryPullback { input, parameters })
     }
 }

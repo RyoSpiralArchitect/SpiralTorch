@@ -96,6 +96,7 @@ fn composite_input_and_all_parameter_vjps_match_finite_differences() {
         let runtime = NativeGeometryRuntime::new(artifact(kind));
         let batch = runtime.forward_sequence("site", &x, [2, 3]).unwrap();
         let gradient = batch.vjp(&seed).unwrap();
+        assert_eq!(batch.vjp_parameters(&seed).unwrap(), gradient.parameters);
         assert_eq!(
             gradient.parameters.len(),
             runtime.artifact().record().placements[0].tensors.len()

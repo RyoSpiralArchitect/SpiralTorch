@@ -36,6 +36,16 @@ updated = runtime.artifact()
 these feature-wise operators; the feature width is fixed by the artifact.
 Changing a caller's input/output buffer cannot mutate a saved snapshot.
 
+The source-only extension also provides `vjp_parameters(upstream)` and
+`vjp_parameters_buffer(upstream)` when the input adjoint is not needed. They
+return only the parameter mapping, using the same native sums and validation
+as `vjp`, without allocating or evaluating the discarded input gradient.
+All 14 recipe configurations support this path. Frozen parameters still have
+inspection gradients; fixed buffers do not. Requested non-finite parameter
+gradients still fail. Native SGD/MSE and the earliest geometry site in
+`NativeCausalLm` use this path; intermediate sites retain the complete VJP to
+propagate loss to earlier placements. Optional Torch adapters are unchanged.
+
 For a direct native learning loop, `train_mse` or `train_mse_buffer` returns the
 pre-update mean-MSE and performs one plain SGD step using the existing Rust loss
 and its pullback. No Python loss, Torch optimizer, scheduler or hidden adaptive
@@ -63,12 +73,14 @@ This exercises activation fitting, not whole-language-model quality.
 | Fractional memory/history, L2 history, learned-gain and angle/gain history (source-only extension) | Native full-context GL composition, feature gates and parameter charts; explicit sequence entry only |
 | HF Trainer, datasets and model execution | Optional interoperability path; not a Torch-free HF checkpoint executor |
 | Safetensors weight ingress (source-only extension) | [Rust-owned F32/F16/BF16 loader and shape-preserving N-D snapshots](native-weights.md); not architecture conversion or full HF execution |
+| Supported frozen GPT-2 (source-only extension after the fixed 0.4.32 candidate) | Separate [NativeCausalLm](native-causal-lm.md) importer/decoder connects these artifacts to actual language-loss gradients without Torch; CPU, no base-weight FT or KV cache |
 
 All recipes currently defined by `GeometryAdapterArtifact` have a native
-selected-placement route. This is not a whole-model executor: a pretrained HF
-model loader, placement scheduling, cache behavior and full-model native FT
-need their own implementation and validation. No Python wrapper or foreign
-model is silently replaced by this API.
+selected-placement route. This API does not load or schedule a whole model;
+the separate `NativeCausalLm` supports frozen GPT-2 with geometry-only learning.
+Other HF architectures, KV caching and full-model native FT remain separate
+implementation and validation work. No Python wrapper or foreign model is
+silently replaced by this API.
 
 `execution_backend` is `rust_f32_cpu`. No GPU residency, zero-copy foreign
 ownership, higher-order differentiation, throughput gain or language-quality

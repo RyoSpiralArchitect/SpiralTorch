@@ -80,6 +80,54 @@ def artifact(kind="affine", *, frozen_gate=False):
 
 
 class NativeGeometryTests(unittest.TestCase):
+    def test_parameter_only_pullback_matches_all_recipes_without_input_adjoint(self):
+        values = array("f", [.2, -.3, .4, .5, .1, -.2] * 2)
+        upstream = array("f", [.3, .5, -.4, .2, -.1, .6] * 2)
+        kinds = ("affine", "wave", "fixed", "learned", "elliptic", "anchored", "causal", "gated", "topos") + FRACTIONAL_KINDS
+        for kind in kinds:
+            for strength in (0., .5):
+                for frozen in (False, True):
+                    with self.subTest(kind=kind, strength=strength, frozen=frozen):
+                        state = json.loads(artifact(kind).state_json())
+                        placement = state["placements"][0]
+                        placement["recipe"]["strength"] = strength
+                        if kind == "affine":
+                            placement["recipe"]["max_values"] = len(values)
+                        if frozen:
+                            for tensor in placement["tensors"]:
+                                tensor["requires_grad"] = False
+                        saved = st.GeometryAdapterArtifact.create_json(json.dumps(state))
+                        runtime = st.NativeGeometryRuntime(saved)
+                        batch = runtime.forward_sequence_buffer("site", values, (2, 2))
+                        expected = batch.vjp(list(upstream))[1]
+                        self.assertEqual(batch.vjp_parameters(list(upstream)), expected)
+                        buffers = batch.vjp_parameters_buffer(upstream)
+                        self.assertEqual(buffers, {name: array("f", v).tobytes() for name, v in expected.items()})
+                        next(iter(buffers.values()))[0] ^= 255
+                        self.assertEqual(batch.vjp_parameters(list(upstream)), expected)
+                        self.assertEqual(runtime.artifact().artifact_id, saved.artifact_id)
+                        for invalid in ([], [float("nan")] * len(upstream)):
+                            with self.assertRaises(ValueError):
+                                batch.vjp_parameters(invalid)
+                            with self.assertRaises(ValueError):
+                                batch.vjp_parameters_buffer(array("f", invalid))
+
+    def test_unused_input_overflow_does_not_block_parameters_or_sgd(self):
+        state = json.loads(artifact().state_json())
+        gate = next(t for t in state["placements"][0]["tensors"] if t["name"] == "gate")
+        gate["values"] = [float.fromhex("0x1.fffffep127")] * 3
+        runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+        batch = runtime.forward("site", [0.] * 3, 1)
+        for full in (batch.vjp, lambda u: batch.vjp_buffer(array("f", u))):
+            with self.assertRaises(ValueError):
+                full([4.] * 3)
+        expected = {"gate": [0.] * 3, "bias": [2.] * 3}
+        self.assertEqual(batch.vjp_parameters([4.] * 3), expected)
+        self.assertEqual(batch.vjp_parameters_buffer(array("f", [4.] * 3)),
+                         {name: array("f", v).tobytes() for name, v in expected.items()})
+        before = runtime.artifact().artifact_id
+        self.assertNotEqual(runtime.step_sgd(batch, [4.] * 3, .1), before)
+
     def test_shared_fixture_residual_vjp_and_owned_buffers(self):
         f = FIXTURE
         runtime = st.NativeGeometryRuntime(artifact())

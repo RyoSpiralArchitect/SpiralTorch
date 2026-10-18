@@ -23,6 +23,8 @@ older installed wheel.
 - [Durable byte-LM runs](python/byte-study-runs.md): sealed geometric checkpoints and explicit recovery through the Rust owner.
 - [Geometry adapter stack](geometry_adapter_stack.md): composing geometric interventions.
 - [HF geometry Trainer](python/hf-geometry-training.md): train geometric adapters through HF clipping, checkpoints and resume.
+- [Torch-free GPT-2 geometry learning](python/native-causal-lm.md): Rust-owned checkpoint import, inference and language-loss gradients through a frozen decoder; CPU, source-only after the fixed 0.4.32 candidate.
+- [Native weights](python/native-weights.md) and [geometry runtime](python/native-geometry-runtime.md): owning tensor views and standalone geometric updates without an optional ML framework.
 - [Document-safe HF geometry data](python/hf-geometry-data.md): Rust-owned contexts, spawned workers and an offline pretrained-model example.
 - [Training reference](reference/learning.md): language models, GoldenRetriever, RL, Rec, coherence, and Rust training examples.
 - [Geometric toolkits](reference/geometry.md): topos, GNNs, desire, quantum overlays, and telemetry.

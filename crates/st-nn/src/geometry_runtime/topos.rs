@@ -1,4 +1,4 @@
-use super::{tensor, GeometryAdapterPlacement, NativeGeometryVjp, Result};
+use super::{tensor, GeometryAdapterPlacement, NativeGeometryPullback, Result};
 use crate::geometry_artifact::ToposRecipe;
 use st_core::dynamics::topos_resonator::{
     ToposResonatorConfig, ToposResonatorLearningBatch, ToposResonatorOperator,
@@ -42,12 +42,24 @@ impl ToposRuntimeBatch {
         &self.output
     }
 
-    pub(super) fn vjp(&self, upstream: &Tensor) -> Result<NativeGeometryVjp> {
-        let gradient = self.native.vjp(upstream.data())?;
+    pub(super) fn vjp(
+        &self,
+        upstream: &Tensor,
+        need_input: bool,
+    ) -> Result<NativeGeometryPullback> {
         let (rows, features) = self.output.shape();
-        Ok(NativeGeometryVjp {
-            input: Tensor::from_vec(rows, features, gradient.grad_input)?,
-            parameters: BTreeMap::from([("gate".into(), gradient.grad_gate)]),
+        let (input, gate) = if need_input {
+            let gradient = self.native.vjp(upstream.data())?;
+            (
+                Some(Tensor::from_vec(rows, features, gradient.grad_input)?),
+                gradient.grad_gate,
+            )
+        } else {
+            (None, self.native.vjp_gate(upstream.data())?)
+        };
+        Ok(NativeGeometryPullback {
+            input,
+            parameters: BTreeMap::from([("gate".into(), gate)]),
         })
     }
 }
