@@ -155,6 +155,11 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
             st.NativeCausalLm.from_training_checkpoint(self.base, trainer.to_json(), "wrong")
 
     def test_public_example_full_and_resumed_private_outputs_match(self):
+        for execution in (None, {"kind": "full_prefix"}, {"kind": "kv_cache", "max_values": 100000}):
+            with self.subTest(execution=execution):
+                self.check_public_example_resume(execution)
+
+    def check_public_example_resume(self, execution):
         example = runpy.run_path(str(Path(__file__).resolve().parents[1] / "examples/native_geometry_generation.py"))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -169,7 +174,10 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
             (root / "model.safetensors").write_bytes(struct.pack("<Q", len(raw)) + raw + payload)
             (root / "config.json").write_text(self.config)
             (root / "prompt.json").write_text("[1, 2]")
-            (root / "recipe.json").write_text('{"max_new_tokens": 5, "seed": 123, "decoding": {"selection": "sample"}}')
+            recipe = {"max_new_tokens": 5, "seed": 123, "decoding": {"selection": "sample"}}
+            if execution is not None:
+                recipe["execution"] = execution
+            (root / "recipe.json").write_text(json.dumps(recipe))
             fresh = ["--model-dir", str(root), "--prompt-json", str(root / "prompt.json"), "--recipe-json", str(root / "recipe.json")]
             previous = os.umask(0)
             try:
@@ -184,6 +192,10 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
             self.assertEqual((root / "full/generation.json").read_bytes(), (root / "resumed/generation.json").read_bytes())
             self.assertEqual((root / "full/steps.jsonl").read_bytes(),
                              (root / "part/steps.jsonl").read_bytes() + (root / "resumed/steps.jsonl").read_bytes())
+            for run in ("full", "part", "resumed"):
+                result = json.loads((root / run / "result.json").read_text())
+                self.assertEqual(result["execution"], execution or {"kind": "full_prefix"})
+                self.assertNotIn("no KV cache", result["scope"])
             if os.name == "posix":
                 self.assertEqual((root / "full").stat().st_mode & 0o777, 0o700)
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

@@ -87,3 +87,53 @@ limit; preparation, replay and publication each had 180 seconds. These are
 safety limits, not benchmark timings. Existing records must not be overwritten.
 Linux, Windows and CPython 3.8 installed-wheel gates are wired into CI/release
 workflows but were not executed locally; official publication remains separate.
+
+## Public Example Integration
+
+[integration-reviewed.json](integration-reviewed.json) adds a separate default-f32
+study through the public corpus and generation examples: two periodic-repetition
+updates with smoothing 0.1 and weight decay 0.01, then four Z-Space-controlled
+tokens in each of full-prefix and KV-cache modes. Fresh-process partial/resumed
+runs match complete runs byte-for-byte, including every step and checkpoint.
+The verifier independently re-executes the same sealed inputs through Rust and
+compares all summaries, intermediate/final states and ordered reports. This is
+same-runtime mechanics verification, not an independent numerical oracle or a
+language-quality/speed result. The synthetic stress window remains explicit.
+
+Independent review found three initial verifier gaps: empty logs, unbound training
+conditions and unbound generation conditions. All were fixed; negative tests use
+coherent wrong-data, no-repetition, wrong-optimizer, wrong-seed and wrong-prompt
+runs, not just malformed JSON. The [initial result](integration-initial.json) is
+retained, not silently replaced. All 37 input/runtime file hashes and aggregate
+results match the separate reviewed rerun; only the sealed verifier source
+contract changed. Raw inputs, checkpoints and logs remain private.
+[integration-verification.json](integration-verification.json) retains execution
+receipts, expected failing regressions and a failed fixture attempt whose
+re-serialized safetensors required a newly bound base identity. The broad native
+Rust suite also passed 1,032 library and 9 gradient-reduction tests.
+
+With the same authorized local assets and matching source-built native wheel,
+run each command as its own process. The probe refuses source/binary/input
+changes after preparation and forbids optional foreign ML imports:
+
+```bash
+PROBE=benchmarks/results/2026-10-19-native-repetition/integration.py
+COMMON=(--model-dir "$LOCAL_GPT2" --data "$ADMITTED_DATA"
+        --checkpoint "$ORIGINAL_CHECKPOINT" --cohort "$NEW_PRIVATE_RUN")
+python -I -B "$PROBE" --mode prepare "${COMMON[@]}"
+for ARM in full part resume; do
+  python -I -B "$PROBE" --mode train --arm "$ARM" "${COMMON[@]}"
+done
+for EXECUTION in full_prefix kv_cache; do
+  for ARM in full part resume; do
+    python -I -B "$PROBE" --mode generate --execution "$EXECUTION" \
+      --arm "$ARM" "${COMMON[@]}"
+  done
+done
+python -I -B "$PROBE" --mode report --output "$NEW_PUBLIC_RESULT" "${COMMON[@]}"
+```
+
+The recorded runs use the same two-thread/offline environment above and
+`tools/owned_process.py`, with 180-second training/report and 120-second
+preparation/generation limits. The report's additional native re-execution is
+qualification overhead, not part of a throughput measurement.
