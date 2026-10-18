@@ -42,9 +42,11 @@ local persistence. This does not make arbitrary HF architectures native or reuse
 the byte-study format; the optional HF integration below remains separate.
 
 [Native generation](python/native-generation.md) consumes the same learned
-geometry without Torch: full-prefix decoding, ordinary or Z-Space selection,
-EOS and pinned seeded continuation are Rust-owned. This is a bounded CPU
-execution path, not a KV-cached serving engine or a model-quality claim.
+geometry without Torch: full-prefix or explicit native K/V-cached decoding,
+ordinary or Z-Space selection, EOS and pinned seeded continuation are Rust-owned.
+Row-local geometry runs on the newest row; causal geometry retains and replays
+its input history through the shared Rust operator. This is a bounded CPU
+execution path, not a batched serving engine or a model-quality claim.
 
 The [portable geometry adapter](python/geometry-artifacts.md) extends the same
 Rust-owned-state direction to existing HF language models: learned WaveGate,

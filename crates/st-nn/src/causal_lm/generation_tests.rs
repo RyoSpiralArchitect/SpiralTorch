@@ -13,6 +13,7 @@ fn policy() -> CausalLmGenerationConfig {
         eos_token_ids: vec![],
         seed: 81,
         decoding: Default::default(),
+        execution: Default::default(),
     }
 }
 fn pin(bytes: &[u8]) -> String {

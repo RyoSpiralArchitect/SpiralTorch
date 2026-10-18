@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `NativeCausalLmGenerator` for Rust-owned greedy/seeded sampling, EOS,
+  ordinary or Z-Space token control, and pinned continuation. Explicit
+  `execution.kind="kv_cache"` reuses native K/V through `NativeCausalLmContext`;
+  default full-prefix v1 checkpoint bytes remain unchanged. Row-local geometry
+  evaluates new rows; causal geometry retains and replays its native input
+  history. Atomic updates preserve context on errors, and cached resume rebuilds
+  the original prefill/append chronology. No Torch/NumPy fallback, GPU serving
+  claim or change to the already-published 0.4.32 wheels.
+
 - Add Rust-owned `NativeCausalLmTrainer` for fixed-order document-safe geometry
   learning, token-weighted microbatch groups and atomic model/optimizer/cursor
   updates. Native checkpoints bind base, complete tokens/labels, recipe and

@@ -20,6 +20,7 @@ generator = st.NativeCausalLmGenerator(model, [15496, 11], json.dumps({
     "max_new_tokens": 16,
     "seed": 81,
     "eos_token_ids": [50256],
+    "execution": {"kind": "kv_cache", "max_values": 16_777_216},
     "decoding": {
         "selection": "sample", "top_k": 40, "top_p": 0.9,
         "distribution": {"kind": "softmax", "temperature": 0.8},
@@ -48,13 +49,54 @@ Geometry inside the decoder and Z-Space output control are separate intervention
 - Sampling uses probabilities directly, not the older Z-Space reporting log-probability floor. Underflowed zero mass is never sampled. No Torch RNG equivalence is claimed.
 - Step `probability` and `entropy` describe the final filtered distribution, not the likelihood of a deterministic greedy policy. `control_entropy` is before nucleus filtering. JSON also records raw/controlled top IDs, candidate counts, temperature and the optional Z-Space contract version.
 
+## Cached execution
+
+The example explicitly opts into Rust-owned K/V caching. Omitting `execution`
+preserves full-prefix execution and the original v1 checkpoint serialization.
+`{"kind": "full_prefix"}` also selects that default. Python does not manage a
+Torch cache, attention math or geometry history.
+
+The prompt is evaluated once. Subsequent appends compute one new query at its
+original absolute position, reuse prior K/V, and project only the final row to
+vocabulary logits. Frozen model and geometry identities travel with the context;
+they cannot be changed underneath an existing cache. Row-local geometry evaluates
+only the new row. Causal/history geometry retains its raw input prefix and replays
+the existing Rust geometry operator, selecting the last output row. It is correct
+prefix reuse, **not** a claim that every geometry operator has constant-cost
+incremental execution. K/V transaction buffers also still copy prior storage.
+
+For caller-controlled token insertion, use the same state independently:
+
+```python
+context = st.NativeCausalLmContext(model, [15496, 11], max_cache_values=16_777_216)
+last = context.logits()       # NdTensor [1,1,vocab]
+last = context.append(995)    # Admit and evaluate one token, then publish state.
+print(context.token_ids, context.cache_values)
+assert context.execution_backend == "rust_f32_cpu_prepacked_kv"
+```
+
+`max_values` / `max_cache_values` counts persistent **f32 values**, not bytes:
+K/V plus retained geometry input histories. It excludes model weights, readout,
+temporaries and concurrent old/new transaction storage; it is not an RSS cap.
+Prefill still uses the square attention admission. Cached appends use one-query
+attention admission, while sequence geometry keeps its own full-prefix bounds.
+Unsupported or over-budget execution fails; it never silently switches backends.
+Invalid/numerically failing appends leave tokens, logits and cache unchanged.
+
+Cached generation checkpoints store execution policy and token history, not opaque
+K/V buffers. Resume rebuilds the **original prompt prefill followed by chronological
+appends**, preserving the cached numerical path and random position. This costs a
+replay on the first resumed step. Simply re-prefilling the entire current history
+would change the floating-point reduction path. Old full-prefix checkpoints remain
+supported; older readers reject the new explicit execution field.
+
 ## State and bounds
 
-One unpadded, full prefix is recomputed per step using the frozen f32 CPU model.
-This is not arbitrary-HF support, a KV cache, a GPU generation path or a serving
-scheduler. Tokenization/detokenization is external; use the imported model's
-tokenizer. The largest evaluated prefix is admitted before copying prompt IDs.
-There is no automatic cropping, position reset or cache substitution.
+Both modes use one unpadded sequence and the frozen f32 CPU model. This is not
+arbitrary-HF support, a GPU generation path or a serving scheduler.
+Tokenization/detokenization is external; use the imported model's tokenizer.
+The requested execution bounds are admitted before copying prompt IDs.
+There is no automatic cropping or position reset.
 
 Caps: 1024 new tokens, 16384 total IDs, 1048576 vocabulary entries and 256 distinct
 EOS IDs, subject also to the model's tighter position/activation/attention budgets.
@@ -93,7 +135,13 @@ Output is a new POSIX-0700 directory containing step reports, a generation
 checkpoint and a summary. Treat IDs, text and checkpoints as private experiment
 data. The example does not promise power-loss durability or public serving.
 
-Rust exposes the same session through
-`st_nn::causal_lm::{NativeCausalLmGenerator, CausalLmGenerationConfig}` and pure
+Rust exposes the same session and context through
+`st_nn::causal_lm::{NativeCausalLmGenerator, CausalLmGenerationConfig, NativeCausalLmContext}` and pure
 selection through `st_core::inference::token_decoding`. Successful execution and
 resume are not evidence of language-quality uplift.
+
+The [fixed local KV qualification](../../benchmarks/results/2026-10-18-native-lm-cache/README.md)
+separates geometry-bearing numerical checks from ordinary, geometry-free CPU
+timing against PyTorch. Cached/full-prefix logits are compared with a declared
+tolerance; exact cached resume does not imply bit-identical execution between
+different kernel shapes, runtimes or hardware.

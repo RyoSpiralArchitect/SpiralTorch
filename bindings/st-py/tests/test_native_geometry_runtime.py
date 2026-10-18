@@ -80,6 +80,26 @@ def artifact(kind="affine", *, frozen_gate=False):
 
 
 class NativeGeometryTests(unittest.TestCase):
+    def test_every_recipe_preserves_outputs_when_a_prefix_is_extended(self):
+        kinds = ("affine", "wave", "fixed", "learned", "elliptic", "anchored", "causal", "gated", "topos") + FRACTIONAL_KINDS
+        rows = [[((i * 17 + b * 11) % 41 - 20) * .031 for i in range(24)] for b in range(2)]
+        for kind in kinds:
+            for strength in (0., .5):
+                state = json.loads(artifact(kind).state_json())
+                placement = state["placements"][0]
+                placement["recipe"]["strength"] = strength
+                if kind == "affine":
+                    placement["recipe"]["max_values"] = 96
+                runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+                full = runtime.forward_sequence("site", rows[0] + rows[1], [2, 8]).output
+                for length in range(1, 8):
+                    prefix = [v for row in rows for v in row[:length*3]]
+                    actual = runtime.forward_sequence("site", prefix, [2, length]).output
+                    expected = full[:length*3] + full[24:24+length*3]
+                    with self.subTest(kind=kind, strength=strength, length=length):
+                        for a, b in zip(actual, expected):
+                            self.assertAlmostEqual(a, b, delta=2e-7)
+
     def test_parameter_only_pullback_matches_all_recipes_without_input_adjoint(self):
         values = array("f", [.2, -.3, .4, .5, .1, -.2] * 2)
         upstream = array("f", [.3, .5, -.4, .2, -.1, .6] * 2)

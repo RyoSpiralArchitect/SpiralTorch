@@ -1,5 +1,5 @@
-//! Full-prefix native generation. No hidden context cropping, KV cache or foreign fallback.
-use super::{CausalLmResult, NativeCausalLm, NativeCausalLmTrainer};
+//! Native generation with explicit full-prefix or owned KV execution, never a foreign fallback.
+use super::{CausalLmResult, NativeCausalLm, NativeCausalLmContext, NativeCausalLmTrainer};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,22 @@ const SCHEMA: &str = "spiraltorch.native_causal_lm_generation.v1";
 const RNG: &str = "rand_chacha_0_3_chacha20_seed_u64_top53.v1";
 const MAX_CHECKPOINT_BYTES: usize = 1_048_576;
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CausalLmGenerationExecution {
+    #[default]
+    FullPrefix,
+    KvCache {
+        max_values: usize,
+    },
+}
+
+impl CausalLmGenerationExecution {
+    fn is_full_prefix(&self) -> bool {
+        *self == Self::FullPrefix
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CausalLmGenerationConfig {
@@ -22,6 +38,12 @@ pub struct CausalLmGenerationConfig {
     pub seed: u64,
     #[serde(default)]
     pub decoding: TokenDecodingConfig,
+    // Preserve byte serialization of the already-issued full-prefix v1 checkpoints.
+    #[serde(
+        default,
+        skip_serializing_if = "CausalLmGenerationExecution::is_full_prefix"
+    )]
+    pub execution: CausalLmGenerationExecution,
 }
 
 impl CausalLmGenerationConfig {
@@ -41,7 +63,15 @@ impl CausalLmGenerationConfig {
             .checked_add(self.max_new_tokens)
             .filter(|&n| n <= MAX_HISTORY)
             .ok_or("generation token count exceeds budget")?;
-        model.input_count([1, total - 1], true)?;
+        match self.execution {
+            CausalLmGenerationExecution::FullPrefix => {
+                model.input_count([1, total - 1], true)?;
+            }
+            CausalLmGenerationExecution::KvCache { max_values } => {
+                model.context_prefill_count(prompt_length, max_values)?;
+                model.cached_input_count(total - 1, max_values)?;
+            }
+        }
         self.decoding.validate(model.config.vocabulary, total - 1)?;
         if self.eos_token_ids.len() > 256
             || self.eos_token_ids.iter().enumerate().any(|(i, id)| {
@@ -68,6 +98,7 @@ pub struct NativeCausalLmGenerator {
     config: CausalLmGenerationConfig,
     prompt_length: usize,
     tokens: Vec<usize>,
+    cache: Option<NativeCausalLmContext>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -117,6 +148,7 @@ impl NativeCausalLmGenerator {
             config,
             prompt_length: prompt.len(),
             tokens: prompt,
+            cache: None,
         })
     }
     pub fn config(&self) -> &CausalLmGenerationConfig {
@@ -149,9 +181,35 @@ impl NativeCausalLmGenerator {
         if self.finished() {
             return Ok(None);
         }
-        let logits = self
-            .model
-            .logits(&self.tokens, [1, self.tokens.len()], true)?;
+        let next_cache = match self.config.execution {
+            CausalLmGenerationExecution::FullPrefix => None,
+            CausalLmGenerationExecution::KvCache { max_values } => {
+                Some(if let Some(cache) = &self.cache {
+                    if cache.token_ids() != &self.tokens[..self.tokens.len() - 1] {
+                        return Err("cached generation cursor differs from token history".into());
+                    }
+                    cache.preview(*self.tokens.last().unwrap())?
+                } else {
+                    // Restore follows the original prefill + incremental chronology,
+                    // not a numerically different full-prefix re-prefill of all history.
+                    let mut cache = NativeCausalLmContext::new(
+                        self.model.clone(),
+                        self.tokens[..self.prompt_length].to_vec(),
+                        max_values,
+                    )?;
+                    for &token in &self.tokens[self.prompt_length..] {
+                        cache = cache.preview(token)?;
+                    }
+                    cache
+                })
+            }
+        };
+        let logits = match &next_cache {
+            Some(cache) => cache.logits_tensor().clone(),
+            None => self
+                .model
+                .logits(&self.tokens, [1, self.tokens.len()], true)?,
+        };
         let logits: Vec<_> = logits.data().iter().map(|&v| f64::from(v)).collect();
         let candidates = prepare_token_candidates(&logits, &self.tokens, &self.config.decoding)?;
         let decision = match self.config.decoding.selection {
@@ -167,6 +225,7 @@ impl NativeCausalLmGenerator {
         };
         self.tokens.try_reserve(1)?;
         self.tokens.push(decision.token_id);
+        self.cache = next_cache;
         Ok(Some(CausalLmGenerationStep {
             step: self.generated_ids().len(),
             decision,
@@ -231,6 +290,7 @@ impl NativeCausalLmGenerator {
             config: saved.config,
             prompt_length: saved.prompt_length,
             tokens: saved.tokens,
+            cache: None,
         })
     }
 }

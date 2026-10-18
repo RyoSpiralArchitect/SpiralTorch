@@ -4,6 +4,8 @@ use safetensors::tensor::{serialize, Dtype, TensorView};
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[path = "context_tests.rs"]
+mod context;
 #[path = "generation_tests.rs"]
 mod generation;
 #[path = "learning_tests.rs"]

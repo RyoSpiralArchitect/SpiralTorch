@@ -21,6 +21,14 @@ mod elliptic;
 mod fractional;
 mod optimizer;
 pub use optimizer::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
+
+/// Appending future rows does not change existing outputs in either mode.
+/// New recipes must explicitly declare and test their prefix dependency.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GeometrySequenceDependency {
+    RowLocal,
+    CausalPrefix,
+}
 #[cfg(test)]
 mod memory_tests;
 #[cfg(test)]
@@ -109,6 +117,26 @@ impl NativeGeometryRuntime {
             .iter()
             .find(|p| p.path == path)
             .ok_or_else(|| "unknown geometry placement".into())
+    }
+
+    /// Declare whether a placement needs preceding rows during incremental inference.
+    pub fn sequence_dependency(&self, path: &str) -> Result<GeometrySequenceDependency> {
+        use GeometrySequenceDependency::{CausalPrefix, RowLocal};
+        Ok(match &self.placement(path)?.recipe {
+            GeometryAdapterRecipe::ChannelAffine { .. }
+            | GeometryAdapterRecipe::Wave { .. }
+            | GeometryAdapterRecipe::WaveRadius { .. }
+            | GeometryAdapterRecipe::Topos { .. }
+            | GeometryAdapterRecipe::Elliptic { .. }
+            | GeometryAdapterRecipe::EllipticAnchored { .. } => RowLocal,
+            GeometryAdapterRecipe::EllipticCausal { .. }
+            | GeometryAdapterRecipe::EllipticGated { .. }
+            | GeometryAdapterRecipe::Fractional { .. }
+            | GeometryAdapterRecipe::History { .. }
+            | GeometryAdapterRecipe::HistoryL2 { .. }
+            | GeometryAdapterRecipe::HistoryGain { .. }
+            | GeometryAdapterRecipe::HistoryAngle { .. } => CausalPrefix,
+        })
     }
 
     /// Return the feature width and allocation budget before binding extraction.

@@ -19,9 +19,9 @@ if __name__ == "__main__":
 import spiraltorch as st  # noqa: E402
 
 
-def fixture():
-    config = {"model_type": "gpt2", "vocab_size": 11, "n_positions": 8,
-              "n_embd": 4, "n_head": 2, "n_layer": 2}
+def fixture(*, width=4, heads=2, positions=8):
+    config = {"model_type": "gpt2", "vocab_size": 11, "n_positions": positions,
+              "n_embd": width, "n_head": heads, "n_layer": 2}
     header, payload = {}, bytearray()
 
     def add(name, shape):
@@ -32,18 +32,18 @@ def fixture():
         payload.extend(struct.pack("<" + "f" * count, *values))
         header[name] = {"dtype": "F32", "shape": shape, "data_offsets": [start, len(payload)]}
 
-    add("wte.weight", [11, 4])
-    add("wpe.weight", [8, 4])
+    add("wte.weight", [11, width])
+    add("wpe.weight", [positions, width])
     for layer in range(2):
         for norm in ("ln_1", "ln_2"):
             for suffix in ("weight", "bias"):
-                add(f"h.{layer}.{norm}.{suffix}", [4])
-        for name, input_width, output_width in (("attn.c_attn", 4, 12), ("attn.c_proj", 4, 4),
-                                                ("mlp.c_fc", 4, 16), ("mlp.c_proj", 16, 4)):
+                add(f"h.{layer}.{norm}.{suffix}", [width])
+        for name, input_width, output_width in (("attn.c_attn", width, 3*width), ("attn.c_proj", width, width),
+                                                ("mlp.c_fc", width, 4*width), ("mlp.c_proj", 4*width, width)):
             add(f"h.{layer}.{name}.weight", [input_width, output_width])
             add(f"h.{layer}.{name}.bias", [output_width])
-    add("ln_f.weight", [4])
-    add("ln_f.bias", [4])
+    add("ln_f.weight", [width])
+    add("ln_f.bias", [width])
     raw = json.dumps(header).encode()
     return json.dumps(config), st.SafeTensorArchive.from_bytes(struct.pack("<Q", len(raw)) + raw + payload)
 

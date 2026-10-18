@@ -35,8 +35,10 @@ is external: the input is exact integer IDs, never text implicitly normalized
 or mapped through a different vocabulary. `next_token_loss` shifts independently
 within each window, never between batch rows. Greedy ties choose the lowest ID.
 Positions restart at zero in each row. No padding, token-type IDs, attention
-mask, custom position IDs, KV cache, dropout or base-weight updates are
-implemented here. Frozen inference and the geometry-only learning below are
+mask, custom position IDs, dropout or base-weight updates are implemented here.
+The separate [native context](native-generation.md#cached-execution) adds owned
+single-sequence K/V reuse without changing the full-prefix `forward` contract.
+Frozen inference and the geometry-only learning below are
 not full-model native fine-tuning.
 
 The initial execution backend is `rust_f32_cpu_prepacked`. Layer projections
@@ -58,7 +60,7 @@ Supported config variants include `n_inner`, tied/untied head, unscaled
 attention and inverse-layer scaling. Other activations, cross-attention,
 pruned heads and reordered/upcast attention are rejected. Unrelated config
 metadata such as generation defaults or training dropout probabilities does
-not change this explicitly frozen, no-cache execution policy. No remote code
+not change this explicitly frozen execution policy. No remote code
 or arbitrary HF architecture is loaded.
 
 The normalized semantic config and exact checkpoint byte identity form
@@ -160,7 +162,8 @@ pair, fixed recipe and data cursor, so whole runs can continue without HF Traine
 or a Python reimplementation of the loss/optimizer loop.
 
 The learned model also feeds [native generation](native-generation.md): Rust owns
-greedy/sampled decoding, EOS, Z-Space control and pinned random continuation.
+full-prefix or explicitly cached execution, greedy/sampled decoding, EOS,
+Z-Space control and pinned random continuation.
 Python no longer needs a Torch generation loop for this supported model family.
 
 ### Selected Targets and Label Smoothing
