@@ -42,6 +42,21 @@ terminal measurements. This identifies a substantial numerical contribution,
 not a general claim that Torch is incorrect or native is always more accurate.
 The first-update diagnostic alone does not qualify a complete training run.
 
+## Separate Precision Control
+
+`comparison-f64-control.json` is a **post-failure diagnostic control**, not a
+replacement for the initial report. Before its run, the new contract fixed
+`reference_ce_dtype: f64`. Only reference CE received float64 logits; the Torch
+decoder, geometry and AdamW stayed f32. Native math, initial geometry, encoded
+data, recipe, update count and original error thresholds were unchanged.
+
+All 20 updates passed: maximum loss difference 1.9663438e-6, final parameter
+difference 3.7430e-6. Fresh-process continuation again reproduced the remaining
+18 reports and final checkpoint bytes exactly. Both cohorts' native checkpoint
+bytes also agree. This qualifies this bounded configuration against the stated
+precision control, not ordinary all-f32 Torch parameter parity. It gives no
+language-quality, speed, unseen-corpus or cross-platform conclusion.
+
 Tests now include vocabulary-sized smoothed gradients against an independent
 f64 distribution and the optional f64 Torch oracle. Native arithmetic was not
 changed to imitate the f32 difference.
@@ -53,7 +68,8 @@ Only results, hashes, verification records and executable procedures are public.
 Use new output paths for every invocation; preserve failed attempts.
 
 Use the source revision matching `contract.source_sha256` when checking an old
-cohort. For a new cohort, `prepare` pins the current script/example bytes before
+cohort (the first protocol is retained in commit `4abd57c4e`). For a new cohort,
+`prepare` pins the current script/example bytes before
 training. `MODEL` must contain the exact local config, tokenizer and safetensors
 hashes in the contract. `CHAPTER` is the pinned existing train/chapter-01.txt,
 and `ARTIFACT` is the pinned initial geometry. No download is performed.
@@ -69,6 +85,18 @@ SCRIPT="$PWD/benchmarks/results/2026-10-18-native-corpus-training/qualify.py"
 "$REFERENCE_PYTHON" -I "$SCRIPT" reference --model-dir "$MODEL" \
   --cohort "$COHORT" --output "$COHORT/reference"
 python3 -I -S "$SCRIPT" compare --cohort "$COHORT" --output "$COHORT/comparison.json"
+```
+
+For the separate precision control, add `--reference-ce-dtype f64` to `prepare`
+and choose a new cohort directory. The precision is sealed before model execution
+and cannot be overridden on an individual run. The default remains the original
+f32 comparison, whose failure is retained above. New cohort/run directories use
+POSIX mode `0700`; that is not encryption or a Windows ACL guarantee.
+
+The stdlib comparator regression tests need neither model files nor Torch:
+
+```sh
+python3 -I -S benchmarks/results/2026-10-18-native-corpus-training/test_qualification.py
 ```
 
 Both Python environments need this source build; only the comparison environment

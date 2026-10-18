@@ -4,6 +4,7 @@ import importlib.abc
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import runpy
 import sys
@@ -210,6 +211,20 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
             self.assertEqual(example["read"](bounded, 3), b"abc")
             with self.assertRaisesRegex(ValueError, "budget"):
                 example["read"](bounded, 2)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permission bits")
+    def test_example_run_directory_is_private_even_with_permissive_umask(self):
+        example = runpy.run_path(str(Path(__file__).resolve().parents[1] / "examples/native_geometry_corpus_training.py"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "parent" / "run"
+            previous = os.umask(0)
+            try:
+                example["private_output"](path)
+            finally:
+                os.umask(previous)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+            with self.assertRaises(FileExistsError):
+                example["private_output"](path)
 
 
 if __name__ == "__main__":

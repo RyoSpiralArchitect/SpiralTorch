@@ -19,6 +19,10 @@ def digest(value):
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
+def private_output(path):
+    path.mkdir(mode=0o700, parents=True, exist_ok=False)
+
+
 def save(directory, trainer):
     payload = trainer.to_json()
     identity = trainer.checkpoint_id
@@ -75,7 +79,7 @@ def main(argv=None):
     stop = trainer.total_updates if args.stop_after is None else args.stop_after
     if not trainer.completed_updates <= stop <= trainer.total_updates:
         raise ValueError("stop-after must be between the current cursor and the sealed run end")
-    args.output.mkdir(parents=True, exist_ok=False)
+    private_output(args.output)
     initial = save(args.output, trainer)
     saved = [initial]
     with (args.output / "steps.jsonl").open("x", encoding="utf-8") as log:

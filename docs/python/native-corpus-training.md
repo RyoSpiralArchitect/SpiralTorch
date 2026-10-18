@@ -109,6 +109,9 @@ it does not shorten or rewrite the sealed run recipe. Always use a new output
 directory. Checkpoints are saved at complete optimizer boundaries, not during
 pending accumulation. The example stops on I/O failure; it is not a durable
 transactional store or a guarantee against power loss during file writes.
+On POSIX the new run directory uses mode `0700`, independent of a permissive
+process umask. This is local access restriction, not encryption or a Windows ACL
+guarantee; retain inputs and backups with equivalent care.
 
 The optional HF Trainer remains an explicit interoperability path for its
 supported models and policies. Neither client silently falls back to the other.
@@ -121,3 +124,6 @@ checkpoint bytes in a new process. The original strict f32 Torch parameter
 comparison failed despite matching losses within its gate. Same-input f64
 diagnostics localize a substantial loss-gradient precision contribution; this
 is not a claim of across-engine bitwise training parity or language quality.
+A separately sealed post-failure control, using only float64 reference CE with
+the same f32 decoder/geometry/AdamW, passed all 20 updates under the unchanged
+loss and parameter gates. The original f32 failure remains published alongside it.

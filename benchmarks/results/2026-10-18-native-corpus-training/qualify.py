@@ -42,7 +42,7 @@ def load(path):
 
 
 def source_hashes():
-    return {str(p.relative_to(ROOT)): digest(p) for p in (Path(__file__), EXAMPLE, HELPER)}
+    return {str(p.relative_to(ROOT)): digest(p) for p in (Path(__file__).resolve(), EXAMPLE, HELPER)}
 
 
 def check_model(path):
@@ -74,7 +74,7 @@ def prepare(args):
     updates_per_epoch = math.ceil(windows / (RECIPE["microbatch_windows"] * RECIPE["accumulation_steps"]))
     if windows < 5:
         raise ValueError("fixture is too small for this continuation check")
-    args.output.mkdir(parents=True, exist_ok=False)
+    args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     save(args.output / "data.json", {"token_documents": [ids]})
     save(args.output / "recipe.json", RECIPE)
     with (args.output / "initial.json").open("xb") as stream:
@@ -85,7 +85,8 @@ def prepare(args):
         "encoding": "one existing train chapter; no added special tokens/EOS/padding/truncation",
         "base_model_identity": BASE, "initial_geometry_artifact_id": ARTIFACT,
         "input_sha256": {name: digest(args.output / name) for name in ("data.json", "recipe.json", "initial.json")},
-        "recipe": RECIPE, "gates": GATES, "documents": 1, "tokens": len(ids), "windows_per_epoch": windows,
+        "recipe": RECIPE, "gates": GATES, "reference_ce_dtype": args.reference_ce_dtype or "f32",
+        "documents": 1, "tokens": len(ids), "windows_per_epoch": windows,
         "dropped_tokens": len(ids) % RECIPE["context_length"],
         "target_tokens_per_epoch": windows * (RECIPE["context_length"] - 1),
         "updates_per_epoch": updates_per_epoch, "total_updates": updates_per_epoch * RECIPE["epochs"],
@@ -98,6 +99,8 @@ def cohort(args):
     contract = load(args.cohort / "contract.json")
     if contract["source_sha256"] != source_hashes() or contract["recipe"] != RECIPE or contract["gates"] != GATES:
         raise ValueError("source, recipe or gates changed after predeclaration")
+    if contract["reference_ce_dtype"] not in ("f32", "f64"):
+        raise ValueError("unsupported reference loss precision")
     if any(digest(args.cohort / n) != h for n, h in contract["input_sha256"].items()):
         raise ValueError("sealed cohort input changed")
     check_model(args.model_dir)
@@ -144,7 +147,7 @@ def reference(args):
     spans = [(d, s) for d, doc in enumerate(docs) for s in range(0, len(doc) - context + 1, context)]
     if len(spans) != contract["windows_per_epoch"]:
         raise ValueError("independent reference window count differs")
-    args.output.mkdir(parents=True, exist_ok=False)
+    args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     rows = []
     group = RECIPE["microbatch_windows"] * RECIPE["accumulation_steps"]
     for epoch in range(RECIPE["epochs"]):
@@ -158,6 +161,8 @@ def reference(args):
                 ids = torch.tensor([docs[d][s:s+context] for d, s in selected])
                 with attach(stack, model):
                     logits = model(ids[:, :-1], use_cache=False).logits
+                    if contract["reference_ce_dtype"] == "f64":
+                        logits = logits.double()
                     loss = torch.nn.functional.cross_entropy(logits.reshape(-1, logits.shape[-1]), ids[:, 1:].reshape(-1),
                         reduction="sum", label_smoothing=RECIPE["label_smoothing"]) / count
                     loss.backward()
@@ -176,6 +181,8 @@ def reference(args):
     save(args.output / "result.json", {"rows": rows, "base_parameter_versions_unchanged": True,
         "torch": torch.__version__, "transformers": transformers.__version__, "python": platform.python_version(),
         "platform": platform.platform(), "intraop_threads": torch.get_num_threads(),
+        "cross_entropy_dtype": contract["reference_ce_dtype"],
+        "native_extension_sha256": digest(Path(st._rs.__file__)),
         "qualification_contract_sha256": digest(args.cohort / "contract.json")})
 
 
@@ -203,6 +210,10 @@ def compare(args):
             raise ValueError("runs used different qualification contracts")
     if reference_result["base_parameter_versions_unchanged"] is not True:
         raise ValueError("reference base was not frozen")
+    if (contract["reference_ce_dtype"] not in ("f32", "f64")
+            or reference_result["cross_entropy_dtype"] != contract["reference_ce_dtype"]
+            or reference_result["native_extension_sha256"] != runtime["native_extension_sha256"]):
+        raise ValueError("reference loss precision or native geometry binary differs")
     native_rows, resumed_rows = ([json.loads(s) for s in (p / "steps.jsonl").read_text().splitlines()] for p in (full, resumed))
     expected = contract["total_updates"]
     if len(native_rows) != expected or len(reference_result["rows"]) != expected:
@@ -237,6 +248,7 @@ def compare(args):
     files = [args.cohort / "contract.json", args.cohort / "data.json", args.cohort / "recipe.json", args.cohort / "initial.json"]
     files += sorted(p for parent in (full, resumed, ref) for p in parent.iterdir() if p.is_file())
     report = {"schema": "spiraltorch.native_corpus_comparison.v1", "contract": contract,
+        "comparison_kind": "posthoc_f64_ce_control" if contract["reference_ce_dtype"] == "f64" else "f32_comparison",
         "native_runtime": runtime, "resume_runtime": resume_runtime,
         "reference_runtime": {k: v for k, v in reference_result.items() if k != "rows"},
         "native_steps": native_rows, "reference_steps": reference_result["rows"],
@@ -260,8 +272,12 @@ def main():
     parser.add_argument("--artifact", type=Path)
     parser.add_argument("--cohort", type=Path)
     parser.add_argument("--resume-run", type=Path)
+    parser.add_argument("--reference-ce-dtype", choices=["f32", "f64"],
+                        help="prepare only: seal reference CE precision; f64 is a separate post-failure control")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.mode != "prepare" and args.reference_ce_dtype is not None:
+        parser.error("reference loss precision is sealed only at prepare, not overridden per run")
     required = {"prepare": ("model_dir", "chapter", "artifact"), "native": ("model_dir", "cohort"),
                 "reference": ("model_dir", "cohort"), "compare": ("cohort",)}[args.mode]
     if any(getattr(args, name) is None for name in required):
