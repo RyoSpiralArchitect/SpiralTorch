@@ -33,6 +33,7 @@ jobs:
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-book-controls -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-geometry-observation -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-learned-radius -p 'test_*.py'
+          python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-residual-calibration -p 'test_*.py'
           python3 -I -S -B bindings/st-py/tests/test_byte_corpus_runs.py
           python3 -I -S -B tools/test_qualify_byte_corpus_runs.py
           python3 -I -S -B tools/test_owned_process.py
