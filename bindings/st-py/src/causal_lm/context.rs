@@ -10,6 +10,11 @@ pub struct PyNativeCausalLmContext {
 
 #[pymethods]
 impl PyNativeCausalLmContext {
+    #[getter]
+    fn readout_accumulator(&self) -> &'static str {
+        self.inner.readout_accumulator().as_str()
+    }
+
     #[new]
     #[pyo3(signature = (model, prompt_ids, *, max_cache_values=None))]
     fn new(

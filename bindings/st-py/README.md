@@ -76,6 +76,12 @@ or [direct Rust use](https://github.com/RyoSpiralArchitect/SpiralTorch#native-au
 
 ## Optional HF Integration
 
+Newer source builds also expose `NativeCausalLm`, `NativeCausalLmTrainer` and
+`NativeCausalLmGenerator` for supported GPT-2 execution, geometry-only learning
+and generation without Torch. These are **not in the published 0.4.32 wheels**.
+See the [native/HF execution boundary](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-hf-boundary.md)
+for the native route and remaining foreign-model/PEFT dependencies.
+
 Portable affine/WaveGate adapters can also execute and learn directly through
 `NativeGeometryRuntime`, without Torch, Transformers or NumPy. See
 [native geometry training](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-geometry-runtime.md)

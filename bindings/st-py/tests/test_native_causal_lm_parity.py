@@ -26,8 +26,10 @@ def pair(*, dtype=torch.float32, tied=True, scaled=True, inverse=False, width=8,
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("tied,scaled,inverse", [(True, True, False), (False, True, True), (True, False, False)])
-def test_complete_logits_last_projection_and_nll(dtype, tied, scaled, inverse):
+@pytest.mark.parametrize("accumulator", ["f32", "f64"])
+def test_complete_logits_last_projection_and_nll(dtype, tied, scaled, inverse, accumulator):
     reference, native = pair(dtype=dtype, tied=tied, scaled=scaled, inverse=inverse)
+    native = native.with_readout_accumulator(accumulator)
     tokens = torch.tensor([[1, 5, 7, 3], [2, 8, 4, 6]])
     with torch.no_grad():
         expected = reference(tokens, labels=tokens, use_cache=False)

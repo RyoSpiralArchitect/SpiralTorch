@@ -1,0 +1,19 @@
+{
+  "schema": "spiraltorch.native_repetition_verification_followup.v1",
+  "prior_verification_sha256": "19f8f358669471a77ff9f77b7b7cd0ddc9077a6c9b6f20f720edc8c38d3bb8ca",
+  "initial_supplemental_attempt": {
+    "returncode": 1,
+    "interpreter": "global Python, not qualified wheel environment",
+    "failure": "stale global SpiralTorch package lacks recent exports",
+    "separate_log_available": false,
+    "task_tool_output_retained": true,
+    "note_sha256": "9a9a264435f726d632a00da51fc48ae90e517d1766e585672ebd3e47d22807c9"
+  },
+  "qualified_environment_rerun": {
+    "returncode": 0,
+    "passed_tests": 9,
+    "receipt_sha256": "df3e04b54f58954a1cad9a7ea6c52b25f0b431322149bb4ccbb31416692f3ba0",
+    "log_sha256": "12811f2301010026a78284d583cd10b242678f38a13d59cbacd0b4d73025179a"
+  },
+  "changed_implementation_or_gates": false
+}

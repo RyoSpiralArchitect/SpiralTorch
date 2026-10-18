@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Integrate native projection/readout policy, repetition learning, clipping and
+  corpus evaluation. Evaluation reports the active readout accumulator and
+  stays unsmoothed NLL without repetition penalties; combined learning/evaluation
+  resume tests cover both f32 and opt-in f64 vocabulary-head accumulation.
+
 - Add `NativeCausalLm.evaluate_documents`: native, read-only corpus NLL and
   perplexity for the supported decoder and attached geometry. Rust covers
   within-document targets including short tails, masks selected labels and
@@ -19,6 +24,38 @@
   byte-LM example accepts `--optimizer`, `--rate`, and `--max-norm`.
   Source-only after 0.4.32; this does not resolve the separately recorded
   contextual-study CI resume discrepancy or qualify a new release.
+
+- Align native Linear/LoRA parameter and accumulated-gradient layouts before
+  SGD, Realgrad or AmegaHypergrad updates, canonicalizing storage to row-major
+  during nonempty backward. Column-major state now follows the
+  same logical update as row-major state, including warmed projection caches
+  and multiple microbatches. Add installed-wheel learning gates with foreign ML
+  imports forbidden and remove the legacy Linear/LoRA test's fake Torch module.
+  This fixes native layer primitives; it does not add PEFT import or LoRA
+  placement/learning inside `NativeCausalLm`.
+
+- Add opt-in native repetition-unlikelihood learning for the frozen GPT-2
+  decoder and attached geometry. Shared Rust tensor loss/VJP and candidate
+  selection feed decoder gradients, independently normalized accumulation,
+  SGD/AdamW and pinned trainer continuation. Python transports a versioned
+  `repetition` recipe; it performs no Torch/NumPy computation. Three candidate
+  sources are supported with deterministic native proposal ties. Default CE
+  and checkpoint formats are unchanged; legacy HF v3 remains an explicit
+  foreign-model path. No language-quality or speed improvement is claimed.
+  Qualify the public corpus-to-generation examples through separate-process
+  continuation; generation summaries identify the effective full-prefix/KV
+  execution instead of always claiming no cache.
+
+- Optimize ordinary packed CPU projections across eight independent columns,
+  retaining each default f32 dot's reduction order; advance autotuning to v7.
+  Add opt-in `NativeCausalLm.with_readout_accumulator("f64")` for the vocabulary
+  head and its input-gradient projection, with f32 storage/output. Rust owns
+  arithmetic and policy binding across loss, geometry learning, KV contexts
+  and trainer/generator continuation. Cross-policy gradients/checkpoints reject;
+  default f32 checkpoint bytes remain unchanged. Scoped GPT-2 comparisons and
+  exact native resume checks are recorded separately from quality and speed
+  claims. Installed-wheel gates cover the new API on all release platforms and
+  the Linux CPython 3.8 floor; existing published wheels are unchanged.
 
 - Add `NativeCausalLmGenerator` for Rust-owned greedy/seeded sampling, EOS,
   ordinary or Z-Space token control, and pinned continuation. Explicit

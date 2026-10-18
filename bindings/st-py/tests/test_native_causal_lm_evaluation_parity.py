@@ -13,7 +13,8 @@ data = runpy.run_path(str(Path(__file__).with_name("test_native_causal_lm_evalua
 
 @pytest.mark.parametrize("kind", (None, *helpers["KINDS"]))
 @pytest.mark.parametrize("masked", [False, True])
-def test_native_corpus_matches_independent_target_sum_with_geometry(kind, masked):
+@pytest.mark.parametrize("arithmetic", ["f32", "f64"])
+def test_native_corpus_matches_independent_target_sum_with_geometry(kind, masked, arithmetic):
     reference, native = helpers["pair"](width=3, heads=1)
     handles = []
     if kind is not None:
@@ -25,6 +26,7 @@ def test_native_corpus_matches_independent_target_sum_with_geometry(kind, masked
         artifact = st.GeometryAdapterArtifact.create_json(json.dumps(record))
         native = native.with_geometry(artifact)
         _, handles = helpers["attach"](reference, artifact)
+    native = native.with_readout_accumulator(arithmetic)
     docs = data["DOCS"]
     labels = [list(d) for d in docs]
     if masked:
@@ -44,6 +46,7 @@ def test_native_corpus_matches_independent_target_sum_with_geometry(kind, masked
                     count += active
         for batch in (1, 2, 8):
             result = native.evaluate_documents(docs, 4, labels=labels if masked else None, microbatch_windows=batch)
+            assert result.readout_accumulator == arithmetic
             assert result.target_tokens == count
             assert result.nll == pytest.approx(total/count, abs=3e-6)
     finally:

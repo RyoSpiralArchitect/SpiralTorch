@@ -150,7 +150,12 @@ entire corpus without selected targets is rejected before model execution.
 
 Only equal-width consecutive windows share a microbatch; tails are not padded.
 The result's `to_json()` retains the config, base/geometry identities, plan/data
-IDs, window counts, selected/ignored target counts and executed microbatches.
+IDs, active `readout_accumulator` (`f32` or opt-in `f64`), window counts,
+selected/ignored target counts and executed microbatches. The score also exposes
+`.readout_accumulator`; scoring follows the model's selected policy without
+changing it. Evaluation always excludes the trainer's label smoothing and
+optional repetition-unlikelihood auxiliary objective. It remains plain NLL
+when inserted between repetition-training steps or after checkpoint restoration.
 The data ID binds exact documents, labels and window policy, including unscored
 content, but not batch size. Different batch sizes can change floating-point
 rounding; no across-engine bitwise score guarantee is made. These identities do
@@ -178,6 +183,8 @@ lower training/evaluation loss proves improved generation quality.
 [Local evaluation qualification](native-corpus-evaluation-validation.md) records
 the complete four-condition GPT-2 comparison and the optional 30-case geometry
 reference suite, separately from training quality and speed claims.
+The later [stack integration qualification](../../benchmarks/results/2026-10-19-native-language-integration/README.md)
+adds active readout-policy, repetition-training and saved-generation combinations.
 
 ## Qualification Boundary
 

@@ -1,0 +1,286 @@
+{
+  "schema": "spiraltorch.native_example_integration_verification.v1",
+  "scope": "local CPU mechanics and same-runtime replay; no new publication, quality or speed claim",
+  "native_optional_ml_imports_forbidden": true,
+  "independent_review": {
+    "mode": "read-only source review; runtime checks executed by parent",
+    "resolved_findings": 3,
+    "remaining_findings": 0
+  },
+  "initial_result_sha256": "321e78343d80084d014a8d7d8cd7ed96bbcc0786ad490ed291b9ed87fd44bf89",
+  "reviewed_result_sha256": "eff585fb77406364867c8fd81f7a2b1497ffdc36ebb1be8e42e6c281de80f070",
+  "initial_verifier_retained_privately_sha256": "1384e6c4cad2b62219433d157e63007b1225ac81f8a5c668e87ad9f90668516b",
+  "runtime_and_input_file_count": 37,
+  "unchanged_runtime_and_input_bytes": true,
+  "unchanged_aggregate_results": true,
+  "review_dispositions": [
+    "effective generation execution metadata corrected",
+    "empty/all-omitted logs rejected by ordered native report comparison",
+    "training model/data/recipe/optimizer/initial state bound by exact native re-execution",
+    "generation prompt/seed/control/execution/geometry bound by exact native re-execution"
+  ],
+  "retained_failures": {
+    "generation-example-red": "expected missing execution metadata failure in all three recipe variants",
+    "integration-review-red": "three expected gate regressions failed before verifier repair",
+    "integration-review-green": "tiny fixture used the pre-reserialization model identity; corrected fixture binds its actual archive"
+  },
+  "validation": [
+    {
+      "case": "examples-full_prefix-full",
+      "returncode": 0,
+      "execution_receipt_sha256": "ea433191b325b9fc0bd8813cf0e2f178def38558b38bbd8557c3987b7896b171",
+      "log_sha256": "8e9f3c5900cb8c441f6c5b1689f9b5cfd1332b5762497b13ddad035c4499b2b8",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-full_prefix-part",
+      "returncode": 0,
+      "execution_receipt_sha256": "1b8b1113af9bbf6a2d345fa92fc34f393b0f4e42324b01a5e7268cbbbb122752",
+      "log_sha256": "28f1d5bc88152bc6bf41916c890d5b23ac10526d1e845a0220cc65f8f5659cf2",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-full_prefix-resume",
+      "returncode": 0,
+      "execution_receipt_sha256": "224de8b11cf2167f8f65a79f5a95b74e1675d7e12e9ee952dd5f53fb51ebf0d1",
+      "log_sha256": "402a5bbe4534b72bd8b0fd97c8a14d37b00b44cc93af1edbbfde13f1ee622894",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-kv_cache-full",
+      "returncode": 0,
+      "execution_receipt_sha256": "77028bac47599bf7bfa287f7cd24ab5af22f31e21952d25bc44107ba88765cd0",
+      "log_sha256": "1709873f4d5ee77ab49ce7d7a33c6653e154fcf874c465780728a36277e8b82a",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-kv_cache-part",
+      "returncode": 0,
+      "execution_receipt_sha256": "40f793c8fd6941586ad2f456becdea1f6bb0daab5ac045b5e8cde6aa0b89118a",
+      "log_sha256": "40e0c6640bcf83edf3e1e52c66e966098bf872b3cf4000b19aaea729ec8805bf",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-kv_cache-resume",
+      "returncode": 0,
+      "execution_receipt_sha256": "862fad674362581f92bd1a2a358984256a1b1004b00247aef9a25fd371ff1286",
+      "log_sha256": "f171c88baee1190088ee712080eda601cb548ddf4f7b2053cd4a73d598e482a3",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-prepare",
+      "returncode": 0,
+      "execution_receipt_sha256": "c000a1a7ae1f405f7a5e111b5c0690c29bf5b54bfda918c74fb17dc4489d4f00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-report",
+      "returncode": 0,
+      "execution_receipt_sha256": "be199aa67971063ccda2c14fcea421b7f0b062645f48e6e1eaa6de0e0799c29d",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-train-full",
+      "returncode": 0,
+      "execution_receipt_sha256": "6d94fa6a59f204ef8198fb2559218817502011ca3a0236c85fcdf4d60dfa8519",
+      "log_sha256": "a34e589b8248af8f236d7a6d9657e530f274cafa80311f3927e5166757aa28f1",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-train-part",
+      "returncode": 0,
+      "execution_receipt_sha256": "1921f66d49d7be413906ac4ba058ac358800d1f4ffbfb6edd375511704b11c81",
+      "log_sha256": "7ba0c46238d0cf0827b9c540690eb897f406161805e78bf5ab935da7d8f34bb6",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-train-resume",
+      "returncode": 0,
+      "execution_receipt_sha256": "a076112ec6655dcd6de914d51571b046396bb53711ff41b8d1d1ad561271f3b6",
+      "log_sha256": "67dc7cd3f5cd2be327d2bb864852d4a68442b4bd4a3c57f85eb9e43c2b6b4493",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-full_prefix-full",
+      "returncode": 0,
+      "execution_receipt_sha256": "d7b213a65a3c01953ad6e14e9feaa5e858a49da6a3edb91156a50539f70dee9c",
+      "log_sha256": "8e9f3c5900cb8c441f6c5b1689f9b5cfd1332b5762497b13ddad035c4499b2b8",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-full_prefix-part",
+      "returncode": 0,
+      "execution_receipt_sha256": "7ee4239fb9c8c0da3f57bc3dd1392ff072daba6937abdd5e6714b17053677ecd",
+      "log_sha256": "28f1d5bc88152bc6bf41916c890d5b23ac10526d1e845a0220cc65f8f5659cf2",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-full_prefix-resume",
+      "returncode": 0,
+      "execution_receipt_sha256": "ccfb48c7da3b928dcfee54c3d5c3fba620a2971e2f8a9ff729a3f9226a082888",
+      "log_sha256": "402a5bbe4534b72bd8b0fd97c8a14d37b00b44cc93af1edbbfde13f1ee622894",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-kv_cache-full",
+      "returncode": 0,
+      "execution_receipt_sha256": "06516b46744222180165aee344e60866355d6a3c450807db176e202a4199968c",
+      "log_sha256": "1709873f4d5ee77ab49ce7d7a33c6653e154fcf874c465780728a36277e8b82a",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-kv_cache-part",
+      "returncode": 0,
+      "execution_receipt_sha256": "ae085d2ceb6f578cc4459f06605d30bce91dd011104d7788a03c3e081586400e",
+      "log_sha256": "40e0c6640bcf83edf3e1e52c66e966098bf872b3cf4000b19aaea729ec8805bf",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-kv_cache-resume",
+      "returncode": 0,
+      "execution_receipt_sha256": "b3c7b8ea1ee14c113166be89cfc53622fb2fa9cf698baea240aa020e94cbb10c",
+      "log_sha256": "f171c88baee1190088ee712080eda601cb548ddf4f7b2053cd4a73d598e482a3",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-prepare",
+      "returncode": 0,
+      "execution_receipt_sha256": "b174dafab01d9fda39a355085d89fccbdcc9605c6c0c0252299b9b49ba813870",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-report",
+      "returncode": 0,
+      "execution_receipt_sha256": "003d4d0cfb7236688b62749b998acee9bb43a8768d08d2cff3f876f2885a1956",
+      "log_sha256": "3ef9094ededc76d50d7e48458e98640330e8d859eece54bea3a31fdbd6697154",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-train-full",
+      "returncode": 0,
+      "execution_receipt_sha256": "5738d94bf6957a58a1f6b553dbb1da7eac8327c0c54c4b050584f3dfbd26303d",
+      "log_sha256": "a34e589b8248af8f236d7a6d9657e530f274cafa80311f3927e5166757aa28f1",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-train-part",
+      "returncode": 0,
+      "execution_receipt_sha256": "8eeecbbcf8e309b251a2f8f77b26603bdef78bcaf0d2cd02131c6014f530e25a",
+      "log_sha256": "7ba0c46238d0cf0827b9c540690eb897f406161805e78bf5ab935da7d8f34bb6",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "examples-v2-train-resume",
+      "returncode": 0,
+      "execution_receipt_sha256": "56fc42ab95b809c9a8798155b63feb82177200cac27755d36705adb1ea3c25e1",
+      "log_sha256": "67dc7cd3f5cd2be327d2bb864852d4a68442b4bd4a3c57f85eb9e43c2b6b4493",
+      "reported_test_counts": [],
+      "rust_test_counts": []
+    },
+    {
+      "case": "generation-example-green",
+      "returncode": 0,
+      "execution_receipt_sha256": "d927215b632c82fd4e3a11964e049fee48c7a5e69206b93f67c6f1740aa91689",
+      "log_sha256": "092f3ef0c082b5e2a61888b77b1f68ffbd0afb7284e19601ea6250cb7141c478",
+      "reported_test_counts": [
+        9
+      ],
+      "rust_test_counts": []
+    },
+    {
+      "case": "generation-example-red",
+      "returncode": 1,
+      "execution_receipt_sha256": "6e330ef513aec65da5d4c3abc59b427cdfbfb94f46f4df1273b117fe6a849a70",
+      "log_sha256": "6ca1eeeb20fb8510b4f8716caf79d7467ab1f4407a8126f1fb195e67eeb8504d",
+      "reported_test_counts": [
+        1
+      ],
+      "rust_test_counts": []
+    },
+    {
+      "case": "integration-gates",
+      "returncode": 0,
+      "execution_receipt_sha256": "1c7a4f6cd81be7680a54509c87328a83f7cc56304cce2929d1894cf53ceccf66",
+      "log_sha256": "db06451d2c80060493c2e197c256647ea1fa18247749d9105639f7be86ad8b05",
+      "reported_test_counts": [
+        12
+      ],
+      "rust_test_counts": []
+    },
+    {
+      "case": "integration-review-green",
+      "returncode": 1,
+      "execution_receipt_sha256": "8efcda715f864348de19b4170559d60b3e8b0eb5cfba9af0e57f804d3d24657a",
+      "log_sha256": "dba2091a4e271d52b27a67a958a35abfd4cee88b5626abdbb167c9ee48641af9",
+      "reported_test_counts": [
+        12
+      ],
+      "rust_test_counts": []
+    },
+    {
+      "case": "integration-review-green-v2",
+      "returncode": 0,
+      "execution_receipt_sha256": "c4d022268f72b350dbbbead8dca6e35fe53727fad860b9ee1f654ef42f73976f",
+      "log_sha256": "9ac85876ec1b02d20298aabcf3e09e13f7beb6d185750cf75655eb065c278e86",
+      "reported_test_counts": [
+        12
+      ],
+      "rust_test_counts": []
+    },
+    {
+      "case": "integration-review-red",
+      "returncode": 1,
+      "execution_receipt_sha256": "0574a124e421181a132ad3759a3c54823b9cbf25490d77eca8d58e0107900c56",
+      "log_sha256": "ecb17c118259312b30b5d79c05fde47ddec2be62c5e46326370a19c8ec16bfa3",
+      "reported_test_counts": [
+        15
+      ],
+      "rust_test_counts": []
+    },
+    {
+      "case": "release-workflows",
+      "returncode": 0,
+      "execution_receipt_sha256": "5a887803464bf54dd86bee1a64c141439e183a8646d11e16460c094e79004893",
+      "log_sha256": "c68fbe0f5e95bc2ca01b2df69e8e5d3b761613a06f7e48608ed0d13c5dde30fc",
+      "reported_test_counts": [
+        21
+      ],
+      "rust_test_counts": []
+    },
+    {
+      "case": "st-nn-golden-full",
+      "returncode": 0,
+      "execution_receipt_sha256": "659387872f41830db3d0f771df1f0a58a9f3feaf2c319594e725c7bc04ad238c",
+      "log_sha256": "10047efb5d6bbf4d09f8fc92777584f4bcf7e2ef0cb3443bee8812210633fbeb",
+      "reported_test_counts": [],
+      "rust_test_counts": [
+        1032,
+        9
+      ]
+    }
+  ]
+}

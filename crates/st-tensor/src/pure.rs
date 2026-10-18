@@ -18,6 +18,7 @@ pub mod measure;
 pub mod python;
 pub mod topos;
 pub mod wasm_canvas;
+mod wide_matmul;
 
 pub use self::differential::{
     DifferentialResonance, FunctorDifferential, HomotopyDifferential, InfinityDifferential,

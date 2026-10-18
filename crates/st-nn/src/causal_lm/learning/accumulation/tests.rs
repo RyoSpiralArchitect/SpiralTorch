@@ -3,11 +3,15 @@ use super::*;
 fn accumulator() -> NativeCausalLmAccumulator {
     NativeCausalLmAccumulator {
         base_id: "base".into(),
+        readout_accumulator: CausalLmReadoutAccumulator::F32,
         geometry_id: "geometry".into(),
         objective: CausalLmObjective::default(),
         loss: 0.,
         target_tokens: 0,
         microbatches: 0,
+        repetition_means: None,
+        repetition_loss: 0.,
+        repetition_positions: 0,
         means: BTreeMap::from([(
             "site".into(),
             BTreeMap::from([("gate".into(), vec![0.; 2])]),
@@ -18,16 +22,67 @@ fn accumulator() -> NativeCausalLmAccumulator {
 fn batch(shape: [usize; 2], values: [f32; 2], loss: f32) -> NativeCausalLmGradients {
     NativeCausalLmGradients {
         base_id: "base".into(),
+        readout_accumulator: CausalLmReadoutAccumulator::F32,
         geometry_id: "geometry".into(),
         shape,
         target_tokens: shape[0].saturating_mul(shape[1].saturating_sub(1)),
         objective: CausalLmObjective::default(),
         loss,
+        causal_loss: loss,
+        causal_parameters: None,
+        repetition: None,
         parameters: BTreeMap::from([(
             "site".into(),
             BTreeMap::from([("gate".into(), values.to_vec())]),
         )]),
     }
+}
+
+#[test]
+fn repetition_failure_preserves_both_means_counts_and_losses() {
+    use st_core::runtime::zspace_repetition_unlikelihood::{
+        ZSpaceRepetitionUnlikelihoodCandidateSource as Source,
+        ZSpaceRepetitionUnlikelihoodConfig as Config,
+    };
+    let mut state = accumulator();
+    state.objective.repetition = Some(CausalLmRepetition::NativeV1 {
+        config: Config {
+            strength: 1.,
+            candidate_source: Source::PriorContinuation { ngram_order: 2 },
+            context_window: 8,
+            max_candidates_per_position: 2,
+        },
+    });
+    state.repetition_means = Some(state.means.clone());
+    let valid = || {
+        let mut value = batch([1, 4], [1., 2.], 3.);
+        value.objective = state.objective;
+        value.causal_parameters = Some(value.parameters.clone());
+        value.repetition = Some(RepetitionGradients {
+            loss: 0.5,
+            active_positions: 1,
+            parameters: value.parameters.clone(),
+        });
+        value
+    };
+    let good = valid();
+    let mut bad = valid();
+    bad.repetition
+        .as_mut()
+        .unwrap()
+        .parameters
+        .get_mut("site")
+        .unwrap()
+        .get_mut("gate")
+        .unwrap()[1] = f32::NAN;
+    state.add(&good).unwrap();
+    let before = format!("{state:?}");
+    assert!(state.add(&bad).is_err());
+    assert_eq!(format!("{state:?}"), before);
+    state.repetition_positions = MAX_TARGET_TOKENS;
+    let before = format!("{state:?}");
+    assert!(state.add(&good).is_err());
+    assert_eq!(format!("{state:?}"), before);
 }
 
 #[test]

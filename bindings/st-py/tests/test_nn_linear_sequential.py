@@ -1,22 +1,12 @@
 from __future__ import annotations
 
 import importlib
-import sys
 import types
 
 import pytest
 
 
-def _ensure_torch_stub() -> None:
-    if "torch" in sys.modules:
-        return
-    torch_stub = types.ModuleType("torch")
-    torch_stub.autograd = types.SimpleNamespace(Function=object)
-    sys.modules["torch"] = torch_stub
-
-
 def _load_native() -> types.ModuleType | None:
-    _ensure_torch_stub()
     try:
         module = importlib.import_module("spiraltorch")
     except ModuleNotFoundError:

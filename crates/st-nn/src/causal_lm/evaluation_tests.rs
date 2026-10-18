@@ -66,6 +66,35 @@ fn corpus_nll_matches_target_weighted_manual_windows_and_preserves_geometry() {
 }
 
 #[test]
+fn evaluation_reports_active_arithmetic_without_changing_data_identity() {
+    let base = load();
+    let documents = vec![vec![1, 2, 3, 4]];
+    let mut data_id = None;
+    for accumulator in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let model = base.with_readout_accumulator(accumulator);
+        let score = model
+            .evaluate_documents(&documents, None, policy(1))
+            .unwrap();
+        assert_eq!(score.readout_accumulator, accumulator);
+        assert_eq!(
+            serde_json::to_value(&score).unwrap()["readout_accumulator"],
+            accumulator.as_str()
+        );
+        assert_eq!(
+            score.nll,
+            f64::from(model.next_token_loss(&documents[0], [1, 4]).unwrap())
+        );
+        if let Some(previous) = &data_id {
+            assert_eq!(&score.data_id, previous);
+        }
+        data_id = Some(score.data_id);
+    }
+}
+
+#[test]
 fn masked_targets_and_short_documents_are_validated_and_not_misweighted() {
     let model = load();
     let documents = docs();

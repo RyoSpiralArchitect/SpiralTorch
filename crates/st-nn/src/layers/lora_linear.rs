@@ -313,8 +313,8 @@ impl Module for LoraLinear {
         validate_finite_tensor("lora_a_grad", &grad_a)?;
         validate_finite_tensor("lora_b_grad", &grad_b)?;
         validate_finite_tensor("lora_input_grad", &grad_input)?;
-        self.lora_a.accumulate_euclidean(&grad_a)?;
-        self.lora_b.accumulate_euclidean(&grad_b)?;
+        self.lora_a.accumulate_euclidean_row_major(&grad_a)?;
+        self.lora_b.accumulate_euclidean_row_major(&grad_b)?;
         Ok(grad_input)
     }
 

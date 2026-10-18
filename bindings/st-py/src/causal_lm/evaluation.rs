@@ -11,6 +11,11 @@ pub struct PyNativeCausalLmEvaluation {
 #[pymethods]
 impl PyNativeCausalLmEvaluation {
     #[getter]
+    fn readout_accumulator(&self) -> &'static str {
+        self.inner.readout_accumulator.as_str()
+    }
+
+    #[getter]
     fn nll(&self) -> f64 {
         self.inner.nll
     }

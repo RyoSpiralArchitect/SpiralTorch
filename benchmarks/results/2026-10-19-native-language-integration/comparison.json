@@ -1,0 +1,350 @@
+{
+  "scope": "existing training chapter; mechanics only, not holdout quality or speed",
+  "probe_sha256": "ba26fff35a468eec1b57febd5e902df80b6206e26c70a9029251766b070cb1d2",
+  "python": "3.12.6",
+  "extension_sha256": "623ca28b2112ae6222bb4da2f56e1b15d46ac615acc42d822dd150407a46e9ea",
+  "reference_sha256": "489abb9c5498c307884b29b67bd36b3b9c8a3610257aeeba3d265590907c6ae0",
+  "reference_relation": "retained FP32 Torch reference on identical pinned inputs, not rerun",
+  "model_sha256": {
+    "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+    "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707"
+  },
+  "data_sha256": "d95c8c6161a6ad91b67be1d477890daf3adc15b90f804a83a1350b955bd40fee",
+  "checkpoint_sha256": "1ed13924961efe03330d1e16407382e3fcb0b3255504939215215a9375f62e6e",
+  "nll_atol": 0.0005,
+  "context_length": 32,
+  "generation_config": {
+    "max_new_tokens": 4,
+    "seed": 714,
+    "decoding": {
+      "selection": "sample",
+      "top_k": 40,
+      "top_p": 0.9,
+      "distribution": {
+        "kind": "zspace",
+        "config": {
+          "curvature": -1.0,
+          "temperature": 0.8,
+          "repression_window": 32,
+          "repression_strength": 0.6,
+          "last_token_repression": 0.3,
+          "ngram_size": 3,
+          "ngram_repression_strength": 0.4
+        }
+      }
+    }
+  },
+  "scores": [
+    {
+      "model": "base",
+      "readout": "f32",
+      "batch": 1,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": null,
+        "readout_accumulator": "f32",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 1
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 42,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.68507562932514,
+        "perplexity": 108.31846405074826
+      },
+      "reference_nll": 4.685049704509214,
+      "absolute_error": 2.592481592600393e-05,
+      "passed": true
+    },
+    {
+      "model": "base",
+      "readout": "f32",
+      "batch": 2,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": null,
+        "readout_accumulator": "f32",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 2
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 21,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.68507566906157,
+        "perplexity": 108.31846835493742
+      },
+      "reference_nll": 4.685049704509214,
+      "absolute_error": 2.596455235615025e-05,
+      "passed": true
+    },
+    {
+      "model": "base",
+      "readout": "f64",
+      "batch": 1,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": null,
+        "readout_accumulator": "f64",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 1
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 42,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.685075595265343,
+        "perplexity": 108.31846036144346
+      },
+      "reference_nll": 4.685049704509214,
+      "absolute_error": 2.5890756129243186e-05,
+      "passed": true
+    },
+    {
+      "model": "base",
+      "readout": "f64",
+      "batch": 2,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": null,
+        "readout_accumulator": "f64",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 2
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 21,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.685075544175648,
+        "perplexity": 108.31845482748648
+      },
+      "reference_nll": 4.685049704509214,
+      "absolute_error": 2.583966643410207e-05,
+      "passed": true
+    },
+    {
+      "model": "trained",
+      "readout": "f32",
+      "batch": 1,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+        "readout_accumulator": "f32",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 1
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 42,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.679894611949012,
+        "perplexity": 107.75871549195814
+      },
+      "reference_nll": 4.679868947159493,
+      "absolute_error": 2.566478951937512e-05,
+      "passed": true
+    },
+    {
+      "model": "trained",
+      "readout": "f32",
+      "batch": 2,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+        "readout_accumulator": "f32",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 2
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 21,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.679894583565848,
+        "perplexity": 107.75871243342486
+      },
+      "reference_nll": 4.679868947159493,
+      "absolute_error": 2.5636406355111774e-05,
+      "passed": true
+    },
+    {
+      "model": "trained",
+      "readout": "f64",
+      "batch": 1,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+        "readout_accumulator": "f64",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 1
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 42,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.679894782247997,
+        "perplexity": 107.75873384315953
+      },
+      "reference_nll": 4.679868947159493,
+      "absolute_error": 2.5835088504067016e-05,
+      "passed": true
+    },
+    {
+      "model": "trained",
+      "readout": "f64",
+      "batch": 2,
+      "score": {
+        "schema": "spiraltorch.native_causal_lm_evaluation.v1",
+        "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+        "geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+        "readout_accumulator": "f64",
+        "data_id": "sha256:a09a993c6dd7c7495caf028569208c2d045b8c425c80a8f8cceb916bb57406d1",
+        "plan_id": "sha256:f3735045a0c6b7118afeff074589f16db661e191ab003f722cff4666ea9d602a",
+        "config": {
+          "context_length": 32,
+          "microbatch_windows": 2
+        },
+        "window_count": 42,
+        "skipped_windows": 0,
+        "microbatches": 21,
+        "target_tokens": 1302,
+        "ignored_targets": 0,
+        "nll": 4.679894753864834,
+        "perplexity": 107.75873078462584
+      },
+      "reference_nll": 4.679868947159493,
+      "absolute_error": 2.580670534069185e-05,
+      "passed": true
+    }
+  ],
+  "generation": [
+    {
+      "model": "base",
+      "readout": "f32",
+      "execution": {
+        "kind": "full_prefix"
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:00b4e6beb9ca24b74d69e35eb81a93f5892a847d8c91e63170e74acc3bf8bb7a",
+      "step_reports_sha256": "66f08d1d76171e10608fc1544a1a2b6d0965bf5ae4212d4d33fc475ff3f8ab3c"
+    },
+    {
+      "model": "base",
+      "readout": "f32",
+      "execution": {
+        "kind": "kv_cache",
+        "max_values": 1000000
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:4322fd24c0e7c20c4a2b1da4f68a2371e0c7150f6317c38ef1a5805342dc360d",
+      "step_reports_sha256": "66f08d1d76171e10608fc1544a1a2b6d0965bf5ae4212d4d33fc475ff3f8ab3c"
+    },
+    {
+      "model": "base",
+      "readout": "f64",
+      "execution": {
+        "kind": "full_prefix"
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:bc28da4940c090b7ed0147e85b2018866d18d6c16af887c171baaa9ee0a52919",
+      "step_reports_sha256": "a7e71d150d7add5747e23754352490869c73e8b76f0cb04e44ecb4af20f1b73f"
+    },
+    {
+      "model": "base",
+      "readout": "f64",
+      "execution": {
+        "kind": "kv_cache",
+        "max_values": 1000000
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:636cf59b024084714bbf6471baae4dc23b1f7bf12d28a8bfac61c8363e62d8c4",
+      "step_reports_sha256": "a7e71d150d7add5747e23754352490869c73e8b76f0cb04e44ecb4af20f1b73f"
+    },
+    {
+      "model": "trained",
+      "readout": "f32",
+      "execution": {
+        "kind": "full_prefix"
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:106433db0d990273287f06070a7307019210803696557d81318af4912d3bbf50",
+      "step_reports_sha256": "395e67c1d409a3ebed91286d888542b6174ab21c13edaa94224a47107a1d2e6b"
+    },
+    {
+      "model": "trained",
+      "readout": "f32",
+      "execution": {
+        "kind": "kv_cache",
+        "max_values": 1000000
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:e0f4ea0dd150b6fbbfc07a39e70108fb7e550561b13b7faae7fca8d474ac5947",
+      "step_reports_sha256": "395e67c1d409a3ebed91286d888542b6174ab21c13edaa94224a47107a1d2e6b"
+    },
+    {
+      "model": "trained",
+      "readout": "f64",
+      "execution": {
+        "kind": "full_prefix"
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:b30c536877db40e08434aa8d2e8cc3fb4b03b39b5afe39bded9c44549ff263b6",
+      "step_reports_sha256": "8ee3adb9d660b2921daed9559272169405d6f6d7b8212b83908ada96cd5e38bc"
+    },
+    {
+      "model": "trained",
+      "readout": "f64",
+      "execution": {
+        "kind": "kv_cache",
+        "max_values": 1000000
+      },
+      "passed": true,
+      "resumed_steps": 3,
+      "final_checkpoint_id": "sha256:557c86bf262f76b9a65befe48488cae27bcdc429a3842ffd3ea093407f4cca15",
+      "step_reports_sha256": "8ee3adb9d660b2921daed9559272169405d6f6d7b8212b83908ada96cd5e38bc"
+    }
+  ],
+  "passed": true
+}

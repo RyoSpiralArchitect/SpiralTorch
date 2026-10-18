@@ -1,0 +1,211 @@
+{
+  "contract": {
+    "schema": "spiraltorch.native_repetition_qualification.v1",
+    "source_sha256": {
+      "benchmarks/results/2026-10-19-native-repetition/qualify.py": "2c33b1aa9b5351e610f3e917fd2d4e23ad883d8f0f46d7d7b8cc7b6c5e70ad85",
+      "benchmarks/results/2026-10-18-native-lm-generation/qualify.py": "88c0434bfb0f4ef5ae128a5bbb367aea21e87928c896b812f614c4fe046f6061",
+      "crates/st-tensor/src/classification/unlikelihood.rs": "89ae3a7565e189ae4a5a8c9120eea4c52b12c6b3670311227e12788bbe09cfb5",
+      "crates/st-core/src/runtime/zspace_repetition_unlikelihood.rs": "828bbac21139948dc9804dc515d96afc312c1d5345c23c0cf3104dc18eab5819",
+      "crates/st-nn/src/causal_lm/repetition.rs": "c3b665dbecd1f54677756dd50abbfe9b3a46823d904e02e66cdb5a074c19a857",
+      "crates/st-nn/src/causal_lm/objective.rs": "953f263152dd61b04f0a99c376e7c82cc322cc89ff0e103b0fa0a2bb61bc7b50",
+      "crates/st-nn/src/causal_lm/learning.rs": "9c6acdb104f775a7a373c4835bdf922cee686fe54b759aa78decd8a45958ef0c",
+      "crates/st-nn/src/causal_lm/learning/accumulation.rs": "11661528e60ffaafa2e43fd92488ac29ea572ce30e20a2e41b4a6f6a4ad24128",
+      "crates/st-nn/src/causal_lm/training.rs": "da13e616cfcae1fe33e10be114a99934823646c71f972553e465635b1077f410",
+      "bindings/st-py/src/causal_lm.rs": "6ddd0b600bbc1e39859c911ca7116b9617726726b3bb6d536e675f55a1549802",
+      "bindings/st-py/src/causal_lm/accumulation.rs": "5b8f909fbeb46ec5474424a4d173dcce2a22818734b090aef993c15d30c38696",
+      "bindings/st-py/src/causal_lm/training.rs": "68272d2b412074d3d204f71258ba0e783224e4defe56c937d6ce0ed004853c02"
+    },
+    "extension_sha256": "8f9ef5615e428e22665f32a46f43920b7ad7b26bdbd253761d38b3b1de4876ff",
+    "configs": {
+      "prior_continuation": {
+        "kind": "native_v1",
+        "config": {
+          "strength": 0.3,
+          "context_window": 32,
+          "max_candidates_per_position": 8,
+          "candidate_source": {
+            "kind": "prior_continuation",
+            "ngram_order": 2
+          }
+        }
+      },
+      "model_topk_history": {
+        "kind": "native_v1",
+        "config": {
+          "strength": 0.3,
+          "context_window": 32,
+          "max_candidates_per_position": 8,
+          "candidate_source": {
+            "kind": "model_topk_history",
+            "proposal_top_k": 32
+          }
+        }
+      },
+      "model_topk_periodic": {
+        "kind": "native_v1",
+        "config": {
+          "strength": 0.3,
+          "context_window": 32,
+          "max_candidates_per_position": 8,
+          "candidate_source": {
+            "kind": "model_topk_periodic",
+            "proposal_top_k": 32
+          }
+        }
+      }
+    },
+    "data_sha256": "d95c8c6161a6ad91b67be1d477890daf3adc15b90f804a83a1350b955bd40fee",
+    "checkpoint_sha256": "1ed13924961efe03330d1e16407382e3fcb0b3255504939215215a9375f62e6e",
+    "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+    "model_sha256": {
+      "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+      "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+      "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+    },
+    "documents_sha256": "6f779bad5f90e7f03e23ddfa249382ab1de8dd4df3325652b6e7d70af2b4ae1d",
+    "windows": [
+      "train_doc0[0:32]",
+      "synthetic:train_doc0[128:130]*15+train_doc0[130:132]"
+    ],
+    "training": {
+      "context_length": 32,
+      "microbatch_windows": 1,
+      "accumulation_steps": 2,
+      "epochs": 2,
+      "learning_rate": 0.001,
+      "max_gradient_norm": 0.1
+    },
+    "readout": "f64",
+    "gates": {
+      "resume_reports_exact": true,
+      "resume_checkpoint_bytes_exact": true
+    },
+    "scope": "six geometry-only updates on frozen GPT-2; includes synthetic stress, not quality or speed evidence"
+  },
+  "conditions": {
+    "prior_continuation": {
+      "reports": [
+        {
+          "update": 1,
+          "epoch": 0,
+          "window_start": 0,
+          "window_end": 2,
+          "microbatches": 2,
+          "target_tokens": 62,
+          "loss": 2.672579419400011,
+          "repetition_loss": 0.3898017002003533,
+          "repetition_positions": 7,
+          "pre_geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+          "post_geometry_artifact_id": "sha256:2ff128e170a5a3d6803e521641cd531b4a54bd20227d3d457945fc77f78a59de"
+        },
+        {
+          "update": 2,
+          "epoch": 1,
+          "window_start": 0,
+          "window_end": 2,
+          "microbatches": 2,
+          "target_tokens": 62,
+          "loss": 2.6720712059310503,
+          "repetition_loss": 0.3892079570463725,
+          "repetition_positions": 7,
+          "pre_geometry_artifact_id": "sha256:2ff128e170a5a3d6803e521641cd531b4a54bd20227d3d457945fc77f78a59de",
+          "post_geometry_artifact_id": "sha256:7578669bdf91cad904302ae6e0e41ea70c9c28808498b02a27ae4ea71f3a511d"
+        }
+      ],
+      "first": {
+        "file": "prior_continuation-step1.json",
+        "sha256": "7d75b609d53308d47e8d921dce7a84ca18b8268c17fcd2ea5da52e00ac5844fb"
+      },
+      "final": {
+        "file": "prior_continuation-step2.json",
+        "sha256": "9bd13583b71d7c3654571f3997349e8b1d3f35c8d4235fcfe011d1e6a0736bd5"
+      }
+    },
+    "model_topk_history": {
+      "reports": [
+        {
+          "update": 1,
+          "epoch": 0,
+          "window_start": 0,
+          "window_end": 2,
+          "microbatches": 2,
+          "target_tokens": 62,
+          "loss": 2.5913552995990305,
+          "repetition_loss": 0.11905463419708551,
+          "repetition_positions": 51,
+          "pre_geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+          "post_geometry_artifact_id": "sha256:86a7ac935265d1cb2664de45a0228ee0d06756bb5114355e649d557f51ed2cff"
+        },
+        {
+          "update": 2,
+          "epoch": 1,
+          "window_start": 0,
+          "window_end": 2,
+          "microbatches": 2,
+          "target_tokens": 62,
+          "loss": 2.590931036279482,
+          "repetition_loss": 0.11904669538432476,
+          "repetition_positions": 51,
+          "pre_geometry_artifact_id": "sha256:86a7ac935265d1cb2664de45a0228ee0d06756bb5114355e649d557f51ed2cff",
+          "post_geometry_artifact_id": "sha256:9597dcf45a8c12b6e38cd698d8be671a868e83638aa21ffcac29b81a1008fdfe"
+        }
+      ],
+      "first": {
+        "file": "model_topk_history-step1.json",
+        "sha256": "f037f156f0442277754dca94c49e4817cab8d8ce8a3219dc1e56ea24461f80d4"
+      },
+      "final": {
+        "file": "model_topk_history-step2.json",
+        "sha256": "fa67056add0624966a8a71f1645a5eb1119a1169a46c3f92f75819dbabb95abc"
+      }
+    },
+    "model_topk_periodic": {
+      "reports": [
+        {
+          "update": 1,
+          "epoch": 0,
+          "window_start": 0,
+          "window_end": 2,
+          "microbatches": 2,
+          "target_tokens": 62,
+          "loss": 3.2935405731201173,
+          "repetition_loss": 2.459672212600708,
+          "repetition_positions": 1,
+          "pre_geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+          "post_geometry_artifact_id": "sha256:834b281435fcf3f0511bb44da2650d1cddcaf7ea1f873122dfa878097001dc5f"
+        },
+        {
+          "update": 2,
+          "epoch": 1,
+          "window_start": 0,
+          "window_end": 2,
+          "microbatches": 2,
+          "target_tokens": 62,
+          "loss": 3.291378355026245,
+          "repetition_loss": 2.4526615142822266,
+          "repetition_positions": 1,
+          "pre_geometry_artifact_id": "sha256:834b281435fcf3f0511bb44da2650d1cddcaf7ea1f873122dfa878097001dc5f",
+          "post_geometry_artifact_id": "sha256:c86728aa16920c4b75ed5a1f8f0ea955bb6148b85f217a59b7126549667a8c64"
+        }
+      ],
+      "first": {
+        "file": "model_topk_periodic-step1.json",
+        "sha256": "fd2cee2e2e91b5e2a6a885341be904abdd186bc0a4ac4fc993813e6dae186fd7"
+      },
+      "final": {
+        "file": "model_topk_periodic-step2.json",
+        "sha256": "e6b6d3d86b5b0e7322048eef6b2a8d9105607b0904d5b9316af1a558803d52af"
+      }
+    }
+  },
+  "resume_exact": {
+    "prior_continuation": true,
+    "model_topk_history": true,
+    "model_topk_periodic": true
+  },
+  "raw_receipts": {
+    "contract.json": "d04fab08978777293ab2cfd55380c2d619091affb113d5ffd2b0ff4d0e62809d",
+    "native.json": "ba9c6ce8c81026d896250a0b46d1fe1cf6bce0bdc21d13368a4d12c53d6bd575",
+    "resume.json": "b96203b1a1ecda3274b739680e5db62b9a75b858fb4a778bc33be635adae0a1b"
+  }
+}

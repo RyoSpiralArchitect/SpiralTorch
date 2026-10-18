@@ -11,6 +11,7 @@ fn config() -> CausalLmTrainingConfig {
         learning_rate: 0.001,
         weight_decay: 0.01,
         label_smoothing: 0.1,
+        repetition: None,
     }
 }
 
@@ -23,7 +24,14 @@ fn documents() -> Vec<Vec<usize>> {
 }
 
 fn create(config: CausalLmTrainingConfig) -> NativeCausalLmTrainer {
-    let base = load();
+    create_with_readout(config, CausalLmReadoutAccumulator::F32)
+}
+
+fn create_with_readout(
+    config: CausalLmTrainingConfig,
+    accumulator: CausalLmReadoutAccumulator,
+) -> NativeCausalLmTrainer {
+    let base = load().with_readout_accumulator(accumulator);
     let artifact = trainable(&base);
     let optimizer = NativeGeometryAdamW::new(
         &artifact,
@@ -39,6 +47,63 @@ fn create(config: CausalLmTrainingConfig) -> NativeCausalLmTrainer {
         config,
     )
     .unwrap()
+}
+
+#[test]
+fn training_resume_requires_same_readout_policy_and_preserves_default_bytes() {
+    for accumulator in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let mut trainer = create_with_readout(config(), accumulator);
+        trainer.step().unwrap();
+        let payload = trainer.to_json().unwrap();
+        let id = trainer.checkpoint_id().unwrap();
+        assert_eq!(
+            payload.contains("readout_accumulator"),
+            accumulator == CausalLmReadoutAccumulator::F64
+        );
+        let base = load().with_readout_accumulator(accumulator);
+        let other =
+            load().with_readout_accumulator(if accumulator == CausalLmReadoutAccumulator::F32 {
+                CausalLmReadoutAccumulator::F64
+            } else {
+                CausalLmReadoutAccumulator::F32
+            });
+        assert!(NativeCausalLmTrainer::from_json(
+            other.clone(),
+            documents(),
+            None,
+            payload.as_bytes(),
+            &id
+        )
+        .is_err());
+        assert!(NativeCausalLm::from_training_checkpoint(other, payload.as_bytes(), &id).is_err());
+        let mut restored = NativeCausalLmTrainer::from_json(
+            base.clone(),
+            documents(),
+            None,
+            payload.as_bytes(),
+            &id,
+        )
+        .unwrap();
+        assert_eq!(restored.to_json().unwrap(), payload);
+        assert_eq!(
+            NativeCausalLm::from_training_checkpoint(base, payload.as_bytes(), &id)
+                .unwrap()
+                .readout_accumulator(),
+            accumulator
+        );
+        while !trainer.exhausted() {
+            let a = trainer.step().unwrap().unwrap();
+            let b = restored.step().unwrap().unwrap();
+            assert_eq!(
+                serde_json::to_string(&a).unwrap(),
+                serde_json::to_string(&b).unwrap()
+            );
+            assert_eq!(trainer.to_json().unwrap(), restored.to_json().unwrap());
+        }
+    }
 }
 
 #[test]
@@ -61,6 +126,7 @@ fn ordered_groups_match_manual_native_accumulation_and_keep_partial_epoch_group(
         let mut accumulator = model
             .geometry_accumulator_with_objective(CausalLmObjective {
                 label_smoothing: 0.1,
+                repetition: None,
             })
             .unwrap();
         for windows in trainer.plan().windows()[start..end].chunks(2) {

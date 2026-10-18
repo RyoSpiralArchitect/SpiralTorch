@@ -48,6 +48,41 @@ causal prefix computation. F16/BF16 checkpoint values explicitly become f32.
 This is not a resident-GPU or speedup claim. The Rust core compiles for WASM;
 a JavaScript client and browser model execution require separate work.
 
+## Explicit Readout Arithmetic
+
+The default remains sequential f32 accumulation, including existing checkpoint
+serialization. Source builds expose an opt-in wide accumulator:
+
+```python
+wide = model.with_readout_accumulator("f64")
+assert model.readout_accumulator == "f32"  # Original handle is unchanged.
+last = wide.forward(ids, [1, len(ids)], last_only=True)
+```
+
+Only the final vocabulary projection and its input-gradient projection use four
+fixed f64 partial sums per dot product. Operands, stored weights, logits and
+gradients remain f32; attention, MLP and geometry keep their existing arithmetic.
+This is neither a full-f64 model nor a Torch/GPU fallback. Rust owns the kernel
+through `Tensor::matmul_prepacked_wide`; the same core compiles for WASM CPU.
+
+The policy follows full/last-only forward, selected-target loss, geometry
+learning and K/V contexts. Gradients and microbatch accumulators expose
+`readout_accumulator` and reject batches or model handles with another policy.
+Training and generation checkpoints bind it separately from the unchanged
+weight/geometry identities. A geometry artifact alone does **not** record this
+choice: preserve the runtime policy when using an artifact independently.
+
+Select the same policy on the base handle **before** restoring a wide training
+checkpoint. Existing checkpoints without the field mean f32 and reject an f64
+base. To deliberately start a new numerical trajectory from old learned geometry,
+restore under f32 first, then call `with_readout_accumulator("f64")`; this is not
+an exact continuation of the old trajectory. New f64 checkpoints are rejected by
+older readers. A precision policy is not a promise of language-quality uplift.
+
+The [pinned projection study](../../benchmarks/results/2026-10-19-native-lm-projections/README.md)
+checks the old f32 trajectory, every compared prefix, native learning/generation
+resume and the remaining CPU performance gap separately.
+
 ## Checkpoint Admission
 
 The importer accepts bare GPT-2 names (`h.0...`, `wte.weight`) or the HF LM

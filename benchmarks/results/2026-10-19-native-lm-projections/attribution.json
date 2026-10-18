@@ -1,0 +1,3256 @@
+{
+  "schema": "spiraltorch.native_projection_attribution.v1",
+  "scope": "post-result numerical attribution; hybrid hooks and f64 are diagnostics, not replacements for the failed gate",
+  "conditions": [
+    {
+      "steps": 24,
+      "native_vs_torch": {
+        "max_abs": 0.000213623046875,
+        "rms": 4.686180114500801e-05
+      },
+      "primitives": [
+        {
+          "name": "transformer.h.0.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.960464477539063e-08,
+            "rms": 6.7777758429538084e-09
+          },
+          "native_vs_f64": {
+            "max_abs": 4.224424998700016e-08,
+            "rms": 4.651274947311708e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.889073749822728e-08,
+            "rms": 6.629786887608919e-09
+          }
+        },
+        {
+          "name": "transformer.h.0.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.5299530029296875e-06,
+            "rms": 3.63644350168078e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 7.42069539327872e-06,
+            "rms": 4.187185623845745e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.897532551481845e-06,
+            "rms": 4.47489753580661e-07
+          }
+        },
+        {
+          "name": "transformer.h.0.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.049041748046875e-05,
+            "rms": 4.3622700704911365e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.3456497880426355e-05,
+            "rms": 4.008108765901017e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.3077447336584669e-05,
+            "rms": 4.773893566480868e-07
+          }
+        },
+        {
+          "name": "transformer.h.0.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.1920928955078125e-07,
+            "rms": 1.1697244101444723e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.8727738115842385e-07,
+            "rms": 6.72139959891353e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.8727738115842385e-07,
+            "rms": 1.144270725037694e-08
+          }
+        },
+        {
+          "name": "transformer.h.0.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 4.649812963636305e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.820156497193807e-06,
+            "rms": 6.009440653941758e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.296993655396932e-06,
+            "rms": 6.682475604040246e-07
+          }
+        },
+        {
+          "name": "transformer.h.0.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.288818359375e-05,
+            "rms": 6.438478539331701e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00011412477850569758,
+            "rms": 1.4672172300269464e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.00010649538397444758,
+            "rms": 1.4814025408731927e-06
+          }
+        },
+        {
+          "name": "transformer.h.1.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.384185791015625e-07,
+            "rms": 1.1217128312215545e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.5293697597229539e-07,
+            "rms": 6.758034172828401e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.2636439994959687e-07,
+            "rms": 1.180771228663084e-08
+          }
+        },
+        {
+          "name": "transformer.h.1.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-06,
+            "rms": 3.223302668611369e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.4045437671845775e-06,
+            "rms": 3.784352561795063e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.443635642254918e-06,
+            "rms": 4.0360594230221897e-07
+          }
+        },
+        {
+          "name": "transformer.h.1.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 2.414564692908081e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.2325893379738773e-05,
+            "rms": 3.384892639557273e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.2325893379738773e-05,
+            "rms": 3.2496209995480795e-07
+          }
+        },
+        {
+          "name": "transformer.h.1.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.384185791015625e-07,
+            "rms": 1.1789865467591638e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.984711828332934e-07,
+            "rms": 9.480283283256414e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.984711828332934e-07,
+            "rms": 1.226310352625744e-08
+          }
+        },
+        {
+          "name": "transformer.h.1.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 3.4897553944341906e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.4629398645382707e-05,
+            "rms": 4.765241408054043e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.390738408524328e-05,
+            "rms": 5.143177183702459e-07
+          }
+        },
+        {
+          "name": "transformer.h.1.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.103515625e-05,
+            "rms": 6.157937597113792e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00010606858393202856,
+            "rms": 9.5413061463975e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.503342768202856e-05,
+            "rms": 6.376092867688938e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.0838280499495297e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 4.521254046707668e-07,
+            "rms": 1.346162202474524e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.756864762204941e-07,
+            "rms": 2.0273354406093234e-08
+          }
+        },
+        {
+          "name": "transformer.h.2.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.152557373046875e-06,
+            "rms": 3.9172827542695206e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.007416632781144e-05,
+            "rms": 6.164949592529637e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.02499163201486e-05,
+            "rms": 6.21148565056404e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.682209014892578e-06,
+            "rms": 2.6831793756420943e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 3.764300318565006e-06,
+            "rms": 2.7420174983050135e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.883509608115787e-06,
+            "rms": 2.826567675815038e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.6218455781190336e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 4.510654854072982e-07,
+            "rms": 1.0122649634800084e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.510654854072982e-07,
+            "rms": 1.6319703670163023e-08
+          }
+        },
+        {
+          "name": "transformer.h.2.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-05,
+            "rms": 4.7015454576376996e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.866276340895979e-05,
+            "rms": 6.914124950990824e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.866276340895979e-05,
+            "rms": 7.292379177322716e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.52587890625e-05,
+            "rms": 5.186762640640247e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.005217872605953744,
+            "rms": 3.8447852614063024e-05
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.005217872605953744,
+            "rms": 3.844517046565667e-05
+          }
+        },
+        {
+          "name": "transformer.h.3.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-06,
+            "rms": 3.195953974918839e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 8.635325521311188e-07,
+            "rms": 1.7740176863396157e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.2393778714425707e-06,
+            "rms": 2.9585010956264446e-08
+          }
+        },
+        {
+          "name": "transformer.h.3.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.33514404296875e-05,
+            "rms": 5.499299936799492e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.2573591293095774e-05,
+            "rms": 1.373146213853907e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.2573591293095774e-05,
+            "rms": 1.3810508694694347e-06
+          }
+        },
+        {
+          "name": "transformer.h.3.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.7220458984375e-06,
+            "rms": 2.068905786786931e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.292320914700554e-06,
+            "rms": 2.1554946670332996e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.495026031392513e-06,
+            "rms": 2.087000751888783e-07
+          }
+        },
+        {
+          "name": "transformer.h.3.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.384185791015625e-07,
+            "rms": 1.278620466402375e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 3.1604938577345365e-07,
+            "rms": 9.496604116228233e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.358922082696836e-07,
+            "rms": 1.3174239725549185e-08
+          }
+        },
+        {
+          "name": "transformer.h.3.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 4.5465847968885273e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 9.21118664720666e-06,
+            "rms": 6.483301499086122e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.3038380143941595e-06,
+            "rms": 7.047679330270222e-07
+          }
+        },
+        {
+          "name": "transformer.h.3.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.52587890625e-05,
+            "rms": 5.031547484260788e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 8.648434481983713e-05,
+            "rms": 9.344028278255152e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.648434481983713e-05,
+            "rms": 9.501015440967174e-07
+          }
+        },
+        {
+          "name": "transformer.h.4.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.7185716552165662e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 6.897816806628043e-07,
+            "rms": 1.546112553303579e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.097317888110183e-06,
+            "rms": 2.4643591592420783e-08
+          }
+        },
+        {
+          "name": "transformer.h.4.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.47955322265625e-05,
+            "rms": 7.002087287027307e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 3.0063672454616608e-05,
+            "rms": 1.2866036840365316e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.6248975188991608e-05,
+            "rms": 1.2389662410937322e-06
+          }
+        },
+        {
+          "name": "transformer.h.4.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.814697265625e-06,
+            "rms": 1.9509448177721984e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.00018023830151e-06,
+            "rms": 2.1550655807554087e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.192273133809323e-06,
+            "rms": 2.168159896666484e-07
+          }
+        },
+        {
+          "name": "transformer.h.4.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.5200768181428128e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 7.259192607023124e-07,
+            "rms": 1.2040532329714963e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.259192607023124e-07,
+            "rms": 1.6117364647196836e-08
+          }
+        },
+        {
+          "name": "transformer.h.4.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 4.299808562879579e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 9.221019189986635e-06,
+            "rms": 5.83714741108179e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 9.69785634818976e-06,
+            "rms": 6.376654372338717e-07
+          }
+        },
+        {
+          "name": "transformer.h.4.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.103515625e-05,
+            "rms": 7.312234935685641e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00016357563967517308,
+            "rms": 1.4250217435946856e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.00022461079592517308,
+            "rms": 1.8200124292699543e-06
+          }
+        },
+        {
+          "name": "transformer.h.5.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.430511474609375e-06,
+            "rms": 3.311330323478654e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.542216587883786e-07,
+            "rms": 1.5312031728629697e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.4154770378027592e-06,
+            "rms": 3.102232115017569e-08
+          }
+        },
+        {
+          "name": "transformer.h.5.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.152557373046875e-06,
+            "rms": 3.9377106855756544e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.3957040578892475e-05,
+            "rms": 8.237088673783096e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.3957040578892475e-05,
+            "rms": 8.237148929763769e-07
+          }
+        },
+        {
+          "name": "transformer.h.5.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.0994415283203125e-06,
+            "rms": 2.4367565585538986e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.602186259639041e-06,
+            "rms": 2.853980761462778e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.51452684502307e-06,
+            "rms": 2.8740179341441657e-07
+          }
+        },
+        {
+          "name": "transformer.h.5.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-06,
+            "rms": 1.9589978518181278e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 7.924016376392728e-07,
+            "rms": 1.1759974021414223e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.1149469951732272e-06,
+            "rms": 1.6125545967756466e-08
+          }
+        },
+        {
+          "name": "transformer.h.5.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-06,
+            "rms": 4.1959552983070184e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.71641560590075e-06,
+            "rms": 5.893339524573284e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.71641560590075e-06,
+            "rms": 6.377664685495404e-07
+          }
+        },
+        {
+          "name": "transformer.h.5.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.0517578125e-05,
+            "rms": 6.375778163206895e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.681179756322763e-05,
+            "rms": 8.801380272540519e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.732937568822763e-05,
+            "rms": 1.0393386591855943e-06
+          }
+        },
+        {
+          "name": "transformer.h.6.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.430511474609375e-06,
+            "rms": 2.7291530173942675e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 7.242877213542442e-07,
+            "rms": 1.6262834480574163e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.2936735407365063e-06,
+            "rms": 2.8976749976249985e-08
+          }
+        },
+        {
+          "name": "transformer.h.6.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.775161743164062e-06,
+            "rms": 4.137775453830889e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.7915061018669576e-05,
+            "rms": 8.039883684639798e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.7915061018669576e-05,
+            "rms": 8.093140820184179e-07
+          }
+        },
+        {
+          "name": "transformer.h.6.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.0265579223632812e-06,
+            "rms": 2.0765301429580448e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.679276351282624e-06,
+            "rms": 2.360563714288579e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.422135322812437e-06,
+            "rms": 2.3623935117129699e-07
+          }
+        },
+        {
+          "name": "transformer.h.6.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 1.6448456907758773e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 6.230649081118145e-07,
+            "rms": 1.0861862841391705e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.04649283694647e-07,
+            "rms": 1.5459414869410783e-08
+          }
+        },
+        {
+          "name": "transformer.h.6.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 4.0692163604880434e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.755671472014058e-06,
+            "rms": 5.420652074172832e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.755671472014058e-06,
+            "rms": 5.954847652800171e-07
+          }
+        },
+        {
+          "name": "transformer.h.6.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.239776611328125e-05,
+            "rms": 6.306722740033498e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.580016281607868e-05,
+            "rms": 9.076070611295051e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.580016281607868e-05,
+            "rms": 9.347893467176815e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.0142259660902727e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.519095624961778e-07,
+            "rms": 1.607516488969175e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.377631637301874e-07,
+            "rms": 2.1539567644346755e-08
+          }
+        },
+        {
+          "name": "transformer.h.7.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.67572021484375e-06,
+            "rms": 4.3080787872578554e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.0289057793831944e-05,
+            "rms": 7.673376926773297e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.0289057793831944e-05,
+            "rms": 7.755902561785946e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.337860107421875e-06,
+            "rms": 2.373135338413711e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.562652489743414e-06,
+            "rms": 2.6909231621115236e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.706711643682638e-06,
+            "rms": 2.692494371270094e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.384185791015625e-07,
+            "rms": 1.538892804958571e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 2.0850497683966296e-07,
+            "rms": 9.060177737460421e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.2236480862479766e-07,
+            "rms": 1.5698067990226985e-08
+          }
+        },
+        {
+          "name": "transformer.h.7.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.4836273193359375e-06,
+            "rms": 4.016130773481943e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.39163730106651e-06,
+            "rms": 5.268924894485295e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.153218721964947e-06,
+            "rms": 5.794302548468738e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-05,
+            "rms": 7.103806459794499e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.763120949111908e-05,
+            "rms": 1.0176018449691392e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.7177496338737228e-05,
+            "rms": 1.0263899682191207e-06
+          }
+        },
+        {
+          "name": "transformer.h.8.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.6113771937695365e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 4.0533440870405e-07,
+            "rms": 1.3039899479484995e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.0656403919284685e-06,
+            "rms": 2.5060119970592256e-08
+          }
+        },
+        {
+          "name": "transformer.h.8.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.62939453125e-06,
+            "rms": 4.152084029080761e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.4183022109648391e-05,
+            "rms": 7.335204930610175e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.4357156400635063e-05,
+            "rms": 7.421820659603822e-07
+          }
+        },
+        {
+          "name": "transformer.h.8.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.198883056640625e-06,
+            "rms": 3.2047359260815834e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.918255374075642e-06,
+            "rms": 3.8640098592419214e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.646951558802016e-06,
+            "rms": 3.8646546107861423e-07
+          }
+        },
+        {
+          "name": "transformer.h.8.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 1.3893987589502854e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.3860522996012037e-07,
+            "rms": 8.532133710147813e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 9.2556551578582e-07,
+            "rms": 1.412030110143553e-08
+          }
+        },
+        {
+          "name": "transformer.h.8.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.0067901611328125e-06,
+            "rms": 3.922729314529217e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.839433602743526e-06,
+            "rms": 5.160217626817832e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.918849385582291e-06,
+            "rms": 5.64353337350463e-07
+          }
+        },
+        {
+          "name": "transformer.h.8.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.002716064453125e-05,
+            "rms": 8.165412439466325e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 3.0132895918910663e-05,
+            "rms": 1.2435786078271652e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.0436948286572942e-05,
+            "rms": 1.2534671026619402e-06
+          }
+        },
+        {
+          "name": "transformer.h.9.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.341939013702162e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.071077593399309e-07,
+            "rms": 1.54112840167168e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.41535888693079e-07,
+            "rms": 2.3082837560160788e-08
+          }
+        },
+        {
+          "name": "transformer.h.9.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-06,
+            "rms": 4.090650579465402e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.3499199761568548e-05,
+            "rms": 6.665871058477207e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.3499199761568548e-05,
+            "rms": 6.760311166423136e-07
+          }
+        },
+        {
+          "name": "transformer.h.9.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.059906005859375e-06,
+            "rms": 3.516375998847248e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.868507315793693e-06,
+            "rms": 3.261702960186128e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.0035121645657341e-05,
+            "rms": 3.7183422728369325e-07
+          }
+        },
+        {
+          "name": "transformer.h.9.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.4420524683585795e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 3.10829127325718e-07,
+            "rms": 9.181976287994726e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.26017349677943e-07,
+            "rms": 1.4532019634183466e-08
+          }
+        },
+        {
+          "name": "transformer.h.9.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.291534423828125e-06,
+            "rms": 3.921637263143929e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.4594382456206745e-06,
+            "rms": 5.367493982381863e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.4594382456206745e-06,
+            "rms": 5.832665761537705e-07
+          }
+        },
+        {
+          "name": "transformer.h.9.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.0517578125e-05,
+            "rms": 1.1081032709181706e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 4.645830800598105e-05,
+            "rms": 1.7299490005708524e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.599505117004355e-05,
+            "rms": 1.8117213598583307e-06
+          }
+        },
+        {
+          "name": "transformer.h.10.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 2.3683887372327863e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.195187986473115e-07,
+            "rms": 1.4861801847410971e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.638066096797957e-07,
+            "rms": 2.2888584793957562e-08
+          }
+        },
+        {
+          "name": "transformer.h.10.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.7220458984375e-06,
+            "rms": 3.998745145980413e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 9.740149857329072e-06,
+            "rms": 6.069374715779085e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.045540559463376e-05,
+            "rms": 6.198216441664354e-07
+          }
+        },
+        {
+          "name": "transformer.h.10.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.288818359375e-05,
+            "rms": 4.967335258119357e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.4236095391927392e-05,
+            "rms": 4.855904170277963e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.2328746759114892e-05,
+            "rms": 5.616236193955161e-07
+          }
+        },
+        {
+          "name": "transformer.h.10.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.384185791015625e-07,
+            "rms": 1.3548648229366773e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 2.638901213103395e-07,
+            "rms": 8.770864435098899e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.638901213103395e-07,
+            "rms": 1.360951098355427e-08
+          }
+        },
+        {
+          "name": "transformer.h.10.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.7220458984375e-06,
+            "rms": 3.824715872173145e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.123823210302248e-06,
+            "rms": 5.350190430614404e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.879031042432814e-06,
+            "rms": 5.73988491728995e-07
+          }
+        },
+        {
+          "name": "transformer.h.10.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.57763671875e-05,
+            "rms": 1.477753868564763e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 0.0001113432170640749,
+            "rms": 3.1511323994051732e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.0001189726115953249,
+            "rms": 3.051256617487385e-06
+          }
+        },
+        {
+          "name": "transformer.h.11.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 2.2111540917887183e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.857469982269322e-07,
+            "rms": 1.2757326009982233e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.273438832276156e-07,
+            "rms": 2.189783503737546e-08
+          }
+        },
+        {
+          "name": "transformer.h.11.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.67572021484375e-06,
+            "rms": 3.6504117048073e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.005805796872039e-05,
+            "rms": 5.532358916273187e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.0627884064362547e-05,
+            "rms": 5.661914703258287e-07
+          }
+        },
+        {
+          "name": "transformer.h.11.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 0.0001373291015625,
+            "rms": 1.9880078473125175e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 0.0007752398905722657,
+            "rms": 7.215798485933977e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.0007752398905722657,
+            "rms": 7.363668293771813e-06
+          }
+        },
+        {
+          "name": "transformer.h.11.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.384185791015625e-07,
+            "rms": 1.4641438756084984e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.633466502060088e-07,
+            "rms": 8.763771778860083e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.0788404953009376e-07,
+            "rms": 1.4557574176397121e-08
+          }
+        },
+        {
+          "name": "transformer.h.11.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.52587890625e-05,
+            "rms": 3.602163868867939e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.1801295565661007e-05,
+            "rms": 5.064712205809131e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.1801295565661007e-05,
+            "rms": 5.402581345646552e-07
+          }
+        },
+        {
+          "name": "transformer.h.11.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.0517578125e-05,
+            "rms": 1.2822612940653213e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00017726803538664626,
+            "rms": 3.7658031410863396e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.00018489742991789626,
+            "rms": 3.7402658079334267e-06
+          }
+        },
+        {
+          "name": "transformer.ln_f",
+          "kind": "norm",
+          "shape": [
+            1,
+            24,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.57763671875e-05,
+            "rms": 7.477663710512347e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.1259417309238415e-05,
+            "rms": 3.911717710678597e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.9522251569223954e-05,
+            "rms": 6.701927345967896e-07
+          }
+        },
+        {
+          "name": "lm_head",
+          "kind": "linear",
+          "shape": [
+            1,
+            1,
+            50257
+          ],
+          "native_vs_torch": {
+            "max_abs": 0.00020599365234375,
+            "rms": 4.6868461425482654e-05
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00019871012264616184,
+            "rms": 4.628999183812745e-05
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.2426258584905554e-05,
+            "rms": 7.4519742116046084e-06
+          }
+        }
+      ],
+      "hybrids": [
+        {
+          "name": "native_linears=True,native_norms=False",
+          "vs_torch": {
+            "max_abs": 0.00022125244140625,
+            "rms": 4.78359839297024e-05
+          },
+          "vs_native": {
+            "max_abs": 9.1552734375e-05,
+            "rms": 2.1183265061972734e-05
+          }
+        },
+        {
+          "name": "native_linears=False,native_norms=True",
+          "vs_torch": {
+            "max_abs": 4.57763671875e-05,
+            "rms": 1.183474268643884e-05
+          },
+          "vs_native": {
+            "max_abs": 0.000213623046875,
+            "rms": 4.776302626197118e-05
+          }
+        },
+        {
+          "name": "native_linears=True,native_norms=True",
+          "vs_torch": {
+            "max_abs": 0.00022125244140625,
+            "rms": 4.94391497028005e-05
+          },
+          "vs_native": {
+            "max_abs": 9.1552734375e-05,
+            "rms": 2.2886918495457427e-05
+          }
+        }
+      ],
+      "whole_model_f64_control": {
+        "native": {
+          "max_abs": 0.00024024712530490433,
+          "rms": 5.388025708505077e-05
+        },
+        "torch_f32": {
+          "max_abs": 6.810404494217437e-05,
+          "rms": 2.8519486205578127e-05
+        },
+        "native_linears=True,native_norms=False": {
+          "max_abs": 0.0002346532616144259,
+          "rms": 4.9848893266708026e-05
+        },
+        "native_linears=False,native_norms=True": {
+          "max_abs": 5.351657827645795e-05,
+          "rms": 2.0397175493536188e-05
+        },
+        "native_linears=True,native_norms=True": {
+          "max_abs": 0.0002582450461687813,
+          "rms": 6.321161225824905e-05
+        }
+      }
+    },
+    {
+      "steps": 72,
+      "native_vs_torch": {
+        "max_abs": 0.000701904296875,
+        "rms": 0.00014661561207431645
+      },
+      "primitives": [
+        {
+          "name": "transformer.h.0.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.1920928955078125e-07,
+            "rms": 8.093498337766867e-09
+          },
+          "native_vs_f64": {
+            "max_abs": 6.186989842671409e-08,
+            "rms": 4.89957307083e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.1536716326698837e-07,
+            "rms": 7.841675918059536e-09
+          }
+        },
+        {
+          "name": "transformer.h.0.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.198883056640625e-06,
+            "rms": 3.8489259998037754e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 7.42069539327872e-06,
+            "rms": 4.4227396239427486e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.897532551481845e-06,
+            "rms": 4.7146584426067776e-07
+          }
+        },
+        {
+          "name": "transformer.h.0.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.1444091796875e-05,
+            "rms": 4.3083567496040676e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.3456497880426355e-05,
+            "rms": 4.031659211486518e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.3077447336584669e-05,
+            "rms": 4.818397178569223e-07
+          }
+        },
+        {
+          "name": "transformer.h.0.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.5762786865234375e-07,
+            "rms": 1.1374768383573829e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.8727738115842385e-07,
+            "rms": 6.3736571650785575e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.735367952144685e-07,
+            "rms": 1.0985639804386138e-08
+          }
+        },
+        {
+          "name": "transformer.h.0.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.62939453125e-06,
+            "rms": 4.673659520695275e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 7.820881459785767e-06,
+            "rms": 6.166801131665565e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.249726678537627e-06,
+            "rms": 6.820837146478305e-07
+          }
+        },
+        {
+          "name": "transformer.h.0.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.765655517578125e-05,
+            "rms": 6.26341627804109e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00011412477850569758,
+            "rms": 1.131211534466614e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.00010649538397444758,
+            "rms": 1.1503835188069524e-06
+          }
+        },
+        {
+          "name": "transformer.h.1.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.3486996603666252e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 2.2313040082266866e-07,
+            "rms": 7.524979621482778e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.2810935019232943e-07,
+            "rms": 1.336589153600625e-08
+          }
+        },
+        {
+          "name": "transformer.h.1.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.152557373046875e-06,
+            "rms": 3.3047992154110626e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.545382275595756e-06,
+            "rms": 3.806536007409284e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.829425500536445e-06,
+            "rms": 4.0793548427990523e-07
+          }
+        },
+        {
+          "name": "transformer.h.1.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 2.366900748453947e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.2325893379738773e-05,
+            "rms": 3.275094590874503e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.2325893379738773e-05,
+            "rms": 3.1733421052093275e-07
+          }
+        },
+        {
+          "name": "transformer.h.1.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.3435204764527625e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.984711828332934e-07,
+            "rms": 8.344843074846496e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.984711828332934e-07,
+            "rms": 1.3438225219060564e-08
+          }
+        },
+        {
+          "name": "transformer.h.1.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.62939453125e-06,
+            "rms": 3.4582859124608726e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.4629398645382707e-05,
+            "rms": 4.496846750163269e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.390738408524328e-05,
+            "rms": 4.898125663032377e-07
+          }
+        },
+        {
+          "name": "transformer.h.1.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.103515625e-05,
+            "rms": 4.984534735113125e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00010606858393202856,
+            "rms": 7.007868600187085e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.503342768202856e-05,
+            "rms": 5.772234181746023e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.180242857042383e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.309007873322003e-07,
+            "rms": 1.4047898561130841e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.0077379455353253e-06,
+            "rms": 2.1530055321159658e-08
+          }
+        },
+        {
+          "name": "transformer.h.2.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.1444091796875e-05,
+            "rms": 4.089772792966867e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.4555358849754896e-05,
+            "rms": 6.699264616349705e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.2648010216942396e-05,
+            "rms": 6.7603092047419e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.546476364135742e-06,
+            "rms": 2.756760736980159e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.989493940898981e-06,
+            "rms": 3.0188170805163645e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.002772902080622e-06,
+            "rms": 3.080135578454433e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.482943652790354e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 4.510654854072982e-07,
+            "rms": 9.526125523463516e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.360779202767674e-07,
+            "rms": 1.48045199055204e-08
+          }
+        },
+        {
+          "name": "transformer.h.2.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-05,
+            "rms": 4.682492339339726e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.866276340895979e-05,
+            "rms": 6.4646210979822e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.866276340895979e-05,
+            "rms": 6.898991546430451e-07
+          }
+        },
+        {
+          "name": "transformer.h.2.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.3365020751953125e-05,
+            "rms": 5.115301134729754e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.005217872605953744,
+            "rms": 2.2203706538555175e-05
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.005217872605953744,
+            "rms": 2.2202166155360062e-05
+          }
+        },
+        {
+          "name": "transformer.h.3.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-06,
+            "rms": 2.997080696521385e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 8.635325521311188e-07,
+            "rms": 1.7996930340108424e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.7126287126245643e-06,
+            "rms": 2.8162664536171698e-08
+          }
+        },
+        {
+          "name": "transformer.h.3.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.33514404296875e-05,
+            "rms": 5.517264390546765e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.631934002295111e-05,
+            "rms": 1.4659072877198584e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.631934002295111e-05,
+            "rms": 1.4740314887404445e-06
+          }
+        },
+        {
+          "name": "transformer.h.3.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.841255187988281e-06,
+            "rms": 2.1988528277707242e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 7.634655187160888e-06,
+            "rms": 2.4002784563543234e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.765010441003085e-06,
+            "rms": 2.2723088953167437e-07
+          }
+        },
+        {
+          "name": "transformer.h.3.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.4712809662682256e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 3.1604938577345365e-07,
+            "rms": 9.338666319520187e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.0812323121031113e-07,
+            "rms": 1.4481152108157665e-08
+          }
+        },
+        {
+          "name": "transformer.h.3.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.7220458984375e-06,
+            "rms": 4.5402757038471603e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 9.21118664720666e-06,
+            "rms": 6.462760329257847e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.692564510719535e-06,
+            "rms": 7.022534385837712e-07
+          }
+        },
+        {
+          "name": "transformer.h.3.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.467632293701172e-05,
+            "rms": 5.192379419636715e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 8.648434481983713e-05,
+            "rms": 7.546289847060382e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.648434481983713e-05,
+            "rms": 7.785641682136416e-07
+          }
+        },
+        {
+          "name": "transformer.h.4.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-06,
+            "rms": 2.7981651413665424e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 8.023466051554351e-07,
+            "rms": 1.522253599554036e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.1485504405328584e-06,
+            "rms": 2.512819814577355e-08
+          }
+        },
+        {
+          "name": "transformer.h.4.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.24249267578125e-05,
+            "rms": 7.247659717359354e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 3.3663638973280285e-05,
+            "rms": 1.3472080894745413e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.1840833905505406e-05,
+            "rms": 1.295779979881275e-06
+          }
+        },
+        {
+          "name": "transformer.h.4.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.500150680541992e-06,
+            "rms": 2.1144679503777388e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.00018023830151e-06,
+            "rms": 2.3456288171757068e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.192273133809323e-06,
+            "rms": 2.3092464696201838e-07
+          }
+        },
+        {
+          "name": "transformer.h.4.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.4978364595458822e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 7.259192607023124e-07,
+            "rms": 1.0852282975137461e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.259192607023124e-07,
+            "rms": 1.5128168754674452e-08
+          }
+        },
+        {
+          "name": "transformer.h.4.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.198883056640625e-06,
+            "rms": 4.2930347014839493e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.0098128854885147e-05,
+            "rms": 5.82955521407164e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 9.69785634818976e-06,
+            "rms": 6.369829964179105e-07
+          }
+        },
+        {
+          "name": "transformer.h.4.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.103515625e-05,
+            "rms": 6.300667852523115e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00016357563967517308,
+            "rms": 1.0024158605145016e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.00022461079592517308,
+            "rms": 1.1947283391506033e-06
+          }
+        },
+        {
+          "name": "transformer.h.5.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.430511474609375e-06,
+            "rms": 3.037443549869173e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 7.267398682841986e-07,
+            "rms": 1.6957834246632597e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.4154770378027592e-06,
+            "rms": 2.843509973239348e-08
+          }
+        },
+        {
+          "name": "transformer.h.5.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-06,
+            "rms": 4.097412463865755e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.3957040578892475e-05,
+            "rms": 8.522967273202178e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.3957040578892475e-05,
+            "rms": 8.537643234043171e-07
+          }
+        },
+        {
+          "name": "transformer.h.5.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.543231964111328e-06,
+            "rms": 2.5116108471214104e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.034015922473657e-06,
+            "rms": 2.9777967190111514e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.7629822931559715e-06,
+            "rms": 2.965388156079693e-07
+          }
+        },
+        {
+          "name": "transformer.h.5.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-06,
+            "rms": 1.7145709950261286e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 7.924016376392728e-07,
+            "rms": 1.0575170771191103e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.1149469951732272e-06,
+            "rms": 1.5627265815835873e-08
+          }
+        },
+        {
+          "name": "transformer.h.5.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.67572021484375e-06,
+            "rms": 4.2651089772070984e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.965562875826947e-06,
+            "rms": 5.88285046466463e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.71641560590075e-06,
+            "rms": 6.391177211949148e-07
+          }
+        },
+        {
+          "name": "transformer.h.5.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.0517578125e-05,
+            "rms": 5.925613756787963e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.681179756322763e-05,
+            "rms": 8.24717985474702e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.732937568822763e-05,
+            "rms": 8.844048064920438e-07
+          }
+        },
+        {
+          "name": "transformer.h.6.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.430511474609375e-06,
+            "rms": 3.003040881783484e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 7.242877213542442e-07,
+            "rms": 1.6921684396149236e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.3529356532870906e-06,
+            "rms": 2.8622838134414383e-08
+          }
+        },
+        {
+          "name": "transformer.h.6.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.049041748046875e-05,
+            "rms": 4.246236186308666e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.2259189506712573e-05,
+            "rms": 8.397054062831909e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.3605588321373716e-05,
+            "rms": 8.422803615280941e-07
+          }
+        },
+        {
+          "name": "transformer.h.6.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.0265579223632812e-06,
+            "rms": 2.2284296191677126e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.26236291875648e-06,
+            "rms": 2.620344845495296e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.422135322812437e-06,
+            "rms": 2.5747690288576706e-07
+          }
+        },
+        {
+          "name": "transformer.h.6.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 1.6867042290371886e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 6.230649081118145e-07,
+            "rms": 1.0173569295714495e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.04649283694647e-07,
+            "rms": 1.6417944160866827e-08
+          }
+        },
+        {
+          "name": "transformer.h.6.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.245208740234375e-06,
+            "rms": 4.082923540428672e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.755671472014058e-06,
+            "rms": 5.390143870710374e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.755671472014058e-06,
+            "rms": 5.925040285537179e-07
+          }
+        },
+        {
+          "name": "transformer.h.6.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.33514404296875e-05,
+            "rms": 6.419416735964257e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 4.580016281607868e-05,
+            "rms": 8.939008692383321e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.580016281607868e-05,
+            "rms": 9.084693985894893e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-06,
+            "rms": 2.861297970600515e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 6.487202064420217e-07,
+            "rms": 1.652281021465526e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.3416293542789504e-06,
+            "rms": 2.6233694683124664e-08
+          }
+        },
+        {
+          "name": "transformer.h.7.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.0013580322265625e-05,
+            "rms": 4.380656920393199e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.0398845412827882e-05,
+            "rms": 8.188653068652662e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.1352519729234132e-05,
+            "rms": 8.252009585197823e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.337860107421875e-06,
+            "rms": 2.641851243475123e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.1632996054444789e-05,
+            "rms": 3.253482546815634e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.063353493080399e-05,
+            "rms": 3.2480052022816455e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.5179415637329986e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 2.3441306540306073e-07,
+            "rms": 9.145841904529655e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.919854643681276e-07,
+            "rms": 1.5175565440407604e-08
+          }
+        },
+        {
+          "name": "transformer.h.7.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.7220458984375e-06,
+            "rms": 4.050476307279898e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 6.0813102278345355e-06,
+            "rms": 5.283246374342541e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.7632950030139796e-06,
+            "rms": 5.80835833985311e-07
+          }
+        },
+        {
+          "name": "transformer.h.7.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.9073486328125e-05,
+            "rms": 7.211006905934298e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.763120949111908e-05,
+            "rms": 1.0468304641796759e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.7177496338737228e-05,
+            "rms": 1.0438783131130735e-06
+          }
+        },
+        {
+          "name": "transformer.h.8.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.4955957649585195e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 6.235734906212542e-07,
+            "rms": 1.444866542412316e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.0656403919284685e-06,
+            "rms": 2.306719449845809e-08
+          }
+        },
+        {
+          "name": "transformer.h.8.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 8.821487426757812e-06,
+            "rms": 4.247700979733529e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.8408812875847502e-05,
+            "rms": 7.780084002021294e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.8204897502371864e-05,
+            "rms": 7.781209597344807e-07
+          }
+        },
+        {
+          "name": "transformer.h.8.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.62939453125e-06,
+            "rms": 3.4197343970522377e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 8.975765624086307e-06,
+            "rms": 4.330126486812615e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.753089332318552e-06,
+            "rms": 4.30756930748293e-07
+          }
+        },
+        {
+          "name": "transformer.h.8.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 1.4388519819818346e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.5666530384095267e-07,
+            "rms": 8.831329947492895e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 9.2556551578582e-07,
+            "rms": 1.4574956359444432e-08
+          }
+        },
+        {
+          "name": "transformer.h.8.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.7220458984375e-06,
+            "rms": 3.97151472272569e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 5.488418753252233e-06,
+            "rms": 5.249730421217012e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 6.203674490556921e-06,
+            "rms": 5.741466805160604e-07
+          }
+        },
+        {
+          "name": "transformer.h.8.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 2.002716064453125e-05,
+            "rms": 8.2036998793301e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 3.0132895918910663e-05,
+            "rms": 1.275376950144739e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.0436948286572942e-05,
+            "rms": 1.2806426129459917e-06
+          }
+        },
+        {
+          "name": "transformer.h.9.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.5613986204903857e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.071077593399309e-07,
+            "rms": 1.528210925409257e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.0057339414615285e-06,
+            "rms": 2.5152467564830758e-08
+          }
+        },
+        {
+          "name": "transformer.h.9.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.33514404296875e-05,
+            "rms": 4.2424159385296784e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.6528989137398753e-05,
+            "rms": 7.040299005141093e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.6170404485649215e-05,
+            "rms": 7.136903731759654e-07
+          }
+        },
+        {
+          "name": "transformer.h.9.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-06,
+            "rms": 3.7769192060522676e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.329581482778508e-05,
+            "rms": 4.0702925965009374e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.4205207836681666e-05,
+            "rms": 4.262464829420071e-07
+          }
+        },
+        {
+          "name": "transformer.h.9.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.4710543701316948e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 3.10829127325718e-07,
+            "rms": 9.23827364658343e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.26017349677943e-07,
+            "rms": 1.4758191595110536e-08
+          }
+        },
+        {
+          "name": "transformer.h.9.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-06,
+            "rms": 4.006619585067142e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 7.092130100971872e-06,
+            "rms": 5.483309627452362e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 8.632498039062853e-06,
+            "rms": 5.929955081725767e-07
+          }
+        },
+        {
+          "name": "transformer.h.9.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.0517578125e-05,
+            "rms": 1.0845731868818978e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 4.645830800598105e-05,
+            "rms": 1.7164195972861206e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.599505117004355e-05,
+            "rms": 1.7647502939470995e-06
+          }
+        },
+        {
+          "name": "transformer.h.10.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 9.5367431640625e-07,
+            "rms": 2.407692229092232e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 5.195187986473115e-07,
+            "rms": 1.5342053044262454e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 9.217848573328524e-07,
+            "rms": 2.3513993486585414e-08
+          }
+        },
+        {
+          "name": "transformer.h.10.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 7.62939453125e-06,
+            "rms": 4.159591286278775e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.2806006262522374e-05,
+            "rms": 6.469523388830303e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.1852331946116124e-05,
+            "rms": 6.57137014529232e-07
+          }
+        },
+        {
+          "name": "transformer.h.10.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.1961669921875e-05,
+            "rms": 5.83047657319903e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.4236095391927392e-05,
+            "rms": 6.082235911801599e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.001909632478373e-05,
+            "rms": 7.038886464718255e-07
+          }
+        },
+        {
+          "name": "transformer.h.10.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.5762786865234375e-07,
+            "rms": 1.5012163301560082e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 2.638901213103395e-07,
+            "rms": 9.144880974322064e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 2.9447579885655273e-07,
+            "rms": 1.4757008527043112e-08
+          }
+        },
+        {
+          "name": "transformer.h.10.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 5.7220458984375e-06,
+            "rms": 3.9441526673817745e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 8.962753588193095e-06,
+            "rms": 5.499284383491784e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 7.055404955380595e-06,
+            "rms": 5.91259470935582e-07
+          }
+        },
+        {
+          "name": "transformer.h.10.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.57763671875e-05,
+            "rms": 1.4399389046116675e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00014422968324367957,
+            "rms": 2.8378048962877796e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.00014422968324367957,
+            "rms": 2.8214762493810434e-06
+          }
+        },
+        {
+          "name": "transformer.h.11.ln_1",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 2.24939319342763e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 2.5532389980043035e-07,
+            "rms": 1.4362612807174081e-08
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.273438832276156e-07,
+            "rms": 2.234817419376191e-08
+          }
+        },
+        {
+          "name": "transformer.h.11.attn.c_attn",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            2304
+          ],
+          "native_vs_torch": {
+            "max_abs": 6.67572021484375e-06,
+            "rms": 3.8913316340596153e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.005805796872039e-05,
+            "rms": 6.026037403170138e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.0627884064362547e-05,
+            "rms": 6.095751413641612e-07
+          }
+        },
+        {
+          "name": "transformer.h.11.attn.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 0.0001373291015625,
+            "rms": 2.143810414897405e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 0.0007752398905722657,
+            "rms": 5.6830200504422555e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.0007752398905722657,
+            "rms": 5.8181977856055425e-06
+          }
+        },
+        {
+          "name": "transformer.h.11.ln_2",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.76837158203125e-07,
+            "rms": 1.5378923082814713e-08
+          },
+          "native_vs_f64": {
+            "max_abs": 1.889651777275958e-07,
+            "rms": 9.313452391628711e-09
+          },
+          "torch_vs_f64": {
+            "max_abs": 3.342610992440598e-07,
+            "rms": 1.524974508043416e-08
+          }
+        },
+        {
+          "name": "transformer.h.11.mlp.c_fc",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            3072
+          ],
+          "native_vs_torch": {
+            "max_abs": 1.52587890625e-05,
+            "rms": 3.822019363463162e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 1.1801295565661007e-05,
+            "rms": 5.480873097677278e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 1.2985936848508572e-05,
+            "rms": 5.795767861167936e-07
+          }
+        },
+        {
+          "name": "transformer.h.11.mlp.c_proj",
+          "kind": "linear",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 3.0517578125e-05,
+            "rms": 1.318616937594169e-06
+          },
+          "native_vs_f64": {
+            "max_abs": 0.00028239994253453915,
+            "rms": 4.6918707001713505e-06
+          },
+          "torch_vs_f64": {
+            "max_abs": 0.00029765873159703915,
+            "rms": 4.725660365344962e-06
+          }
+        },
+        {
+          "name": "transformer.ln_f",
+          "kind": "norm",
+          "shape": [
+            1,
+            72,
+            768
+          ],
+          "native_vs_torch": {
+            "max_abs": 4.57763671875e-05,
+            "rms": 6.860998847017592e-07
+          },
+          "native_vs_f64": {
+            "max_abs": 2.1259417309238415e-05,
+            "rms": 4.221053843129408e-07
+          },
+          "torch_vs_f64": {
+            "max_abs": 4.8069763522562425e-05,
+            "rms": 6.803416982445053e-07
+          }
+        },
+        {
+          "name": "lm_head",
+          "kind": "linear",
+          "shape": [
+            1,
+            1,
+            50257
+          ],
+          "native_vs_torch": {
+            "max_abs": 0.00067138671875,
+            "rms": 0.00014312504627660353
+          },
+          "native_vs_f64": {
+            "max_abs": 0.000636894178228431,
+            "rms": 0.00014231369905772363
+          },
+          "torch_vs_f64": {
+            "max_abs": 5.535770884534941e-05,
+            "rms": 1.4025180811610632e-05
+          }
+        }
+      ],
+      "hybrids": [
+        {
+          "name": "native_linears=True,native_norms=False",
+          "vs_torch": {
+            "max_abs": 0.000732421875,
+            "rms": 0.00014347601273854613
+          },
+          "vs_native": {
+            "max_abs": 0.000244140625,
+            "rms": 4.355416092295351e-05
+          }
+        },
+        {
+          "name": "native_linears=False,native_norms=True",
+          "vs_torch": {
+            "max_abs": 9.1552734375e-05,
+            "rms": 3.060981366417967e-05
+          },
+          "vs_native": {
+            "max_abs": 0.00067138671875,
+            "rms": 0.00015365430145459523
+          }
+        },
+        {
+          "name": "native_linears=True,native_norms=True",
+          "vs_torch": {
+            "max_abs": 0.000732421875,
+            "rms": 0.0001433486863098056
+          },
+          "vs_native": {
+            "max_abs": 0.000213623046875,
+            "rms": 4.2383967936383494e-05
+          }
+        }
+      ],
+      "whole_model_f64_control": {
+        "native": {
+          "max_abs": 0.0006649583619946497,
+          "rms": 0.0001516643628602498
+        },
+        "torch_f32": {
+          "max_abs": 9.006647871956375e-05,
+          "rms": 2.603279828872498e-05
+        },
+        "native_linears=True,native_norms=False": {
+          "max_abs": 0.000670703250079896,
+          "rms": 0.0001453728058167939
+        },
+        "native_linears=False,native_norms=True": {
+          "max_abs": 6.630781496141935e-05,
+          "rms": 1.6079115986522493e-05
+        },
+        "native_linears=True,native_norms=True": {
+          "max_abs": 0.000670703250079896,
+          "rms": 0.00014451586060584658
+        }
+      }
+    }
+  ],
+  "script_sha256": "a9ad6883a46cf0177d4945caf422755c99559f0ca56b6280e314abcabc8e0b0f",
+  "extension_sha256": "29ac8f457d14f1ff17f0573df306c51a742a7d2cd915803f704cc9f8562c93a4",
+  "model_sha256": {
+    "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+    "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+    "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+  },
+  "data_sha256": "d95c8c6161a6ad91b67be1d477890daf3adc15b90f804a83a1350b955bd40fee",
+  "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+  "private_raw_sha256": "4a3287faebdbe105962fe19efe99103f48385187553d61d60cc6ec8b5587bc9b"
+}

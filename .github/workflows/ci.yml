@@ -207,7 +207,7 @@ jobs:
         run: |
           cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_feature_ownership --test ensemble
           cargo run --locked -p st-tensor --release --no-default-features --features cpu,faer --example readme_autograd
-          cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
+          cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction --test learning_parameter_layout
           cargo test --locked -p st-nn --release --no-default-features --lib resident::byte_study
           cargo test --locked -p st-nn --release --no-default-features --lib geometry_artifact
           cargo test --locked -p st-nn --release --no-default-features --lib channel_affine
@@ -595,6 +595,7 @@ jobs:
           python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
       - name: Portable byte corpus study contracts
         run: |
+          python -I -B bindings/st-py/tests/test_nn_native_learning.py -v
           python -I -B bindings/st-py/tests/test_native_geometry_runtime.py -v
           python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B bindings/st-py/tests/test_native_weights.py -v
@@ -605,7 +606,12 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_causal_lm_evaluation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_generation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_context.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_readout.py -v
           python -I -B benchmarks/results/2026-10-18-native-lm-cache/test_qualification.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_repetition.py -v
+          python -I -B benchmarks/results/2026-10-19-native-repetition/test_qualification.py -v
+          python -I -B benchmarks/results/2026-10-19-native-repetition/test_integration.py -v
+          python -I -B benchmarks/results/2026-10-19-native-lm-projections/test_publication.py -v
           python -I -B bindings/st-py/examples/native_weights_geometry.py
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
@@ -903,6 +909,7 @@ jobs:
             bindings/st-py/tests/test_native_causal_lm_objective_parity.py \
             bindings/st-py/tests/test_native_causal_lm_training_parity.py \
             bindings/st-py/tests/test_native_causal_lm_evaluation_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_repetition_parity.py \
             bindings/st-py/tests/test_native_causal_lm_generation_parity.py \
             bindings/st-py/tests/test_native_causal_lm_context_parity.py \
             bindings/st-py/tests/test_hf_geometry_trainer.py \
@@ -978,3 +985,7 @@ jobs:
           python -I -c 'import sys; assert sys.version_info[:2] == (3, 8)'
           python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
           python -I tools/smoke_learning_stack.py
+          python -I -B bindings/st-py/tests/test_nn_native_learning.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_readout.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_repetition.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_evaluation.py -v

@@ -18,6 +18,7 @@ mod generation;
 mod gpt2;
 mod learning;
 mod objective;
+mod repetition;
 mod training;
 pub use context::NativeCausalLmContext;
 pub use evaluation::{CausalLmEvaluation, CausalLmEvaluationConfig, MAX_EVALUATION_TOKENS};
@@ -28,6 +29,7 @@ pub use generation::{
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
+pub use repetition::CausalLmRepetition;
 pub use training::{
     CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
 };
@@ -36,6 +38,27 @@ mod tests;
 
 pub type CausalLmResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type TransposeCache = Arc<OnceLock<Result<PackedB, String>>>;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CausalLmReadoutAccumulator {
+    #[default]
+    F32,
+    F64,
+}
+
+impl CausalLmReadoutAccumulator {
+    fn is_f32(&self) -> bool {
+        *self == Self::F32
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,8 +160,8 @@ struct DecoderBlock {
 }
 
 /// Full unpadded prefixes with learned absolute positions, pre-norm residual
-/// attention/MLP blocks and a vocabulary head. No dropout, KV cache or base
-/// weight updates. Clones share frozen parameters, not a foreign framework.
+/// attention/MLP blocks and a vocabulary head. No dropout or base-weight updates.
+/// The separate context owns K/V. Clones share frozen parameters, not a foreign framework.
 #[derive(Clone, Debug)]
 pub struct NativeCausalLm {
     config: CausalLmConfig,
@@ -151,6 +174,7 @@ pub struct NativeCausalLm {
     head: PackedB,
     backward_head: TransposeCache,
     geometry: Option<Arc<NativeGeometryRuntime>>,
+    readout_accumulator: CausalLmReadoutAccumulator,
 }
 
 fn product(values: &[usize], budget: usize, label: &'static str) -> CausalLmResult<usize> {
@@ -174,6 +198,27 @@ impl NativeCausalLm {
 
     pub fn config(&self) -> &CausalLmConfig {
         &self.config
+    }
+
+    pub fn readout_accumulator(&self) -> CausalLmReadoutAccumulator {
+        self.readout_accumulator
+    }
+
+    /// Preserve frozen/geometry storage while explicitly choosing readout arithmetic.
+    /// Training and generation checkpoints bind this policy independently of weight identity.
+    pub fn with_readout_accumulator(&self, accumulator: CausalLmReadoutAccumulator) -> Self {
+        let mut model = self.clone();
+        model.readout_accumulator = accumulator;
+        model
+    }
+
+    fn project_readout(&self, normalized: &Tensor) -> CausalLmResult<Tensor> {
+        Ok(match self.readout_accumulator {
+            CausalLmReadoutAccumulator::F32 => {
+                normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?
+            }
+            CausalLmReadoutAccumulator::F64 => normalized.matmul_prepacked_wide(&self.head)?,
+        })
     }
 
     pub fn base_model_identity(&self) -> &str {
@@ -319,7 +364,7 @@ impl NativeCausalLm {
             hidden
         };
         let normalized = self.final_norm.forward(&hidden, c.norm_epsilon)?;
-        Ok(normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?)
+        self.project_readout(&normalized)
     }
 
     fn decode_hidden(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {

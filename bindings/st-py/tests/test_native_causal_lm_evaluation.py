@@ -178,8 +178,62 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
         result = self.model.evaluate_documents(DOCS, 4)
         with self.assertRaises(AttributeError):
             result.nll = 0.
+        with self.assertRaises(AttributeError):
+            result.readout_accumulator = "f64"
+
+    def test_repetition_training_keeps_evaluation_pure_nll_and_readout_policy(self):
+        docs = [[1, 2, 1, 2, 1, 3], [4, 5, 4, 6, 4, 7]]
+        repetition = {"kind": "native_v1", "config": {"strength": .7,
+            "candidate_source": {"kind": "prior_continuation", "ngram_order": 2},
+            "context_window": 16, "max_candidates_per_position": 3}}
+        data_ids = []
+        for arithmetic in ("f32", "f64"):
+            with self.subTest(arithmetic=arithmetic):
+                base = self.base.with_readout_accumulator(arithmetic)
+                model = self.model.with_readout_accumulator(arithmetic)
+
+                def fresh():
+                    return st.NativeCausalLmTrainer(model,
+                        st.NativeGeometryAdamW(model.geometry_artifact(), max_gradient_norm=.1),
+                        docs, 6, learning_rate=.01, microbatch_windows=2, epochs=3,
+                        label_smoothing=.2, repetition=repetition)
+
+                reference, observed = fresh(), fresh()
+                while not observed.exhausted:
+                    before = observed.to_json()
+                    score = observed.model.evaluate_documents(docs, 6, microbatch_windows=2)
+                    plain = observed.model.next_token_loss(docs[0] + docs[1], [2, 6])
+                    self.assertEqual(score.nll, plain)
+                    self.assertEqual(score.readout_accumulator, arithmetic)
+                    self.assertEqual(json.loads(score.to_json())["readout_accumulator"], arithmetic)
+                    self.assertEqual(observed.to_json(), before)
+                    step = observed.step()
+                    self.assertGreater(step.repetition_loss, 0.)
+                    self.assertGreater(step.repetition_positions, 0)
+                    self.assertEqual(step.to_json(), reference.step().to_json())
+                    self.assertEqual(observed.to_json(), reference.to_json())
+                    observed = st.NativeCausalLmTrainer.from_json(base, docs, observed.to_json(),
+                                                                observed.checkpoint_id)
+                data_ids.append(score.data_id)
+                # Custom evaluation targets remain legal despite the training
+                # objective requiring labels to match the original token IDs.
+                labels = [[-100] * 5 + [9], [-100] * 5 + [10]]
+                selected = observed.model.evaluate_documents(docs, 6, labels=labels, microbatch_windows=2)
+                expected = observed.model.next_token_loss(docs[0] + docs[1], [2, 6],
+                                                          labels=labels[0] + labels[1])
+                self.assertEqual(selected.nll, expected)
+                self.assertEqual(selected.target_tokens, 2)
+        self.assertEqual(*data_ids)
 
     def test_packaged_periodic_evaluation_preserves_training_and_resumed_checkpoints(self):
+        repetition = {"kind": "native_v1", "config": {"strength": .7,
+            "candidate_source": {"kind": "model_topk_history", "proposal_top_k": 11},
+            "context_window": 16, "max_candidates_per_position": 3}}
+        for objective in (None, repetition):
+            with self.subTest(repetition=objective is not None):
+                self._check_packaged_periodic_evaluation(objective)
+
+    def _check_packaged_periodic_evaluation(self, repetition):
         example = importlib.import_module("examples.native_geometry_corpus_training")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -205,8 +259,11 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             heldout = root / "heldout.json"
             heldout.write_text(json.dumps({"token_documents": DOCS}))
             recipe = root / "recipe.json"
-            recipe.write_text(json.dumps(dict(context_length=4, microbatch_windows=1, accumulation_steps=1,
-                epochs=2, learning_rate=.01, weight_decay=0., label_smoothing=.2, max_gradient_norm=.1)))
+            settings = dict(context_length=4, microbatch_windows=1, accumulation_steps=1,
+                epochs=2, learning_rate=.01, weight_decay=0., label_smoothing=.2, max_gradient_norm=.1)
+            if repetition is not None:
+                settings["repetition"] = repetition
+            recipe.write_text(json.dumps(settings))
             common = ["--model-dir", str(model_dir), "--data-json", str(data), "--save-every", "1"]
             fresh = ["--recipe-json", str(recipe), "--artifact", str(geometry), "--artifact-id", artifact.artifact_id]
             evaluation = ["--eval-data-json", str(heldout), "--eval-every", "1"]
@@ -224,6 +281,11 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
                 example.main([*common, *evaluation, "--resume", str(root / "part/checkpoint-000002.json"),
                               "--checkpoint-id", pin, "--eval-every", "3", "--output", str(root / "resumed")])
             expected = (root / "plain/checkpoint-000004.json").read_bytes()
+            if repetition is not None:
+                training = [json.loads(row) for row in (root / "plain/steps.jsonl").read_text().splitlines()]
+                self.assertEqual(len(training), 4)
+                self.assertTrue(all(row["repetition_positions"] > 0 and row["repetition_loss"] > 0.
+                                    for row in training))
             for name in ("scored", "interval", "default", "resumed"):
                 self.assertEqual((root / name / "checkpoint-000004.json").read_bytes(), expected)
             for name, steps in (("scored", [0, 1, 2, 3, 4]), ("interval", [0, 3, 4]),

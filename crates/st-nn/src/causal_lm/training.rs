@@ -1,7 +1,7 @@
 //! Ordered document-safe training. The existing accumulator and optimizer own math.
 use super::*;
 use crate::geometry_runtime::{AdamWStep, NativeGeometryAdamW};
-use crate::language_windows::{CausalDocumentWindows, MAX_DOCUMENTS};
+use crate::language_windows::{CausalDocumentWindow, CausalDocumentWindows, MAX_DOCUMENTS};
 use sha2::{Digest, Sha256};
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_trainer.v1";
@@ -18,6 +18,8 @@ pub struct CausalLmTrainingConfig {
     pub learning_rate: f32,
     pub weight_decay: f32,
     pub label_smoothing: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetition: Option<CausalLmRepetition>,
 }
 
 impl CausalLmTrainingConfig {
@@ -37,6 +39,7 @@ impl CausalLmTrainingConfig {
         AdamWStep::new(self.learning_rate, self.weight_decay)?;
         CausalLmObjective {
             label_smoothing: self.label_smoothing,
+            repetition: self.repetition,
         }
         .validate()?;
         Ok(())
@@ -56,6 +59,23 @@ struct Corpus {
     id: String,
 }
 
+impl Corpus {
+    fn batch(&self, windows: &[CausalDocumentWindow]) -> (Vec<usize>, Option<Vec<i64>>) {
+        let count = windows.iter().map(|w| w.length as usize).sum();
+        let mut ids = Vec::with_capacity(count);
+        let mut labels = self.labels.as_ref().map(|_| Vec::with_capacity(count));
+        for w in windows {
+            let span = w.start as usize..(w.start + w.length) as usize;
+            ids.extend_from_slice(&self.documents[w.document as usize][span.clone()]);
+            if let Some(targets) = &mut labels {
+                targets
+                    .extend_from_slice(&self.labels.as_ref().unwrap()[w.document as usize][span]);
+            }
+        }
+        (ids, labels)
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct CausalLmTrainingStep {
     pub update: u64,
@@ -65,6 +85,10 @@ pub struct CausalLmTrainingStep {
     pub microbatches: u64,
     pub target_tokens: u64,
     pub loss: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repetition_loss: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repetition_positions: Option<u64>,
     pub pre_geometry_artifact_id: String,
     pub post_geometry_artifact_id: String,
 }
@@ -96,6 +120,8 @@ struct Checkpoint {
     geometry_id: String,
     optimizer_json: String,
     optimizer_id: String,
+    #[serde(default, skip_serializing_if = "CausalLmReadoutAccumulator::is_f32")]
+    readout_accumulator: CausalLmReadoutAccumulator,
 }
 
 /// Verified checkpoint owners, before the separately retained corpus is supplied.
@@ -152,6 +178,9 @@ impl NativeCausalLmTrainer {
         config: CausalLmTrainingConfig,
     ) -> CausalLmResult<()> {
         config.validate()?;
+        if let Some(recipe) = config.repetition {
+            recipe.admit_shape([1, config.context_length as usize], model.config.vocabulary)?;
+        }
         if Some(optimizer.geometry_artifact_id()) != model.geometry_artifact_id() {
             return Err("training optimizer belongs to another geometry snapshot".into());
         }
@@ -183,6 +212,15 @@ impl NativeCausalLmTrainer {
         )?;
         if plan.windows().is_empty() {
             return Err("no full document windows".into());
+        }
+        if let Some(recipe) = config.repetition {
+            recipe.admit_shape(
+                [
+                    config.microbatch_windows.min(plan.windows().len()),
+                    config.context_length as usize,
+                ],
+                model.config.vocabulary,
+            )?;
         }
         model.geometry_objective_input_count(
             [
@@ -220,6 +258,15 @@ impl NativeCausalLmTrainer {
                     .any(|&v| v != -100 && (v < 0 || v as u64 >= model.config.vocabulary as u64))
             {
                 return Err("invalid training document labels".into());
+            }
+            if config.repetition.is_some_and(|r| r.config().strength > 0.)
+                && labels
+                    .iter()
+                    .flatten()
+                    .zip(documents.iter().flatten())
+                    .any(|(&label, &id)| label != -100 && label != id as i64)
+            {
+                return Err("repetition labels must equal input IDs or -100".into());
             }
         }
         let mut hash = Sha256::new();
@@ -279,6 +326,18 @@ impl NativeCausalLmTrainer {
                 return Err("training microbatch has no selected targets".into());
             }
             result.model.logit_count(active)?;
+            if let Some(recipe) = config.repetition.filter(|r| r.config().strength > 0.) {
+                let (ids, labels) = result.corpus.batch(windows);
+                // Plan/work bounds depend on the complete mask, not just shape.
+                // Admit every batch now, not after earlier updates have committed.
+                super::repetition::RepetitionWindow::prepare(
+                    recipe,
+                    &ids,
+                    [windows.len(), config.context_length as usize],
+                    labels.as_deref(),
+                    result.model.config.vocabulary,
+                )?;
+            }
         }
         Ok(result)
     }
@@ -331,25 +390,11 @@ impl NativeCausalLmTrainer {
         let end = (start + self.config.group_windows()).min(self.plan().windows().len());
         let objective = CausalLmObjective {
             label_smoothing: self.config.label_smoothing,
+            repetition: self.config.repetition,
         };
         let mut accumulator = self.model.geometry_accumulator_with_objective(objective)?;
         for windows in self.plan().windows()[start..end].chunks(self.config.microbatch_windows) {
-            let count = windows.len() * self.config.context_length as usize;
-            let mut ids = Vec::with_capacity(count);
-            let mut labels = self
-                .corpus
-                .labels
-                .as_ref()
-                .map(|_| Vec::with_capacity(count));
-            for w in windows {
-                let span = w.start as usize..(w.start + w.length) as usize;
-                ids.extend_from_slice(&self.corpus.documents[w.document as usize][span.clone()]);
-                if let Some(targets) = &mut labels {
-                    targets.extend_from_slice(
-                        &self.corpus.labels.as_ref().unwrap()[w.document as usize][span],
-                    );
-                }
-            }
+            let (ids, labels) = self.corpus.batch(windows);
             accumulator.accumulate_loss_with_labels(
                 &self.model,
                 &ids,
@@ -370,6 +415,14 @@ impl NativeCausalLmTrainer {
             microbatches: accumulator.microbatches(),
             target_tokens: accumulator.target_tokens(),
             loss: accumulator.loss().unwrap(),
+            repetition_loss: self
+                .config
+                .repetition
+                .map(|_| accumulator.repetition_loss().unwrap()),
+            repetition_positions: self
+                .config
+                .repetition
+                .map(|_| accumulator.repetition_positions()),
             pre_geometry_artifact_id: self.model.geometry_artifact_id().unwrap().into(),
             post_geometry_artifact_id: model.geometry_artifact_id().unwrap().into(),
         };
@@ -393,6 +446,7 @@ impl NativeCausalLmTrainer {
             geometry_id: geometry.artifact_id().into(),
             optimizer_json: self.optimizer.to_json()?,
             optimizer_id: self.optimizer.checkpoint_id()?,
+            readout_accumulator: self.model.readout_accumulator,
         };
         let json = serde_json::to_string(&checkpoint)?;
         if json.len() > MAX_CHECKPOINT_BYTES {
@@ -417,8 +471,11 @@ impl NativeCausalLmTrainer {
             return Err("training checkpoint differs from pinned identity".into());
         }
         let checkpoint: Checkpoint = serde_json::from_slice(bytes)?;
-        if checkpoint.schema != SCHEMA || checkpoint.base_model_identity != base.base_id {
-            return Err("training checkpoint schema or base mismatch".into());
+        if checkpoint.schema != SCHEMA
+            || checkpoint.base_model_identity != base.base_id
+            || checkpoint.readout_accumulator != base.readout_accumulator
+        {
+            return Err("training checkpoint schema, base or readout accumulator mismatch".into());
         }
         checkpoint.config.validate()?;
         Ok(checkpoint)
