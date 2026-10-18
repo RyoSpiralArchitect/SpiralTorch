@@ -1,0 +1,226 @@
+{
+  "historical_request_sha256": "fd40be093cee491f9cbd65b5ca4feefdbdb1d6a75dc7928d9ef913b981216da9",
+  "request_sha256": "830d5cee8318bb6aaab67d17ec63843c4fcae8ac2bd28c0abd44533f87dcdf32",
+  "equal": false,
+  "scope": "Initial preparation differences only; no model trained in rejected v1 pilot",
+  "cases": [
+    {
+      "case": "seed11_ordinary",
+      "changes": []
+    },
+    {
+      "case": "seed11_geometry",
+      "changes": []
+    },
+    {
+      "case": "seed11_geometry_frozen",
+      "changes": []
+    },
+    {
+      "case": "seed11_flat",
+      "changes": []
+    },
+    {
+      "case": "seed11_flat_frozen",
+      "changes": []
+    },
+    {
+      "case": "seed11_flat_rms_matched",
+      "changes": []
+    },
+    {
+      "case": "seed11_flat_frozen_rms_matched",
+      "changes": []
+    },
+    {
+      "case": "seed11_flat_fisher_rao_rms_matched",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 9.5367431640625e-07
+        }
+      ]
+    },
+    {
+      "case": "seed11_flat_frozen_fisher_rao_rms_matched",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 9.5367431640625e-07
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-0-train",
+      "changes": []
+    },
+    {
+      "case": "mixture-11-0-frozen_router",
+      "changes": []
+    },
+    {
+      "case": "mixture-11-1-train",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-1-frozen_router",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-2-train",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-2-frozen_router",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-3-train",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 2.2351741790771484e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-3-frozen_router",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 2.2351741790771484e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-0-train-query-train",
+      "changes": []
+    },
+    {
+      "case": "mixture-11-0-train-query-frozen",
+      "changes": []
+    },
+    {
+      "case": "mixture-11-1-train-query-train",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-1-train-query-frozen",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-2-train-query-train",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-2-train-query-frozen",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 4.470348358154297e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-3-train-query-train",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 2.2351741790771484e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    },
+    {
+      "case": "mixture-11-3-train-query-frozen",
+      "changes": [
+        {
+          "path": "/parameters/6/values/0",
+          "absolute_difference": 2.2351741790771484e-08
+        },
+        {
+          "path": "/parameters/6/values/1",
+          "absolute_difference": 2.9802322387695312e-08
+        }
+      ]
+    }
+  ]
+}

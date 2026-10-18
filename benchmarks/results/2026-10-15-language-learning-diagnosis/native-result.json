@@ -1,0 +1,1853 @@
+{
+  "schema": "spiraltorch.byte_corpus.frozen_diagnosis.v1",
+  "engine": "native",
+  "plan_sha256": "b76aa34198f7285afb0e290b99461f69437e06fbff20b324c6dff4437d56957d",
+  "runtime": {
+    "package_version": "0.4.31",
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    }
+  },
+  "baselines": [
+    {
+      "cohort": "historical-heldout",
+      "targets": 2048,
+      "unigram_ce": 3.4005824532730866,
+      "bigram_ce": 3.436886025554789
+    },
+    {
+      "cohort": "autograd-prose",
+      "targets": 512,
+      "unigram_ce": 3.3981296281436215,
+      "bigram_ce": 3.3868900302393086
+    },
+    {
+      "cohort": "geometry-prose",
+      "targets": 512,
+      "unigram_ce": 3.3972966359798575,
+      "bigram_ce": 3.421353001428192
+    },
+    {
+      "cohort": "rust-code",
+      "targets": 512,
+      "unigram_ce": 3.6665444236009996,
+      "bigram_ce": 3.683455023590926
+    }
+  ],
+  "training_target_presentations": 8192,
+  "available_nonoverlapping_training_targets": 143872,
+  "training_target_entropy": 3.43670365611211,
+  "cases": [
+    {
+      "selection": {
+        "seed": 11,
+        "mode": "ordinary",
+        "name": "seed11_ordinary"
+      },
+      "model_json_sha256": "e123ae12ebfffc06d86125e8fc5fe83df8a3053aaae98a307296dcc898330972",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.560237962832908,
+            "mean_entropy": 3.935294063569494,
+            "top1_correct": 273,
+            "top1_space": 1536
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.772188602987028,
+            "mean_entropy": 3.924302011285589,
+            "top1_correct": 1,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.7726876273345855,
+            "mean_entropy": 3.923461227174384,
+            "top1_correct": 1,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.006023954690187784,
+            "mean_total_variation": 0.00252800945881399
+          },
+          "file": "case-0-cohort-0.f32le",
+          "sha256": "889a423fb301b445e07f4824aee3e52ab5bf6b1482b3ace52d5dbf337d52e279"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.543429618568378,
+            "mean_entropy": 3.9213341957869203,
+            "top1_correct": 69,
+            "top1_space": 383
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.3817723905131505,
+            "mean_entropy": 3.9067145665905487,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.384325117815508,
+            "mean_entropy": 3.9078317871739534,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.006264409897216677,
+            "mean_total_variation": 0.0025536640928093845
+          },
+          "file": "case-0-cohort-1.f32le",
+          "sha256": "44cba07a2aa70896391e93abaf25f8d6a602a15aed61e96e8c4715a1d0dbd6d0"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5560798879473547,
+            "mean_entropy": 3.930507512811602,
+            "top1_correct": 81,
+            "top1_space": 396
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 5.134029964586354,
+            "mean_entropy": 3.9254961964176633,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 5.130073861640173,
+            "mean_entropy": 3.926767204914903,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.006411366852899276,
+            "mean_total_variation": 0.002523808756954783
+          },
+          "file": "case-0-cohort-2.f32le",
+          "sha256": "e18d9a369848d043cf81eb0972d7d9c3a20b81affcbafd948252bc96685b1918"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.8476353118883133,
+            "mean_entropy": 3.9381555107813084,
+            "top1_correct": 131,
+            "top1_space": 404
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.5600367929117587,
+            "mean_entropy": 3.929820239018901,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.556286097099096,
+            "mean_entropy": 3.928728924404356,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.004603521372467412,
+            "mean_total_variation": 0.002052900711355788
+          },
+          "file": "case-0-cohort-3.f32le",
+          "sha256": "863ce6ca8efbc4c73b41edcd484b3ec82361421eaf10135f2901d1c6c85068a8"
+        }
+      ],
+      "artifact_id": "sha256:ee0007a076cd8d839f96bf3c0348cc81c79356635d72a05a29a606373858aeb1",
+      "generated_bytes": [
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 11,
+        "mode": "train",
+        "name": "mixture-11-0-train-query-train"
+      },
+      "model_json_sha256": "c69dc04834a97b2584a91cff26a61eab5c7af0744f7ea19ff84ee6eb9f7dce8e",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.5602077600260493,
+            "mean_entropy": 3.942435840842673,
+            "top1_correct": 278,
+            "top1_space": 1530
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.7643374338026137,
+            "mean_entropy": 3.923508616201995,
+            "top1_correct": 1,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.762466676496747,
+            "mean_entropy": 3.925959980931739,
+            "top1_correct": 1,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013749851061597396,
+            "mean_total_variation": 0.0048055696622684215
+          },
+          "file": "case-1-cohort-0.f32le",
+          "sha256": "6d753155a20160662e8a542798bc558ff34f8e84ca9980b4e3afec9c2a0cfe44"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5411013652912167,
+            "mean_entropy": 3.9277356186795864,
+            "top1_correct": 69,
+            "top1_space": 387
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.390636774939164,
+            "mean_entropy": 3.915352934794419,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.394090512759564,
+            "mean_entropy": 3.9147650899162567,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.009222302830708143,
+            "mean_total_variation": 0.003548938528717371
+          },
+          "file": "case-1-cohort-1.f32le",
+          "sha256": "5b5519e96179382256e1c28614bf55a5a15334987c5f7c18bdd51cf885b0dd20"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5558498572768253,
+            "mean_entropy": 3.939462807955783,
+            "top1_correct": 82,
+            "top1_space": 393
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 5.1250752181785195,
+            "mean_entropy": 3.9432827794846728,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 5.12513347282274,
+            "mean_entropy": 3.9373101464049647,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.011747583619253973,
+            "mean_total_variation": 0.00457709500792358
+          },
+          "file": "case-1-cohort-2.f32le",
+          "sha256": "1d3d9e161cfa8789a29e6eda74d763ece28af943dcac4e5c4b74465a80c572ce"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.8465844618142047,
+            "mean_entropy": 3.943943720749366,
+            "top1_correct": 130,
+            "top1_space": 400
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.558838853156428,
+            "mean_entropy": 3.9352437197482484,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.549644518203926,
+            "mean_entropy": 3.93494099460088,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.011433553596384831,
+            "mean_total_variation": 0.005409321302412889
+          },
+          "file": "case-1-cohort-3.f32le",
+          "sha256": "32ffb5127e9303f7faa3f5977492f476358c050360d06f1d1ceb44ea0d96d3b4"
+        }
+      ],
+      "artifact_id": "sha256:628a805ca6b6379c170481566872335d087ea38770631f431697c157a311172f",
+      "generated_bytes": [
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 11,
+        "mode": "frozen",
+        "name": "mixture-11-0-train-query-frozen"
+      },
+      "model_json_sha256": "be125cfc07060610205cf5191cdccb8de2abf4c449d291baf465766391a6f4e3",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.5602077636522713,
+            "mean_entropy": 3.9424358308866783,
+            "top1_correct": 278,
+            "top1_space": 1530
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.764337105949557,
+            "mean_entropy": 3.923508539188772,
+            "top1_correct": 1,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.762466890998436,
+            "mean_entropy": 3.9259600028578623,
+            "top1_correct": 1,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013749850981105602,
+            "mean_total_variation": 0.004805549212338046
+          },
+          "file": "case-2-cohort-0.f32le",
+          "sha256": "010668ec72a1f77ec8caa113fdc81727f55cabae66cb1f5c9844572b2bc91edc"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.541101367282271,
+            "mean_entropy": 3.927735603208712,
+            "top1_correct": 69,
+            "top1_space": 387
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.390636828216812,
+            "mean_entropy": 3.9153529336961874,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.394090573376417,
+            "mean_entropy": 3.914765009915021,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.009222322869737265,
+            "mean_total_variation": 0.0035489610005744205
+          },
+          "file": "case-2-cohort-1.f32le",
+          "sha256": "a9f425eac7978753771dcaff7e270a9d42317e6627e87923a66410a9b1e3e050"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5558498513881145,
+            "mean_entropy": 3.939462794082927,
+            "top1_correct": 82,
+            "top1_space": 393
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 5.125075280364994,
+            "mean_entropy": 3.943282755722581,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 5.125133580301799,
+            "mean_entropy": 3.9373101698678106,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.011747544820624067,
+            "mean_total_variation": 0.00457706639888514
+          },
+          "file": "case-2-cohort-2.f32le",
+          "sha256": "535631b05124a3b0e13f2cc090583a85813bd93121438602b820ed2932b8b64c"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.846584440766691,
+            "mean_entropy": 3.943943691712758,
+            "top1_correct": 130,
+            "top1_space": 400
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.5588389337569435,
+            "mean_entropy": 3.9352436571019096,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.549644628824676,
+            "mean_entropy": 3.934941007114446,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.01143353446227825,
+            "mean_total_variation": 0.0054093245527143535
+          },
+          "file": "case-2-cohort-3.f32le",
+          "sha256": "6856d98a0f837b38c8aad1a35b2c1125e91cdcdb8d14921b779777c8ab40d179"
+        }
+      ],
+      "artifact_id": "sha256:1a310aeee64663b020f42b4a0050e0899e382c1da3e1d6768537cd1ca919901b",
+      "generated_bytes": [
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 23,
+        "mode": "ordinary",
+        "name": "seed23_ordinary"
+      },
+      "model_json_sha256": "f1bc25a50ceee78691d899c72d5a8ea638f0cd708d57db2fbefc98bdbea6b1af",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.5544920981450465,
+            "mean_entropy": 3.924239603688799,
+            "top1_correct": 245,
+            "top1_space": 1238
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.6421502073416443,
+            "mean_entropy": 3.906653828862459,
+            "top1_correct": 1,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.6391465064621835,
+            "mean_entropy": 3.9045678984600634,
+            "top1_correct": 1,
+            "top1_space": 1
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.00905598991293674,
+            "mean_total_variation": 0.003827704522495279
+          },
+          "file": "case-3-cohort-0.f32le",
+          "sha256": "01874f36689635772ef7cdb8e6e249494b2ea5ab0688c4b23b349b1033d47f1e"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5551306890103307,
+            "mean_entropy": 3.9274278700985925,
+            "top1_correct": 61,
+            "top1_space": 365
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.304889514277163,
+            "mean_entropy": 3.907324550882831,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.298104642059574,
+            "mean_entropy": 3.9060267784448968,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.015512103020384315,
+            "mean_total_variation": 0.005221558917650085
+          },
+          "file": "case-3-cohort-1.f32le",
+          "sha256": "a602eabcf7165a3492dee5005cfae4c3a5ee574ae2a28afb55e3668e12a3e1ec"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.560407571075587,
+            "mean_entropy": 3.9228592046193844,
+            "top1_correct": 77,
+            "top1_space": 371
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.9439366882465094,
+            "mean_entropy": 3.920150729380328,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.945891373215334,
+            "mean_entropy": 3.9177525478215407,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.010042926485494229,
+            "mean_total_variation": 0.004365566948975108
+          },
+          "file": "case-3-cohort-2.f32le",
+          "sha256": "0f5c4e22ea59b36864165956c7455ba92bd68f0e70530f7bf7c51116d8116bef"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.892281402771427,
+            "mean_entropy": 3.9483649517428123,
+            "top1_correct": 95,
+            "top1_space": 331
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.4673709215736697,
+            "mean_entropy": 3.902841318400814,
+            "top1_correct": 0,
+            "top1_space": 1
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.4697450181869236,
+            "mean_entropy": 3.904375604806419,
+            "top1_correct": 0,
+            "top1_space": 1
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.007640487570751881,
+            "mean_total_variation": 0.0032225465454197894
+          },
+          "file": "case-3-cohort-3.f32le",
+          "sha256": "8e9ef5b8cdb96cb939444ba619f34871773cf6c865a930505f4b5dfe89bfab44"
+        }
+      ],
+      "artifact_id": "sha256:df9fbfce6eac9d386031678f2d3e14013aef4d5574e2554c787a11d1cdeb650e",
+      "generated_bytes": [
+        [
+          32,
+          101,
+          32,
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          32,
+          101,
+          32,
+          101,
+          32,
+          32,
+          32,
+          32,
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 23,
+        "mode": "train",
+        "name": "mixture-23-0-train-query-train"
+      },
+      "model_json_sha256": "eb0d9ecc2ceac8fcf17da9b109cf6d664cfddc30745e86a447f91683c43f122a",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.552468821333314,
+            "mean_entropy": 3.9276753991288222,
+            "top1_correct": 252,
+            "top1_space": 1248
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.641125714641121,
+            "mean_entropy": 3.905778039088422,
+            "top1_correct": 1,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.633240058993051,
+            "mean_entropy": 3.9014072823211703,
+            "top1_correct": 1,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.009424762603541784,
+            "mean_total_variation": 0.0037327645680769704
+          },
+          "file": "case-4-cohort-0.f32le",
+          "sha256": "3b8b8f0b1381dc668ceabb44a70b8ec826a0ee72138f7eba0081389851c5336b"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.551799646137748,
+            "mean_entropy": 3.9303822523797036,
+            "top1_correct": 58,
+            "top1_space": 365
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.3011821866430395,
+            "mean_entropy": 3.917451319887576,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.2988350491417116,
+            "mean_entropy": 3.9114004891759397,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.014209916973073364,
+            "mean_total_variation": 0.006830780913234474
+          },
+          "file": "case-4-cohort-1.f32le",
+          "sha256": "bbe76e1d6dd203e86b5f990d400b221c6b9d0d9c88c93f795893549dd317540b"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.560331805242369,
+            "mean_entropy": 3.9250069686237725,
+            "top1_correct": 76,
+            "top1_space": 375
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.94482086796291,
+            "mean_entropy": 3.9220353102225394,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.946635182621185,
+            "mean_entropy": 3.9226113996373595,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013071880049381434,
+            "mean_total_variation": 0.005567329652823319
+          },
+          "file": "case-4-cohort-2.f32le",
+          "sha256": "4f15fad3645840a54f3a01b31d604a905dfbb7df9786b2e9a1c089119f3e89bc"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.8801740021932933,
+            "mean_entropy": 3.9581568837966565,
+            "top1_correct": 113,
+            "top1_space": 350
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.45995532186174,
+            "mean_entropy": 3.90110155413769,
+            "top1_correct": 0,
+            "top1_space": 1
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.4647050400357866,
+            "mean_entropy": 3.902842830858524,
+            "top1_correct": 0,
+            "top1_space": 1
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013434090754994734,
+            "mean_total_variation": 0.0063456226893517775
+          },
+          "file": "case-4-cohort-3.f32le",
+          "sha256": "7f3f90f8e856a5cc724b1ad618f37714511ff11c2a674ad2e9d2dd50b4667769"
+        }
+      ],
+      "artifact_id": "sha256:7ef7456ce073d6d9041fadd5653ea26d7e4febe111d81ed7f4deb5a94221dcef",
+      "generated_bytes": [
+        [
+          32,
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          32,
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 23,
+        "mode": "frozen",
+        "name": "mixture-23-0-train-query-frozen"
+      },
+      "model_json_sha256": "c9f5b424da0d7fbf8ca8bf5bc6fbc5dd9855e875f669b8de6c85389c06550df1",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.5524688083952354,
+            "mean_entropy": 3.927675391058787,
+            "top1_correct": 252,
+            "top1_space": 1248
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.6411257610166263,
+            "mean_entropy": 3.9057780011721475,
+            "top1_correct": 1,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.6332400104139166,
+            "mean_entropy": 3.901407158569323,
+            "top1_correct": 1,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.009424751770078383,
+            "mean_total_variation": 0.00373274610614326
+          },
+          "file": "case-5-cohort-0.f32le",
+          "sha256": "29b7bfc2ef4f758145511f104c50e1553c162535bed809fc19a38c36223b3910"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.551799629977846,
+            "mean_entropy": 3.930382248839299,
+            "top1_correct": 58,
+            "top1_space": 365
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.301182209659675,
+            "mean_entropy": 3.917451292264094,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.298834876140729,
+            "mean_entropy": 3.9114005189112615,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.014209909985067463,
+            "mean_total_variation": 0.006830777080193273
+          },
+          "file": "case-5-cohort-1.f32le",
+          "sha256": "dc162737639d33e6e16fc5c179b7956847b28c956a7c0d8d12090b086cec47d8"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5603317970667043,
+            "mean_entropy": 3.9250069798131175,
+            "top1_correct": 76,
+            "top1_space": 375
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.944820939241232,
+            "mean_entropy": 3.9220352821209805,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.946635159391463,
+            "mean_entropy": 3.9226114564257846,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013071877844436308,
+            "mean_total_variation": 0.0055673439122643185
+          },
+          "file": "case-5-cohort-2.f32le",
+          "sha256": "8c2113455f65ea1ed5366c539ae3e290fba888da6352dd819bbb13b3c66809ce"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.880173998808315,
+            "mean_entropy": 3.9581568854775218,
+            "top1_correct": 113,
+            "top1_space": 350
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.4599552075290188,
+            "mean_entropy": 3.9011016032158534,
+            "top1_correct": 0,
+            "top1_space": 1
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.464705198662407,
+            "mean_entropy": 3.9028428150691883,
+            "top1_correct": 0,
+            "top1_space": 1
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013434080949286402,
+            "mean_total_variation": 0.006345605140949626
+          },
+          "file": "case-5-cohort-3.f32le",
+          "sha256": "1577708ad45b86a32a6bedc4c101183486857d59e74251aa3b302246fd19d734"
+        }
+      ],
+      "artifact_id": "sha256:859543718e95c7b9bd2b93703f1f890d4461841b82637ea55d99fd2b70f2d481",
+      "generated_bytes": [
+        [
+          32,
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          32,
+          101,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 37,
+        "mode": "ordinary",
+        "name": "seed37_ordinary"
+      },
+      "model_json_sha256": "0a7d7d20681a678bbc003da37a7b7d5703baff33d828516ba6e7a0ccf6c7d9d1",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.554529412773083,
+            "mean_entropy": 3.8883604644738767,
+            "top1_correct": 264,
+            "top1_space": 1477
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.8193729361364097,
+            "mean_entropy": 3.89481025761149,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.8233335046399852,
+            "mean_entropy": 3.8944090303773176,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.006552825341250068,
+            "mean_total_variation": 0.0022227209399835234
+          },
+          "file": "case-6-cohort-0.f32le",
+          "sha256": "cb08af7e2cf4c75a64c28d24cbbbc57fbb576175de128cc55b005e4980713aef"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5345459947650295,
+            "mean_entropy": 3.884072269540477,
+            "top1_correct": 62,
+            "top1_space": 354
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.360650555032294,
+            "mean_entropy": 3.945610754605422,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.360961338823692,
+            "mean_entropy": 3.947369577912068,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.005986344868026121,
+            "mean_total_variation": 0.002092908189301551
+          },
+          "file": "case-6-cohort-1.f32le",
+          "sha256": "85ebf06063b178c0e6038ed1607aa77b488799405b2a57a8b6ceaee7b3dd25f5"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5492764512198316,
+            "mean_entropy": 3.8947499782820034,
+            "top1_correct": 68,
+            "top1_space": 345
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.974895538843437,
+            "mean_entropy": 3.908937711167689,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.976341037727988,
+            "mean_entropy": 3.911742679349576,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.00841445477157004,
+            "mean_total_variation": 0.0030328821485740916
+          },
+          "file": "case-6-cohort-2.f32le",
+          "sha256": "e5c4aa83d3c42204b989e87394541e089ddb835841676d0852aef8d2fe9dde9f"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.880080790333105,
+            "mean_entropy": 3.8947315263363174,
+            "top1_correct": 114,
+            "top1_space": 352
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.47301801109907,
+            "mean_entropy": 3.870018859644241,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.474061309651203,
+            "mean_entropy": 3.870057022131314,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.007850793143801924,
+            "mean_total_variation": 0.0025640516831903397
+          },
+          "file": "case-6-cohort-3.f32le",
+          "sha256": "d78169023ba65f98e50cb1370d3cdef676f60d9a839f30ad5acd2afd07150034"
+        }
+      ],
+      "artifact_id": "sha256:bec37f82cad50687d5a68a6d8b7a839d57abe6b8b9cf7b4cfb026847ad238eb6",
+      "generated_bytes": [
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          101,
+          101,
+          101,
+          101,
+          101,
+          101
+        ],
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          101,
+          101,
+          101,
+          101,
+          101,
+          101,
+          101,
+          101
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 37,
+        "mode": "train",
+        "name": "mixture-37-0-train-query-train"
+      },
+      "model_json_sha256": "0acfd051fd1f6d4dcddf0c00a762166d10ebdb7a0a9694712628c0bf88c8f52f",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.553146850505348,
+            "mean_entropy": 3.8870187340124573,
+            "top1_correct": 249,
+            "top1_space": 1459
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.815655705806221,
+            "mean_entropy": 3.8850802228661907,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.815213356534467,
+            "mean_entropy": 3.8857657462126998,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013112633331514552,
+            "mean_total_variation": 0.003930460369771516
+          },
+          "file": "case-7-cohort-0.f32le",
+          "sha256": "5136e5dafebf449e0877ab7a86d8a9225b5f64b389aaa810b18dadae508db68c"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5317739395840473,
+            "mean_entropy": 3.882835644945798,
+            "top1_correct": 70,
+            "top1_space": 343
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.380294819087126,
+            "mean_entropy": 3.9265682488351237,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.374348593746833,
+            "mean_entropy": 3.939925984605161,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.01684387277786082,
+            "mean_total_variation": 0.007118100094456237
+          },
+          "file": "case-7-cohort-1.f32le",
+          "sha256": "45340cb71b1f2de936778503288134c8ce9119318648816b0baadb4273f13989"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.548806243914945,
+            "mean_entropy": 3.892846533600737,
+            "top1_correct": 68,
+            "top1_space": 351
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.959929445170095,
+            "mean_entropy": 3.9026292781895786,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.963472830779581,
+            "mean_entropy": 3.909273134032312,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.014873783146771676,
+            "mean_total_variation": 0.005883908842175917
+          },
+          "file": "case-7-cohort-2.f32le",
+          "sha256": "5573ac88f1abbc14a9437e27028dbd3e25ff313bd98401d728fe9b606f963d81"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.872951897174331,
+            "mean_entropy": 3.8986162850073556,
+            "top1_correct": 118,
+            "top1_space": 359
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.4688311916053305,
+            "mean_entropy": 3.859915204029741,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.466218188257495,
+            "mean_entropy": 3.8579926802689286,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.011737027633273778,
+            "mean_total_variation": 0.0036345200211911695
+          },
+          "file": "case-7-cohort-3.f32le",
+          "sha256": "2a04ff4a805f7bc019eade1ea4da6d17d02d1af13a9eedbfded46c1196c9e52b"
+        }
+      ],
+      "artifact_id": "sha256:8826b1e46f53dcd3e25c06558ca5ff06f70f7aff02cea084a0e0e1a661fc3ebb",
+      "generated_bytes": [
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    },
+    {
+      "selection": {
+        "seed": 37,
+        "mode": "frozen",
+        "name": "mixture-37-0-train-query-frozen"
+      },
+      "model_json_sha256": "aac54bc58c184bea509e6f0a11c9370781c5f7dbd1d9fd2321870339d6d3d346",
+      "cohorts": [
+        {
+          "name": "historical-heldout",
+          "metrics": {
+            "targets": 2048,
+            "mean_ce": 3.5531468436755373,
+            "mean_entropy": 3.8870187430833076,
+            "top1_correct": 249,
+            "top1_space": 1459
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.815655738683742,
+            "mean_entropy": 3.8850803302593233,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.815213276287956,
+            "mean_entropy": 3.8857657951646614,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.013112643475353349,
+            "mean_total_variation": 0.003930450513678089
+          },
+          "file": "case-8-cohort-0.f32le",
+          "sha256": "f0b7be367490a0251ad76f2a5428fc2a3e8d30eda79ea2facfb6a238679b55aa"
+        },
+        {
+          "name": "autograd-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.531773939560509,
+            "mean_entropy": 3.882835656565468,
+            "top1_correct": 70,
+            "top1_space": 343
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.380295011259397,
+            "mean_entropy": 3.926568244065685,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.374348617475804,
+            "mean_entropy": 3.9399260051179446,
+            "top1_correct": 0,
+            "top1_space": 4
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.016843869004466293,
+            "mean_total_variation": 0.00711808753746346
+          },
+          "file": "case-8-cohort-1.f32le",
+          "sha256": "b88992131e77c95746a79bffd9fdcb3d1cbcdd52fcb22d4246512eaa39b0e8e9"
+        },
+        {
+          "name": "geometry-prose",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.5488062451440783,
+            "mean_entropy": 3.8928465444911757,
+            "top1_correct": 68,
+            "top1_space": 351
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 4.959929508437242,
+            "mean_entropy": 3.9026292347397655,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 4.963472883078766,
+            "mean_entropy": 3.9092730850040436,
+            "top1_correct": 0,
+            "top1_space": 2
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.014873758254692957,
+            "mean_total_variation": 0.005883920106586319
+          },
+          "file": "case-8-cohort-2.f32le",
+          "sha256": "5509b9ee4ef73573ff8d9e6455e43515c68bfc474fecad082c61f26aec549141"
+        },
+        {
+          "name": "rust-code",
+          "metrics": {
+            "targets": 512,
+            "mean_ce": 3.872951901164496,
+            "mean_entropy": 3.8986162924902628,
+            "top1_correct": 118,
+            "top1_space": 359
+          },
+          "original_last": {
+            "targets": 4,
+            "mean_ce": 3.468831210180242,
+            "mean_entropy": 3.8599151879506004,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "reversed_prefix_last": {
+            "targets": 4,
+            "mean_ce": 3.4662182130514747,
+            "mean_entropy": 3.8579927785480805,
+            "top1_correct": 0,
+            "top1_space": 3
+          },
+          "context_sensitivity": {
+            "logits_rms": 0.011737039134313062,
+            "mean_total_variation": 0.0036345300066443335
+          },
+          "file": "case-8-cohort-3.f32le",
+          "sha256": "f946ceba3d4ece44ad2abe1100999b5525abf27713b6d810e29ea89371ed4e58"
+        }
+      ],
+      "artifact_id": "sha256:da1978816821c27a1d52ceaedc1ba29e2f18d4edebfa795c017b2a50bb698a8c",
+      "generated_bytes": [
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ]
+      ]
+    }
+  ]
+}

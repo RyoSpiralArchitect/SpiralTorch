@@ -1,0 +1,2743 @@
+{
+  "schema": "spiraltorch.frozen_diagnosis.review_recheck.v1",
+  "original_commit": "2308aaeee17b23a55100546b6ad4b8d8bffbc4d7",
+  "original_plan_sha256": "b76aa34198f7285afb0e290b99461f69437e06fbff20b324c6dff4437d56957d",
+  "original_result_sha256": {
+    "native-result.json": "9c062376b69b2c0659419ac98097c3ef692858fadb0690d499e931f5868e1fe0",
+    "torch-result.json": "3a640ac5f7e2e51e0277415c2674937ce9b590be93e829208ed0bf65364da049"
+  },
+  "checker_sha256": "34d34eaf01dbd75c2f4fc2a484f1eae889d3d54e6cefd8483fab39a9b9ed8dba",
+  "recheck_sha256": "949b5bc5407401877e7962d6ec2509f72b1ffd5b4b4533db70460690249a4347",
+  "producer_source_checks": {
+    "original_git_blob": 7,
+    "retained_private_file": 5
+  },
+  "cases": [
+    {
+      "selection": {
+        "seed": 11,
+        "mode": "ordinary",
+        "name": "seed11_ordinary"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.560237962832908,
+                "mean_entropy": 3.935294063569494,
+                "top1_correct": 273,
+                "top1_space": 1536
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.772188602987028,
+                "mean_entropy": 3.924302011285589,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.7726876273345855,
+                "mean_entropy": 3.923461227174384,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006023954690187784,
+                "mean_total_variation": 0.00252800945881399
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5602379630028467,
+                "mean_entropy": 3.9352940823798734,
+                "top1_correct": 273,
+                "top1_space": 1536
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.772188475113083,
+                "mean_entropy": 3.924302052792936,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.772687667722956,
+                "mean_entropy": 3.9234612449814343,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006023943902132134,
+                "mean_total_variation": 0.0025280069199898813
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": -4.440892098500626e-16
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.543429618568378,
+                "mean_entropy": 3.9213341957869203,
+                "top1_correct": 69,
+                "top1_space": 383
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.3817723905131505,
+                "mean_entropy": 3.9067145665905487,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.384325117815508,
+                "mean_entropy": 3.9078317871739534,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006264409897216677,
+                "mean_total_variation": 0.0025536640928093845
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5434296234109,
+                "mean_entropy": 3.9213342190700673,
+                "top1_correct": 69,
+                "top1_space": 383
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.381772408039577,
+                "mean_entropy": 3.9067145908990053,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.384325005272654,
+                "mean_entropy": 3.907831756556586,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006264408215636717,
+                "mean_total_variation": 0.002553671960302929
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.1920928955078125e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.556079887947355,
+                "mean_entropy": 3.930507512811602,
+                "top1_correct": 81,
+                "top1_space": 396
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 5.134029964586354,
+                "mean_entropy": 3.9254961964176633,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 5.130073861640173,
+                "mean_entropy": 3.926767204914903,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006411366852899276,
+                "mean_total_variation": 0.002523808756954783
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 4.440892098500626e-16,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5560798991846645,
+                "mean_entropy": 3.9305075346775173,
+                "top1_correct": 81,
+                "top1_space": 396
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 5.134029884121806,
+                "mean_entropy": 3.925496258175808,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 5.130073911656534,
+                "mean_entropy": 3.9267672455568112,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006411352351667797,
+                "mean_total_variation": 0.0025237768723938747
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8476353118883133,
+                "mean_entropy": 3.9381555107813084,
+                "top1_correct": 131,
+                "top1_space": 404
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.5600367929117587,
+                "mean_entropy": 3.929820239018901,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.556286097099096,
+                "mean_entropy": 3.928728924404356,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.004603521372467412,
+                "mean_total_variation": 0.002052900711355788
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8476353035116193,
+                "mean_entropy": 3.938155534084943,
+                "top1_correct": 131,
+                "top1_space": 404
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.560036699235256,
+                "mean_entropy": 3.9298203320855407,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.556286205806802,
+                "mean_entropy": 3.9287289879160263,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.0046035323997775275,
+                "mean_total_variation": 0.002052895376677143
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 4.440892098500626e-16,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 11,
+        "mode": "train",
+        "name": "mixture-11-0-train-query-train"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5602077600260493,
+                "mean_entropy": 3.942435840842673,
+                "top1_correct": 278,
+                "top1_space": 1530
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.7643374338026137,
+                "mean_entropy": 3.923508616201995,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.7624666764967474,
+                "mean_entropy": 3.925959980931739,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013749851061597396,
+                "mean_total_variation": 0.0048055696622684215
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 4.440892098500626e-16
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5602077600857975,
+                "mean_entropy": 3.942435871445274,
+                "top1_correct": 278,
+                "top1_space": 1530
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.764337365132039,
+                "mean_entropy": 3.9235086789396236,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.7624669205085572,
+                "mean_entropy": 3.9259600313155616,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013749853866658142,
+                "mean_total_variation": 0.004805553050167175
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5411013652912167,
+                "mean_entropy": 3.9277356186795864,
+                "top1_correct": 69,
+                "top1_space": 387
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.390636774939164,
+                "mean_entropy": 3.915352934794419,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.394090512759564,
+                "mean_entropy": 3.9147650899162567,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.009222302830708143,
+                "mean_total_variation": 0.003548938528717371
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5411013857362823,
+                "mean_entropy": 3.9277356506293772,
+                "top1_correct": 69,
+                "top1_space": 387
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.390636628541428,
+                "mean_entropy": 3.9153529882208473,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.394090561658964,
+                "mean_entropy": 3.914765053175345,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.009222320921318096,
+                "mean_total_variation": 0.0035489550004997755
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": -8.881784197001252e-16,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5558498572768253,
+                "mean_entropy": 3.939462807955783,
+                "top1_correct": 82,
+                "top1_space": 393
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 5.1250752181785195,
+                "mean_entropy": 3.9432827794846728,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 5.12513347282274,
+                "mean_entropy": 3.9373101464049647,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011747583619253973,
+                "mean_total_variation": 0.00457709500792358
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5558498551966955,
+                "mean_entropy": 3.939462839003843,
+                "top1_correct": 82,
+                "top1_space": 393
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 5.125075186268847,
+                "mean_entropy": 3.9432828844056056,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 5.125133467878772,
+                "mean_entropy": 3.937310189224977,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011747597453505447,
+                "mean_total_variation": 0.004577122331972904
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8465844618142047,
+                "mean_entropy": 3.943943720749366,
+                "top1_correct": 130,
+                "top1_space": 400
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.5588388531564275,
+                "mean_entropy": 3.9352437197482484,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.549644518203926,
+                "mean_entropy": 3.93494099460088,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011433553596384831,
+                "mean_total_variation": 0.005409321302412889
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": -4.440892098500626e-16,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8465844631303776,
+                "mean_entropy": 3.943943739366995,
+                "top1_correct": 130,
+                "top1_space": 400
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.5588389752379452,
+                "mean_entropy": 3.9352436642432256,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.5496446396146526,
+                "mean_entropy": 3.9349410833892087,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011433538264986437,
+                "mean_total_variation": 0.005409305198995314
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 11,
+        "mode": "frozen",
+        "name": "mixture-11-0-train-query-frozen"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5602077636522713,
+                "mean_entropy": 3.9424358308866783,
+                "top1_correct": 278,
+                "top1_space": 1530
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.764337105949557,
+                "mean_entropy": 3.923508539188772,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.762466890998436,
+                "mean_entropy": 3.9259600028578623,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013749850981105602,
+                "mean_total_variation": 0.004805549212338046
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.560207767171742,
+                "mean_entropy": 3.942435849603409,
+                "top1_correct": 278,
+                "top1_space": 1530
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.764337367710524,
+                "mean_entropy": 3.923508663072363,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.76246691537432,
+                "mean_entropy": 3.925959908169517,
+                "top1_correct": 1,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013749850562480239,
+                "mean_total_variation": 0.004805560246827465
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 4.440892098500626e-16,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.541101367282271,
+                "mean_entropy": 3.927735603208712,
+                "top1_correct": 69,
+                "top1_space": 387
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.390636828216812,
+                "mean_entropy": 3.9153529336961874,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.394090573376417,
+                "mean_entropy": 3.914765009915021,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.009222322869737265,
+                "mean_total_variation": 0.0035489610005744205
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.541101366979643,
+                "mean_entropy": 3.9277356395615604,
+                "top1_correct": 69,
+                "top1_space": 387
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.390636764497514,
+                "mean_entropy": 3.915352865107685,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.394090563425099,
+                "mean_entropy": 3.9147649467119403,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.0092223126850322,
+                "mean_total_variation": 0.0035489446604518387
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5558498513881145,
+                "mean_entropy": 3.939462794082927,
+                "top1_correct": 82,
+                "top1_space": 393
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 5.125075280364995,
+                "mean_entropy": 3.943282755722581,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 5.125133580301799,
+                "mean_entropy": 3.9373101698678106,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011747544820624067,
+                "mean_total_variation": 0.00457706639888514
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 8.881784197001252e-16,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5558498616605774,
+                "mean_entropy": 3.9394628157029485,
+                "top1_correct": 82,
+                "top1_space": 393
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 5.125075306352273,
+                "mean_entropy": 3.9432827163522473,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 5.125133588879302,
+                "mean_entropy": 3.9373101091748173,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011747562715032751,
+                "mean_total_variation": 0.004577079961021522
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": -8.881784197001252e-16
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.1920928955078125e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.846584440766691,
+                "mean_entropy": 3.943943691712758,
+                "top1_correct": 130,
+                "top1_space": 400
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.5588389337569435,
+                "mean_entropy": 3.9352436571019096,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.549644628824676,
+                "mean_entropy": 3.934941007114446,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.01143353446227825,
+                "mean_total_variation": 0.0054093245527143535
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.846584427708843,
+                "mean_entropy": 3.9439437138622817,
+                "top1_correct": 130,
+                "top1_space": 400
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.5588389957479913,
+                "mean_entropy": 3.935243793547447,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.5496443993607896,
+                "mean_entropy": 3.934941023442191,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011433540687944605,
+                "mean_total_variation": 0.005409317732570184
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": -4.440892098500626e-16,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 23,
+        "mode": "ordinary",
+        "name": "seed23_ordinary"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5544920981450465,
+                "mean_entropy": 3.924239603688799,
+                "top1_correct": 245,
+                "top1_space": 1238
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.642150207341644,
+                "mean_entropy": 3.906653828862459,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.639146506462184,
+                "mean_entropy": 3.9045678984600634,
+                "top1_correct": 1,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.00905598991293674,
+                "mean_total_variation": 0.003827704522495279
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": -4.440892098500626e-16,
+              "reversed_prefix_last": 4.440892098500626e-16
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.55449209505849,
+                "mean_entropy": 3.9242396096046135,
+                "top1_correct": 245,
+                "top1_space": 1238
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.6421501040938473,
+                "mean_entropy": 3.9066538654777387,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.639146654446977,
+                "mean_entropy": 3.904567757507337,
+                "top1_correct": 1,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.00905598431858403,
+                "mean_total_variation": 0.0038277006983818912
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": -4.440892098500626e-16,
+              "reversed_prefix_last": -4.440892098500626e-16
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.1920928955078125e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5551306890103307,
+                "mean_entropy": 3.9274278700985925,
+                "top1_correct": 61,
+                "top1_space": 365
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.304889514277163,
+                "mean_entropy": 3.907324550882831,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.298104642059574,
+                "mean_entropy": 3.9060267784448968,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.015512103020384315,
+                "mean_total_variation": 0.005221558917650085
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5551306826320506,
+                "mean_entropy": 3.927427865543492,
+                "top1_correct": 61,
+                "top1_space": 365
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.30488932704231,
+                "mean_entropy": 3.907324490040608,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.298104621613454,
+                "mean_entropy": 3.906026883510493,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.015512092548038687,
+                "mean_total_variation": 0.005221534852643218
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.1920928955078125e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.560407571075587,
+                "mean_entropy": 3.9228592046193844,
+                "top1_correct": 77,
+                "top1_space": 371
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.9439366882465094,
+                "mean_entropy": 3.920150729380328,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.945891373215334,
+                "mean_entropy": 3.9177525478215407,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.010042926485494229,
+                "mean_total_variation": 0.004365566948975108
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5604075768206145,
+                "mean_entropy": 3.922859209233493,
+                "top1_correct": 77,
+                "top1_space": 371
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.943936616713123,
+                "mean_entropy": 3.9201506965886703,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.945891385275167,
+                "mean_entropy": 3.9177525385766234,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.010042916595330862,
+                "mean_total_variation": 0.004365525492337776
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.892281402771427,
+                "mean_entropy": 3.9483649517428123,
+                "top1_correct": 95,
+                "top1_space": 331
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.467370921573669,
+                "mean_entropy": 3.902841318400814,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.469745018186924,
+                "mean_entropy": 3.904375604806419,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.007640487570751881,
+                "mean_total_variation": 0.0032225465454197894
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": -4.440892098500626e-16,
+              "reversed_prefix_last": 4.440892098500626e-16
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.892281391300973,
+                "mean_entropy": 3.948364953722745,
+                "top1_correct": 95,
+                "top1_space": 331
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.467370921063078,
+                "mean_entropy": 3.9028412546639126,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.469745044699251,
+                "mean_entropy": 3.9043756053429193,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.007640499036584126,
+                "mean_total_variation": 0.003222555241181433
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 23,
+        "mode": "train",
+        "name": "mixture-23-0-train-query-train"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.552468821333314,
+                "mean_entropy": 3.9276753991288222,
+                "top1_correct": 252,
+                "top1_space": 1248
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.6411257146411216,
+                "mean_entropy": 3.905778039088422,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.6332400589930507,
+                "mean_entropy": 3.9014072823211703,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.009424762603541784,
+                "mean_total_variation": 0.0037327645680769704
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 4.440892098500626e-16,
+              "reversed_prefix_last": -4.440892098500626e-16
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5524688296132156,
+                "mean_entropy": 3.927675404049175,
+                "top1_correct": 252,
+                "top1_space": 1248
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.6411256794573186,
+                "mean_entropy": 3.905778073214873,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.6332399874910957,
+                "mean_entropy": 3.901407194101132,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.009424782539527861,
+                "mean_total_variation": 0.003732780184668866
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.1920928955078125e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.551799646137748,
+                "mean_entropy": 3.9303822523797036,
+                "top1_correct": 58,
+                "top1_space": 365
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.3011821866430395,
+                "mean_entropy": 3.917451319887576,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.2988350491417116,
+                "mean_entropy": 3.9114004891759397,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014209916973073364,
+                "mean_total_variation": 0.006830780913234474
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5517996434638457,
+                "mean_entropy": 3.9303822683479464,
+                "top1_correct": 58,
+                "top1_space": 365
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.301182328175155,
+                "mean_entropy": 3.917451362804281,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.298835089415616,
+                "mean_entropy": 3.911400408227375,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014209946021766479,
+                "mean_total_variation": 0.00683079712630861
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.560331805242369,
+                "mean_entropy": 3.9250069686237725,
+                "top1_correct": 76,
+                "top1_space": 375
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.94482086796291,
+                "mean_entropy": 3.9220353102225394,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.946635182621185,
+                "mean_entropy": 3.9226113996373595,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013071880049381434,
+                "mean_total_variation": 0.005567329652823319
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.560331812044978,
+                "mean_entropy": 3.925006981717657,
+                "top1_correct": 76,
+                "top1_space": 375
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.944820712733392,
+                "mean_entropy": 3.9220353516872404,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.946635144829183,
+                "mean_entropy": 3.922611518612796,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013071882909565341,
+                "mean_total_variation": 0.005567342211318825
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8801740021932933,
+                "mean_entropy": 3.9581568837966565,
+                "top1_correct": 113,
+                "top1_space": 350
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.45995532186174,
+                "mean_entropy": 3.90110155413769,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.4647050400357866,
+                "mean_entropy": 3.902842830858524,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013434090754994734,
+                "mean_total_variation": 0.0063456226893517775
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8801740047221034,
+                "mean_entropy": 3.958156882436121,
+                "top1_correct": 113,
+                "top1_space": 350
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.459955254282036,
+                "mean_entropy": 3.901101682140209,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.4647050631153054,
+                "mean_entropy": 3.9028427534348786,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013434089712510672,
+                "mean_total_variation": 0.0063456276616422926
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 23,
+        "mode": "frozen",
+        "name": "mixture-23-0-train-query-frozen"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 1.0728836059570312e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5524688083952354,
+                "mean_entropy": 3.927675391058787,
+                "top1_correct": 252,
+                "top1_space": 1248
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.6411257610166263,
+                "mean_entropy": 3.9057780011721475,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.6332400104139166,
+                "mean_entropy": 3.901407158569323,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.009424751770078383,
+                "mean_total_variation": 0.00373274610614326
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5524688089343357,
+                "mean_entropy": 3.9276753933134607,
+                "top1_correct": 252,
+                "top1_space": 1248
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.641125849100137,
+                "mean_entropy": 3.9057780241791527,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.6332400310012725,
+                "mean_entropy": 3.9014070790619924,
+                "top1_correct": 1,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.009424780261586161,
+                "mean_total_variation": 0.00373277566089218
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 4.440892098500626e-16,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.551799629977846,
+                "mean_entropy": 3.930382248839299,
+                "top1_correct": 58,
+                "top1_space": 365
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.301182209659676,
+                "mean_entropy": 3.917451292264094,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.298834876140729,
+                "mean_entropy": 3.9114005189112615,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014209909985067463,
+                "mean_total_variation": 0.006830777080193273
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 8.881784197001252e-16,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.551799630338423,
+                "mean_entropy": 3.930382258483875,
+                "top1_correct": 58,
+                "top1_space": 365
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.301182253502622,
+                "mean_entropy": 3.917451481740948,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.298835051972722,
+                "mean_entropy": 3.9114004190537606,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014209943673724546,
+                "mean_total_variation": 0.006830831337386848
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.430511474609375e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5603317970667043,
+                "mean_entropy": 3.9250069798131175,
+                "top1_correct": 76,
+                "top1_space": 375
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.944820939241232,
+                "mean_entropy": 3.9220352821209805,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.946635159391463,
+                "mean_entropy": 3.9226114564257846,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013071877844436308,
+                "mean_total_variation": 0.0055673439122643185
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5603317996508057,
+                "mean_entropy": 3.9250069692148926,
+                "top1_correct": 76,
+                "top1_space": 375
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.9448208453097395,
+                "mean_entropy": 3.9220354000607096,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.946635167570171,
+                "mean_entropy": 3.9226115094448053,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013071886347117638,
+                "mean_total_variation": 0.005567370661689342
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 1.1920928955078125e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.880173998808315,
+                "mean_entropy": 3.9581568854775218,
+                "top1_correct": 113,
+                "top1_space": 350
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.4599552075290188,
+                "mean_entropy": 3.9011016032158534,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.4647051986624064,
+                "mean_entropy": 3.9028428150691883,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013434080949286402,
+                "mean_total_variation": 0.006345605140949626
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": -4.440892098500626e-16
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8801740099149375,
+                "mean_entropy": 3.9581568855456952,
+                "top1_correct": 113,
+                "top1_space": 350
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.4599552128033255,
+                "mean_entropy": 3.9011016666681053,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.4647050705102567,
+                "mean_entropy": 3.9028428219273246,
+                "top1_correct": 0,
+                "top1_space": 1
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.01343408510073276,
+                "mean_total_variation": 0.006345597287689467
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 37,
+        "mode": "ordinary",
+        "name": "seed37_ordinary"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 1.9073486328125e-06,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.554529412773083,
+                "mean_entropy": 3.8883604644738767,
+                "top1_correct": 264,
+                "top1_space": 1477
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.8193729361364097,
+                "mean_entropy": 3.89481025761149,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.8233335046399852,
+                "mean_entropy": 3.8944090303773176,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006552825341250068,
+                "mean_total_variation": 0.0022227209399835234
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.554529415392193,
+                "mean_entropy": 3.8883604710997566,
+                "top1_correct": 264,
+                "top1_space": 1477
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.819372935691521,
+                "mean_entropy": 3.894810247915145,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.8233334079583874,
+                "mean_entropy": 3.894408999770054,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.006552807412472344,
+                "mean_total_variation": 0.0022227052169501464
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": -4.440892098500626e-16,
+              "reversed_prefix_last": -4.440892098500626e-16
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5345459947650295,
+                "mean_entropy": 3.884072269540477,
+                "top1_correct": 62,
+                "top1_space": 354
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.360650555032294,
+                "mean_entropy": 3.945610754605422,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.360961338823692,
+                "mean_entropy": 3.947369577912068,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.005986344868026121,
+                "mean_total_variation": 0.002092908189301551
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5345459951571687,
+                "mean_entropy": 3.8840722746274743,
+                "top1_correct": 62,
+                "top1_space": 354
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.360650647457188,
+                "mean_entropy": 3.945610745163992,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.360961402039234,
+                "mean_entropy": 3.9473697154627474,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.005986319834914935,
+                "mean_total_variation": 0.002092917338761663
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5492764512198316,
+                "mean_entropy": 3.8947499782820034,
+                "top1_correct": 68,
+                "top1_space": 345
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.974895538843437,
+                "mean_entropy": 3.908937711167689,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.976341037727988,
+                "mean_entropy": 3.911742679349576,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.00841445477157004,
+                "mean_total_variation": 0.0030328821485740916
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5492764578501466,
+                "mean_entropy": 3.8947499799839713,
+                "top1_correct": 68,
+                "top1_space": 345
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.974895636460549,
+                "mean_entropy": 3.908937780242659,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.9763410721848125,
+                "mean_entropy": 3.911742729292141,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.008414457839202947,
+                "mean_total_variation": 0.0030329077536945448
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.880080790333105,
+                "mean_entropy": 3.8947315263363174,
+                "top1_correct": 114,
+                "top1_space": 352
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.47301801109907,
+                "mean_entropy": 3.870018859644241,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.474061309651203,
+                "mean_entropy": 3.870057022131314,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.007850793143801924,
+                "mean_total_variation": 0.0025640516831903397
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.880080787737568,
+                "mean_entropy": 3.894731526130147,
+                "top1_correct": 114,
+                "top1_space": 352
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.4730179725079484,
+                "mean_entropy": 3.870018804490541,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.474061377983396,
+                "mean_entropy": 3.870056966218314,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.007850775003142008,
+                "mean_total_variation": 0.0025640409043654624
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 4.440892098500626e-16
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 37,
+        "mode": "train",
+        "name": "mixture-37-0-train-query-train"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.553146850505348,
+                "mean_entropy": 3.8870187340124573,
+                "top1_correct": 249,
+                "top1_space": 1459
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.8156557058062215,
+                "mean_entropy": 3.8850802228661907,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.8152133565344664,
+                "mean_entropy": 3.8857657462126998,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013112633331514552,
+                "mean_total_variation": 0.003930460369771516
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 4.440892098500626e-16,
+              "reversed_prefix_last": -4.440892098500626e-16
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5531468431755426,
+                "mean_entropy": 3.8870187351227887,
+                "top1_correct": 249,
+                "top1_space": 1459
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.815655710485408,
+                "mean_entropy": 3.885080229583977,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.8152133130560664,
+                "mean_entropy": 3.8857657526590765,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.0131126390296787,
+                "mean_total_variation": 0.003930445751740643
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.531773939584047,
+                "mean_entropy": 3.882835644945798,
+                "top1_correct": 70,
+                "top1_space": 343
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.380294819087126,
+                "mean_entropy": 3.9265682488351237,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.374348593746833,
+                "mean_entropy": 3.939925984605161,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.01684387277786082,
+                "mean_total_variation": 0.007118100094456237
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": -4.440892098500626e-16,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5317739292571786,
+                "mean_entropy": 3.8828356580166647,
+                "top1_correct": 70,
+                "top1_space": 343
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.380294912866748,
+                "mean_entropy": 3.926568278062138,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.374348526573248,
+                "mean_entropy": 3.93992607988018,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.016843885354470116,
+                "mean_total_variation": 0.007118110315047326
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5488062439149455,
+                "mean_entropy": 3.892846533600737,
+                "top1_correct": 68,
+                "top1_space": 351
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.959929445170095,
+                "mean_entropy": 3.9026292781895786,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.963472830779581,
+                "mean_entropy": 3.909273134032312,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014873783146771676,
+                "mean_total_variation": 0.005883908842175917
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 4.440892098500626e-16,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.548806233396966,
+                "mean_entropy": 3.892846546192736,
+                "top1_correct": 68,
+                "top1_space": 351
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.959929320116692,
+                "mean_entropy": 3.902629304546047,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.963472831465187,
+                "mean_entropy": 3.909273124352736,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014873758225426439,
+                "mean_total_variation": 0.005883886785713277
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 8.881784197001252e-16
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.872951897174331,
+                "mean_entropy": 3.8986162850073556,
+                "top1_correct": 118,
+                "top1_space": 359
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.4688311916053305,
+                "mean_entropy": 3.859915204029741,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.466218188257495,
+                "mean_entropy": 3.8579926802689286,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011737027633273778,
+                "mean_total_variation": 0.0036345200211911695
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8729519032406086,
+                "mean_entropy": 3.8986162925609715,
+                "top1_correct": 118,
+                "top1_space": 359
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.4688312293018995,
+                "mean_entropy": 3.8599151689998967,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.466218244248597,
+                "mean_entropy": 3.85799289721958,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011737050794701722,
+                "mean_total_variation": 0.003634542131778178
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    },
+    {
+      "selection": {
+        "seed": 37,
+        "mode": "frozen",
+        "name": "mixture-37-0-train-query-frozen"
+      },
+      "cohorts": [
+        {
+          "cohort": "historical-heldout",
+          "compared_logits": 525312,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.5531468436755373,
+                "mean_entropy": 3.8870187430833076,
+                "top1_correct": 249,
+                "top1_space": 1459
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.815655738683742,
+                "mean_entropy": 3.8850803302593233,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.815213276287956,
+                "mean_entropy": 3.8857657951646614,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013112643475353349,
+                "mean_total_variation": 0.003930450513678089
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 2048,
+                "mean_ce": 3.553146851596314,
+                "mean_entropy": 3.8870187513029424,
+                "top1_correct": 249,
+                "top1_space": 1459
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.815655699987026,
+                "mean_entropy": 3.8850802736951717,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.8152133392037726,
+                "mean_entropy": 3.8857658608846464,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.013112639468917957,
+                "mean_total_variation": 0.003930449760831648
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "autograd-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.531773939560509,
+                "mean_entropy": 3.882835656565468,
+                "top1_correct": 70,
+                "top1_space": 343
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.380295011259397,
+                "mean_entropy": 3.926568244065685,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.374348617475804,
+                "mean_entropy": 3.9399260051179446,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.016843869004466293,
+                "mean_total_variation": 0.00711808753746346
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5317739390842493,
+                "mean_entropy": 3.882835673273406,
+                "top1_correct": 70,
+                "top1_space": 343
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.380294945071034,
+                "mean_entropy": 3.92656825043068,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.374348532068588,
+                "mean_entropy": 3.9399261025563512,
+                "top1_correct": 0,
+                "top1_space": 4
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.016843888272456746,
+                "mean_total_variation": 0.007118101398242912
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "geometry-prose",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.5488062451440783,
+                "mean_entropy": 3.8928465444911757,
+                "top1_correct": 68,
+                "top1_space": 351
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.959929508437242,
+                "mean_entropy": 3.9026292347397655,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.963472883078766,
+                "mean_entropy": 3.9092730850040436,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014873758254692957,
+                "mean_total_variation": 0.005883920106586319
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.548806233572459,
+                "mean_entropy": 3.8928465471279803,
+                "top1_correct": 68,
+                "top1_space": 351
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 4.959929481066301,
+                "mean_entropy": 3.9026292048602,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 4.9634729380498515,
+                "mean_entropy": 3.909273062413966,
+                "top1_correct": 0,
+                "top1_space": 2
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.014873769894730661,
+                "mean_total_variation": 0.0058839130747333195
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        },
+        {
+          "cohort": "rust-code",
+          "compared_logits": 132096,
+          "max_logit_absolute_error": 9.5367431640625e-07,
+          "native": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.872951901164496,
+                "mean_entropy": 3.8986162924902628,
+                "top1_correct": 118,
+                "top1_space": 359
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.468831210180242,
+                "mean_entropy": 3.8599151879506004,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.4662182130514747,
+                "mean_entropy": 3.8579927785480805,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011737039134313062,
+                "mean_total_variation": 0.0036345300066443335
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 0.0,
+              "reversed_prefix_last": 0.0
+            }
+          },
+          "torch": {
+            "metrics": {
+              "metrics": {
+                "targets": 512,
+                "mean_ce": 3.8729519018516148,
+                "mean_entropy": 3.898616297145282,
+                "top1_correct": 118,
+                "top1_space": 359
+              },
+              "original_last": {
+                "targets": 4,
+                "mean_ce": 3.4688312563933987,
+                "mean_entropy": 3.859915159332667,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "reversed_prefix_last": {
+                "targets": 4,
+                "mean_ce": 3.4662181796044744,
+                "mean_entropy": 3.857992823749871,
+                "top1_correct": 0,
+                "top1_space": 3
+              },
+              "context_sensitivity": {
+                "logits_rms": 0.011737033207912423,
+                "mean_total_variation": 0.0036345381261016206
+              }
+            },
+            "mean_ce_changes": {
+              "metrics": 0.0,
+              "original_last": 4.440892098500626e-16,
+              "reversed_prefix_last": 0.0
+            }
+          }
+        }
+      ],
+      "valid_generation_equal": true
+    }
+  ],
+  "compared_logits": 8294400,
+  "maximum_mean_ce_change": 8.881784197001252e-16,
+  "baseline_unchanged": true,
+  "original_summaries_verified": true,
+  "unchanged_numeric_gate_passed": true,
+  "original_outputs_rewritten": false,
+  "new_model_executions": 0,
+  "new_training_updates": 0
+}

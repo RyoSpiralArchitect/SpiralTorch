@@ -446,6 +446,15 @@ to actual byte output with model identity and serving-generation checks. Rust
 owns window movement and byte selection; Python and the packaged browser are
 clients. Teacher-forced admission does not certify free-running quality.
 
+The [fresh 25-arm, 512-update study](../benchmarks/results/2026-10-15-language-budget-512/README.md)
+now compares generated behavior alongside the loss trajectory. All arms pass the
+independent PyTorch numerical gates and beat a train-only unigram baseline, but
+not its simple bigram counterpart; the fixed greedy samples still collapse into
+spaces. This is not a language-quality or geometry-superiority result. Strengthen
+the resident model-parameter learning path next, including optimizer-state
+ownership and exact resume; do not mistake host-side Z-space meta-Adam for a
+resident model optimizer or add geometry search to compensate for a weak baseline.
+
 The [packaged language lifecycle](wasm_byte_language_mlops.md) connects those
 operations through `spiraltorch-wasm`, with CPU-only transport and explicit
 WebGPU execution. Actual byte-LM artifacts retain learned geometry/router state;
@@ -459,8 +468,7 @@ private runs and explicit recovery from a sealed checkpoint into a new lineage.
 It preserves the Rust geometry/optimizer contract rather than rebuilding it in
 Python. This is local storage/execution, not a second scheduler or promotion gate.
 
-Next, compare generated behavior alongside the fixed-window cohort measurements,
-and connect this lifecycle to orchestration without duplicating policy. Reuse the existing
+Connect this lifecycle to orchestration without duplicating policy. Reuse the existing
 [HF lineage, promotion and experiment executor](python/build-and-validation.md)
 rather than adding a second scheduler or independently interpreted client gate.
 Geometry must affect the executable model, not just its report. Its benefit
