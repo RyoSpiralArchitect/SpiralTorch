@@ -59,6 +59,11 @@ python -I -B bindings/st-py/examples/native_geometry_training.py
 
 This exercises activation fitting, not whole-language-model quality.
 
+The source-only [native AdamW extension](native-geometry-adamw.md) adds shared
+Rust adaptive updates, global-norm clipping and explicit optimizer checkpoints
+to this same runtime and `NativeCausalLm`. It returns a new runtime/optimizer
+pair; the existing in-place SGD/MSE methods keep their current behavior.
+
 ## Scope and Next Recovery Work
 
 | Surface | Ownership and current dependency |

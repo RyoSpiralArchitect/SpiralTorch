@@ -9,6 +9,9 @@ use pyo3::types::{PyByteArray, PyDict};
 use st_nn::geometry_runtime::{NativeGeometryBatch, NativeGeometryRuntime};
 use std::collections::BTreeMap;
 
+mod optimizer;
+pub(crate) use optimizer::{adamw_step, PyNativeGeometryAdamW};
+
 fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
 }
@@ -143,6 +146,48 @@ impl PyNativeGeometryRuntime {
         py.detach(|| self.inner.step_sgd(&batch.inner, &upstream, learning_rate))
             .map_err(error)?;
         Ok(self.inner.artifact().artifact_id().into())
+    }
+
+    #[pyo3(signature = (batch, upstream, optimizer, learning_rate, *, weight_decay=None))]
+    fn step_adamw(
+        &self,
+        py: Python<'_>,
+        batch: &PyNativeGeometryBatch,
+        upstream: &Bound<'_, PyAny>,
+        optimizer: &PyNativeGeometryAdamW,
+        learning_rate: &Bound<'_, PyAny>,
+        weight_decay: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(Self, PyNativeGeometryAdamW)> {
+        let step = adamw_step(learning_rate, weight_decay)?;
+        let count = batch.inner.output().data().len();
+        let upstream = sequence(upstream, count, count)?;
+        py.detach(|| {
+            self.inner
+                .step_adamw(&batch.inner, &upstream, &optimizer.inner, step)
+        })
+        .map(|(inner, optimizer)| (Self { inner }, PyNativeGeometryAdamW { inner: optimizer }))
+        .map_err(error)
+    }
+
+    #[pyo3(signature = (batch, upstream, optimizer, learning_rate, *, weight_decay=None))]
+    fn step_adamw_buffer(
+        &self,
+        py: Python<'_>,
+        batch: &PyNativeGeometryBatch,
+        upstream: &Bound<'_, PyAny>,
+        optimizer: &PyNativeGeometryAdamW,
+        learning_rate: &Bound<'_, PyAny>,
+        weight_decay: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(Self, PyNativeGeometryAdamW)> {
+        let step = adamw_step(learning_rate, weight_decay)?;
+        let count = batch.inner.output().data().len();
+        let upstream = read_f32(upstream, count, Some(count))?;
+        py.detach(|| {
+            self.inner
+                .step_adamw(&batch.inner, &upstream, &optimizer.inner, step)
+        })
+        .map(|(inner, optimizer)| (Self { inner }, PyNativeGeometryAdamW { inner: optimizer }))
+        .map_err(error)
     }
 
     fn train_mse(
@@ -312,6 +357,7 @@ impl PyNativeGeometryBatch {
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<PyNativeGeometryAdamW>()?;
     module.add_class::<PyNativeGeometryRuntime>()?;
     module.add_class::<PyNativeGeometryBatch>()
 }

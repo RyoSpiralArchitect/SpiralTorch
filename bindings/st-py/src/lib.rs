@@ -539,6 +539,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "SafeTensorArchive",
         "NativeCausalLm",
         "NativeCausalLmGradients",
+        "NativeGeometryAdamW",
         "NdTensor",
         "ChannelAffineKernel",
         "ChannelAffineLearningBatch",

@@ -585,6 +585,7 @@ jobs:
       - name: Portable byte corpus study contracts
         run: |
           python -I -B bindings/st-py/tests/test_native_geometry_runtime.py -v
+          python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
           python -I -B bindings/st-py/examples/native_weights_geometry.py
@@ -876,6 +877,7 @@ jobs:
             bindings/st-py/tests/test_geometry_artifact.py \
             bindings/st-py/tests/test_channel_affine.py \
             bindings/st-py/tests/test_native_geometry_parity.py \
+            bindings/st-py/tests/test_native_geometry_adamw_parity.py \
             bindings/st-py/tests/test_native_weights_parity.py \
             bindings/st-py/tests/test_native_causal_lm_parity.py \
             bindings/st-py/tests/test_native_causal_lm_learning_parity.py \

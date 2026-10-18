@@ -202,6 +202,75 @@ fn training_admission_and_invalid_updates_fail_without_changes() {
     assert!(other.step_geometry_sgd(&gradient, 0.1).is_err());
 }
 
+#[test]
+fn native_adamw_learns_and_resumes_without_changing_the_base() {
+    use crate::geometry_runtime::{AdamWStep, GlobalNormClip, NativeGeometryAdamW};
+    let base = load();
+    let mut model = base.with_geometry(trainable(&base)).unwrap();
+    let original = model.geometry_artifact().unwrap().clone();
+    let mut optimizer = NativeGeometryAdamW::new(
+        &original,
+        Default::default(),
+        Some(GlobalNormClip::new(0.1).unwrap()),
+    )
+    .unwrap();
+    let windows = [1, 2, 3, 4, 5, 6, 7, 8];
+    let first = model.geometry_loss_gradients(&windows, [2, 4]).unwrap();
+    let step = AdamWStep::new(0.05, 0.01).unwrap();
+    for _ in 0..20 {
+        let gradient = model.geometry_loss_gradients(&windows, [2, 4]).unwrap();
+        (model, optimizer) = model
+            .step_geometry_adamw(&gradient, &optimizer, step)
+            .unwrap();
+    }
+    assert!(model.next_token_loss(&windows, [2, 4]).unwrap() < first.loss() - 1e-4);
+    assert_eq!(base.token.data(), model.token.data());
+    assert_eq!(base.head.as_slice(), model.head.as_slice());
+    assert!(model.step_geometry_adamw(&first, &optimizer, step).is_err());
+    assert_eq!(optimizer.revision(), 20);
+    for (before, after) in original
+        .record()
+        .placements
+        .iter()
+        .zip(&model.geometry_artifact().unwrap().record().placements)
+    {
+        for (p, q) in before.tensors.iter().zip(&after.tensors) {
+            if !p.requires_grad {
+                assert_eq!(p.values, q.values);
+            }
+        }
+    }
+    let saved = model.geometry_artifact().unwrap();
+    let restored = base
+        .with_geometry(
+            GeometryAdapterArtifact::from_json(
+                saved.to_json().as_bytes(),
+                saved.artifact_id(),
+                base.base_model_identity(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let restored_state = NativeGeometryAdamW::from_json(
+        optimizer.to_json().unwrap().as_bytes(),
+        &optimizer.checkpoint_id().unwrap(),
+        restored.geometry_artifact().unwrap(),
+    )
+    .unwrap();
+    let gradients = model.geometry_loss_gradients(&windows, [2, 4]).unwrap();
+    let a = model
+        .step_geometry_adamw(&gradients, &optimizer, step)
+        .unwrap();
+    let b = restored
+        .step_geometry_adamw(&gradients, &restored_state, step)
+        .unwrap();
+    assert_eq!(
+        a.0.geometry_artifact().unwrap().to_json(),
+        b.0.geometry_artifact().unwrap().to_json()
+    );
+    assert_eq!(a.1.to_json().unwrap(), b.1.to_json().unwrap());
+}
+
 fn overflowing_frozen_base_fixture() -> NativeCausalLm {
     let mut p = parameters();
     for (name, (_, values)) in &mut p {

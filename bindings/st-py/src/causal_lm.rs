@@ -1,6 +1,7 @@
 //! Token transport only; model loading, execution, loss and geometry stay in Rust.
 use crate::channel_affine::{dimension, reject_bool};
 use crate::geometry_artifact::PyGeometryAdapterArtifact;
+use crate::geometry_runtime::{adamw_step, PyNativeGeometryAdamW};
 use crate::weights::{PyNdTensor, PySafeTensorArchive};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -165,6 +166,24 @@ impl PyNativeCausalLm {
                 .step_geometry_sgd(&gradients.inner, learning_rate)
         })
         .map(|inner| Self { inner })
+        .map_err(error)
+    }
+
+    #[pyo3(signature = (gradients, optimizer, learning_rate, *, weight_decay=None))]
+    fn step_geometry_adamw(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmGradients,
+        optimizer: &PyNativeGeometryAdamW,
+        learning_rate: &Bound<'_, PyAny>,
+        weight_decay: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(Self, PyNativeGeometryAdamW)> {
+        let step = adamw_step(learning_rate, weight_decay)?;
+        py.detach(|| {
+            self.inner
+                .step_geometry_adamw(&gradients.inner, &optimizer.inner, step)
+        })
+        .map(|(inner, optimizer)| (Self { inner }, PyNativeGeometryAdamW { inner: optimizer }))
         .map_err(error)
     }
 

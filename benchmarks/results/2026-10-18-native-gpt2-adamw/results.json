@@ -1,0 +1,97 @@
+{
+  "schema": "spiraltorch.native_gpt2_adamw_probe.v1",
+  "scope": "three_windows_native_update_and_exact_resume_not_quality_or_speed",
+  "source_sha256": {
+    "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+    "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+    "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+  },
+  "fixture_sha256": "d9b06f31931838c0033bec00f60390af4a328f4719dc0a77e0d0d2cbef631791",
+  "probe_sha256": "aa8b08fc11666ba41df15c60a89014fe5723ba4d8e96d2b554bbc32f6ccf91ae",
+  "policy": {
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "max_gradient_norm": 0.1
+  },
+  "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+  "initial_geometry_artifact_id": "sha256:fb295546689a3c3c83578d5b959da6a9057ba427257f34ac7eaf1b7b78713b94",
+  "rows": [
+    {
+      "step": 0,
+      "case": "meaning",
+      "text": "The meaning of life is not the same as",
+      "ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318,
+        407,
+        262,
+        976,
+        355
+      ],
+      "pre_nll": 2.811478614807129,
+      "post_nll": 2.8105554580688477,
+      "geometry": {
+        "file": "geometry-0.json",
+        "sha256": "c0439786056ad1f63a4080e6b7f48f50f6a5057e7c848ab8b7a63c7ae3cca719"
+      },
+      "optimizer_checkpoint_id": "sha256:ed3298bf226f6045cb4e551f73edf6fce9f2bf8fbc9c89608de1e9bcc5e06e6f",
+      "optimizer_revision": 1
+    },
+    {
+      "step": 1,
+      "case": "models",
+      "text": "Machine learning models can be used to predict",
+      "ids": [
+        37573,
+        4673,
+        4981,
+        460,
+        307,
+        973,
+        284,
+        4331
+      ],
+      "pre_nll": 3.2898879051208496,
+      "post_nll": 3.289332389831543,
+      "geometry": {
+        "file": "geometry-1.json",
+        "sha256": "b3defb8be4c75d4cc0efd53639a7a1097429c2f07ce6d770e4bc0b2fa56c616f"
+      },
+      "optimizer_checkpoint_id": "sha256:8f414b6bcec5d6ba9a9380a6147bcb5d37b34b2fa865a05b8668ebcea218c499",
+      "optimizer_revision": 2
+    },
+    {
+      "step": 2,
+      "case": "spiraltorch",
+      "text": "SpiralTorch is a free, open source",
+      "ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257,
+        1479,
+        11,
+        1280,
+        2723
+      ],
+      "pre_nll": 3.433616876602173,
+      "post_nll": 3.4330906867980957,
+      "geometry": {
+        "file": "geometry-2.json",
+        "sha256": "605d61372d389128ccf0737cd90cdab14750e034c7fb0b5724a407396a1ea0de"
+      },
+      "optimizer_checkpoint_id": "sha256:6d33fd66a99c712426b762eea718dd35c5167f959acccb15ab7d89ba22fc6dab",
+      "optimizer_revision": 3
+    }
+  ],
+  "optional_ml_imports_forbidden": true,
+  "pair_continuation_exact": true,
+  "base_probe_unchanged": true,
+  "base_probe_logits_sha256": "c034b19f51d66c5f37f7abdbc0942d0f4dd9906dad01e7a4c67a2bfebbc4945d"
+}

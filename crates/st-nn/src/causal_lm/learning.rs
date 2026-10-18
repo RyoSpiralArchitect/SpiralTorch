@@ -290,4 +290,30 @@ impl NativeCausalLm {
         next.geometry = Some(Arc::new(geometry));
         Ok(next)
     }
+
+    /// Geometry-only AdamW with shared native clipping, moments and clocks.
+    /// Both returned owners commit together; the original pair and base stay unchanged.
+    pub fn step_geometry_adamw(
+        &self,
+        gradients: &NativeCausalLmGradients,
+        optimizer: &crate::geometry_runtime::NativeGeometryAdamW,
+        step: crate::geometry_runtime::AdamWStep,
+    ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
+        if gradients.base_id != self.base_id {
+            return Err("LM gradients belong to a different base model".into());
+        }
+        let runtime = self
+            .geometry
+            .as_ref()
+            .ok_or("native LM has no attached geometry")?;
+        let (geometry, optimizer) = runtime.with_gradients_adamw(
+            &gradients.geometry_id,
+            &gradients.parameters,
+            optimizer,
+            step,
+        )?;
+        let mut next = self.clone();
+        next.geometry = Some(Arc::new(geometry));
+        Ok((next, optimizer))
+    }
 }

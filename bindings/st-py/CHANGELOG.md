@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `NativeGeometryAdamW` for standalone geometry and frozen GPT-2
+  language-loss learning. The shared Rust AdamW/global-norm kernels own
+  adaptive updates; Python only transports inputs. Atomic model/optimizer
+  pairs preserve frozen and absent placements, reject invalid candidates,
+  and resume from pinned geometry plus bounded moment/clock checkpoints.
+  Zero rate freezes values, moments and clocks by the existing ST contract.
+  Source-only after the immutable 0.4.32 release; no whole-model FT or GPU
+  optimizer execution is claimed.
+
 - Add native `vjp_parameters` / `vjp_parameters_buffer` for all 14 geometry
   recipe configurations. Shared Rust pullbacks omit unused input adjoints in
   standalone SGD and at the earliest frozen-GPT-2 geometry site, preventing

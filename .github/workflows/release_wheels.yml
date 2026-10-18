@@ -263,6 +263,7 @@ jobs:
           python -I ../../tools/smoke_learning_stack.py
           python -I ../../tools/smoke_fft.py
           python -I -B ../../bindings/st-py/tests/test_native_geometry_runtime.py -v
+          python -I -B ../../bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B ../../bindings/st-py/examples/native_geometry_training.py
           python -I -B ../../bindings/st-py/tests/test_native_weights.py -v
           python -I -B ../../bindings/st-py/tests/test_native_causal_lm.py -v
@@ -280,6 +281,7 @@ jobs:
           python -I tools/smoke_learning_stack.py
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
+          python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v7
         with:

@@ -143,6 +143,11 @@ Frozen parameters and fixed buffers never change; invalid rates or updates
 leave the source untouched. There is no hidden optimizer state. An artifact
 alone is not a data-cursor/RNG checkpoint or a provenance certificate.
 
+For adaptive updates, the separate [native geometry AdamW API](native-geometry-adamw.md)
+uses shared Rust clipping, moments and accepted-update clocks. It returns an
+atomic `(model, optimizer)` pair and supports exact pair checkpoint continuation;
+it does not delegate to `torch.optim` or alter the stateless SGD contract above.
+
 Learning saves block-boundary activations from the earliest participating
 geometry layer and replays one block at a time, preserving the full `[B,T]`
 partition. Reverse execution stops immediately after collecting that earliest

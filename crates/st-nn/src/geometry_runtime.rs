@@ -19,6 +19,8 @@ use std::collections::BTreeMap;
 
 mod elliptic;
 mod fractional;
+mod optimizer;
+pub use optimizer::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
 #[cfg(test)]
 mod memory_tests;
 #[cfg(test)]
@@ -26,6 +28,7 @@ mod sequence_tests;
 mod topos;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+type ParameterGradients = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
 
 #[derive(Debug)]
 enum Pullback {
@@ -361,23 +364,45 @@ impl NativeGeometryRuntime {
     pub(crate) fn with_gradients_sgd(
         &self,
         source_id: &str,
-        gradients: &BTreeMap<String, BTreeMap<String, Vec<f32>>>,
+        gradients: &ParameterGradients,
         learning_rate: f32,
     ) -> Result<Self> {
-        if source_id != self.artifact.artifact_id() {
-            return Err("geometry snapshot is stale or belongs to another artifact".into());
-        }
+        self.validate_gradients(source_id, gradients)?;
         if !learning_rate.is_finite() || learning_rate <= 0. {
             return Err("learning rate must be finite and positive".into());
         }
         let mut record = self.artifact.record().clone();
+        for placement in &mut record.placements {
+            let Some(values) = gradients.get(&placement.path) else {
+                continue;
+            };
+            for parameter in &mut placement.tensors {
+                if parameter.role != GeometryAdapterTensorRole::Parameter
+                    || !parameter.requires_grad
+                {
+                    continue;
+                }
+                let gradient = &values[&parameter.name];
+                let current =
+                    Tensor::from_vec(1, parameter.values.len(), parameter.values.clone())?;
+                let delta = Tensor::from_vec(1, gradient.len(), gradient.clone())?
+                    .scale_with_backend(learning_rate, TensorUtilBackend::Cpu)?;
+                parameter.values = current
+                    .sub_with_backend(&delta, TensorUtilBackend::Cpu)?
+                    .data()
+                    .to_vec();
+            }
+        }
+        Ok(Self::new(GeometryAdapterArtifact::create(record)?))
+    }
+
+    fn validate_gradients(&self, source_id: &str, gradients: &ParameterGradients) -> Result<()> {
+        if source_id != self.artifact.artifact_id() {
+            return Err("geometry snapshot is stale or belongs to another artifact".into());
+        }
         let mut trainable = false;
         for (path, values) in gradients {
-            let placement = record
-                .placements
-                .iter_mut()
-                .find(|p| p.path == *path)
-                .ok_or("unknown geometry gradient placement")?;
+            let placement = self.placement(path)?;
             let parameters = placement
                 .tensors
                 .iter()
@@ -394,29 +419,13 @@ impl NativeGeometryRuntime {
                 {
                     return Err("invalid geometry parameter gradient shape or values".into());
                 }
-            }
-            for parameter in &mut placement.tensors {
-                if parameter.role != GeometryAdapterTensorRole::Parameter
-                    || !parameter.requires_grad
-                {
-                    continue;
-                }
-                trainable = true;
-                let gradient = &values[&parameter.name];
-                let current =
-                    Tensor::from_vec(1, parameter.values.len(), parameter.values.clone())?;
-                let delta = Tensor::from_vec(1, gradient.len(), gradient.clone())?
-                    .scale_with_backend(learning_rate, TensorUtilBackend::Cpu)?;
-                parameter.values = current
-                    .sub_with_backend(&delta, TensorUtilBackend::Cpu)?
-                    .data()
-                    .to_vec();
+                trainable |= parameter.requires_grad;
             }
         }
         if !trainable {
             return Err("selected placements have no trainable parameters".into());
         }
-        Ok(Self::new(GeometryAdapterArtifact::create(record)?))
+        Ok(())
     }
 
     /// One mean-MSE SGD step using the existing Rust loss and its pullback.
