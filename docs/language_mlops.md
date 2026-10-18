@@ -61,6 +61,12 @@ uses that identical route. This makes a matched WaveGate ablation possible
 without a separate Python-only training or checkpoint implementation. It is a
 non-geometric adapter control, not full-model FT or a claimed quality win.
 
+The [fixed book comparison](../benchmarks/results/2026-10-18-hf-book-controls/README.md)
+extends that public route to a pinned chapter corpus and four controls across
+three seeds. Its initial state, matched-gradient pairs and unused reserve are
+qualified before training. Results must be retained for every declared arm;
+the preflight itself is not evidence that geometry improves language quality.
+
 ## Start With One Explicit Run
 
 Build a [WGPU source wheel](python/build-and-validation.md). Pin a request and
