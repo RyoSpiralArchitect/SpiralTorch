@@ -8,6 +8,9 @@ use pyo3::prelude::*;
 use st_nn::causal_lm::{CausalLmLimits, NativeCausalLm, NativeCausalLmGradients};
 use std::collections::BTreeMap;
 
+mod accumulation;
+use accumulation::PyNativeCausalLmAccumulator;
+
 fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
 }
@@ -136,6 +139,12 @@ impl PyNativeCausalLm {
             .map(|inner| PyGeometryAdapterArtifact { inner })
     }
 
+    fn geometry_accumulator(&self, py: Python<'_>) -> PyResult<PyNativeCausalLmAccumulator> {
+        py.detach(|| self.inner.geometry_accumulator())
+            .map(|inner| PyNativeCausalLmAccumulator { inner })
+            .map_err(error)
+    }
+
     fn geometry_loss_gradients(
         &self,
         py: Python<'_>,
@@ -251,6 +260,7 @@ impl PyNativeCausalLm {
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLm>()?;
+    module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;
     Ok(())
 }

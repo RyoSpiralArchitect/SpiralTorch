@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add Rust-owned `NativeCausalLmAccumulator` for token-weighted geometry
+  learning over variable-length, unpadded microbatches. Loss and parameter
+  means accumulate without Python tensor arithmetic or retained decoder tapes;
+  shared SGD/AdamW applies once per group, with clipping after reduction.
+  Invalid additions are atomic, and stale model snapshots are rejected.
+  Pending accumulations are not checkpointed; resume at optimizer boundaries.
+  Source-only after 0.4.32, not full-model FT or a memory/speed measurement.
+
 - Add `NativeGeometryAdamW` for standalone geometry and frozen GPT-2
   language-loss learning. The shared Rust AdamW/global-norm kernels own
   adaptive updates; Python only transports inputs. Atomic model/optimizer
@@ -63,7 +71,9 @@
 
 ## 0.4.32
 
-0.4.32 is prepared in source; this does not confirm PyPI publication.
+0.4.32 was published and its three official wheel hashes verified on 2026-10-18.
+See the [release receipt](../../docs/ops/release.md). The newer native LM,
+AdamW and accumulation APIs above are not included in those immutable wheels.
 
 - Add `NativeGeometryRuntime` and immutable `NativeGeometryBatch` to execute
   portable channel-affine and WaveGate v1/v2 placements without Torch, NumPy or

@@ -37,6 +37,51 @@ zero weight decay. Specify hyperparameters on construction; learning rate and
 weight decay are explicit step arguments. No scheduler or parameter-group
 decay heuristic is inferred from parameter names.
 
+## Token-Weighted Microbatches
+
+```python
+for group in microbatch_groups:
+    accumulation = model.geometry_accumulator()
+    for windows, shape in group:  # unpadded [B,T], T >= 2; lengths may differ
+        accumulation.accumulate_loss(model, windows, shape)
+    print(accumulation.loss, accumulation.target_tokens, accumulation.microbatches)
+    model, optimizer = accumulation.step_adamw(
+        model, optimizer, learning_rate=0.001, weight_decay=0.01
+    )
+```
+
+`NativeCausalLmAccumulator` has no public constructor or caller-supplied
+gradient setter. `model.geometry_accumulator()` seals it to the current base
+and geometry IDs. `accumulate_loss` performs native forward/backward and
+reduction without exporting parameter arrays. Alternatively,
+`accumulation.add(model.geometry_loss_gradients(windows, shape))` accepts a
+sealed native gradient batch. `step_sgd(model, learning_rate)` uses the same
+mean with the existing stateless update path.
+
+Each window contributes `B * (T - 1)` next-token targets. The group loss and
+gradient are target-weighted means, **not** equally weighted microbatch means.
+For lengths three and five with batch size one, the weights are two and four.
+There is no fabricated concatenated shape and no padding or ignored-label
+semantics. SGD runs once, or AdamW clips the combined gradient once and advances
+its clocks once, irrespective of microbatch count.
+
+The Rust owner retains f64 parameter/loss means and integer counters, not token
+windows, logits or decoder tapes. Each window still has its own admitted
+forward/replay memory. An addition stages new means before committing, so a
+bad token, stale snapshot, invalid gradient or exhausted budget cannot partly
+modify the accumulation. The cumulative target count is capped at `2**53` for
+exact integer-to-f64 conversion. Online means reduce f32 sum-overflow risk;
+they are not cancellation-proof or bitwise equivalent to a full-batch
+reduction, and order can affect rounding.
+
+An empty accumulation has `loss is None`; inspection or update of its gradients
+fails. `parameter_gradients()` returns detached f32 copies rounded at that
+boundary. Updates do not clear or consume the accumulation. Start a new one
+for each new model snapshot; applying an old one to changed geometry rejects.
+Pending accumulations are **not serialized**: checkpoint the model/optimizer
+pair at completed update boundaries and save the external data cursor/schedule
+separately. Mid-group fault recovery must replay that whole group.
+
 ## Standalone Geometry
 
 ```python
@@ -123,6 +168,21 @@ frozen derivatives, scalar state, overflow, domain rejection and clock limits.
 These are implementation and continuation checks, not held-out language-quality
 or speedup evidence. The core compiles for WASM; no browser or GPU execution of
 this new optimizer is claimed.
+
+The accumulation follow-up adds five Rust and four isolated Python tests for
+weighted/ragged means, full-batch agreement within tolerance, atomic rejection,
+pre-extraction budgets and exact next-group continuation. Its optional 28-case
+reference test covers all 14 recipes with SGD and clipped AdamW over three
+updates. A fresh local run passed 48 Rust, 39 isolated Python and 249 optional
+comparison/regression cases. A separate read-only source review found no
+actionable correctness issue; this is not a proof of arbitrary numerical
+stability or long-run model quality.
+
+The [real GPT-2 accumulation probe](../../benchmarks/results/2026-10-18-native-gpt2-accumulation/README.md)
+then checks three target-weighted groups, one optimizer tick per group and
+exact next-group continuation with simultaneous Wave/fractional/Topos learning.
+All short-window outcomes and raw-state hashes are retained; no new matched
+real-model Torch AdamW arm, speed measurement or quality claim is implied.
 
 Local checks on 2026-10-18 passed 43 relevant Rust tests, 35 isolated Python
 tests and 192 optional comparison/regression tests (including the 56 new

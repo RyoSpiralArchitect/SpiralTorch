@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 mod decoder;
 mod gpt2;
 mod learning;
-pub use learning::NativeCausalLmGradients;
+pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 

@@ -8,6 +8,9 @@ use std::collections::BTreeMap;
 
 type Parameters = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
 
+mod accumulation;
+pub use accumulation::NativeCausalLmAccumulator;
+
 /// Sealed gradients from one model/artifact snapshot, not a caller-authored update.
 #[derive(Debug)]
 pub struct NativeCausalLmGradients {
@@ -274,18 +277,29 @@ impl NativeCausalLm {
         gradients: &NativeCausalLmGradients,
         learning_rate: f32,
     ) -> CausalLmResult<Self> {
-        if gradients.base_id != self.base_id {
+        self.with_geometry_sgd(
+            &gradients.base_id,
+            &gradients.geometry_id,
+            &gradients.parameters,
+            learning_rate,
+        )
+    }
+
+    fn with_geometry_sgd(
+        &self,
+        base_id: &str,
+        geometry_id: &str,
+        parameters: &Parameters,
+        learning_rate: f32,
+    ) -> CausalLmResult<Self> {
+        if base_id != self.base_id {
             return Err("LM gradients belong to a different base model".into());
         }
         let runtime = self
             .geometry
             .as_ref()
             .ok_or("native LM has no attached geometry")?;
-        let geometry = runtime.with_gradients_sgd(
-            &gradients.geometry_id,
-            &gradients.parameters,
-            learning_rate,
-        )?;
+        let geometry = runtime.with_gradients_sgd(geometry_id, parameters, learning_rate)?;
         let mut next = self.clone();
         next.geometry = Some(Arc::new(geometry));
         Ok(next)
@@ -299,19 +313,32 @@ impl NativeCausalLm {
         optimizer: &crate::geometry_runtime::NativeGeometryAdamW,
         step: crate::geometry_runtime::AdamWStep,
     ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
-        if gradients.base_id != self.base_id {
+        self.with_geometry_adamw(
+            &gradients.base_id,
+            &gradients.geometry_id,
+            &gradients.parameters,
+            optimizer,
+            step,
+        )
+    }
+
+    fn with_geometry_adamw(
+        &self,
+        base_id: &str,
+        geometry_id: &str,
+        parameters: &Parameters,
+        optimizer: &crate::geometry_runtime::NativeGeometryAdamW,
+        step: crate::geometry_runtime::AdamWStep,
+    ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
+        if base_id != self.base_id {
             return Err("LM gradients belong to a different base model".into());
         }
         let runtime = self
             .geometry
             .as_ref()
             .ok_or("native LM has no attached geometry")?;
-        let (geometry, optimizer) = runtime.with_gradients_adamw(
-            &gradients.geometry_id,
-            &gradients.parameters,
-            optimizer,
-            step,
-        )?;
+        let (geometry, optimizer) =
+            runtime.with_gradients_adamw(geometry_id, parameters, optimizer, step)?;
         let mut next = self.clone();
         next.geometry = Some(Arc::new(geometry));
         Ok((next, optimizer))

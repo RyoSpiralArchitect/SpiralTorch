@@ -1,7 +1,7 @@
 # Native Causal Language Models
 
-Source-only extension after the fixed 0.4.32 candidate. This does not establish
-PyPI publication or change the existing optional HF Trainer implementation.
+Source-only extension after the published 0.4.32 release. The immutable release
+wheels do not include this decoder or change the optional HF Trainer implementation.
 
 `NativeCausalLm` executes a complete supported decoder from token IDs to
 vocabulary logits in Rust. Its first explicit checkpoint importer supports
@@ -148,6 +148,12 @@ uses shared Rust clipping, moments and accepted-update clocks. It returns an
 atomic `(model, optimizer)` pair and supports exact pair checkpoint continuation;
 it does not delegate to `torch.optim` or alter the stateless SGD contract above.
 
+For larger effective batches, use the
+[native microbatch accumulator](native-geometry-adamw.md#token-weighted-microbatches).
+It accepts different unpadded window lengths, weights each loss/gradient by its
+number of shifted targets, and applies one update after the group. Token
+extraction, forward/backward admission and snapshot checks remain native.
+
 Learning saves block-boundary activations from the earliest participating
 geometry layer and replays one block at a time, preserving the full `[B,T]`
 partition. Reverse execution stops immediately after collecting that earliest
@@ -178,9 +184,11 @@ comparison after integration with the optional HF observation/Trainer client.
 ```sh
 cargo test -p st-nn --lib causal_lm:: --locked
 python -I -B bindings/st-py/tests/test_native_causal_lm.py
+python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py
 # Optional comparison environment only:
 python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_parity.py
 python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_learning_parity.py
+python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_accumulation_parity.py
 ```
 
 The no-framework test exercises a complete small synthetic decoder, batch

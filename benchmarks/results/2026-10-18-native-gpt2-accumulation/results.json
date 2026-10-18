@@ -1,0 +1,246 @@
+{
+  "schema": "spiraltorch.native_gpt2_accumulation_probe.v1",
+  "scope": "three_ragged_groups_native_update_and_boundary_resume_not_quality_or_speed",
+  "source_sha256": {
+    "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+    "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+    "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+  },
+  "fixture_sha256": "d9b06f31931838c0033bec00f60390af4a328f4719dc0a77e0d0d2cbef631791",
+  "probe_sha256": "b2a438c1929755d6b0f7946cd27b1cacda6677b3092a2b4e9e29fd07d2be96ff",
+  "policy": {
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "max_gradient_norm": 0.1
+  },
+  "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+  "initial_geometry_artifact_id": "sha256:fb295546689a3c3c83578d5b959da6a9057ba427257f34ac7eaf1b7b78713b94",
+  "rows": [
+    {
+      "step": 0,
+      "microbatches": 3,
+      "target_tokens": 25,
+      "pre_nll": 3.194246082305908,
+      "post_nll": 3.1936347579956053,
+      "cases": [
+        {
+          "case": "meaning",
+          "text": "The meaning of life is not the same as",
+          "ids": [
+            464,
+            3616,
+            286,
+            1204,
+            318,
+            407,
+            262,
+            976,
+            355
+          ],
+          "targets": 8,
+          "pre_nll": 2.811478614807129,
+          "post_nll": 2.811033248901367
+        },
+        {
+          "case": "models",
+          "text": "Machine learning models can be used to predict",
+          "ids": [
+            37573,
+            4673,
+            4981,
+            460,
+            307,
+            973,
+            284,
+            4331
+          ],
+          "targets": 7,
+          "pre_nll": 3.2899045944213867,
+          "post_nll": 3.2895030975341797
+        },
+        {
+          "case": "spiraltorch",
+          "text": "SpiralTorch is a free, open source",
+          "ids": [
+            50,
+            4063,
+            282,
+            15884,
+            354,
+            318,
+            257,
+            1479,
+            11,
+            1280,
+            2723
+          ],
+          "targets": 10,
+          "pre_nll": 3.4334990978240967,
+          "post_nll": 3.432608127593994
+        }
+      ],
+      "gradient": {
+        "file": "gradient-0.json",
+        "sha256": "4a6f0aedf7f5fbce5b70b7679580e78b8395fbcd2a7f552c3188f4cd8ccbcf36"
+      },
+      "geometry": {
+        "file": "geometry-0.json",
+        "sha256": "e054e29b928d0a6c6380f3293846b2d257aeb7066729fdf69d8c58642971d1c3"
+      },
+      "optimizer_checkpoint_id": "sha256:19093ff748af558e26b943ff85495ab63b741f671e30faaf4a4cadea08cc5433",
+      "optimizer_revision": 1
+    },
+    {
+      "step": 1,
+      "microbatches": 3,
+      "target_tokens": 25,
+      "pre_nll": 3.1936347579956053,
+      "post_nll": 3.1930005836486814,
+      "cases": [
+        {
+          "case": "meaning",
+          "text": "The meaning of life is not the same as",
+          "ids": [
+            464,
+            3616,
+            286,
+            1204,
+            318,
+            407,
+            262,
+            976,
+            355
+          ],
+          "targets": 8,
+          "pre_nll": 2.811033248901367,
+          "post_nll": 2.8106019496917725
+        },
+        {
+          "case": "models",
+          "text": "Machine learning models can be used to predict",
+          "ids": [
+            37573,
+            4673,
+            4981,
+            460,
+            307,
+            973,
+            284,
+            4331
+          ],
+          "targets": 7,
+          "pre_nll": 3.2895030975341797,
+          "post_nll": 3.289041042327881
+        },
+        {
+          "case": "spiraltorch",
+          "text": "SpiralTorch is a free, open source",
+          "ids": [
+            50,
+            4063,
+            282,
+            15884,
+            354,
+            318,
+            257,
+            1479,
+            11,
+            1280,
+            2723
+          ],
+          "targets": 10,
+          "pre_nll": 3.432608127593994,
+          "post_nll": 3.4316911697387695
+        }
+      ],
+      "gradient": {
+        "file": "gradient-1.json",
+        "sha256": "042e99ee000697b031d6c9565643c09575580e93b7a5904c828b7a7526517e76"
+      },
+      "geometry": {
+        "file": "geometry-1.json",
+        "sha256": "2a8decfc3e4d07a4fb5e4a32c829aecf1486f96631fe1e883df8664f2c5af4c5"
+      },
+      "optimizer_checkpoint_id": "sha256:6e9d1e1c5be167ac8e05556cf35e63f3272565ec9bc96e606b7ddb102e690c88",
+      "optimizer_revision": 2
+    },
+    {
+      "step": 2,
+      "microbatches": 3,
+      "target_tokens": 25,
+      "pre_nll": 3.193000583648682,
+      "post_nll": 3.192367582321167,
+      "cases": [
+        {
+          "case": "meaning",
+          "text": "The meaning of life is not the same as",
+          "ids": [
+            464,
+            3616,
+            286,
+            1204,
+            318,
+            407,
+            262,
+            976,
+            355
+          ],
+          "targets": 8,
+          "pre_nll": 2.8106019496917725,
+          "post_nll": 2.8101444244384766
+        },
+        {
+          "case": "models",
+          "text": "Machine learning models can be used to predict",
+          "ids": [
+            37573,
+            4673,
+            4981,
+            460,
+            307,
+            973,
+            284,
+            4331
+          ],
+          "targets": 7,
+          "pre_nll": 3.289041042327881,
+          "post_nll": 3.288612127304077
+        },
+        {
+          "case": "spiraltorch",
+          "text": "SpiralTorch is a free, open source",
+          "ids": [
+            50,
+            4063,
+            282,
+            15884,
+            354,
+            318,
+            257,
+            1479,
+            11,
+            1280,
+            2723
+          ],
+          "targets": 10,
+          "pre_nll": 3.4316911697387695,
+          "post_nll": 3.4307749271392822
+        }
+      ],
+      "gradient": {
+        "file": "gradient-2.json",
+        "sha256": "a4b92c23ce58d6073cb6786d55b1832d9c17229e2a798b0b74ddd834e3bc1933"
+      },
+      "geometry": {
+        "file": "geometry-2.json",
+        "sha256": "1e80f461f1a45c30deb4a189f1d99e2756cd7024495da2cc94bc193c9d2de775"
+      },
+      "optimizer_checkpoint_id": "sha256:329145c15f2040be547f032defe8d541e627307f65221de946ff0ded5c26a382",
+      "optimizer_revision": 3
+    }
+  ],
+  "optional_ml_imports_forbidden": true,
+  "next_group_continuation_exact": true,
+  "base_probe_unchanged": true,
+  "base_probe_logits_sha256": "c034b19f51d66c5f37f7abdbc0942d0f4dd9906dad01e7a4c67a2bfebbc4945d"
+}
