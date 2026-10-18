@@ -68,8 +68,9 @@ def main(argv=None):
                     read(args.resume, 128 * 1024 * 1024).decode(), args.checkpoint_id, labels=data.get("labels"))
     else:
         recipe = json.loads(read(args.recipe_json, 65_536))
-        if not isinstance(recipe, dict) or set(recipe) != {"context_length", "microbatch_windows", "accumulation_steps",
-                "epochs", "learning_rate", "weight_decay", "label_smoothing", "max_gradient_norm"}:
+        required = {"context_length", "microbatch_windows", "accumulation_steps",
+                    "epochs", "learning_rate", "weight_decay", "label_smoothing", "max_gradient_norm"}
+        if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - {"repetition"}:
             raise ValueError("provide the complete explicit native training and clipping recipe")
         artifact = st.GeometryAdapterArtifact.from_json(read(args.artifact, 64 * 1024 * 1024).decode(),
                                                         args.artifact_id, base.base_model_identity)

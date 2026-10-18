@@ -39,6 +39,21 @@ impl PyNativeCausalLmAccumulator {
         self.inner.loss()
     }
     #[getter]
+    fn causal_loss(&self) -> Option<f64> {
+        self.inner.causal_loss()
+    }
+    #[getter]
+    fn repetition_loss(&self) -> Option<f64> {
+        self.inner.repetition_loss()
+    }
+    #[getter]
+    fn repetition_positions(&self) -> u64 {
+        self.inner.repetition_positions()
+    }
+    fn repetition_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner.objective().repetition).map_err(error)
+    }
+    #[getter]
     fn label_smoothing(&self) -> f64 {
         self.inner.objective().label_smoothing
     }

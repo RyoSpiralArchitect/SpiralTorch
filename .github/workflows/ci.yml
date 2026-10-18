@@ -596,6 +596,8 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_causal_lm_context.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_readout.py -v
           python -I -B benchmarks/results/2026-10-18-native-lm-cache/test_qualification.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_repetition.py -v
+          python -I -B benchmarks/results/2026-10-19-native-repetition/test_qualification.py -v
           python -I -B benchmarks/results/2026-10-19-native-lm-projections/test_publication.py -v
           python -I -B bindings/st-py/examples/native_weights_geometry.py
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
@@ -893,6 +895,7 @@ jobs:
             bindings/st-py/tests/test_native_causal_lm_accumulation_parity.py \
             bindings/st-py/tests/test_native_causal_lm_objective_parity.py \
             bindings/st-py/tests/test_native_causal_lm_training_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_repetition_parity.py \
             bindings/st-py/tests/test_native_causal_lm_generation_parity.py \
             bindings/st-py/tests/test_native_causal_lm_context_parity.py \
             bindings/st-py/tests/test_hf_geometry_trainer.py \
@@ -969,3 +972,4 @@ jobs:
           python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
           python -I tools/smoke_learning_stack.py
           python -I -B bindings/st-py/tests/test_native_causal_lm_readout.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_repetition.py -v

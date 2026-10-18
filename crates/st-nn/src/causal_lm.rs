@@ -17,6 +17,7 @@ mod generation;
 mod gpt2;
 mod learning;
 mod objective;
+mod repetition;
 mod training;
 pub use context::NativeCausalLmContext;
 pub use generation::{
@@ -26,6 +27,7 @@ pub use generation::{
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
+pub use repetition::CausalLmRepetition;
 pub use training::{
     CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
 };

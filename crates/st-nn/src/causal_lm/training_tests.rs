@@ -11,6 +11,7 @@ fn config() -> CausalLmTrainingConfig {
         learning_rate: 0.001,
         weight_decay: 0.01,
         label_smoothing: 0.1,
+        repetition: None,
     }
 }
 
@@ -125,6 +126,7 @@ fn ordered_groups_match_manual_native_accumulation_and_keep_partial_epoch_group(
         let mut accumulator = model
             .geometry_accumulator_with_objective(CausalLmObjective {
                 label_smoothing: 0.1,
+                repetition: None,
             })
             .unwrap();
         for windows in trainer.plan().windows()[start..end].chunks(2) {

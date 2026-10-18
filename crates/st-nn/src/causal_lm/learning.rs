@@ -21,12 +21,31 @@ pub struct NativeCausalLmGradients {
     target_tokens: usize,
     objective: CausalLmObjective,
     loss: f32,
+    causal_loss: f32,
+    parameters: Parameters,
+    causal_parameters: Option<Parameters>,
+    repetition: Option<RepetitionGradients>,
+}
+
+#[derive(Debug)]
+struct RepetitionGradients {
+    loss: f32,
+    active_positions: usize,
     parameters: Parameters,
 }
 
 impl NativeCausalLmGradients {
     pub fn loss(&self) -> f32 {
         self.loss
+    }
+    pub fn causal_loss(&self) -> f32 {
+        self.causal_loss
+    }
+    pub fn repetition_loss(&self) -> f32 {
+        self.repetition.as_ref().map_or(0., |r| r.loss)
+    }
+    pub fn repetition_positions(&self) -> usize {
+        self.repetition.as_ref().map_or(0, |r| r.active_positions)
     }
     pub fn base_model_identity(&self) -> &str {
         &self.base_id
@@ -208,10 +227,11 @@ impl NativeCausalLm {
             target_tokens,
             selected_rows,
             objective,
+            repetition,
         } = prepared;
         let runtime = self.geometry.as_ref().unwrap();
         let c = &self.config;
-        let (first_layer, first_site) = self.first_geometry_site()?;
+        let (first_layer, _) = self.first_geometry_site()?;
         let mut checkpoints = Vec::with_capacity(c.layers - first_layer + 1);
         let mut hidden = self.embed(&ids, shape)?;
         for index in 0..c.layers {
@@ -227,7 +247,7 @@ impl NativeCausalLm {
         };
         let normalized = self.final_norm.forward(&selected, c.norm_epsilon)?;
         let logits = self.project_readout(&normalized)?;
-        let loss = logits
+        let causal_loss = logits
             .cross_entropy_with_logits(&labels, objective.kernel_config())?
             .data()[0];
         let seed = Tensor::from_vec(1, 1, vec![1.])?;
@@ -239,16 +259,110 @@ impl NativeCausalLm {
             &d_logits,
             self.readout_accumulator,
         )?;
+        drop(d_logits);
+        let repetition = match repetition {
+            Some(window) => {
+                let (loss, gradient, active_positions) =
+                    window.loss_gradient(&logits, selected_rows.as_deref(), shape[1])?;
+                if active_positions == 0 {
+                    None
+                } else {
+                    let d_normalized = frozen_pullback(
+                        &self.head,
+                        &self.backward_head,
+                        &gradient,
+                        self.readout_accumulator,
+                    )?;
+                    Some((loss, active_positions, d_normalized))
+                }
+            }
+            None => None,
+        };
+        let hidden_rows = hidden.shape().0;
+        drop((logits, normalized, hidden));
+        let auxiliary_checkpoints = repetition.as_ref().map(|_| checkpoints.clone());
+        let auxiliary_selected = repetition.as_ref().map(|_| selected.clone());
+        let causal_parameters = self.parameter_pullback(
+            checkpoints,
+            hidden_rows,
+            selected,
+            shape,
+            selected_rows.as_deref(),
+            d_normalized,
+        )?;
+        let repetition = match repetition {
+            Some((loss, active_positions, gradient)) => Some(RepetitionGradients {
+                loss,
+                active_positions,
+                parameters: self.parameter_pullback(
+                    auxiliary_checkpoints.unwrap(),
+                    hidden_rows,
+                    auxiliary_selected.unwrap(),
+                    shape,
+                    selected_rows.as_deref(),
+                    gradient,
+                )?,
+            }),
+            None => None,
+        };
+        let mut parameters = causal_parameters;
+        let causal_parameters = repetition.as_ref().map(|_| parameters.clone());
+        let mut loss = causal_loss;
+        if let Some(auxiliary) = &repetition {
+            let strength = objective.repetition.unwrap().config().strength;
+            loss = (f64::from(causal_loss) + strength * f64::from(auxiliary.loss)) as f32;
+            for (path, group) in &mut parameters {
+                for (name, values) in group {
+                    for (value, &other) in values.iter_mut().zip(&auxiliary.parameters[path][name])
+                    {
+                        *value = (f64::from(*value) + strength * f64::from(other)) as f32;
+                        if !value.is_finite() {
+                            return Err("nonfinite combined repetition gradient".into());
+                        }
+                    }
+                }
+            }
+        }
+        if !loss.is_finite() {
+            return Err("nonfinite combined repetition loss".into());
+        }
+        Ok(NativeCausalLmGradients {
+            base_id: self.base_id.clone(),
+            readout_accumulator: self.readout_accumulator,
+            geometry_id: runtime.artifact().artifact_id().to_owned(),
+            shape: window_shape,
+            target_tokens,
+            objective,
+            loss,
+            causal_loss,
+            parameters,
+            causal_parameters,
+            repetition,
+        })
+    }
+
+    fn parameter_pullback(
+        &self,
+        mut checkpoints: Vec<Tensor>,
+        hidden_rows: usize,
+        selected: Tensor,
+        shape: [usize; 2],
+        selected_rows: Option<&[usize]>,
+        d_normalized: Tensor,
+    ) -> CausalLmResult<Parameters> {
+        let runtime = self.geometry.as_ref().unwrap();
+        let c = &self.config;
+        let (first_layer, first_site) = self.first_geometry_site()?;
         let d_selected = selected.layer_norm_input_backward(
             &self.final_norm.gamma,
             &d_normalized,
             c.norm_epsilon,
         )?;
+        drop((selected, d_normalized));
         let mut gradient = match &selected_rows {
-            Some(rows) => d_selected.scatter_add_rows(rows, hidden.shape().0)?,
+            Some(rows) => d_selected.scatter_add_rows(rows, hidden_rows)?,
             None => d_selected,
         };
-        drop((hidden, selected, normalized, logits, d_logits, d_normalized));
         checkpoints.pop();
         let mut parameters = BTreeMap::new();
         for index in (first_layer..c.layers).rev() {
@@ -330,16 +444,7 @@ impl NativeCausalLm {
         if parameters.len() != runtime.artifact().record().placements.len() {
             return Err("not all native geometry placements received a loss gradient".into());
         }
-        Ok(NativeCausalLmGradients {
-            base_id: self.base_id.clone(),
-            readout_accumulator: self.readout_accumulator,
-            geometry_id: runtime.artifact().artifact_id().to_owned(),
-            shape: window_shape,
-            target_tokens,
-            objective,
-            loss,
-            parameters,
-        })
+        Ok(parameters)
     }
 
     /// Atomic stateless SGD across every trainable placement. Return a new

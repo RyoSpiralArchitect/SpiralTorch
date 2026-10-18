@@ -43,7 +43,10 @@ fn tokens(value: &Bound<'_, PyAny>, count: usize) -> PyResult<Vec<usize>> {
     Ok(result)
 }
 
-fn loss_objective(value: Option<&Bound<'_, PyAny>>) -> PyResult<CausalLmObjective> {
+fn loss_objective(
+    value: Option<&Bound<'_, PyAny>>,
+    repetition: Option<&Bound<'_, PyAny>>,
+) -> PyResult<CausalLmObjective> {
     let label_smoothing = match value {
         Some(value) => {
             reject_bool(value)?;
@@ -51,7 +54,22 @@ fn loss_objective(value: Option<&Bound<'_, PyAny>>) -> PyResult<CausalLmObjectiv
         }
         None => 0.,
     };
-    let objective = CausalLmObjective { label_smoothing };
+    let repetition = repetition
+        .map(|value| {
+            let value = crate::json::py_to_json_bounded(
+                value,
+                65_536,
+                1024,
+                8,
+                "native repetition objective",
+            )?;
+            serde_json::from_value(value).map_err(error)
+        })
+        .transpose()?;
+    let objective = CausalLmObjective {
+        label_smoothing,
+        repetition,
+    };
     objective.validate().map_err(error)?;
     Ok(objective)
 }
@@ -100,6 +118,21 @@ impl PyNativeCausalLmGradients {
     #[getter]
     fn loss(&self) -> f32 {
         self.inner.loss()
+    }
+    #[getter]
+    fn causal_loss(&self) -> f32 {
+        self.inner.causal_loss()
+    }
+    #[getter]
+    fn repetition_loss(&self) -> f32 {
+        self.inner.repetition_loss()
+    }
+    #[getter]
+    fn repetition_positions(&self) -> usize {
+        self.inner.repetition_positions()
+    }
+    fn repetition_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner.objective().repetition).map_err(error)
     }
     #[getter]
     fn base_model_identity(&self) -> &str {
@@ -219,19 +252,20 @@ impl PyNativeCausalLm {
             .map(|inner| PyGeometryAdapterArtifact { inner })
     }
 
-    #[pyo3(signature = (*, label_smoothing=None))]
+    #[pyo3(signature = (*, label_smoothing=None, repetition=None))]
     fn geometry_accumulator(
         &self,
         py: Python<'_>,
         label_smoothing: Option<&Bound<'_, PyAny>>,
+        repetition: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAccumulator> {
-        let objective = loss_objective(label_smoothing)?;
+        let objective = loss_objective(label_smoothing, repetition)?;
         py.detach(|| self.inner.geometry_accumulator_with_objective(objective))
             .map(|inner| PyNativeCausalLmAccumulator { inner })
             .map_err(error)
     }
 
-    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None))]
+    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None, repetition=None))]
     fn geometry_loss_gradients(
         &self,
         py: Python<'_>,
@@ -239,9 +273,13 @@ impl PyNativeCausalLm {
         shape: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
         label_smoothing: Option<&Bound<'_, PyAny>>,
+        repetition: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmGradients> {
-        let objective = loss_objective(label_smoothing)?;
+        let objective = loss_objective(label_smoothing, repetition)?;
         let shape = self::shape(shape)?;
+        self.inner
+            .validate_objective_shape(shape, objective)
+            .map_err(error)?;
         let count = self
             .inner
             .geometry_objective_input_count(shape, labels.is_some())
@@ -333,7 +371,7 @@ impl PyNativeCausalLm {
             .map_err(error)
     }
 
-    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None))]
+    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None, repetition=None))]
     fn next_token_loss(
         &self,
         py: Python<'_>,
@@ -341,9 +379,13 @@ impl PyNativeCausalLm {
         shape: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
         label_smoothing: Option<&Bound<'_, PyAny>>,
+        repetition: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<f32> {
-        let objective = loss_objective(label_smoothing)?;
+        let objective = loss_objective(label_smoothing, repetition)?;
         let shape = self::shape(shape)?;
+        self.inner
+            .validate_objective_shape(shape, objective)
+            .map_err(error)?;
         let count = self
             .inner
             .loss_objective_input_count(shape, labels.is_some())

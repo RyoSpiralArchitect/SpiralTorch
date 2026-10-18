@@ -8,6 +8,9 @@ use crate::{emit_tensor_op, emit_tensor_op_meta, Layout, PureResult, Tensor, Ten
 use st_kernel_contracts::classification::{decode_class_index, ClassReduction, CrossEntropySpec};
 use std::str::FromStr;
 
+mod unlikelihood;
+pub use unlikelihood::UnlikelihoodPosition;
+
 /// Reduction over non-ignored samples, not over classes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LossReduction {

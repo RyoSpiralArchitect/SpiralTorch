@@ -1,16 +1,20 @@
 //! Causal label transport and admission; shared tensor kernels own CE and VJP.
 use super::*;
 
-/// Mean CE over selected shifted labels, with uniform label smoothing.
+/// Mean CE over selected shifted labels, optionally plus native unlikelihood.
 /// Unshifted labels use -100 to exclude loss terms, never attention positions.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CausalLmObjective {
     pub label_smoothing: f64,
+    pub repetition: Option<CausalLmRepetition>,
 }
 
 impl CausalLmObjective {
     pub fn validate(self) -> CausalLmResult<()> {
         self.kernel_config().validate()?;
+        if let Some(repetition) = self.repetition {
+            repetition.validate()?;
+        }
         Ok(())
     }
 
@@ -30,9 +34,22 @@ pub(super) struct PreparedCausalWindow {
     pub target_tokens: usize,
     pub selected_rows: Option<Vec<usize>>,
     pub objective: CausalLmObjective,
+    pub repetition: Option<super::repetition::RepetitionWindow>,
 }
 
 impl NativeCausalLm {
+    /// Admission of a numerical objective before clients copy token storage.
+    pub fn validate_objective_shape(
+        &self,
+        shape: [usize; 2],
+        objective: CausalLmObjective,
+    ) -> CausalLmResult<()> {
+        objective.validate()?;
+        if let Some(recipe) = objective.repetition {
+            recipe.admit_shape(shape, self.config.vocabulary)?;
+        }
+        Ok(())
+    }
     /// Bound all arrays before a binding copies tokens or labels.
     pub fn loss_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
         self.loss_objective_input_count(shape, false)
@@ -82,6 +99,16 @@ impl NativeCausalLm {
             }
         }
         let steps = shape[1] - 1;
+        let repetition = match objective.repetition {
+            Some(recipe) => super::repetition::RepetitionWindow::prepare(
+                recipe,
+                windows,
+                shape,
+                labels,
+                self.config.vocabulary,
+            )?,
+            None => None,
+        };
         let mut input = Vec::with_capacity(shape[0] * steps);
         let mut shifted = Vec::with_capacity(shape[0] * steps);
         for (row, window) in windows.chunks_exact(shape[1]).enumerate() {
@@ -117,11 +144,14 @@ impl NativeCausalLm {
             target_tokens,
             selected_rows,
             objective,
+            repetition,
         })
     }
 
-    /// Labels are unshifted `[B,T]`, independent of input IDs; each row's first
-    /// label is validated but not scored. No padding or attention mask inferred.
+    /// Labels are unshifted `[B,T]`; each row's first label is not scored.
+    /// Positive-strength repetition requires labels to equal IDs or -100.
+    /// No padding or attention mask is inferred. Repetition is opt-in here:
+    /// omit it when reporting plain evaluation CE.
     pub fn next_token_loss_with_objective(
         &self,
         windows: &[usize],
@@ -138,9 +168,24 @@ impl NativeCausalLm {
         let normalized = self
             .final_norm
             .forward(&selected, self.config.norm_epsilon)?;
-        Ok(self
-            .project_readout(&normalized)?
+        let logits = self.project_readout(&normalized)?;
+        let causal = logits
             .cross_entropy_with_logits(&prepared.labels, objective.kernel_config())?
-            .data()[0])
+            .data()[0];
+        if let Some(repetition) = prepared.repetition {
+            let (loss, _, _) = repetition.loss_gradient(
+                &logits,
+                prepared.selected_rows.as_deref(),
+                prepared.shape[1],
+            )?;
+            let combined = (f64::from(causal)
+                + objective.repetition.unwrap().config().strength * f64::from(loss))
+                as f32;
+            if !combined.is_finite() {
+                return Err("nonfinite combined repetition loss".into());
+            }
+            return Ok(combined);
+        }
+        Ok(causal)
     }
 }

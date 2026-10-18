@@ -71,7 +71,7 @@ const MATERIALIZED_REQUEST_PROPOSAL_TOKEN_BYTES: u64 = 17;
 const MATERIALIZED_POSITION_BYTES: u64 = 320;
 const MATERIALIZED_CANDIDATE_BYTES: u64 = 384;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ZSpaceRepetitionUnlikelihoodConfig {
     pub strength: f64,
@@ -80,7 +80,13 @@ pub struct ZSpaceRepetitionUnlikelihoodConfig {
     pub max_candidates_per_position: usize,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+impl ZSpaceRepetitionUnlikelihoodConfig {
+    pub fn validate(&self) -> Result<(), ZSpaceRepetitionUnlikelihoodError> {
+        validate_config(self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ZSpaceRepetitionUnlikelihoodCandidateSource {
     PriorContinuation { ngram_order: usize },
@@ -304,10 +310,76 @@ fn plan_zspace_repetition_unlikelihood_internal(
     request: ZSpaceRepetitionUnlikelihoodRequest,
     enforce_admission_budget: bool,
 ) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
+    let (positions, aggregate) = select_candidates_internal(&request, enforce_admission_budget)?;
+    let plan_id = repetition_unlikelihood_plan_id(&request)?;
+    Ok(ZSpaceRepetitionUnlikelihoodPlan {
+        contract_version: ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION,
+        kind: ZSPACE_REPETITION_UNLIKELIHOOD_KIND,
+        semantic_owner: ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
+        semantic_backend: ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
+        differentiation_owner: ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER,
+        proposal_owner: ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER,
+        plan_validated: true,
+        plan_id,
+        status: "ready",
+        request,
+        proposal_rule: ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
+        candidate_rule: ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE,
+        objective_rule: ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE,
+        probability_epsilon: ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON,
+        periodic_suffix_max_period: ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD,
+        periodic_suffix_min_repetitions: ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS,
+        positions,
+        aggregate,
+        efficacy_claim_ready: false,
+        evidence_boundary: "the plan proves deterministic negative-candidate selection and objective wiring, not reduced generation loops or improved language quality",
+    })
+}
+
+/// Backend-neutral candidate selection. Callers own proposal generation and must
+/// identify their own tie/arithmetic policy; the historical v3 report is unchanged.
+pub fn select_repetition_unlikelihood_candidates(
+    request: &ZSpaceRepetitionUnlikelihoodRequest,
+) -> Result<
+    (
+        Vec<ZSpaceRepetitionUnlikelihoodPosition>,
+        ZSpaceRepetitionUnlikelihoodAggregate,
+    ),
+    ZSpaceRepetitionUnlikelihoodError,
+> {
+    select_candidates_internal(request, true)
+}
+
+fn select_candidates_internal(
+    request: &ZSpaceRepetitionUnlikelihoodRequest,
+    enforce_admission_budget: bool,
+) -> Result<
+    (
+        Vec<ZSpaceRepetitionUnlikelihoodPosition>,
+        ZSpaceRepetitionUnlikelihoodAggregate,
+    ),
+    ZSpaceRepetitionUnlikelihoodError,
+> {
+    admit_candidate_request(request, enforce_admission_budget)?;
+
+    select_admitted_candidates(request)
+}
+
+/// Validate a typed request and work/materialization bounds before model execution.
+pub fn admit_repetition_unlikelihood_request(
+    request: &ZSpaceRepetitionUnlikelihoodRequest,
+) -> Result<(), ZSpaceRepetitionUnlikelihoodError> {
+    admit_candidate_request(request, true)
+}
+
+fn admit_candidate_request(
+    request: &ZSpaceRepetitionUnlikelihoodRequest,
+    enforce_admission_budget: bool,
+) -> Result<(), ZSpaceRepetitionUnlikelihoodError> {
     validate_config(&request.config)?;
     validate_sequences(&request.sequences, &request.config.candidate_source)?;
     if enforce_admission_budget {
-        let materialized = estimate_validated_materialized_plan(&request);
+        let materialized = estimate_validated_materialized_plan(request);
         if materialized.bytes > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES {
             return Err(
                 ZSpaceRepetitionUnlikelihoodError::MaterializedPlanBudgetExceeded {
@@ -318,7 +390,7 @@ fn plan_zspace_repetition_unlikelihood_internal(
                 },
             );
         }
-        let estimated_work_units = estimate_validated_work_units(&request);
+        let estimated_work_units = estimate_validated_work_units(request);
         if estimated_work_units > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS {
             return Err(ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded {
                 estimated_work_units,
@@ -327,7 +399,18 @@ fn plan_zspace_repetition_unlikelihood_internal(
         }
     }
     validate_proposal_values(&request.sequences, &request.config.candidate_source)?;
+    Ok(())
+}
 
+fn select_admitted_candidates(
+    request: &ZSpaceRepetitionUnlikelihoodRequest,
+) -> Result<
+    (
+        Vec<ZSpaceRepetitionUnlikelihoodPosition>,
+        ZSpaceRepetitionUnlikelihoodAggregate,
+    ),
+    ZSpaceRepetitionUnlikelihoodError,
+> {
     let mut positions = Vec::new();
     let mut total_token_count = 0usize;
     let mut eligible_target_count = 0usize;
@@ -543,32 +626,7 @@ fn plan_zspace_repetition_unlikelihood_internal(
         active_position_ratio: ratio(active_position_count, eligible_target_count),
         mean_candidates_per_active_position: ratio(candidate_count, active_position_count),
     };
-    let plan_id = repetition_unlikelihood_plan_id(&request)?;
-
-    Ok(ZSpaceRepetitionUnlikelihoodPlan {
-        contract_version: ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION,
-        kind: ZSPACE_REPETITION_UNLIKELIHOOD_KIND,
-        semantic_owner: ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
-        semantic_backend: ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
-        differentiation_owner: ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER,
-        proposal_owner: ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER,
-        plan_validated: true,
-        plan_id,
-        status: "ready",
-        request,
-        proposal_rule: ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
-        candidate_rule: ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE,
-        objective_rule: ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE,
-        probability_epsilon: ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON,
-        periodic_suffix_max_period:
-            ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD,
-        periodic_suffix_min_repetitions:
-            ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS,
-        positions,
-        aggregate,
-        efficacy_claim_ready: false,
-        evidence_boundary: "the plan proves deterministic negative-candidate selection and objective wiring, not reduced generation loops or improved language quality",
-    })
+    Ok((positions, aggregate))
 }
 
 fn truncate_candidates(
@@ -1138,6 +1196,27 @@ mod tests {
         let mut request = model_request(token_ids, target_index, proposals);
         request.config = periodic_config(proposals.len());
         request
+    }
+
+    #[test]
+    fn typed_selection_preserves_legacy_report_candidates_and_admission() {
+        for request in [
+            prior_request(&[1, 2, 3, 1, 2, 4]),
+            model_request(&[1, 2, 1, 2, 1, 3], 5, &[2, 1, 3]),
+            periodic_request(&[1, 2, 1, 2, 1, 3], 5, &[2, 1, 3]),
+        ] {
+            admit_repetition_unlikelihood_request(&request).unwrap();
+            let (positions, aggregate) =
+                select_repetition_unlikelihood_candidates(&request).unwrap();
+            let report = plan_zspace_repetition_unlikelihood(request.clone()).unwrap();
+            assert_eq!(positions, report.positions);
+            assert_eq!(aggregate, report.aggregate);
+            assert_eq!(report.differentiation_owner, "model-client-autograd");
+            let mut invalid = request;
+            invalid.config.strength = -1.;
+            assert!(admit_repetition_unlikelihood_request(&invalid).is_err());
+            assert!(select_repetition_unlikelihood_candidates(&invalid).is_err());
+        }
     }
 
     fn materialization_heavy_request(

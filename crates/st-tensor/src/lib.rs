@@ -30,7 +30,9 @@ pub use autograd::{
     AUTOGRAD_CONTRACT_VERSION, AUTOGRAD_SEMANTIC_OWNER,
 };
 pub use backend::faer_dense;
-pub use classification::{class_indices_from_tensor, CrossEntropyConfig, LossReduction};
+pub use classification::{
+    class_indices_from_tensor, CrossEntropyConfig, LossReduction, UnlikelihoodPosition,
+};
 pub use ensemble::mean_tensors_scaled;
 pub use execution::{
     emit_tensor_execution_receipt, prepare_tensor_execution, TensorExecutionCompletion,

@@ -212,6 +212,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 invocation = workflow.split("partial_loss = trainer.step_partial(", 1)[1].split(")", 1)[0]
                 self.assertIn('gradient_basis="spiraltorch.release.smoke.control.v1"', invocation)
 
+    def test_native_repetition_is_gated_with_forbidden_imports_and_optional_reference(self) -> None:
+        script = "bindings/st-py/tests/test_native_causal_lm_repetition.py -v"
+        for filename in ("ci.yml", "wheels.yml", "release_wheels.yml"):
+            workflow = (ROOT / ".github/workflows" / filename).read_text()
+            normal, floor = workflow.split("      - name: Verify installed wheel on CPython 3.8 (Linux)\n", 1)
+            prefix = "" if filename == "ci.yml" else "../../"
+            self.assertIn("python -I -B " + prefix + script, normal)
+            self.assertIn("python -I -B " + script, floor)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("bindings/st-py/tests/test_native_causal_lm_repetition_parity.py", ci)
+        test = (ROOT / "bindings/st-py/tests/test_native_causal_lm_repetition.py").read_text()
+        self.assertIn("NoForeignML()", test)
+
     def test_publish_from_release_has_safe_dry_run_mode(self) -> None:
         workflow = (
             ROOT / ".github" / "workflows" / "publish_pypi_from_release.yml"

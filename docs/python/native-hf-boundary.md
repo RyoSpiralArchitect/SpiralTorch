@@ -16,6 +16,7 @@ models; they must not be mistaken for the native path below.
 | Read local checkpoint tensors | [`SafeTensorArchive`, `NdTensor`](native-weights.md) | Rust safetensors ingress; no pickle, remote code or implicit model conversion |
 | Execute a supported GPT-2 | [`NativeCausalLm.from_gpt2`](native-causal-lm.md) | Frozen base, f32 CPU storage, exact integer token IDs; not an arbitrary HF architecture loader |
 | Learn attached geometry from language loss | [`geometry_loss_gradients`, `NativeGeometryAdamW`, `NativeCausalLmTrainer`](native-corpus-training.md) | Rust decoder pullback, optimizer and document cursor; base weights stay frozen |
+| Add repetition-aware language learning | [Native repetition objective](native-repetition.md) | Shared Rust candidates, loss/VJP, two-normalizer reduction and pinned recipe; no Torch auxiliary loss |
 | Generate with ordinary or Z-Space control | [`NativeCausalLmGenerator`, `NativeCausalLmContext`](native-generation.md) | Rust selection, RNG and explicit K/V reuse; no Torch generation loop |
 | Execute portable geometry independently | [`NativeGeometryRuntime`](native-geometry-runtime.md) | Same admitted artifact recipes without a foreign model; standalone MSE is not LM fine-tuning |
 | Run other HF models or PEFT adapters today | `load_hf_causal_lm_artifact`, `prepare_hf_finetune_model`, HF Trainer helpers | Explicit optional Transformers/Torch/PEFT path, not a fallback inside `NativeCausalLm` |
@@ -47,20 +48,19 @@ This inventory separates intentional transport from missing native execution:
   the supported decoder, not a transparent replacement for every HF model.
 - [`hf_repetition_unlikelihood.py`](../../bindings/st-py/spiraltorch/hf_repetition_unlikelihood.py)
   obtains candidate plans and control from Rust, but still computes log-softmax,
-  clamped unlikelihood, position reduction and differentiation in Torch. The
-  current native causal-LM objective supports selected CE/smoothing, **not** this
-  additional training objective. Rust planning alone does not close this gap.
+  clamped unlikelihood, position reduction and differentiation in Torch for
+  foreign decoders. The separate [native objective](native-repetition.md) now
+  owns this computation and its decoder pullback in Rust for the admitted
+  GPT-2 path. This is not a claim that the HF wrapper itself is Torch-free.
 
 The existing wrappers remain explicit interoperability clients. Removing an
 import or changing a report's owner string is not a native implementation.
 
 ## Recovery Order
 
-1. Move repetition-unlikelihood primal and VJP into shared Rust tensor kernels,
-   consume the existing canonical candidate plan, and connect the combined loss
-   to actual native decoder/geometry gradients. Preserve masking, clipping,
-   active-position normalization and objective ownership through accumulation
-   and resume. Compare both values and gradients with the separate Torch arm.
+1. Qualify native repetition learning through the installed-wheel gates and
+   matched corpus studies. Mechanics and numerical parity do not establish
+   fewer generation loops or better language quality.
 2. Connect native low-rank projections to decoder placements and weight loading,
    then optimizer/checkpoint ownership. Verify a real parameter update and exact
    continuation; a compatible artifact report or frozen forward is insufficient.

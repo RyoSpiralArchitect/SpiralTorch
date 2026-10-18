@@ -5,6 +5,9 @@ mod objective;
 #[path = "training_tests.rs"]
 mod training;
 
+#[path = "repetition_tests.rs"]
+mod repetition;
+
 fn trainable(model: &NativeCausalLm) -> GeometryAdapterArtifact {
     let mut record = artifact(model, "transformer.h.0.attn", 0.2)
         .record()
