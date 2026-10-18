@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.hf_residual_calibration_saved_check.v1",
+  "status": "passed",
+  "results_id": "sha256:aedecead4378a51dd7c1ded4a45e7684eb9c5eb1dffb65cdcd2e9f06080b2620",
+  "execution_id": "sha256:67138e9b4b623ad32987e715afd6f371366244763733a80674beaa5b98dfc640",
+  "private_manifest_id": "sha256:bced2ebaa87931e6089341441ed6af7cadf9dcec39dea1b2735b0c2d08b37a36",
+  "verifier_id": "sha256:530be7e446577c841dc8c6b84b60c757fcea2a894cd4c36ff293ba045c9af072",
+  "cases": 27,
+  "traces": 102,
+  "candidate_artifacts": 27,
+  "source_artifacts": 15,
+  "public_projection_exact": true,
+  "all_retained_outcomes_published": true,
+  "trace_aggregates_exact": true,
+  "sequential_stage_artifact_ids_exact": true,
+  "calibration_rule_and_mismatch_rechecked": true,
+  "learned_tensors_unchanged": true,
+  "reference_ce_receipts_exact": true,
+  "source_ids_unchanged": true,
+  "model_loaded": false,
+  "optimizer_updates": 0,
+  "reserve_opened": false
+}
