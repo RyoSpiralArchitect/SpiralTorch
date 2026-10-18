@@ -190,7 +190,7 @@ execution; it does not silently trigger decay or advance optimizer clocks.
 Label exclusion is not an attention/padding mask: the complete unpadded prefix
 still runs, masked prompt positions can receive gradients through later
 predictions, and no EOS or document boundary is invented. Input and label
-budgets are checked before foreign array extraction. Invalid inputs do not
+context budgets are checked before foreign array extraction. Invalid inputs do not
 change an existing accumulation. Its `label_smoothing` policy is sealed at
 creation, and adding a sealed gradient batch with another policy rejects.
 Different label selections under the same policy are expected and combine by
@@ -202,6 +202,33 @@ objective, labels/data cursor and schedule alongside the artifact/optimizer
 pair for continuation. They are not inferred from optimizer moments or saved
 inside a pending accumulation. These entries do not silently replace
 `HfGeometryTrainer` or enable arbitrary HF architecture execution.
+
+Selected-label execution compacts only the **terminal readout**: final LayerNorm,
+vocabulary projection, CE and their pullbacks run on selected rows. The shared
+row-gather/scatter kernels restore terminal gradients to the full context before
+decoder reverse execution. This is not attention pruning or zeroing all prompt
+gradients. When every shifted target is selected, no gather/scatter is added.
+
+With explicit labels, `max_logit_elements` bounds
+`non_ignored_shifted_targets * vocabulary`, not every contextual position.
+Admission first bounds input/label transport, QKV/MLP, attention, geometry and
+learning checkpoints; after bounded label extraction it validates the exact
+logit count **before decoding**. At least one vocabulary row must fit. Without
+labels the full output count is already known and still checked before token
+extraction. Ordinary `forward`/last-only budgets are unchanged. Unrequested
+vocabulary outputs need not be materialized or finite; invalid source weights,
+IDs, labels and required intermediates are not silently accepted.
+
+This reduces head/adjoint work and logit storage for sparse supervision, not
+decoder context work, packed-weight storage or full-backward checkpoint sizes.
+Numerical comparisons use tolerances; different selected row counts may choose
+different native matrix kernels. No cross-version bitwise-continuation promise
+is implied by exact resume within one tested runtime.
+
+The [complete local readout comparison](../../benchmarks/results/2026-10-18-native-lm-selected-readout/README.md)
+retains the initial 4-row regression and the CPU autotune fix, alongside both
+full-head and selected-head Torch references. It measures frozen loss evaluation,
+not geometry learning speed or quality; Torch is still substantially faster.
 
 Learning saves block-boundary activations from the earliest participating
 geometry layer and replays one block at a time, preserving the full `[B,T]`

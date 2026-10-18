@@ -25,6 +25,7 @@ jobs:
         run: python3 -I -B tests/test_build_wasm_web.py
       - name: Test resident benchmark admission
         run: |
+          python3 -I -S -B tests/test_native_lm_readout_bench.py
           python3 -I -S -B -m unittest discover -s tools -p 'test_byte_corpus*.py'
           python3 -I -S -B -m unittest discover -s tools -p 'test_verify_byte_corpus*.py'
           python3 -I -S -B benchmarks/results/2026-10-15-language-learning-diagnosis/test_diagnose.py

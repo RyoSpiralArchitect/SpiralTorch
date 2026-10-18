@@ -791,7 +791,7 @@ pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, S
     Ok(packed)
 }
 
-const CPU_AUTOTUNE_REVISION: u64 = 5;
+const CPU_AUTOTUNE_REVISION: u64 = 6;
 const CPU_AUTOTUNE_MIN_VOLUME: usize = 64 * 64 * 32;
 const CPU_AUTOTUNE_SAMPLE_MAX_DIM: usize = 2048;
 const CPU_AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -1004,7 +1004,13 @@ fn should_autotune(rows: usize, inner: usize, cols: usize) -> bool {
 
 fn quantized_problem(rows: usize, inner: usize, cols: usize) -> (usize, usize, usize) {
     (
-        quantize_dimension(rows),
+        // Small row counts determine whether a tile runs at all, or falls back
+        // to scalar tails. In particular, 1/4/8 rows must not share an 8-row trial.
+        if rows <= 64 {
+            rows
+        } else {
+            quantize_dimension(rows)
+        },
         quantize_dimension(inner),
         quantize_dimension(cols),
     )
@@ -1029,7 +1035,8 @@ fn quantize_dimension(value: usize) -> usize {
 }
 
 fn sample_dimension(value: usize) -> usize {
-    quantize_dimension(value).clamp(1, CPU_AUTOTUNE_SAMPLE_MAX_DIM)
+    // The input is already bucketed; do not round exact small row counts again.
+    value.clamp(1, CPU_AUTOTUNE_SAMPLE_MAX_DIM)
 }
 
 fn cpu_autotune_key(
@@ -1501,6 +1508,55 @@ mod tests {
                     let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
                     let mut actual = vec![0.25; rows * cols];
                     matmul_with_kernel_spec(spec, &mut actual, &lhs, &rhs, rows, inner, cols);
+                    for (&a, &b) in actual.iter().zip(&expected) {
+                        assert_eq!(a.to_bits(), (0.25 + b).to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn autotune_preserves_small_row_counts_in_keys_and_samples() {
+        let mut keys = std::collections::HashSet::new();
+        for rows in 1..=64 {
+            let (bucket_rows, inner, cols) = quantized_problem(rows, 768, 50_257);
+            assert_eq!(bucket_rows, rows);
+            assert_eq!(sample_dimension(bucket_rows), rows);
+            assert!(keys.insert(cpu_autotune_signature(
+                bucket_rows,
+                inner,
+                cols,
+                CpuRhsLayout::PrepackedColumns,
+            )));
+        }
+        assert_eq!(sample_dimension(4096), CPU_AUTOTUNE_SAMPLE_MAX_DIM);
+    }
+
+    #[test]
+    fn packed_kernels_preserve_subtile_rows_and_column_tails() {
+        for spec in MICROKERNELS {
+            for rows in 1..=spec.tm + 1 {
+                for cols in [1, spec.tn - 1, spec.tn, spec.tn + 3] {
+                    let inner = 37;
+                    let lhs: Vec<_> = (0..rows * inner)
+                        .map(|i| (i % 19) as f32 / 7.0 - 1.0)
+                        .collect();
+                    let rhs: Vec<_> = (0..inner * cols)
+                        .map(|i| (i % 23) as f32 / 11.0 - 1.0)
+                        .collect();
+                    let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+                    let packed = unwrap_ok(prepack_rhs(&rhs, inner, cols));
+                    let mut actual = vec![0.25; rows * cols];
+                    matmul_packed_with_kernel_spec(
+                        spec,
+                        &mut actual,
+                        &lhs,
+                        &packed,
+                        rows,
+                        inner,
+                        cols,
+                    );
                     for (&a, &b) in actual.iter().zip(&expected) {
                         assert_eq!(a.to_bits(), (0.25 + b).to_bits());
                     }

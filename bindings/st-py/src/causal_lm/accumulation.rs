@@ -53,7 +53,10 @@ impl PyNativeCausalLmAccumulator {
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<f32> {
         let shape = shape(window_shape)?;
-        let count = self.inner.input_count(&model.inner, shape).map_err(error)?;
+        let count = self
+            .inner
+            .objective_input_count(&model.inner, shape, labels.is_some())
+            .map_err(error)?;
         let windows = tokens(windows, count)?;
         let labels = loss_labels(labels, count)?;
         py.detach(|| {

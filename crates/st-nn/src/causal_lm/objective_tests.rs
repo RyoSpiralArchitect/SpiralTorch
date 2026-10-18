@@ -208,3 +208,101 @@ fn invalid_labels_and_objectives_fail_before_pullback() {
     }
     assert!(model.backward_head.get().is_none());
 }
+
+#[test]
+fn selected_readout_admits_only_actual_logits_without_losing_context_rows() {
+    let base = load();
+    let model = base.with_geometry(trainable(&base)).unwrap();
+    let ids = [1, 2, 3, 4, 5, 6, 7, 8];
+    let labels = [-100, -100, 8, -100, 4, -100, 3, 1];
+    let objective = CausalLmObjective {
+        label_smoothing: 0.2,
+    };
+    let prepared = model
+        .prepare_objective(&ids, [2, 4], Some(&labels), objective)
+        .unwrap();
+    assert_eq!(prepared.input, [1, 2, 3, 5, 6, 7]);
+    assert_eq!(prepared.shape, [2, 3]);
+    assert_eq!(
+        prepared.selected_rows.as_deref(),
+        Some([1, 4, 5].as_slice())
+    );
+    assert_eq!(prepared.labels, [8, 3, 1]);
+    assert!(model
+        .prepare_objective(&ids, [2, 4], None, objective)
+        .unwrap()
+        .selected_rows
+        .is_none());
+    let expected = model
+        .geometry_loss_gradients_with_objective(&ids, [2, 4], Some(&labels), objective)
+        .unwrap();
+    let mut limited = model.clone();
+    limited.limits.max_logit_elements = 33;
+    assert!(limited.geometry_gradient_input_count([2, 4]).is_err());
+    assert!(limited.geometry_objective_input_count([2, 4], true).is_ok());
+    let actual = limited
+        .geometry_loss_gradients_with_objective(&ids, [2, 4], Some(&labels), objective)
+        .unwrap();
+    assert_eq!(expected.loss(), actual.loss());
+    assert_eq!(expected.parameters(), actual.parameters());
+    assert_eq!(
+        limited
+            .next_token_loss_with_objective(&ids, [2, 4], Some(&labels), objective)
+            .unwrap(),
+        actual.loss()
+    );
+    let mut group = limited
+        .geometry_accumulator_with_objective(objective)
+        .unwrap();
+    group
+        .accumulate_loss_with_labels(&limited, &ids, [2, 4], Some(&labels))
+        .unwrap();
+    let before = format!("{group:?}");
+    assert!(group
+        .accumulate_loss_with_labels(&limited, &ids, [2, 4], None)
+        .is_err());
+    assert!(group
+        .accumulate_loss_with_labels(&limited, &ids, [2, 4], Some(&[1; 8]))
+        .is_err());
+    assert_eq!(before, format!("{group:?}"));
+    limited.limits.max_logit_elements = 32;
+    assert!(limited
+        .next_token_loss_with_objective(&ids, [2, 4], Some(&labels), objective)
+        .is_err());
+    limited.limits.max_logit_elements = 10;
+    assert!(limited.loss_objective_input_count([2, 4], true).is_err());
+}
+
+#[test]
+fn unused_vocabulary_projection_cannot_overflow_a_selected_loss() {
+    let mut weights = parameters();
+    for (name, (_, values)) in &mut weights {
+        values.fill(if name.contains("ln_") && name.ends_with("weight") {
+            1.
+        } else {
+            0.
+        });
+    }
+    weights.get_mut("wte.weight").unwrap().1[4..8].copy_from_slice(&[1., 1., -1., -1.]);
+    let mut head = vec![0.; 44];
+    head[..2].fill(f32::MAX);
+    weights.insert("lm_head.weight".into(), (vec![11, 4], head));
+    let mut c = config();
+    c["tie_word_embeddings"] = json!(false);
+    let model = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&c).unwrap(),
+        &archive(&weights),
+        Default::default(),
+    )
+    .unwrap();
+    assert!(model.next_token_loss(&[1, 2, 3], [1, 3]).is_err());
+    let selected = model
+        .next_token_loss_with_objective(
+            &[1, 2, 3],
+            [1, 3],
+            Some(&[-100, -100, 3]),
+            Default::default(),
+        )
+        .unwrap();
+    assert!((selected - 11f32.ln()).abs() < 1e-6);
+}

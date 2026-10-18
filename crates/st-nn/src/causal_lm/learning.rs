@@ -117,6 +117,14 @@ impl NativeCausalLm {
     /// Existing forward/geometry limits apply to each replay; checkpoints have
     /// an additional aggregate element bound. This is not a peak-RSS guarantee.
     pub fn geometry_gradient_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        self.geometry_objective_input_count(shape, false)
+    }
+
+    pub fn geometry_objective_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         let runtime = self
             .geometry
             .as_ref()
@@ -128,11 +136,8 @@ impl NativeCausalLm {
         }) {
             return Err("attached geometry has no trainable parameters".into());
         }
-        let steps = shape[1]
-            .checked_sub(1)
-            .filter(|&n| n > 0)
-            .ok_or("geometry loss needs at least two IDs per window")?;
-        self.input_count([shape[0], steps], false)?;
+        let count = self.loss_objective_input_count(shape, has_labels)?;
+        let steps = shape[1] - 1;
         let (first_layer, _) = self.first_geometry_site()?;
         product(
             &[
@@ -144,7 +149,7 @@ impl NativeCausalLm {
             self.limits.max_training_checkpoint_elements,
             "training checkpoints",
         )?;
-        product(&shape, usize::MAX, "window IDs")
+        Ok(count)
     }
 
     /// Mean next-token NLL and all placement parameter gradients, with base
@@ -171,7 +176,7 @@ impl NativeCausalLm {
         objective: CausalLmObjective,
     ) -> CausalLmResult<NativeCausalLmGradients> {
         objective.validate()?;
-        self.geometry_gradient_input_count(window_shape)?;
+        self.geometry_objective_input_count(window_shape, labels.is_some())?;
         let prepared = self.prepare_objective(windows, window_shape, labels, objective)?;
         self.geometry_loss_gradients_prepared(prepared)
     }
@@ -186,6 +191,7 @@ impl NativeCausalLm {
             shape,
             window_shape,
             target_tokens,
+            selected_rows,
             objective,
         } = prepared;
         let runtime = self.geometry.as_ref().unwrap();
@@ -200,7 +206,11 @@ impl NativeCausalLm {
             hidden = self.run_block(index, hidden, shape, false)?.output;
         }
         checkpoints.push(hidden.clone());
-        let normalized = self.final_norm.forward(&hidden, c.norm_epsilon)?;
+        let selected = match &selected_rows {
+            Some(rows) => hidden.gather_rows(rows)?,
+            None => hidden.clone(),
+        };
+        let normalized = self.final_norm.forward(&selected, c.norm_epsilon)?;
         let logits =
             normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?;
         let loss = logits
@@ -210,12 +220,16 @@ impl NativeCausalLm {
         let d_logits =
             logits.cross_entropy_with_logits_backward(&labels, objective.kernel_config(), &seed)?;
         let d_normalized = frozen_pullback(&self.head, &self.backward_head, &d_logits)?;
-        let mut gradient = hidden.layer_norm_input_backward(
+        let d_selected = selected.layer_norm_input_backward(
             &self.final_norm.gamma,
             &d_normalized,
             c.norm_epsilon,
         )?;
-        drop((hidden, normalized, logits, d_logits, d_normalized));
+        let mut gradient = match &selected_rows {
+            Some(rows) => d_selected.scatter_add_rows(rows, hidden.shape().0)?,
+            None => d_selected,
+        };
+        drop((hidden, selected, normalized, logits, d_logits, d_normalized));
         checkpoints.pop();
         let mut parameters = BTreeMap::new();
         for index in (first_layer..c.layers).rev() {

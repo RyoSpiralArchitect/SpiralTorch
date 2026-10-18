@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Compact native selected-label readout before final normalization and the
+  vocabulary head, including reverse scatter into the unchanged full decoder
+  context. Logit budgets now cover actual scored rows after bounded label
+  extraction; ordinary full/last-only forward admission is unchanged. Reuse
+  shared row-gather/scatter kernels, with no added gather when all targets
+  participate. Unrequested vocabulary overflow cannot suppress a valid loss.
+  CPU autotuning v6 retains exact small row counts instead of treating 1/4 rows
+  as an 8-row trial; old cached selections are not reused.
+  This is source-only after 0.4.32, not GPU or whole-training speed evidence.
+
 - Add optional unshifted causal `labels` and `label_smoothing` to native LM
   loss/geometry learning. Shared Rust CE/VJP handles `-100` exclusions and
   uniform smoothing; input context is not removed. Accumulation weights by

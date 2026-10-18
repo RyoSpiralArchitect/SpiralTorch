@@ -15,7 +15,8 @@ batches = runpy.run_path(str(Path(__file__).with_name("test_native_causal_lm_obj
 @pytest.mark.parametrize("smoothing", [0., .2, 1.])
 @pytest.mark.parametrize("method", ["sgd", "adamw"])
 def test_selected_target_loss_gradients_and_updates_match_reference(kind, smoothing, method):
-    reference, base = helpers["pair"](width=3, heads=1)
+    # Only two selected rows fit; materializing full-context logits would fail.
+    reference, base = helpers["pair"](width=3, heads=1, native_limits={"max_logit_elements": 38})
     reference.requires_grad_(False)
     record = json.loads(helpers["fixtures"]["artifact"](kind).state_json())
     record["base_model_identity"] = base.base_model_identity

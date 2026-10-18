@@ -110,10 +110,19 @@ impl NativeCausalLmAccumulator {
 
     /// Check the cumulative counter and per-window budgets before foreign ID extraction.
     pub fn input_count(&self, model: &NativeCausalLm, shape: [usize; 2]) -> CausalLmResult<usize> {
+        self.objective_input_count(model, shape, false)
+    }
+
+    pub fn objective_input_count(
+        &self,
+        model: &NativeCausalLm,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         self.validate_model(model)?;
         // Actual selected-target count is known after bounded label extraction.
         self.next_counts(shape, 1)?;
-        model.geometry_gradient_input_count(shape)
+        model.geometry_objective_input_count(shape, has_labels)
     }
 
     /// Compute and reduce one window without exporting parameter lists to Python.
@@ -134,7 +143,7 @@ impl NativeCausalLmAccumulator {
         shape: [usize; 2],
         labels: Option<&[i64]>,
     ) -> CausalLmResult<f32> {
-        self.input_count(model, shape)?;
+        self.objective_input_count(model, shape, labels.is_some())?;
         let prepared = model.prepare_objective(windows, shape, labels, self.objective)?;
         self.next_counts(shape, prepared.target_tokens)?;
         let batch = model.geometry_loss_gradients_prepared(prepared)?;

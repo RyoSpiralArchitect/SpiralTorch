@@ -209,6 +209,20 @@ impl NativeCausalLm {
 
     /// Validate work before a binding extracts token IDs or any activation is allocated.
     pub fn input_count(&self, shape: [usize; 2], last_only: bool) -> CausalLmResult<usize> {
+        let rows = self.context_input_count(shape)?;
+        self.logit_count(if last_only { shape[0] } else { rows })?;
+        Ok(rows)
+    }
+
+    fn logit_count(&self, rows: usize) -> CausalLmResult<usize> {
+        product(
+            &[rows, self.config.vocabulary],
+            self.limits.max_logit_elements,
+            "logits",
+        )
+    }
+
+    fn context_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
         let [batch, steps] = shape;
         let c = &self.config;
         if batch == 0 || steps == 0 || steps > c.positions {
@@ -231,11 +245,6 @@ impl NativeCausalLm {
             &[c.layers, batch, c.heads, steps, steps],
             self.limits.max_attention_pairs,
             "total attention pairs",
-        )?;
-        product(
-            &[if last_only { batch } else { rows }, c.vocabulary],
-            self.limits.max_logit_elements,
-            "logits",
         )?;
         if let Some(runtime) = &self.geometry {
             for placement in &runtime.artifact().record().placements {
@@ -290,10 +299,7 @@ impl NativeCausalLm {
         self.input_count(shape, last_only)?;
         let c = &self.config;
         let [batch, steps] = shape;
-        let mut hidden = self.embed(ids, shape)?;
-        for index in 0..self.blocks.len() {
-            hidden = self.run_block(index, hidden, shape, false)?.output;
-        }
+        let hidden = self.decode_hidden(ids, shape)?;
         let hidden = if last_only {
             hidden.gather_rows(&(0..batch).map(|b| (b + 1) * steps - 1).collect::<Vec<_>>())?
         } else {
@@ -301,5 +307,13 @@ impl NativeCausalLm {
         };
         let normalized = self.final_norm.forward(&hidden, c.norm_epsilon)?;
         Ok(normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?)
+    }
+
+    fn decode_hidden(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {
+        let mut hidden = self.embed(ids, shape)?;
+        for index in 0..self.blocks.len() {
+            hidden = self.run_block(index, hidden, shape, false)?.output;
+        }
+        Ok(hidden)
     }
 }

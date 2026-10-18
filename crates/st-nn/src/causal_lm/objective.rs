@@ -28,17 +28,33 @@ pub(super) struct PreparedCausalWindow {
     pub shape: [usize; 2],
     pub window_shape: [usize; 2],
     pub target_tokens: usize,
+    pub selected_rows: Option<Vec<usize>>,
     pub objective: CausalLmObjective,
 }
 
 impl NativeCausalLm {
     /// Bound all arrays before a binding copies tokens or labels.
     pub fn loss_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        self.loss_objective_input_count(shape, false)
+    }
+
+    /// With labels, admit context first; exact output budget follows bounded
+    /// label extraction, before decoding. At least one logit row must fit.
+    pub fn loss_objective_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         let steps = shape[1]
             .checked_sub(1)
             .filter(|&n| n > 0)
             .ok_or("next-token loss needs at least two IDs per window")?;
-        self.input_count([shape[0], steps], false)?;
+        if has_labels {
+            self.context_input_count([shape[0], steps])?;
+            self.logit_count(1)?;
+        } else {
+            self.input_count([shape[0], steps], false)?;
+        }
         product(&shape, usize::MAX, "window IDs")
     }
 
@@ -50,7 +66,7 @@ impl NativeCausalLm {
         objective: CausalLmObjective,
     ) -> CausalLmResult<PreparedCausalWindow> {
         objective.validate()?;
-        let count = self.loss_input_count(shape)?;
+        let count = self.loss_objective_input_count(shape, labels.is_some())?;
         if windows.len() != count || windows.iter().any(|&id| id >= self.config.vocabulary) {
             return Err("invalid next-token window length or token ID".into());
         }
@@ -81,12 +97,25 @@ impl NativeCausalLm {
         if target_tokens == 0 {
             return Err("causal loss requires at least one non-ignored shifted target".into());
         }
+        self.logit_count(target_tokens)?;
+        let selected_rows = if target_tokens == shifted.len() {
+            None
+        } else {
+            let rows = shifted
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &v)| (v != -100).then_some(i))
+                .collect();
+            shifted.retain(|&v| v != -100);
+            Some(rows)
+        };
         Ok(PreparedCausalWindow {
             input,
             labels: shifted,
             shape: [shape[0], steps],
             window_shape: shape,
             target_tokens,
+            selected_rows,
             objective,
         })
     }
@@ -101,8 +130,16 @@ impl NativeCausalLm {
         objective: CausalLmObjective,
     ) -> CausalLmResult<f32> {
         let prepared = self.prepare_objective(windows, shape, labels, objective)?;
-        Ok(self
-            .logits(&prepared.input, prepared.shape, false)?
+        let hidden = self.decode_hidden(&prepared.input, prepared.shape)?;
+        let selected = match &prepared.selected_rows {
+            Some(rows) => hidden.gather_rows(rows)?,
+            None => hidden,
+        };
+        let normalized = self
+            .final_norm
+            .forward(&selected, self.config.norm_epsilon)?;
+        Ok(normalized
+            .matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?
             .cross_entropy_with_logits(&prepared.labels, objective.kernel_config())?
             .data()[0])
     }

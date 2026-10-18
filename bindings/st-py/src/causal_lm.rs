@@ -202,7 +202,7 @@ impl PyNativeCausalLm {
         let shape = self::shape(shape)?;
         let count = self
             .inner
-            .geometry_gradient_input_count(shape)
+            .geometry_objective_input_count(shape, labels.is_some())
             .map_err(error)?;
         let windows = tokens(windows, count)?;
         let labels = loss_labels(labels, count)?;
@@ -302,7 +302,10 @@ impl PyNativeCausalLm {
     ) -> PyResult<f32> {
         let objective = loss_objective(label_smoothing)?;
         let shape = self::shape(shape)?;
-        let count = self.inner.loss_input_count(shape).map_err(error)?;
+        let count = self
+            .inner
+            .loss_objective_input_count(shape, labels.is_some())
+            .map_err(error)?;
         let windows = tokens(windows, count)?;
         let labels = loss_labels(labels, count)?;
         py.detach(|| {

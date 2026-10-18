@@ -9,7 +9,7 @@ transformers = pytest.importorskip("transformers")
 import spiraltorch as st  # noqa: E402
 
 
-def pair(*, dtype=torch.float32, tied=True, scaled=True, inverse=False, width=8, heads=2):
+def pair(*, dtype=torch.float32, tied=True, scaled=True, inverse=False, width=8, heads=2, native_limits=None):
     torch.manual_seed(327)
     config = transformers.GPT2Config(vocab_size=19, n_positions=12, n_embd=width, n_head=heads,
                                     n_layer=2, n_inner=13, resid_pdrop=0., embd_pdrop=0., attn_pdrop=0.,
@@ -20,7 +20,7 @@ def pair(*, dtype=torch.float32, tied=True, scaled=True, inverse=False, width=8,
     state = {k: v.to(dtype).clone().contiguous() for k, v in reference.state_dict().items()}
     reference.load_state_dict({k: v.float() for k, v in state.items()})
     weights = st.SafeTensorArchive.from_bytes(safe_torch.save(state))
-    native = st.NativeCausalLm.from_gpt2(config.to_json_string(), weights)
+    native = st.NativeCausalLm.from_gpt2(config.to_json_string(), weights, **(native_limits or {}))
     return reference, native
 
 

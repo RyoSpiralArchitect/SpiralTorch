@@ -92,13 +92,36 @@ class NativeCausalLmObjectiveTests(unittest.TestCase):
             for call in (self.model.next_token_loss, self.model.geometry_loss_gradients):
                 with self.assertRaises((TypeError, ValueError)):
                     call([1, 2, 3], [1, 3], labels=labels)
-        limited = st.NativeCausalLm.from_gpt2(self.config, self.weights, max_logit_elements=11).with_geometry(self.model.geometry_artifact())
+        limited = st.NativeCausalLm.from_gpt2(self.config, self.weights, max_activation_elements=16).with_geometry(self.model.geometry_artifact())
         for call in (limited.next_token_loss, limited.geometry_loss_gradients):
             with self.assertRaises(ValueError):
                 call(Unreadable(), [1, 3], labels=Unreadable())
         mean = limited.geometry_accumulator()
         with self.assertRaises(ValueError):
             mean.accumulate_loss(limited, Unreadable(), [1, 3], labels=Unreadable())
+
+    def test_selected_readout_uses_actual_output_budget(self):
+        limited = st.NativeCausalLm.from_gpt2(self.config, self.weights, max_logit_elements=22).with_geometry(self.model.geometry_artifact())
+        ids, shape, labels = BATCHES[1]  # Six contextual positions; two scored rows.
+        expected = self.model.geometry_loss_gradients(ids, shape, labels=labels, label_smoothing=.2)
+        actual = limited.geometry_loss_gradients(ids, shape, labels=labels, label_smoothing=.2)
+        self.assertEqual(actual.target_tokens, 2)
+        self.assertEqual(actual.loss, expected.loss)
+        self.assertEqual(actual.parameter_gradients(), expected.parameter_gradients())
+        self.assertEqual(limited.next_token_loss(ids, shape, labels=labels, label_smoothing=.2), actual.loss)
+        mean = limited.geometry_accumulator(label_smoothing=.2)
+        mean.accumulate_loss(limited, ids, shape, labels=labels)
+        before = mean.loss, mean.target_tokens, mean.parameter_gradients()
+        for call in (limited.next_token_loss, limited.geometry_loss_gradients):
+            with self.assertRaises(ValueError):
+                call(ids, shape)
+            with self.assertRaises(ValueError):
+                call(ids, shape, labels=ids)
+        with self.assertRaises(ValueError):
+            mean.accumulate_loss(limited, ids, shape, labels=ids)
+        with self.assertRaises(ValueError):
+            limited.forward(ids, shape)
+        self.assertEqual(before, (mean.loss, mean.target_tokens, mean.parameter_gradients()))
 
     def test_objective_mismatch_and_empty_selection_do_not_change_mean(self):
         mean = self.model.geometry_accumulator(label_smoothing=.2)
