@@ -1,0 +1,48 @@
+{
+  "schema": "spiraltorch.hf_book_qualification.v1",
+  "status": "twelve_fixed_runs_and_saved_state_checks_passed",
+  "executor_source_commit": "111524b16",
+  "feature_parent_commit": "f55042a4892a971e4d426f4a6f817dd125a96e67",
+  "plan_id": "sha256:f90fe89f9b9824365f46be056ca7bf3a15fef6079a141c8ea3172b987ee4c3bb",
+  "preparation_manifest_id": "sha256:b94af83d84c537cc7ed2d54c92853f64c2de09c8cdb287189eabe1ec6bd5a862",
+  "preflight_id": "sha256:f7c6539567cb970bb5a3c9b54855c17e28228867b6402a495db182acefcdb467",
+  "execution_id": "sha256:b34c214b5e67ab1153e993038bcee93de97b1d562bc3863f1a0e4edeaaf51f92",
+  "actual_runs": 12,
+  "optimizer_updates_per_run": 512,
+  "total_optimizer_updates": 6144,
+  "trainable_values_per_arm": 6144,
+  "trained_sites_per_run": 4,
+  "base_unchanged_runs": 12,
+  "restored_logits_exact_runs": 12,
+  "fixed_radius_buffers_unchanged_runs": 6,
+  "retained_checkpoints": 24,
+  "saved_checkpoint_optimizer_scheduler_step_checks": "passed",
+  "saved_state_verifier_source_id": "sha256:35abab40d625186dbd496df55fded2e12eea917a3926e9828c73599f47c63e8b",
+  "final_checkpoint_weights_match_export_except_training_flags": true,
+  "reserve_opened_by_preflight_or_replay": false,
+  "book_interrupt_resume_executed": false,
+  "model_free_tests": {
+    "book": 18,
+    "shared_case_retention": 4
+  },
+  "independent_review": "bounded_source_findings_closed_before_launch",
+  "strict_parent_rustdoc": "passed_local_and_latest_head_GitHub_lint",
+  "private_log_ids": {
+    "chapters-balanced/manifest.json": "sha256:b94af83d84c537cc7ed2d54c92853f64c2de09c8cdb287189eabe1ec6bd5a862",
+    "stdlib-tests.log": "sha256:36d4f2f757c5df2bb76834dcd4ba9829766635f1a595b1ffc2e5701446f77219",
+    "shared-retention-tests.log": "sha256:5d8a174d448d59185fd227bcbab9c964e39b10a9c2e28965972cfb0c833dd854",
+    "affine-rustdoc.log": "sha256:9be53de6ddab14e16b880b6771b505463253b48f291d2a403a069d28a6d7b87b",
+    "preflight-bound.log": "sha256:1542ee359894af45369a497dc95b3f7de198b7a1b59054a0514573f83d2400c3",
+    "runs-fixed.log": "sha256:ca45823869a46bf2457505abb04e94658a44d69fb17cb7e5fd0f56576d4a9fa0"
+  },
+  "intentional_deleted_files": 8234,
+  "deleted_path_list_sha256": "bc8917dfba59592756119508ad01d973e5062cebffbbc585d3aaa3b6c5adb04a",
+  "claims": {
+    "general_quality_advantage": false,
+    "pretraining_unseen": false,
+    "equal_flops": false,
+    "speed_advantage": false,
+    "promoted_default": false,
+    "pypi_release": false
+  }
+}

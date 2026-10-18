@@ -1,0 +1,125 @@
+{
+  "schema": "spiraltorch.hf_book_control_plan.v2",
+  "status": "declared_before_training",
+  "source": {
+    "title": "Pride and Prejudice",
+    "author": "Jane Austen",
+    "catalog_url": "https://www.gutenberg.org/ebooks/1342",
+    "text_url": "https://www.gutenberg.org/cache/epub/1342/pg1342.txt",
+    "raw_sha256": "3f6bb9d6f78e0293b56acd4714dd68cb7d6d1d293402031ce9d5a216bcaf9d75",
+    "catalog_rights": "Public domain in the USA",
+    "acquired_utc": "2026-10-18",
+    "historical_source_identity_reused": false
+  },
+  "data_policy": {
+    "normalization": "utf8_bom_optional_crlf_to_lf",
+    "body": "numbered_chapters_only_drop_illustration_blocks_and_final_colophon",
+    "expected_chapters": 61,
+    "train_chapters": [
+      1,
+      49
+    ],
+    "development_chapters": [
+      50,
+      55
+    ],
+    "reserve_chapters": [
+      56,
+      61
+    ],
+    "reserve_policy": "write_only_no_tokenization_training_evaluation_or_selection",
+    "window_policy": "Rust HfGeometryDataset disjoint full contexts per chapter; drop tails"
+  },
+  "model": {
+    "family": "gpt2",
+    "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "runtime_identity": "sha256:330598b4c2d9a369c49ee513907821f51fd6fc5ac537ab943576acef02de76e5",
+    "base_frozen": true,
+    "dtype": "float32",
+    "device": "mps",
+    "attention": "eager",
+    "kv_cache": false
+  },
+  "arms": [
+    {
+      "name": "ordinary",
+      "type": "ChannelAffineAdapter",
+      "features": 768,
+      "strength": 0.1
+    },
+    {
+      "name": "wave_gate",
+      "type": "WaveGateAdapter",
+      "features": 768,
+      "strength": 0.1,
+      "curvature": -1
+    },
+    {
+      "name": "wave_gate_radius1",
+      "type": "WaveGateAdapter",
+      "features": 768,
+      "strength": 0.1,
+      "curvature": -1,
+      "log_radius": 0,
+      "learnable_radius": false
+    },
+    {
+      "name": "wave_gate_radius4",
+      "type": "WaveGateAdapter",
+      "features": 768,
+      "strength": 0.1,
+      "curvature": -1,
+      "log_radius": 1.3862943611198906,
+      "learnable_radius": false
+    }
+  ],
+  "sites": [
+    "transformer.h.8.mlp",
+    "transformer.h.9.mlp",
+    "transformer.h.10.mlp",
+    "transformer.h.11.mlp"
+  ],
+  "trainable_values_per_arm": 6144,
+  "seeds": [
+    41,
+    43,
+    47
+  ],
+  "context_length": 128,
+  "batch_size": 2,
+  "gradient_accumulation_steps": 1,
+  "max_steps": 512,
+  "save_steps": 256,
+  "learning_rate": 0.001,
+  "max_grad_norm": 0.1,
+  "optimizer": "adamw_torch",
+  "scheduler": "linear",
+  "warmup_steps": 0,
+  "weight_decay": 0,
+  "generation_prompt": "Elizabeth said",
+  "generation_max_new_tokens": 24,
+  "generation_sampling": false,
+  "primary_contrast": "wave_gate minus ordinary at fixed final step 512 development cross-entropy",
+  "diagnostic_contrast": "fixed-radius4 minus fixed-radius1 within the same f64 radius VJP path at fixed final step 512 development cross-entropy; exploratory",
+  "selection": "No best-checkpoint selection, adaptive tuning, retries, dropped failures or automatic promotion",
+  "publication": "All conditions, metrics, failures, source/data/weight hashes and replay code. No raw text, generated text or learned weights.",
+  "claims": {
+    "pretraining_unseen": false,
+    "equal_flops": false,
+    "speed_advantage": false,
+    "general_language_quality_advantage": false
+  },
+  "supersedes_plan_id": "sha256:dd6654b2afd60f3c1994739d437759c53f5000995551a32b2756c4c3803fb6d0",
+  "revision_reason": "Before training: balanced illustration removal and separate controls for the legacy f32 and radius f64 VJP paths; no model-evaluation outcome has been observed.",
+  "paired_contrasts": [
+    [
+      "ordinary",
+      "wave_gate"
+    ],
+    [
+      "wave_gate_radius1",
+      "wave_gate_radius4"
+    ]
+  ],
+  "initial_gradient_policy": "Bit-exact within each declared pair; cross-path f32/f64 differences are measured, not waived or attributed to geometry."
+}

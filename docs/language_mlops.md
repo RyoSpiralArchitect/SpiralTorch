@@ -61,6 +61,14 @@ uses that identical route. This makes a matched WaveGate ablation possible
 without a separate Python-only training or checkpoint implementation. It is a
 non-geometric adapter control, not full-model FT or a claimed quality win.
 
+The [fixed book comparison](../benchmarks/results/2026-10-18-hf-book-controls/README.md)
+extends that public route to a pinned chapter corpus and four controls across
+three seeds. All twelve 512-step runs completed with the same data and frozen
+base, and exact reconstructed inference. This WaveGate insertion underperformed
+the ordinary control in all seeds; widening the fixed radius helped but did not
+close the gap. Every result and private-state hash is retained without promoting
+a default. That is a bounded mechanism comparison, not a verdict on all geometry.
+
 ## Start With One Explicit Run
 
 Build a [WGPU source wheel](python/build-and-validation.md). Pin a request and
