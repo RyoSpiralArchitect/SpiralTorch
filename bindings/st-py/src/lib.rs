@@ -538,6 +538,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     exports.extend_from_slice(&[
         "SafeTensorArchive",
         "NativeCausalLm",
+        "NativeCausalLmGradients",
         "NdTensor",
         "ChannelAffineKernel",
         "ChannelAffineLearningBatch",

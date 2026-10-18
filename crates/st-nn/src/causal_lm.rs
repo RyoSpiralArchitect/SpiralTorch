@@ -1,22 +1,25 @@
-//! Frozen native causal language-model execution from explicit checkpoint importers.
+//! Native causal language models with frozen base weights and trainable geometry.
 //! The first importer is HF GPT-2; Python performs no transformer arithmetic.
 
 use crate::geometry_artifact::GeometryAdapterArtifact;
 use crate::geometry_runtime::NativeGeometryRuntime;
 use crate::weights::SafeTensorArchive;
 use serde::{Deserialize, Serialize};
-use st_kernel_contracts::attention::{attention_reference, AttentionMask, AttentionSpec};
 use st_tensor::{
     CrossEntropyConfig, LayerNormBackend, MatmulBackend, NdTensor, PackedB, Tensor,
     TensorUtilBackend,
 };
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+mod decoder;
 mod gpt2;
+mod learning;
+pub use learning::NativeCausalLmGradients;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
 pub type CausalLmResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+type TransposeCache = Arc<OnceLock<Result<PackedB, String>>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +42,7 @@ pub struct CausalLmLimits {
     pub max_activation_elements: usize,
     pub max_attention_pairs: usize,
     pub max_logit_elements: usize,
+    pub max_training_checkpoint_elements: usize,
 }
 
 impl Default for CausalLmLimits {
@@ -48,6 +52,7 @@ impl Default for CausalLmLimits {
             max_activation_elements: 16_777_216,
             max_attention_pairs: 4_194_304,
             max_logit_elements: 16_777_216,
+            max_training_checkpoint_elements: 16_777_216,
         }
     }
 }
@@ -59,6 +64,7 @@ impl CausalLmLimits {
             self.max_activation_elements,
             self.max_attention_pairs,
             self.max_logit_elements,
+            self.max_training_checkpoint_elements,
         ] {
             if limit == 0 || limit > isize::MAX as usize / 4 {
                 return Err(
@@ -73,6 +79,7 @@ impl CausalLmLimits {
 #[derive(Clone, Debug)]
 struct Dense {
     weight: PackedB,
+    backward_weight: TransposeCache,
     bias: Tensor,
 }
 
@@ -114,8 +121,8 @@ struct DecoderBlock {
 }
 
 /// Full unpadded prefixes with learned absolute positions, pre-norm residual
-/// attention/MLP blocks and a vocabulary head. No dropout, KV cache or update
-/// methods. Clones share frozen parameters, not a foreign framework/module.
+/// attention/MLP blocks and a vocabulary head. No dropout, KV cache or base
+/// weight updates. Clones share frozen parameters, not a foreign framework.
 #[derive(Clone, Debug)]
 pub struct NativeCausalLm {
     config: CausalLmConfig,
@@ -126,6 +133,7 @@ pub struct NativeCausalLm {
     blocks: Vec<DecoderBlock>,
     final_norm: Norm,
     head: PackedB,
+    backward_head: TransposeCache,
     geometry: Option<Arc<NativeGeometryRuntime>>,
 }
 
@@ -160,6 +168,10 @@ impl NativeCausalLm {
         self.geometry
             .as_ref()
             .map(|runtime| runtime.artifact().artifact_id())
+    }
+
+    pub fn geometry_artifact(&self) -> Option<&GeometryAdapterArtifact> {
+        self.geometry.as_ref().map(|runtime| runtime.artifact())
     }
 
     /// Attach existing native recipes at GPT-2-compatible branch output paths:
@@ -268,6 +280,18 @@ impl NativeCausalLm {
     /// Mean teacher-forced next-token NLL for B independent windows of T+1 IDs.
     /// Labels are shifted within each row only; there is no padding or ignore mask.
     pub fn next_token_loss(&self, windows: &[usize], shape: [usize; 2]) -> CausalLmResult<f32> {
+        let (input, labels, shape) = self.shift_windows(windows, shape)?;
+        Ok(self
+            .logits(&input, shape, false)?
+            .cross_entropy_with_logits(&labels, CrossEntropyConfig::default())?
+            .data()[0])
+    }
+
+    fn shift_windows(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+    ) -> CausalLmResult<(Vec<usize>, Vec<i64>, [usize; 2])> {
         if shape[1] < 2 {
             return Err("next-token loss needs at least two IDs per window".into());
         }
@@ -284,110 +308,16 @@ impl NativeCausalLm {
             input.extend_from_slice(&window[..steps]);
             labels.extend(window[1..].iter().map(|&id| id as i64));
         }
-        Ok(self
-            .logits(&input, [shape[0], steps], false)?
-            .cross_entropy_with_logits(&labels, CrossEntropyConfig::default())?
-            .data()[0])
-    }
-
-    fn intervene(&self, path: &str, input: Tensor, shape: [usize; 2]) -> CausalLmResult<Tensor> {
-        if let Some(runtime) = &self.geometry {
-            if runtime
-                .artifact()
-                .record()
-                .placements
-                .iter()
-                .any(|p| p.path == path)
-            {
-                return Ok(runtime
-                    .forward_sequence(path, input.data(), shape)?
-                    .output()
-                    .clone());
-            }
-        }
-        Ok(input)
+        Ok((input, labels, [shape[0], steps]))
     }
 
     fn logits(&self, ids: &[usize], shape: [usize; 2], last_only: bool) -> CausalLmResult<Tensor> {
-        let rows = self.input_count(shape, last_only)?;
+        self.input_count(shape, last_only)?;
         let c = &self.config;
-        if ids.len() != rows || ids.iter().any(|&id| id >= c.vocabulary) {
-            return Err("native causal LM token count or ID is invalid".into());
-        }
         let [batch, steps] = shape;
-        let positions: Vec<_> = (0..rows).map(|row| row % steps).collect();
-        let mut hidden = self.token.gather_rows(ids)?.add_with_backend(
-            &self.position.gather_rows(&positions)?,
-            TensorUtilBackend::Cpu,
-        )?;
-        let head_dim = c.width / c.heads;
-        for (index, block) in self.blocks.iter().enumerate() {
-            let norm = block.first_norm.forward(&hidden, c.norm_epsilon)?;
-            let fused = block.qkv.forward(&norm)?;
-            let count = rows * c.width;
-            let mut qkv = [vec![0.; count], vec![0.; count], vec![0.; count]];
-            // Existing attention contracts consume explicit [B,H,T,D], not a
-            // flattened row stream; unpack GPT-2's [B,T,3*H*D] projection once.
-            for b in 0..batch {
-                for h in 0..c.heads {
-                    for t in 0..steps {
-                        let destination = ((b * c.heads + h) * steps + t) * head_dim;
-                        for (component, output) in qkv.iter_mut().enumerate() {
-                            let source = (b * steps + t) * (3 * c.width)
-                                + component * c.width
-                                + h * head_dim;
-                            output[destination..destination + head_dim]
-                                .copy_from_slice(&fused.data()[source..source + head_dim]);
-                        }
-                    }
-                }
-            }
-            let mut scale = if c.scale_attention {
-                1. / (head_dim as f32).sqrt()
-            } else {
-                1.
-            };
-            if c.inverse_layer_scale {
-                scale /= (index + 1) as f32;
-            }
-            let heads = [batch, c.heads, steps, head_dim];
-            let spec = AttentionSpec::new(
-                &heads,
-                &heads,
-                &heads,
-                scale,
-                AttentionMask::Causal { query_offset: 0 },
-            )?;
-            let attended = attention_reference(spec, &qkv[0], &qkv[1], &qkv[2], None, None)?;
-            let mut merged = vec![0.; count];
-            for b in 0..batch {
-                for t in 0..steps {
-                    for h in 0..c.heads {
-                        let source = ((b * c.heads + h) * steps + t) * head_dim;
-                        let destination = (b * steps + t) * c.width + h * head_dim;
-                        merged[destination..destination + head_dim]
-                            .copy_from_slice(&attended[source..source + head_dim]);
-                    }
-                }
-            }
-            let path = format!("transformer.h.{index}");
-            let attention = block
-                .output
-                .forward(&Tensor::from_vec(rows, c.width, merged)?)?;
-            let attention = self.intervene(&format!("{path}.attn"), attention, shape)?;
-            hidden = attention.add_with_backend(&hidden, TensorUtilBackend::Cpu)?;
-            let norm = block.second_norm.forward(&hidden, c.norm_epsilon)?;
-            let expanded = block.expand.forward(&norm)?.try_into_gelu()?;
-            let mlp = self.intervene(
-                &format!("{path}.mlp"),
-                block.contract.forward(&expanded)?,
-                shape,
-            )?;
-            hidden = self.intervene(
-                &path,
-                hidden.add_with_backend(&mlp, TensorUtilBackend::Cpu)?,
-                shape,
-            )?;
+        let mut hidden = self.embed(ids, shape)?;
+        for index in 0..self.blocks.len() {
+            hidden = self.run_block(index, hidden, shape, false)?.output;
         }
         let hidden = if last_only {
             hidden.gather_rows(&(0..batch).map(|b| (b + 1) * steps - 1).collect::<Vec<_>>())?

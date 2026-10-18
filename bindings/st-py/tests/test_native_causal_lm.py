@@ -48,13 +48,13 @@ def fixture():
     return json.dumps(config), st.SafeTensorArchive.from_bytes(struct.pack("<Q", len(raw)) + raw + payload)
 
 
-def artifact(model, *, path="transformer.h.0.mlp", gate=.5):
+def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False):
     return st.GeometryAdapterArtifact.create_json(json.dumps({
         "schema": "spiraltorch.geometry_adapter_artifact.v1", "base_model_identity": model.base_model_identity,
-        "policy": "full_prefix_f32_no_cache.v1", "training": False, "placements": [{
-            "path": path, "training": False,
+        "policy": "full_prefix_f32_no_cache.v1", "training": trainable, "placements": [{
+            "path": path, "training": trainable,
             "recipe": {"schema": "spiraltorch.channel_affine_adapter.v1", "features": 4, "strength": .5, "max_values": 1024},
-            "tensors": [{"name": name, "shape": [4], "values": values, "requires_grad": False, "role": "parameter"}
+            "tensors": [{"name": name, "shape": [4], "values": values, "requires_grad": trainable and name == "gate", "role": "parameter"}
                         for name, values in [("gate", [gate, 0., -gate, gate]), ("bias", [0.] * 4)]],
         }],
     }))
@@ -136,6 +136,63 @@ class NativeCausalLmTests(unittest.TestCase):
         limited = st.NativeCausalLm.from_gpt2(self.config, self.weights, max_attention_pairs=15)
         with self.assertRaisesRegex(ValueError, "attention pairs"):
             limited.forward(Poison(), [1, 2], last_only=True)
+
+    def test_native_language_loss_learning_keeps_base_and_resumes_exactly(self):
+        base = self.model
+        state = artifact(base, trainable=True)
+        original = base.with_geometry(state)
+        windows, shape = [1, 2, 3, 4, 5, 6, 7, 8], [2, 4]
+        first = original.geometry_loss_gradients(windows, shape)
+        self.assertEqual(first.loss, original.next_token_loss(windows, shape))
+        self.assertEqual(first.window_shape, shape)
+        self.assertEqual(first.base_model_identity, base.base_model_identity)
+        self.assertEqual(first.geometry_artifact_id, state.artifact_id)
+        gradients = first.parameter_gradients()
+        self.assertTrue(any(x != 0. for x in gradients["transformer.h.0.mlp"]["gate"]))
+        gradients["transformer.h.0.mlp"]["gate"][0] = 999.
+        self.assertNotEqual(first.parameter_gradients(), gradients)
+        model = original.step_geometry_sgd(first, .5)
+        with self.assertRaisesRegex(ValueError, "stale"):
+            model.step_geometry_sgd(first, .5)
+        for _ in range(19):
+            model = model.step_geometry_sgd(model.geometry_loss_gradients(windows, shape), .5)
+        self.assertLess(model.next_token_loss(windows, shape), first.loss)
+        self.assertEqual(model.base_model_identity, base.base_model_identity)
+        self.assertIsNone(base.geometry_artifact())
+        self.assertEqual(original.geometry_artifact().to_json(), state.to_json())
+        saved = model.geometry_artifact()
+        restored_state = st.GeometryAdapterArtifact.from_json(saved.to_json(), saved.artifact_id, base.base_model_identity)
+        restored = base.with_geometry(restored_state)
+        a, b = model.geometry_loss_gradients(windows, shape), restored.geometry_loss_gradients(windows, shape)
+        self.assertEqual(a.parameter_gradients(), b.parameter_gradients())
+        self.assertEqual(model.step_geometry_sgd(a, .5).geometry_artifact().to_json(),
+                         restored.step_geometry_sgd(b, .5).geometry_artifact().to_json())
+        before = json.loads(state.state_json())["placements"][0]["tensors"]
+        after = json.loads(saved.state_json())["placements"][0]["tensors"]
+        self.assertEqual(next(t for t in before if t["name"] == "bias"), next(t for t in after if t["name"] == "bias"))
+        self.assertIn("NativeCausalLmGradients", st.__all__)
+        with self.assertRaises(TypeError):
+            st.NativeCausalLmGradients()
+
+    def test_learning_budget_and_flags_precede_token_extraction(self):
+        class Poison:
+            def __len__(self):
+                raise AssertionError("token extraction must follow learning admission")
+        with self.assertRaisesRegex(ValueError, "no attached geometry"):
+            self.model.geometry_loss_gradients(Poison(), [1, 3])
+        frozen = self.model.with_geometry(artifact(self.model))
+        with self.assertRaisesRegex(ValueError, "no trainable parameters"):
+            frozen.geometry_loss_gradients(Poison(), [1, 3])
+        small = st.NativeCausalLm.from_gpt2(self.config, self.weights, max_training_checkpoint_elements=23)
+        small = small.with_geometry(artifact(small, trainable=True))
+        with self.assertRaisesRegex(ValueError, "training checkpoints"):
+            small.geometry_loss_gradients(Poison(), [1, 3])
+        g = small.geometry_loss_gradients([1, 2], [1, 2])
+        before = small.geometry_artifact().to_json()
+        for rate in (True, 0., -1., float("inf"), float("nan")):
+            with self.assertRaises((ValueError, TypeError)):
+                small.step_geometry_sgd(g, rate)
+            self.assertEqual(small.geometry_artifact().to_json(), before)
 
 
 if __name__ == "__main__":

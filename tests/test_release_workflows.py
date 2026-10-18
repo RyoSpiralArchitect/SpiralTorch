@@ -166,6 +166,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("bindings/st-py/tests/test_native_weights_parity.py", ci)
         self.assertIn("bindings/st-py/tests/test_native_causal_lm_parity.py", ci)
+        self.assertIn("bindings/st-py/tests/test_native_causal_lm_learning_parity.py", ci)
+        self.assertIn("python -I -B tests/test_native_gpt2_probe.py", ci)
+        self.assertIn("python -I -B tests/test_native_gpt2_learning_probe.py", ci)
 
     def test_official_actions_use_node24_generation(self) -> None:
         workflow_dir = ROOT / ".github" / "workflows"

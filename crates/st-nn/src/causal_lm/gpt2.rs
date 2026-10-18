@@ -136,6 +136,7 @@ fn dense(
     let weight = matrix(weights, &format!("{prefix}.weight"), input, output)?;
     Ok(Dense {
         weight: PackedB::from_tensor(&weight, Tile::col_major())?,
+        backward_weight: Arc::new(OnceLock::new()),
         bias: matrix(weights, &format!("{prefix}.bias"), 1, output)?,
     })
 }
@@ -282,6 +283,7 @@ pub(super) fn load(
         blocks,
         final_norm,
         head,
+        backward_head: Arc::new(OnceLock::new()),
         geometry: None,
     })
 }

@@ -1,0 +1,455 @@
+{
+  "schema": "spiraltorch.native_gpt2_learning_comparison.v1",
+  "scope": "three_window_gradient_and_update_parity_not_language_quality",
+  "source_sha256": {
+    "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+    "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+    "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+  },
+  "learning_rate": 0.02,
+  "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+  "initial_geometry_artifact_id": "sha256:fb295546689a3c3c83578d5b959da6a9057ba427257f34ac7eaf1b7b78713b94",
+  "initial_geometry_sha256": "fb295546689a3c3c83578d5b959da6a9057ba427257f34ac7eaf1b7b78713b94",
+  "native_report_sha256": "b90bcb44a9e11e5a4acd6032a0be6a73b8225cca387ca855f1e4cdf4f73c223d",
+  "reference_report_sha256": "a4a5a0be58156a6901cedf8bcd6c9712079f0c5d768c6b323b83b7ffee123dbe",
+  "reference_versions": {
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  },
+  "native_artifact_continuation_exact": true,
+  "rows": [
+    {
+      "step": 0,
+      "case": "meaning",
+      "text": "The meaning of life is not the same as",
+      "ids": [
+        464,
+        3616,
+        286,
+        1204,
+        318,
+        407,
+        262,
+        976,
+        355
+      ],
+      "native_pre_nll": 2.811478614807129,
+      "native_post_nll": 2.811465263366699,
+      "reference_pre_nll": 2.8114471435546875,
+      "reference_post_nll": 2.8114380836486816,
+      "pre_nll_abs_error": 3.147125244140625e-05,
+      "post_nll_abs_error": 2.7179718017578125e-05,
+      "native_gradient": {
+        "file": "gradient-0.json",
+        "sha256": "07893c0d2e90ea4f9ca3ac32ba9f21dd26a3a35d2815242dd2a219f17bd3ea69"
+      },
+      "reference_gradient": {
+        "file": "gradient-0.json",
+        "sha256": "f3f70711ec0f6b13331e62a52e356824424d8666bf9b30789f9c0f4d10e9be91"
+      },
+      "native_state": {
+        "file": "state-0.json",
+        "sha256": "ee6bfd346710b41fdff31b296c048a1726ba71b21e895338d813db38075d87c8"
+      },
+      "reference_state": {
+        "file": "state-0.json",
+        "sha256": "7283cd47e991e929e78f211256593fcba41328bd98a4d25e5556728dbe32b070"
+      },
+      "parameters": {
+        "transformer.h.0.mlp": {
+          "bias": {
+            "gradient_error": {
+              "max_abs": 1.2015225365757942e-06,
+              "rms": 3.4457295787314237e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 2.4029999999997125e-08,
+              "rms": 6.8914587925345255e-09
+            }
+          },
+          "gate": {
+            "gradient_error": {
+              "max_abs": 2.9690563678741455e-06,
+              "rms": 3.165668266782919e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 5.929999999983865e-08,
+              "rms": 6.333560238123683e-09
+            }
+          },
+          "log_radius": {
+            "gradient_error": {
+              "max_abs": 5.029505700804293e-10,
+              "rms": 5.029505700804293e-10,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          }
+        },
+        "transformer.h.6.attn": {
+          "gate": {
+            "gradient_error": {
+              "max_abs": 4.874891601502895e-07,
+              "rms": 9.640502834818056e-08,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 9.999999999940612e-09,
+              "rms": 1.940152535633147e-09
+            }
+          },
+          "history_angle": {
+            "gradient_error": {
+              "max_abs": 1.4224497135728598e-09,
+              "rms": 1.4224497135728598e-09,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          },
+          "local_gate": {
+            "gradient_error": {
+              "max_abs": 4.99923771712929e-07,
+              "rms": 9.039211643977739e-08,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 1.0999999999414256e-08,
+              "rms": 1.8672583232188526e-09
+            }
+          },
+          "log_gain": {
+            "gradient_error": {
+              "max_abs": 8.152710506692529e-09,
+              "rms": 8.152710506692529e-09,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          }
+        },
+        "transformer.h.11.mlp": {
+          "gate": {
+            "gradient_error": {
+              "max_abs": 1.5998550225049257e-05,
+              "rms": 8.750142586656888e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 3.1997120000000004e-07,
+              "rms": 1.7504585353264216e-08
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": 1,
+      "case": "models",
+      "text": "Machine learning models can be used to predict",
+      "ids": [
+        37573,
+        4673,
+        4981,
+        460,
+        307,
+        973,
+        284,
+        4331
+      ],
+      "native_pre_nll": 3.289907217025757,
+      "native_post_nll": 3.28989315032959,
+      "reference_pre_nll": 3.2898757457733154,
+      "reference_post_nll": 3.289865732192993,
+      "pre_nll_abs_error": 3.147125244140625e-05,
+      "post_nll_abs_error": 2.7418136596679688e-05,
+      "native_gradient": {
+        "file": "gradient-1.json",
+        "sha256": "d203adf4476e20dfe87614a83f4930fb48d6d4b07c1d90fa7ba4243a9435acec"
+      },
+      "reference_gradient": {
+        "file": "gradient-1.json",
+        "sha256": "a8f6aaa02f9b1a8a699489b60c883533c167cc9c6b8f70fc5aaae3acdd5845ae"
+      },
+      "native_state": {
+        "file": "state-1.json",
+        "sha256": "e970eca23bb942122096f78ad6a181031b500a59510cfb37dbb667bb58f11820"
+      },
+      "reference_state": {
+        "file": "state-1.json",
+        "sha256": "8efd52f64992f5c2959c48fad0402a707bdba5ce4d839f0250e8d541ad524fee"
+      },
+      "parameters": {
+        "transformer.h.0.mlp": {
+          "bias": {
+            "gradient_error": {
+              "max_abs": 9.77073796093464e-07,
+              "rms": 2.836253824950172e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 4.250299999999989e-08,
+              "rms": 9.675463175803023e-09
+            }
+          },
+          "gate": {
+            "gradient_error": {
+              "max_abs": 9.482027962803841e-07,
+              "rms": 1.7754462261826827e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 5.559999999987797e-08,
+              "rms": 7.496669784627801e-09
+            }
+          },
+          "log_radius": {
+            "gradient_error": {
+              "max_abs": 5.63431967748329e-10,
+              "rms": 5.63431967748329e-10,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          }
+        },
+        "transformer.h.6.attn": {
+          "gate": {
+            "gradient_error": {
+              "max_abs": 4.584435373544693e-07,
+              "rms": 8.499411308348066e-08,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 1.159999999961886e-08,
+              "rms": 2.615001757083502e-09
+            }
+          },
+          "history_angle": {
+            "gradient_error": {
+              "max_abs": 1.5620571502950042e-10,
+              "rms": 1.5620571502950042e-10,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          },
+          "local_gate": {
+            "gradient_error": {
+              "max_abs": 4.788162186741829e-07,
+              "rms": 8.382929679101616e-08,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 1.3000000000096268e-08,
+              "rms": 2.543565718087621e-09
+            }
+          },
+          "log_gain": {
+            "gradient_error": {
+              "max_abs": 5.962419891147874e-09,
+              "rms": 5.962419891147874e-09,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          }
+        },
+        "transformer.h.11.mlp": {
+          "gate": {
+            "gradient_error": {
+              "max_abs": 2.348935231566429e-05,
+              "rms": 1.513914626997162e-06,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 7.897639999999919e-07,
+              "rms": 4.6880156409828835e-08
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": 2,
+      "case": "spiraltorch",
+      "text": "SpiralTorch is a free, open source",
+      "ids": [
+        50,
+        4063,
+        282,
+        15884,
+        354,
+        318,
+        257,
+        1479,
+        11,
+        1280,
+        2723
+      ],
+      "native_pre_nll": 3.433504581451416,
+      "native_post_nll": 3.433483123779297,
+      "reference_pre_nll": 3.4334754943847656,
+      "reference_post_nll": 3.433457612991333,
+      "pre_nll_abs_error": 2.9087066650390625e-05,
+      "post_nll_abs_error": 2.5510787963867188e-05,
+      "native_gradient": {
+        "file": "gradient-2.json",
+        "sha256": "52e6f83ee49b325b29fbfda56c2c533e3ea4ce5c539036ac6ef8bd50603b3643"
+      },
+      "reference_gradient": {
+        "file": "gradient-2.json",
+        "sha256": "7ac1a6734e8720dd9937f755861c7826392c918e0c892f4e752ee736814ce2b1"
+      },
+      "native_state": {
+        "file": "state-2.json",
+        "sha256": "7dc415729bf9544e92f72ab1fe61b7372db989f798d0a37a2b7a51b371b5f03f"
+      },
+      "reference_state": {
+        "file": "state-2.json",
+        "sha256": "afc4859b2d0fddefeb5cd380710bb6d6b4d46d66559f12874b1278090998795e"
+      },
+      "parameters": {
+        "transformer.h.0.mlp": {
+          "bias": {
+            "gradient_error": {
+              "max_abs": 1.0335934348404408e-06,
+              "rms": 2.8099907528519215e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 5.069300000000023e-08,
+              "rms": 1.2313488605428569e-08
+            }
+          },
+          "gate": {
+            "gradient_error": {
+              "max_abs": 1.7557467799633741e-06,
+              "rms": 2.690094133143003e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 9.000000000033287e-08,
+              "rms": 9.843849780090701e-09
+            }
+          },
+          "log_radius": {
+            "gradient_error": {
+              "max_abs": 5.622950993711129e-10,
+              "rms": 5.622950993711129e-10,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          }
+        },
+        "transformer.h.6.attn": {
+          "gate": {
+            "gradient_error": {
+              "max_abs": 3.3923424780368805e-07,
+              "rms": 8.056580117493793e-08,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 1.519999999997912e-08,
+              "rms": 3.247807885834893e-09
+            }
+          },
+          "history_angle": {
+            "gradient_error": {
+              "max_abs": 2.4923565433709882e-09,
+              "rms": 2.4923565433709882e-09,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          },
+          "local_gate": {
+            "gradient_error": {
+              "max_abs": 3.30386683344841e-07,
+              "rms": 7.387765417035937e-08,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 1.6499999999988746e-08,
+              "rms": 3.1184305948780945e-09
+            }
+          },
+          "log_gain": {
+            "gradient_error": {
+              "max_abs": 1.4943452697480097e-08,
+              "rms": 1.4943452697480097e-08,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 0.0,
+              "rms": 0.0
+            }
+          }
+        },
+        "transformer.h.11.mlp": {
+          "gate": {
+            "gradient_error": {
+              "max_abs": 1.6852427506819367e-05,
+              "rms": 6.983710377614546e-07,
+              "native_nonzero": true,
+              "reference_nonzero": true
+            },
+            "parameter_error_after_step": {
+              "max_abs": 1.1268100000000049e-06,
+              "rms": 5.96106492935316e-08
+            }
+          }
+        }
+      }
+    }
+  ],
+  "interpretation": "Measured three-window gradient/update agreement, not held-out quality, full-model FT, timing or a selected pass threshold.",
+  "publication": {
+    "schema": "spiraltorch.native_gpt2_learning_public_projection.v1",
+    "private_comparison_sha256": "4959f0064554e731d1c98ed0a9c90f868622c44d00862dc3db4b6d1f93eb1527",
+    "operand_norm_fields_removed": 96
+  }
+}

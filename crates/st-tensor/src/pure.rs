@@ -1371,6 +1371,30 @@ pub struct PackedB {
 }
 
 impl PackedB {
+    /// Pack the transposed operand directly, without a temporary dense tensor.
+    /// Frozen-model pullbacks can cache this second orientation across steps.
+    pub fn transposed(&self) -> PureResult<Self> {
+        if self.layout != PackedLayout::ColMajor {
+            return Err(TensorError::UnsupportedLayout {
+                label: "transposing a packed operand requires column-major storage",
+            });
+        }
+        let mut packed = aligned_zeroed(self.buf.len());
+        crate::backend::transpose::transpose_into(
+            self.buf.as_slice(),
+            &mut packed,
+            self.cols,
+            self.inner,
+        );
+        Ok(Self {
+            cols: self.inner,
+            inner: self.cols,
+            tile: self.tile,
+            layout: PackedLayout::ColMajor,
+            buf: Arc::new(packed),
+        })
+    }
+
     pub fn from_tensor(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
         match tensor.layout {
             Layout::RowMajor => Self::from_row_major(tensor, tile),
@@ -16721,6 +16745,31 @@ mod tests {
         let standard = unwrap_ok(lhs.matmul(&rhs_t));
         let prepacked = unwrap_ok(lhs.matmul_prepacked(&packed_t));
         assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn packed_transposed_operand_reuses_packing_semantics() {
+        for (rows, cols) in [(0, 3), (3, 0), (1, 5), (3, 5), (33, 17)] {
+            let input = unwrap_ok(Tensor::from_fn(rows, cols, |r, c| {
+                (r * cols + c) as f32 * 0.01
+            }));
+            let packed = unwrap_ok(PackedB::from_tensor(&input, Tile::col_major()));
+            let transpose = unwrap_ok(packed.transposed());
+            let reference = unwrap_ok(PackedB::from_tensor_transpose(&input, Tile::col_major()));
+            assert_eq!((transpose.inner(), transpose.cols()), (cols, rows));
+            assert_eq!(transpose.as_slice(), reference.as_slice());
+            assert_eq!(
+                unwrap_ok(transpose.transposed()).as_slice(),
+                packed.as_slice()
+            );
+            let upstream = unwrap_ok(Tensor::from_fn(2, cols, |r, c| (r + c) as f32 * 0.02));
+            assert_eq!(
+                unwrap_ok(
+                    upstream.matmul_prepacked_with_backend(&transpose, MatmulBackend::CpuSimd)
+                ),
+                unwrap_ok(upstream.matmul_with_backend(&input.transpose(), MatmulBackend::CpuSimd))
+            );
+        }
     }
 
     #[test]

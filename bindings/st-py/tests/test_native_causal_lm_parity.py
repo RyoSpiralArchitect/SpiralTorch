@@ -9,9 +9,9 @@ transformers = pytest.importorskip("transformers")
 import spiraltorch as st  # noqa: E402
 
 
-def pair(*, dtype=torch.float32, tied=True, scaled=True, inverse=False):
+def pair(*, dtype=torch.float32, tied=True, scaled=True, inverse=False, width=8, heads=2):
     torch.manual_seed(327)
-    config = transformers.GPT2Config(vocab_size=19, n_positions=12, n_embd=8, n_head=2,
+    config = transformers.GPT2Config(vocab_size=19, n_positions=12, n_embd=width, n_head=heads,
                                     n_layer=2, n_inner=13, resid_pdrop=0., embd_pdrop=0., attn_pdrop=0.,
                                     tie_word_embeddings=tied, scale_attn_weights=scaled,
                                     scale_attn_by_inverse_layer_idx=inverse)

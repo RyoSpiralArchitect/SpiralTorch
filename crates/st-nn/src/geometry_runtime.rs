@@ -326,36 +326,76 @@ impl NativeGeometryRuntime {
             return Err("learning rate must be finite and positive".into());
         }
         let gradient = batch.vjp(upstream)?;
+        let next = self.with_gradients_sgd(
+            &batch.source_id,
+            &BTreeMap::from([(batch.placement.path.clone(), gradient.parameters)]),
+            learning_rate,
+        )?;
+        self.artifact = next.artifact;
+        Ok(())
+    }
+
+    /// Shared atomic update for gradients obtained from the same frozen artifact.
+    /// Kept crate-private: clients submit sealed learning batches, not arbitrary maps.
+    pub(crate) fn with_gradients_sgd(
+        &self,
+        source_id: &str,
+        gradients: &BTreeMap<String, BTreeMap<String, Vec<f32>>>,
+        learning_rate: f32,
+    ) -> Result<Self> {
+        if source_id != self.artifact.artifact_id() {
+            return Err("geometry snapshot is stale or belongs to another artifact".into());
+        }
+        if !learning_rate.is_finite() || learning_rate <= 0. {
+            return Err("learning rate must be finite and positive".into());
+        }
         let mut record = self.artifact.record().clone();
-        let placement = record
-            .placements
-            .iter_mut()
-            .find(|p| p.path == batch.placement.path)
-            .unwrap();
         let mut trainable = false;
-        for parameter in &mut placement.tensors {
-            if parameter.role != GeometryAdapterTensorRole::Parameter || !parameter.requires_grad {
-                continue;
+        for (path, values) in gradients {
+            let placement = record
+                .placements
+                .iter_mut()
+                .find(|p| p.path == *path)
+                .ok_or("unknown geometry gradient placement")?;
+            let parameters = placement
+                .tensors
+                .iter()
+                .filter(|p| p.role == GeometryAdapterTensorRole::Parameter);
+            if values.len() != parameters.clone().count() {
+                return Err("geometry parameter gradient set differs from the placement".into());
             }
-            trainable = true;
-            let values = gradient
-                .parameters
-                .get(&parameter.name)
-                .ok_or("missing native parameter gradient")?;
-            let current = Tensor::from_vec(1, parameter.values.len(), parameter.values.clone())?;
-            let delta = Tensor::from_vec(1, values.len(), values.clone())?
-                .scale_with_backend(learning_rate, TensorUtilBackend::Cpu)?;
-            parameter.values = current
-                .sub_with_backend(&delta, TensorUtilBackend::Cpu)?
-                .data()
-                .to_vec();
+            for parameter in parameters {
+                let gradient = values
+                    .get(&parameter.name)
+                    .ok_or("missing native parameter gradient")?;
+                if gradient.len() != parameter.values.len()
+                    || gradient.iter().any(|v| !v.is_finite())
+                {
+                    return Err("invalid geometry parameter gradient shape or values".into());
+                }
+            }
+            for parameter in &mut placement.tensors {
+                if parameter.role != GeometryAdapterTensorRole::Parameter
+                    || !parameter.requires_grad
+                {
+                    continue;
+                }
+                trainable = true;
+                let gradient = &values[&parameter.name];
+                let current =
+                    Tensor::from_vec(1, parameter.values.len(), parameter.values.clone())?;
+                let delta = Tensor::from_vec(1, gradient.len(), gradient.clone())?
+                    .scale_with_backend(learning_rate, TensorUtilBackend::Cpu)?;
+                parameter.values = current
+                    .sub_with_backend(&delta, TensorUtilBackend::Cpu)?
+                    .data()
+                    .to_vec();
+            }
         }
         if !trainable {
-            return Err("selected placement has no trainable parameters".into());
+            return Err("selected placements have no trainable parameters".into());
         }
-        let candidate = GeometryAdapterArtifact::create(record)?;
-        self.artifact = candidate;
-        Ok(())
+        Ok(Self::new(GeometryAdapterArtifact::create(record)?))
     }
 
     /// One mean-MSE SGD step using the existing Rust loss and its pullback.
@@ -696,6 +736,35 @@ mod tests {
             }
         }
         GeometryAdapterArtifact::create_json(value.to_string().as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn joint_gradient_update_is_atomic_and_keeps_fixed_buffers() {
+        let mut record = artifact(true, Some(false), 0.5).record().clone();
+        let mut second = record.placements[0].clone();
+        second.path = "site2".into();
+        record.placements.push(second);
+        let runtime = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(record).unwrap());
+        let id = runtime.artifact().artifact_id();
+        let gradient =
+            BTreeMap::from([("gate".into(), vec![0.1; 3]), ("bias".into(), vec![0.2; 3])]);
+        let mut gradients = BTreeMap::from([
+            ("site".into(), gradient.clone()),
+            ("site2".into(), gradient),
+        ]);
+        let before = runtime.artifact().to_json();
+        let updated = runtime.with_gradients_sgd(id, &gradients, 0.1).unwrap();
+        assert_ne!(updated.artifact().artifact_id(), id);
+        for p in &updated.artifact().record().placements {
+            assert_eq!(tensor(p, "log_radius"), [0.2]);
+        }
+        assert_eq!(runtime.artifact().to_json(), before);
+        gradients.get_mut("site2").unwrap().get_mut("gate").unwrap()[0] = f32::MAX;
+        assert!(runtime.with_gradients_sgd(id, &gradients, 2.).is_err());
+        assert_eq!(runtime.artifact().to_json(), before);
+        gradients.get_mut("site2").unwrap().remove("gate");
+        assert!(runtime.with_gradients_sgd(id, &gradients, 0.1).is_err());
+        assert_eq!(runtime.artifact().to_json(), before);
     }
 
     #[test]

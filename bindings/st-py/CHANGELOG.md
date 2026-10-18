@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add end-to-end native language-loss gradients for geometry fine-tuning on
+  the frozen GPT-2 decoder. Rust owns full decoder pullback and atomic
+  multi-placement SGD, with sealed snapshot-bound gradients, artifact restore,
+  block checkpoint recomputation, cached packed transposes and input-only
+  LayerNorm gradients. Python remains transport only; optional Torch/HF tests
+  compare all 14 recipe configurations. No base-weight FT, padding or KV cache
+  is implied. This remains after the fixed 0.4.32 candidate.
+
 - Add `NativeCausalLm` with an explicit GPT-2 safetensors importer: complete
   frozen token-ID-to-logits/NLL/greedy execution in Rust, prepacked CPU
   projections, tied/untied output heads and validated native geometry output

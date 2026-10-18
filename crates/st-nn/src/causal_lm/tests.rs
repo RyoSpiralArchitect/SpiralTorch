@@ -4,6 +4,9 @@ use safetensors::tensor::{serialize, Dtype, TensorView};
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[path = "learning_tests.rs"]
+mod learning;
+
 fn config() -> serde_json::Value {
     json!({"model_type":"gpt2","vocab_size":11,"n_positions":8,"n_embd":4,"n_head":2,"n_layer":2})
 }

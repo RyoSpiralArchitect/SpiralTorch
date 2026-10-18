@@ -4,7 +4,8 @@ use crate::geometry_artifact::PyGeometryAdapterArtifact;
 use crate::weights::{PyNdTensor, PySafeTensorArchive};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use st_nn::causal_lm::{CausalLmLimits, NativeCausalLm};
+use st_nn::causal_lm::{CausalLmLimits, NativeCausalLm, NativeCausalLmGradients};
+use std::collections::BTreeMap;
 
 fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
@@ -47,10 +48,38 @@ pub struct PyNativeCausalLm {
     inner: NativeCausalLm,
 }
 
+#[pyclass(name = "NativeCausalLmGradients", module = "spiraltorch", frozen)]
+pub struct PyNativeCausalLmGradients {
+    inner: NativeCausalLmGradients,
+}
+
+#[pymethods]
+impl PyNativeCausalLmGradients {
+    #[getter]
+    fn loss(&self) -> f32 {
+        self.inner.loss()
+    }
+    #[getter]
+    fn base_model_identity(&self) -> &str {
+        self.inner.base_model_identity()
+    }
+    #[getter]
+    fn geometry_artifact_id(&self) -> &str {
+        self.inner.geometry_artifact_id()
+    }
+    #[getter]
+    fn window_shape(&self) -> Vec<usize> {
+        self.inner.window_shape().to_vec()
+    }
+    fn parameter_gradients(&self) -> BTreeMap<String, BTreeMap<String, Vec<f32>>> {
+        self.inner.parameters().clone()
+    }
+}
+
 #[pymethods]
 impl PyNativeCausalLm {
     #[staticmethod]
-    #[pyo3(signature = (config_json, weights, *, max_parameter_elements=None, max_activation_elements=None, max_attention_pairs=None, max_logit_elements=None))]
+    #[pyo3(signature = (config_json, weights, *, max_parameter_elements=None, max_activation_elements=None, max_attention_pairs=None, max_logit_elements=None, max_training_checkpoint_elements=None))]
     fn from_gpt2(
         py: Python<'_>,
         config_json: &str,
@@ -59,6 +88,7 @@ impl PyNativeCausalLm {
         max_activation_elements: Option<&Bound<'_, PyAny>>,
         max_attention_pairs: Option<&Bound<'_, PyAny>>,
         max_logit_elements: Option<&Bound<'_, PyAny>>,
+        max_training_checkpoint_elements: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let defaults = CausalLmLimits::default();
         let limits = CausalLmLimits {
@@ -69,6 +99,10 @@ impl PyNativeCausalLm {
             )?,
             max_attention_pairs: limit(max_attention_pairs, defaults.max_attention_pairs)?,
             max_logit_elements: limit(max_logit_elements, defaults.max_logit_elements)?,
+            max_training_checkpoint_elements: limit(
+                max_training_checkpoint_elements,
+                defaults.max_training_checkpoint_elements,
+            )?,
         };
         py.detach(|| NativeCausalLm::from_gpt2_json(config_json.as_bytes(), &weights.inner, limits))
             .map(|inner| Self { inner })
@@ -92,6 +126,46 @@ impl PyNativeCausalLm {
 
     fn config_json(&self) -> PyResult<String> {
         serde_json::to_string(self.inner.config()).map_err(error)
+    }
+
+    fn geometry_artifact(&self) -> Option<PyGeometryAdapterArtifact> {
+        self.inner
+            .geometry_artifact()
+            .cloned()
+            .map(|inner| PyGeometryAdapterArtifact { inner })
+    }
+
+    fn geometry_loss_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmGradients> {
+        let shape = self::shape(shape)?;
+        let count = self
+            .inner
+            .geometry_gradient_input_count(shape)
+            .map_err(error)?;
+        let windows = tokens(windows, count)?;
+        py.detach(|| self.inner.geometry_loss_gradients(&windows, shape))
+            .map(|inner| PyNativeCausalLmGradients { inner })
+            .map_err(error)
+    }
+
+    fn step_geometry_sgd(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmGradients,
+        learning_rate: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        reject_bool(learning_rate)?;
+        let learning_rate = learning_rate.extract::<f32>()?;
+        py.detach(|| {
+            self.inner
+                .step_geometry_sgd(&gradients.inner, learning_rate)
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
     }
 
     fn with_geometry(
@@ -158,5 +232,6 @@ impl PyNativeCausalLm {
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLm>()?;
+    module.add_class::<PyNativeCausalLmGradients>()?;
     Ok(())
 }
