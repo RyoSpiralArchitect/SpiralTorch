@@ -126,15 +126,15 @@ impl AlignedVec {
         }
     }
 
+    pub(crate) fn checked_layout(capacity: usize) -> Option<Layout> {
+        let size = capacity.checked_mul(mem::size_of::<f32>())?;
+        Layout::from_size_align(size, ALIGNMENT).ok()
+    }
+
     fn layout(capacity: usize) -> Layout {
-        let size = match capacity.checked_mul(mem::size_of::<f32>()) {
-            Some(size) => size,
-            None => panic!("AlignedVec allocation overflow (capacity={capacity})"),
-        };
-        match Layout::from_size_align(size, ALIGNMENT) {
-            Ok(layout) => layout,
-            Err(_) => panic!("AlignedVec invalid layout (size={size}, align={ALIGNMENT})"),
-        }
+        Self::checked_layout(capacity).unwrap_or_else(|| {
+            panic!("AlignedVec invalid allocation layout (capacity={capacity}, align={ALIGNMENT})")
+        })
     }
 
     fn dangling_aligned() -> NonNull<f32> {

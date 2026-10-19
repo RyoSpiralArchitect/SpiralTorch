@@ -92,6 +92,55 @@ fn close(a: &[f32], b: &[f32]) {
 }
 
 #[test]
+fn explicit_wide_readout_reaches_full_last_and_cached_paths() {
+    let mut c = config();
+    c["tie_word_embeddings"] = json!(false);
+    let mut p = parameters();
+    p.get_mut("ln_f.weight").unwrap().1.fill(0.);
+    p.get_mut("ln_f.bias").unwrap().1.fill(1.);
+    p.insert(
+        "lm_head.weight".into(),
+        (vec![11, 4], [1e8, 1., -1e8, 1.].repeat(11)),
+    );
+    let base = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&c).unwrap(),
+        &archive(&p),
+        Default::default(),
+    )
+    .unwrap();
+    let wide = base.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+    assert_eq!(base.readout_accumulator(), CausalLmReadoutAccumulator::F32);
+    assert_eq!(wide.base_model_identity(), base.base_model_identity());
+    for last in [false, true] {
+        assert!(base
+            .logits(&[1, 2], [1, 2], last)
+            .unwrap()
+            .data()
+            .iter()
+            .all(|&v| v == 1.));
+        assert!(wide
+            .logits(&[1, 2], [1, 2], last)
+            .unwrap()
+            .data()
+            .iter()
+            .all(|&v| v == 2.));
+    }
+    let mut context = NativeCausalLmContext::new(wide, vec![1, 2], 1024).unwrap();
+    assert_eq!(
+        context.readout_accumulator(),
+        CausalLmReadoutAccumulator::F64
+    );
+    assert_eq!(
+        context.logits().unwrap().read_values().unwrap(),
+        vec![2.; 11]
+    );
+    assert_eq!(
+        context.append(3).unwrap().read_values().unwrap(),
+        vec![2.; 11]
+    );
+}
+
+#[test]
 fn complete_decoder_preserves_batch_causality_and_last_projection() {
     let model = load();
     let all = model.forward(&[1, 2, 3, 4, 5, 6], [2, 3], false).unwrap();

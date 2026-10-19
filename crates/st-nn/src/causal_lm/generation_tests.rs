@@ -21,6 +21,59 @@ fn pin(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn generation_checkpoint_binds_readout_policy_and_keeps_default_bytes() {
+    for execution in [
+        CausalLmGenerationExecution::FullPrefix,
+        CausalLmGenerationExecution::KvCache { max_values: 1024 },
+    ] {
+        for accumulator in [
+            CausalLmReadoutAccumulator::F32,
+            CausalLmReadoutAccumulator::F64,
+        ] {
+            let model = load().with_readout_accumulator(accumulator);
+            let mut generator = NativeCausalLmGenerator::new(
+                model.clone(),
+                vec![1, 2],
+                CausalLmGenerationConfig {
+                    execution: execution.clone(),
+                    ..policy()
+                },
+            )
+            .unwrap();
+            generator.step().unwrap();
+            let payload = generator.to_json().unwrap();
+            assert_eq!(
+                payload.contains("readout_accumulator"),
+                accumulator == CausalLmReadoutAccumulator::F64
+            );
+            let other =
+                model.with_readout_accumulator(if accumulator == CausalLmReadoutAccumulator::F32 {
+                    CausalLmReadoutAccumulator::F64
+                } else {
+                    CausalLmReadoutAccumulator::F32
+                });
+            assert!(NativeCausalLmGenerator::from_json(
+                other,
+                payload.as_bytes(),
+                &pin(payload.as_bytes())
+            )
+            .is_err());
+            let mut restored = NativeCausalLmGenerator::from_json(
+                model,
+                payload.as_bytes(),
+                &pin(payload.as_bytes()),
+            )
+            .unwrap();
+            assert_eq!(restored.to_json().unwrap(), payload);
+            while !generator.finished() {
+                assert_eq!(generator.step().unwrap(), restored.step().unwrap());
+                assert_eq!(generator.to_json().unwrap(), restored.to_json().unwrap());
+            }
+        }
+    }
+}
+
+#[test]
 fn greedy_matches_manual_decoder_and_finished_session_is_immutable() {
     let model = load();
     let mut generator =

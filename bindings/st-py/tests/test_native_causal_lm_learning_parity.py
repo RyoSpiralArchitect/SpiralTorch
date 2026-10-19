@@ -32,8 +32,10 @@ def attach(reference, state):
 @pytest.mark.parametrize("dtype,tied,scaled,inverse", [
     (torch.float32, True, True, False), (torch.bfloat16, False, True, True), (torch.float16, True, False, False),
 ])
-def test_language_loss_all_recipe_gradients_and_update_match_reference(kind, dtype, tied, scaled, inverse):
+@pytest.mark.parametrize("accumulator", ["f32", "f64"])
+def test_language_loss_all_recipe_gradients_and_update_match_reference(kind, dtype, tied, scaled, inverse, accumulator):
     reference, base = pair(dtype=dtype, tied=tied, scaled=scaled, inverse=inverse, width=3, heads=1)
+    base = base.with_readout_accumulator(accumulator)
     reference.requires_grad_(False)
     record = json.loads(fixtures["artifact"](kind).state_json())
     record["base_model_identity"] = base.base_model_identity

@@ -112,7 +112,10 @@ position is derived from generated count, not an editable extra cursor.
 
 Checkpoints are capped at 1 MiB, pinned by byte SHA-256 and bound to the supplied
 base **and exact geometry artifact**. They omit large model weights. Continuation
-is qualified on the tested runtime, not promised bit-identical across CPU/compiler
+also requires the same [readout accumulator](native-causal-lm.md#explicit-readout-arithmetic).
+The f32 default keeps the old checkpoint bytes; f64 is explicit and sealed.
+They are not interchangeable even when frozen weights and geometry are identical.
+Continuation is qualified on the tested runtime, not promised bit-identical across CPU/compiler
 versions. Hashes are integrity pins, not provenance signatures; re-sealing valid
 arbitrary history does not prove that it was generated.
 

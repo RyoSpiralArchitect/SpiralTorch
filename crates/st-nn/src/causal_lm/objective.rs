@@ -138,8 +138,8 @@ impl NativeCausalLm {
         let normalized = self
             .final_norm
             .forward(&selected, self.config.norm_epsilon)?;
-        Ok(normalized
-            .matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?
+        Ok(self
+            .project_readout(&normalized)?
             .cross_entropy_with_logits(&prepared.labels, objective.kernel_config())?
             .data()[0])
     }

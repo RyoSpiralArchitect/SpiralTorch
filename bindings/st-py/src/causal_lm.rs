@@ -6,7 +6,8 @@ use crate::weights::{PyNdTensor, PySafeTensorArchive};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use st_nn::causal_lm::{
-    CausalLmLimits, CausalLmObjective, NativeCausalLm, NativeCausalLmGradients,
+    CausalLmLimits, CausalLmObjective, CausalLmReadoutAccumulator, NativeCausalLm,
+    NativeCausalLmGradients,
 };
 use std::collections::BTreeMap;
 
@@ -93,6 +94,10 @@ pub struct PyNativeCausalLmGradients {
 #[pymethods]
 impl PyNativeCausalLmGradients {
     #[getter]
+    fn readout_accumulator(&self) -> &'static str {
+        self.inner.readout_accumulator().as_str()
+    }
+    #[getter]
     fn loss(&self) -> f32 {
         self.inner.loss()
     }
@@ -123,6 +128,22 @@ impl PyNativeCausalLmGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
+    #[getter]
+    fn readout_accumulator(&self) -> &'static str {
+        self.inner.readout_accumulator().as_str()
+    }
+
+    fn with_readout_accumulator(&self, accumulator: &str) -> PyResult<Self> {
+        let accumulator = match accumulator {
+            "f32" => CausalLmReadoutAccumulator::F32,
+            "f64" => CausalLmReadoutAccumulator::F64,
+            _ => return Err(error("readout accumulator must be f32 or f64")),
+        };
+        Ok(Self {
+            inner: self.inner.with_readout_accumulator(accumulator),
+        })
+    }
+
     #[staticmethod]
     fn from_training_checkpoint(
         py: Python<'_>,

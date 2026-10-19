@@ -56,7 +56,16 @@ fn objective(model: &NativeCausalLm, windows: &[usize], shape: [usize; 2]) -> f6
 
 #[test]
 fn joint_decoder_pullback_matches_every_geometry_parameter_difference() {
-    let base = load();
+    check_joint_decoder_pullback(CausalLmReadoutAccumulator::F32);
+}
+
+#[test]
+fn wide_readout_pullback_matches_every_geometry_parameter_difference() {
+    check_joint_decoder_pullback(CausalLmReadoutAccumulator::F64);
+}
+
+fn check_joint_decoder_pullback(accumulator: CausalLmReadoutAccumulator) {
+    let base = load().with_readout_accumulator(accumulator);
     let artifact = trainable(&base);
     let model = base.with_geometry(artifact.clone()).unwrap();
     let windows = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -108,6 +117,54 @@ fn joint_decoder_pullback_matches_every_geometry_parameter_difference() {
                 assert!((v - mean).abs() < 1e-7);
             }
         }
+    }
+}
+
+#[test]
+fn gradients_and_accumulators_cannot_cross_readout_arithmetic() {
+    use crate::geometry_runtime::{AdamWStep, NativeGeometryAdamW};
+    let base = load();
+    let f32 = base.with_geometry(trainable(&base)).unwrap();
+    let f64 = f32.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+    let g32 = f32.geometry_loss_gradients(&[1, 2, 3], [1, 3]).unwrap();
+    let g64 = f64.geometry_loss_gradients(&[1, 2, 3], [1, 3]).unwrap();
+    assert_eq!(g64.readout_accumulator(), CausalLmReadoutAccumulator::F64);
+    for (model, own, foreign) in [(&f32, &g32, &g64), (&f64, &g64, &g32)] {
+        let optimizer =
+            NativeGeometryAdamW::new(model.geometry_artifact().unwrap(), Default::default(), None)
+                .unwrap();
+        assert!(model.step_geometry_sgd(foreign, 0.1).is_err());
+        assert!(model
+            .step_geometry_adamw(foreign, &optimizer, AdamWStep::new(0.01, 0.).unwrap())
+            .is_err());
+        let mut accumulator = model.geometry_accumulator().unwrap();
+        assert_eq!(
+            accumulator.readout_accumulator(),
+            model.readout_accumulator()
+        );
+        assert!(accumulator.add(foreign).is_err());
+        assert_eq!(accumulator.microbatches(), 0);
+        accumulator.add(own).unwrap();
+        let other = if model.readout_accumulator() == CausalLmReadoutAccumulator::F32 {
+            &f64
+        } else {
+            &f32
+        };
+        assert!(accumulator
+            .accumulate_loss(other, &[1, 2, 3], [1, 3])
+            .is_err());
+        assert_eq!(accumulator.microbatches(), 1);
+        assert!(accumulator.step_sgd(other, 0.1).is_err());
+        assert!(accumulator
+            .step_adamw(other, &optimizer, AdamWStep::new(0.01, 0.).unwrap())
+            .is_err());
+        assert_eq!(
+            accumulator
+                .step_sgd(model, 0.1)
+                .unwrap()
+                .readout_accumulator(),
+            model.readout_accumulator()
+        );
     }
 }
 

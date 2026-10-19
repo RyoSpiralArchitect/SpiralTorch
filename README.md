@@ -91,7 +91,8 @@ These are host-tensor examples, not resident GPU graphs. Continue with the
 | I want to... | Start here |
 | --- | --- |
 | Learn the native Python API | [Getting started](docs/getting-started.md), [Python recipes](docs/python/recipes.md) |
-| Train or fine-tune language models | [Model zoo](models/README.md), [HF/Z-space optimizer experiments](docs/hf_zspace_optimizer_ablation.md) |
+| Run GPT-2 and learn geometry without Torch (source builds) | [Native language model](docs/python/native-causal-lm.md), [corpus training](docs/python/native-corpus-training.md) |
+| Choose native execution or optional HF fine-tuning | [Execution boundary](docs/python/native-hf-boundary.md), [HF/Z-space experiments](docs/hf_zspace_optimizer_ablation.md) |
 | Connect geometric mechanisms to learning | [Geometric learning bridge](docs/geometric_learning_bridge.md), [geometry toolkits](docs/reference/geometry.md) |
 | Keep NN computation on the GPU | [Resident forward](docs/module_resident_forward.md), [resident training](docs/resident_nn_training.md) |
 | Train a byte LM with geometric attention | [Python byte-LM API](docs/python/byte-language-models.md), [runnable example](bindings/st-py/examples/resident_byte_geometry_lm.py) |

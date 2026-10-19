@@ -3,6 +3,7 @@ use super::*;
 fn accumulator() -> NativeCausalLmAccumulator {
     NativeCausalLmAccumulator {
         base_id: "base".into(),
+        readout_accumulator: CausalLmReadoutAccumulator::F32,
         geometry_id: "geometry".into(),
         objective: CausalLmObjective::default(),
         loss: 0.,
@@ -18,6 +19,7 @@ fn accumulator() -> NativeCausalLmAccumulator {
 fn batch(shape: [usize; 2], values: [f32; 2], loss: f32) -> NativeCausalLmGradients {
     NativeCausalLmGradients {
         base_id: "base".into(),
+        readout_accumulator: CausalLmReadoutAccumulator::F32,
         geometry_id: "geometry".into(),
         shape,
         target_tokens: shape[0].saturating_mul(shape[1].saturating_sub(1)),

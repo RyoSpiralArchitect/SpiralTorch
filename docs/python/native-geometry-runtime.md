@@ -78,12 +78,12 @@ pair; the existing in-place SGD/MSE methods keep their current behavior.
 | Fractional memory/history, L2 history, learned-gain and angle/gain history (source-only extension) | Native full-context GL composition, feature gates and parameter charts; explicit sequence entry only |
 | HF Trainer, datasets and model execution | Optional interoperability path; not a Torch-free HF checkpoint executor |
 | Safetensors weight ingress (source-only extension) | [Rust-owned F32/F16/BF16 loader and shape-preserving N-D snapshots](native-weights.md); not architecture conversion or full HF execution |
-| Supported frozen GPT-2 (source-only extension after the fixed 0.4.32 candidate) | Separate [NativeCausalLm](native-causal-lm.md) importer/decoder connects these artifacts to actual language-loss gradients without Torch; CPU, no base-weight FT or KV cache |
+| Supported frozen GPT-2 (source-only extension after the fixed 0.4.32 candidate) | Separate [NativeCausalLm](native-causal-lm.md) importer/decoder connects these artifacts to actual language-loss gradients without Torch; CPU, no base-weight FT; [owned K/V contexts](native-generation.md#cached-execution) are explicit |
 
 All recipes currently defined by `GeometryAdapterArtifact` have a native
 selected-placement route. This API does not load or schedule a whole model;
 the separate `NativeCausalLm` supports frozen GPT-2 with geometry-only learning.
-Other HF architectures, KV caching and full-model native FT remain separate
+Other HF architectures and full-model native FT remain separate
 implementation and validation work. No Python wrapper or foreign model is
 silently replaced by this API.
 

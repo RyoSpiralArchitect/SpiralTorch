@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Optimize ordinary packed CPU projections across eight independent columns,
+  retaining each default f32 dot's reduction order; advance autotuning to v7.
+  Add opt-in `NativeCausalLm.with_readout_accumulator("f64")` for the vocabulary
+  head and its input-gradient projection, with f32 storage/output. Rust owns
+  arithmetic and policy binding across loss, geometry learning, KV contexts
+  and trainer/generator continuation. Cross-policy gradients/checkpoints reject;
+  default f32 checkpoint bytes remain unchanged. Scoped GPT-2 comparisons and
+  exact native resume checks are recorded separately from quality and speed
+  claims. Installed-wheel gates cover the new API on all release platforms and
+  the Linux CPython 3.8 floor; existing published wheels are unchanged.
+
 - Add `NativeCausalLmGenerator` for Rust-owned greedy/seeded sampling, EOS,
   ordinary or Z-Space token control, and pinned continuation. Explicit
   `execution.kind="kv_cache"` reuses native K/V through `NativeCausalLmContext`;

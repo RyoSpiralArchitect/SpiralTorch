@@ -1,5 +1,8 @@
 //! Native generation with explicit full-prefix or owned KV execution, never a foreign fallback.
-use super::{CausalLmResult, NativeCausalLm, NativeCausalLmContext, NativeCausalLmTrainer};
+use super::{
+    CausalLmReadoutAccumulator, CausalLmResult, NativeCausalLm, NativeCausalLmContext,
+    NativeCausalLmTrainer,
+};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
@@ -111,6 +114,8 @@ struct Checkpoint {
     config: CausalLmGenerationConfig,
     prompt_length: usize,
     tokens: Vec<usize>,
+    #[serde(default, skip_serializing_if = "CausalLmReadoutAccumulator::is_f32")]
+    readout_accumulator: CausalLmReadoutAccumulator,
 }
 
 fn identity(bytes: &[u8]) -> String {
@@ -242,6 +247,7 @@ impl NativeCausalLmGenerator {
             config: self.config.clone(),
             prompt_length: self.prompt_length,
             tokens: self.tokens.clone(),
+            readout_accumulator: self.model.readout_accumulator,
         })?;
         if json.len() > MAX_CHECKPOINT_BYTES {
             return Err("generation checkpoint exceeds byte budget".into());
@@ -267,8 +273,12 @@ impl NativeCausalLmGenerator {
             || saved.rng != RNG
             || saved.base_model_identity != model.base_id
             || saved.geometry_artifact_id.as_deref() != model.geometry_artifact_id()
+            || saved.readout_accumulator != model.readout_accumulator
         {
-            return Err("generation schema, RNG, base or geometry owner mismatch".into());
+            return Err(
+                "generation schema, RNG, base, geometry or readout accumulator owner mismatch"
+                    .into(),
+            );
         }
         saved.config.validate(&model, saved.prompt_length)?;
         if saved.tokens.len() < saved.prompt_length
