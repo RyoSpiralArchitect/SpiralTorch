@@ -191,7 +191,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("actions/setup-go@v6", workflow_text)
 
     def test_native_readout_and_evaluation_gate_each_installed_wheel_and_python_floor(self) -> None:
-        scripts = ("bindings/st-py/tests/test_native_causal_lm_readout.py -v",
+        scripts = ("bindings/st-py/tests/test_native_geometry_adamw.py -v",
+                   "bindings/st-py/tests/test_native_causal_lm_readout.py -v",
                    "bindings/st-py/tests/test_native_causal_lm_evaluation.py -v")
         floor_step = "      - name: Verify installed wheel on CPython 3.8 (Linux)\n"
         for filename in ("ci.yml", "wheels.yml", "release_wheels.yml"):

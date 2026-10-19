@@ -11,7 +11,7 @@ import unittest
 
 class NoForeignML(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"torch", "transformers", "numpy", "accelerate", "safetensors"}:
+        if fullname.split(".")[0] in {"torch", "transformers", "peft", "numpy", "accelerate", "safetensors"}:
             raise AssertionError("native AdamW must not import " + fullname)
 
 

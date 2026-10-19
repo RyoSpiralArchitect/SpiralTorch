@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Harden installed-wheel qualification: verify clipped byte-decoder method and
+  shipped stub signatures without acquiring a GPU, forbid foreign ML imports
+  in the shared native smoke, and run standalone geometry AdamW in manual and
+  minimum-Python wheel checks. Retain bounded GPU/runtime/library identity only
+  on an exact contextual-resume mismatch. No arithmetic change, numerical fix,
+  new package version or publication is implied.
+
 - Integrate native projection/readout policy, repetition learning, clipping and
   corpus evaluation. Evaluation reports the active readout accumulator and
   stays unsmoothed NLL without repetition penalties; combined learning/evaluation

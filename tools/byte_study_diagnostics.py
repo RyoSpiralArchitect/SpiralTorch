@@ -1,8 +1,47 @@
 """Bounded diagnostics for exact synthetic native-byte-study comparisons."""
 
 import hashlib
+import importlib
 import json
 from pathlib import Path
+import platform
+import sys
+
+
+def runtime_identity(st):
+    """Post-failure identity only: no environment, host name or model payloads.
+
+    The tensor device reuses the study's process-default runtime. This does not
+    dispatch or read back tensors, and must not run before the comparison.
+    """
+    native = importlib.import_module("spiraltorch.spiraltorch")
+    library = Path(native.__file__)
+    digest = hashlib.sha256()
+    with library.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "schema": "spiraltorch.synthetic_gpu_runtime.v1",
+        "python": sys.version,
+        "system": platform.system(), "release": platform.release(),
+        "os_version": platform.version(), "machine": platform.machine(),
+        "native_library": {"filename": library.name, "sha256": digest.hexdigest()},
+        "adapter": st.wgpu.WgpuTensorDevice.create().adapter_info(),
+    }
+
+
+def _runtime_payload(collect):
+    try:
+        value = collect()
+        if not isinstance(value, dict):
+            raise ValueError("runtime context must be an object")
+        raw = json.dumps(value, sort_keys=True, allow_nan=False).encode("utf-8")
+        if len(raw) > 16 * 1024:
+            raise ValueError("runtime context exceeds 16 KiB")
+        return raw
+    except Exception as error:
+        # Metadata failures must not discard the numerical failure evidence.
+        return json.dumps({"status": "collection_failed", "error_type": type(error).__name__}).encode("utf-8")
 
 
 def exact_report_differences(expected, actual, *, limit=16):
@@ -74,7 +113,7 @@ def retain_detached_failure(directory, request, expected, actuals, round_index):
 
 
 def retain_resume_failure(directory, request, *, full_report, first_report, resumed_report,
-                          full_checkpoint, first_checkpoint, resumed_checkpoint):
+                          full_checkpoint, first_checkpoint, resumed_checkpoint, runtime_context=None):
     """Keep the first synthetic resume mismatch, including the restart boundary.
 
     Independent full and partial runs do not isolate checkpoint restoration:
@@ -84,6 +123,8 @@ def retain_resume_failure(directory, request, *, full_report, first_report, resu
                 "first-report.json": first_report, "resumed-report.json": resumed_report,
                 "full-checkpoint.json": full_checkpoint, "first-checkpoint.json": first_checkpoint,
                 "resumed-checkpoint.json": resumed_checkpoint}
+    if runtime_context is not None:
+        payloads["runtime.json"] = _runtime_payload(runtime_context)
     payloads = {name: raw.encode("utf-8") if isinstance(raw, str) else raw
                 for name, raw in payloads.items()}
     if any(type(raw) is not bytes or len(raw) > 64 * 1024 * 1024 for raw in payloads.values()):
@@ -106,14 +147,15 @@ def retain_resume_failure(directory, request, *, full_report, first_report, resu
 
 
 def assert_exact_resume(directory, request, *, full_report, first_report, resumed_report,
-                        full_checkpoint, first_checkpoint, resumed_checkpoint):
+                        full_checkpoint, first_checkpoint, resumed_checkpoint, runtime_context=None):
     """Fail either exact comparison, whether or not retention is enabled."""
     if full_report == resumed_report and full_checkpoint == resumed_checkpoint:
         return
     if directory:
         retain_resume_failure(directory, request, full_report=full_report, first_report=first_report,
                               resumed_report=resumed_report, full_checkpoint=full_checkpoint,
-                              first_checkpoint=first_checkpoint, resumed_checkpoint=resumed_checkpoint)
+                              first_checkpoint=first_checkpoint, resumed_checkpoint=resumed_checkpoint,
+                              runtime_context=runtime_context)
     raise AssertionError("exact contextual-mixture resume comparison: " + json.dumps({
         "reports": exact_report_differences(full_report, resumed_report),
         "checkpoints": exact_report_differences(full_checkpoint, resumed_checkpoint),

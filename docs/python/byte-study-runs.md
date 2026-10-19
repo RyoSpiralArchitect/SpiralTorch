@@ -158,3 +158,12 @@ failure; private training runs are not automatically published. Strict report
 and checkpoint equality remains required. The next investigation must use the
 first differing histories, parameter values and optimizer states, rather than
 rerunning until green or treating local success as a correctness repair.
+
+When retention is enabled, a mismatch also records a hash-bound `runtime.json`
+with the active process-default GPU's name/backend/type, OS/Python versions,
+and the installed native library's basename and SHA-256. Collection runs only
+after a mismatch, without tensor dispatch/readback; passing comparisons do not
+change their execution cadence. No environment, host name or absolute library
+path is collected. Context is bounded to 16 KiB; a metadata-collection failure
+retains its exception type, not its message, alongside the original comparison
+payloads. This improves failure localization, not numerical correctness.

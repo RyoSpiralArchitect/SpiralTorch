@@ -187,6 +187,7 @@ jobs:
           python -I ../../tools/smoke_autograd.py
           python -I ../../tools/smoke_learning_stack.py
           python -I -B ../../bindings/st-py/tests/test_nn_native_learning.py -v
+          python -I -B ../../bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B ../../bindings/st-py/tests/test_native_causal_lm_readout.py -v
           python -I -B ../../bindings/st-py/tests/test_native_causal_lm_repetition.py -v
           python -I -B ../../bindings/st-py/tests/test_native_causal_lm_evaluation.py -v
@@ -202,6 +203,7 @@ jobs:
           python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
           python -I tools/smoke_learning_stack.py
           python -I -B bindings/st-py/tests/test_nn_native_learning.py -v
+          python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_readout.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_repetition.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_evaluation.py -v
