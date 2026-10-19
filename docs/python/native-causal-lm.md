@@ -1,7 +1,7 @@
 # Native Causal Language Models
 
-Source-only extension after the fixed 0.4.32 candidate. This does not establish
-PyPI publication or change the existing optional HF Trainer implementation.
+Source-only extension after the published 0.4.32 release. The immutable release
+wheels do not include this decoder or change the optional HF Trainer implementation.
 
 `NativeCausalLm` executes a complete supported decoder from token IDs to
 vocabulary logits in Rust. Its first explicit checkpoint importer supports
@@ -35,8 +35,10 @@ is external: the input is exact integer IDs, never text implicitly normalized
 or mapped through a different vocabulary. `next_token_loss` shifts independently
 within each window, never between batch rows. Greedy ties choose the lowest ID.
 Positions restart at zero in each row. No padding, token-type IDs, attention
-mask, custom position IDs, KV cache, dropout or base-weight updates are
-implemented here. Frozen inference and the geometry-only learning below are
+mask, custom position IDs, dropout or base-weight updates are implemented here.
+The separate [native context](native-generation.md#cached-execution) adds owned
+single-sequence K/V reuse without changing the full-prefix `forward` contract.
+Frozen inference and the geometry-only learning below are
 not full-model native fine-tuning.
 
 The initial execution backend is `rust_f32_cpu_prepacked`. Layer projections
@@ -58,7 +60,7 @@ Supported config variants include `n_inner`, tied/untied head, unscaled
 attention and inverse-layer scaling. Other activations, cross-attention,
 pruned heads and reordered/upcast attention are rejected. Unrelated config
 metadata such as generation defaults or training dropout probabilities does
-not change this explicitly frozen, no-cache execution policy. No remote code
+not change this explicitly frozen execution policy. No remote code
 or arbitrary HF architecture is loaded.
 
 The normalized semantic config and exact checkpoint byte identity form
@@ -143,6 +145,103 @@ Frozen parameters and fixed buffers never change; invalid rates or updates
 leave the source untouched. There is no hidden optimizer state. An artifact
 alone is not a data-cursor/RNG checkpoint or a provenance certificate.
 
+For adaptive updates, the separate [native geometry AdamW API](native-geometry-adamw.md)
+uses shared Rust clipping, moments and accepted-update clocks. It returns an
+atomic `(model, optimizer)` pair and supports exact pair checkpoint continuation;
+it does not delegate to `torch.optim` or alter the stateless SGD contract above.
+
+For larger effective batches, use the
+[native microbatch accumulator](native-geometry-adamw.md#token-weighted-microbatches).
+It accepts different unpadded window lengths, weights each loss/gradient by its
+number of shifted targets, and applies one update after the group. Token
+extraction, forward/backward admission and snapshot checks remain native.
+
+For an ordered document corpus, the [native corpus trainer](native-corpus-training.md)
+reuses this accumulator and Rust's document boundaries. It owns the model/optimizer
+pair, fixed recipe and data cursor, so whole runs can continue without HF Trainer
+or a Python reimplementation of the loss/optimizer loop.
+
+The learned model also feeds [native generation](native-generation.md): Rust owns
+full-prefix or explicitly cached execution, greedy/sampled decoding, EOS,
+Z-Space control and pinned random continuation.
+Python no longer needs a Torch generation loop for this supported model family.
+
+### Selected Targets and Label Smoothing
+
+Source builds also accept HF-style **unshifted** `labels` with the same flat
+`[B,T]` layout as the input windows. This enables completion-only supervision:
+prompt tokens remain context, but their loss terms can be excluded. Python
+only passes integer labels and configuration to Rust; `st-tensor` owns mean
+cross entropy, uniform smoothing and the matching VJP.
+
+```python
+ids = [464, 3616, 286, 1204, 318, 407]
+labels = [-100, -100, -100, 1204, 318, 407]
+gradients = model.geometry_loss_gradients(
+    ids, [1, len(ids)], labels=labels, label_smoothing=0.1
+)
+assert gradients.target_tokens == 3
+score = model.next_token_loss(
+    ids, [1, len(ids)], labels=labels, label_smoothing=0.1
+)
+
+group = model.geometry_accumulator(label_smoothing=0.1)
+group.accumulate_loss(model, ids, [1, len(ids)], labels=labels)
+model, optimizer = group.step_adamw(model, optimizer, 0.001)
+```
+
+Each row's first label is never predicted; every other `-100` label excludes
+one loss term. All labels, including the first, must be valid vocabulary IDs or
+`-100`. Non-ignored labels need not equal input IDs. With `labels=None`, input
+IDs supply all shifted targets as before. Smoothing is finite in `[0,1]`, with
+default zero, and is **not** a generation temperature or a change to geometry.
+Mean reduction divides by the non-ignored shifted target count. A row can be
+fully ignored, but an entire microbatch with no targets rejects before decoder
+execution; it does not silently trigger decay or advance optimizer clocks.
+
+Label exclusion is not an attention/padding mask: the complete unpadded prefix
+still runs, masked prompt positions can receive gradients through later
+predictions, and no EOS or document boundary is invented. Input and label
+context budgets are checked before foreign array extraction. Invalid inputs do not
+change an existing accumulation. Its `label_smoothing` policy is sealed at
+creation, and adding a sealed gradient batch with another policy rejects.
+Different label selections under the same policy are expected and combine by
+their actual target counts, not by context lengths.
+
+For Rust callers, `CausalLmObjective` and the `*_with_objective` methods expose
+the same contract; default method signatures are unchanged. Preserve the
+objective, labels/data cursor and schedule alongside the artifact/optimizer
+pair for continuation. They are not inferred from optimizer moments or saved
+inside a pending accumulation. These entries do not silently replace
+`HfGeometryTrainer` or enable arbitrary HF architecture execution.
+
+Selected-label execution compacts only the **terminal readout**: final LayerNorm,
+vocabulary projection, CE and their pullbacks run on selected rows. The shared
+row-gather/scatter kernels restore terminal gradients to the full context before
+decoder reverse execution. This is not attention pruning or zeroing all prompt
+gradients. When every shifted target is selected, no gather/scatter is added.
+
+With explicit labels, `max_logit_elements` bounds
+`non_ignored_shifted_targets * vocabulary`, not every contextual position.
+Admission first bounds input/label transport, QKV/MLP, attention, geometry and
+learning checkpoints; after bounded label extraction it validates the exact
+logit count **before decoding**. At least one vocabulary row must fit. Without
+labels the full output count is already known and still checked before token
+extraction. Ordinary `forward`/last-only budgets are unchanged. Unrequested
+vocabulary outputs need not be materialized or finite; invalid source weights,
+IDs, labels and required intermediates are not silently accepted.
+
+This reduces head/adjoint work and logit storage for sparse supervision, not
+decoder context work, packed-weight storage or full-backward checkpoint sizes.
+Numerical comparisons use tolerances; different selected row counts may choose
+different native matrix kernels. No cross-version bitwise-continuation promise
+is implied by exact resume within one tested runtime.
+
+The [complete local readout comparison](../../benchmarks/results/2026-10-18-native-lm-selected-readout/README.md)
+retains the initial 4-row regression and the CPU autotune fix, alongside both
+full-head and selected-head Torch references. It measures frozen loss evaluation,
+not geometry learning speed or quality; Torch is still substantially faster.
+
 Learning saves block-boundary activations from the earliest participating
 geometry layer and replays one block at a time, preserving the full `[B,T]`
 partition. Reverse execution stops immediately after collecting that earliest
@@ -173,9 +272,13 @@ comparison after integration with the optional HF observation/Trainer client.
 ```sh
 cargo test -p st-nn --lib causal_lm:: --locked
 python -I -B bindings/st-py/tests/test_native_causal_lm.py
+python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py
+python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py
 # Optional comparison environment only:
 python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_parity.py
 python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_learning_parity.py
+python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_accumulation_parity.py
+python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_native_causal_lm_objective_parity.py
 ```
 
 The no-framework test exercises a complete small synthetic decoder, batch
@@ -200,3 +303,8 @@ Wave, fractional and Topos placements without Torch. It compares every parameter
 gradient/update against the optional HF reference and verifies exact native
 artifact continuation. These short-window checks establish mechanism agreement,
 not held-out quality or whole-model fine-tuning.
+
+The [selected-target follow-up](../../benchmarks/results/2026-10-18-native-gpt2-objective/README.md)
+uses explicit suffix labels, smoothing and native target-weighted accumulation
+on the same real GPT-2. It records every window, update and next-group
+continuation check; it is not a new matched real-model Torch or quality study.

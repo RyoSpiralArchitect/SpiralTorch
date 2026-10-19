@@ -1,4 +1,5 @@
 //! One decoder implementation for inference and checkpointed learning replay.
+use super::context::InferenceBlockCache;
 use super::*;
 use crate::geometry_runtime::NativeGeometryBatch;
 use st_kernel_contracts::attention::{attention_reference, AttentionMask, AttentionSpec};
@@ -15,6 +16,7 @@ pub(super) struct BlockCache {
 pub(super) struct BlockOutput {
     pub output: Tensor,
     pub cache: Option<BlockCache>,
+    pub inference_cache: Option<InferenceBlockCache>,
 }
 
 impl NativeCausalLm {
@@ -110,7 +112,7 @@ impl NativeCausalLm {
         Ok(Tensor::from_vec(batch * steps, N * c.width, output)?)
     }
 
-    fn geometry_output(
+    pub(super) fn geometry_output(
         &self,
         path: &str,
         input: Tensor,
@@ -139,6 +141,26 @@ impl NativeCausalLm {
         shape: [usize; 2],
         capture: bool,
     ) -> CausalLmResult<BlockOutput> {
+        self.run_block_capture(index, input, shape, capture, false)
+    }
+
+    pub(super) fn prefill_block(
+        &self,
+        index: usize,
+        input: Tensor,
+        steps: usize,
+    ) -> CausalLmResult<BlockOutput> {
+        self.run_block_capture(index, input, [1, steps], false, true)
+    }
+
+    fn run_block_capture(
+        &self,
+        index: usize,
+        input: Tensor,
+        shape: [usize; 2],
+        capture: bool,
+        inference: bool,
+    ) -> CausalLmResult<BlockOutput> {
         let block = &self.blocks[index];
         let norm = block.first_norm.forward(&input, self.config.norm_epsilon)?;
         let qkv = self.split_heads::<3>(&block.qkv.forward(&norm)?, shape)?;
@@ -154,6 +176,10 @@ impl NativeCausalLm {
             .output
             .forward(&self.merge_heads([attended.as_slice()], shape)?)?;
         let path = format!("transformer.h.{index}");
+        let mut history = std::array::from_fn(|_| None);
+        if inference && self.geometry_needs_history(&format!("{path}.attn"))? {
+            history[0] = Some(attention.clone());
+        }
         let (attention, attention_geometry) =
             self.geometry_output(&format!("{path}.attn"), attention, shape, capture)?;
         let after_attention = attention.add_with_backend(&input, TensorUtilBackend::Cpu)?;
@@ -163,14 +189,21 @@ impl NativeCausalLm {
         let expanded = block.expand.forward(&norm)?;
         let pre_gelu = capture.then(|| expanded.clone());
         let mlp = block.contract.forward(&expanded.try_into_gelu()?)?;
+        if inference && self.geometry_needs_history(&format!("{path}.mlp"))? {
+            history[1] = Some(mlp.clone());
+        }
         let (mlp, mlp_geometry) =
             self.geometry_output(&format!("{path}.mlp"), mlp, shape, capture)?;
-        let (output, block_geometry) = self.geometry_output(
-            &path,
-            after_attention.add_with_backend(&mlp, TensorUtilBackend::Cpu)?,
-            shape,
-            capture,
-        )?;
+        let output = after_attention.add_with_backend(&mlp, TensorUtilBackend::Cpu)?;
+        if inference && self.geometry_needs_history(&path)? {
+            history[2] = Some(output.clone());
+        }
+        let (output, block_geometry) = self.geometry_output(&path, output, shape, capture)?;
+        let inference_cache = inference.then(|| InferenceBlockCache {
+            key: qkv[1].clone(),
+            value: qkv[2].clone(),
+            history,
+        });
         let cache = capture.then(|| BlockCache {
             qkv,
             after_attention,
@@ -179,6 +212,10 @@ impl NativeCausalLm {
             mlp_geometry,
             block_geometry,
         });
-        Ok(BlockOutput { output, cache })
+        Ok(BlockOutput {
+            output,
+            cache,
+            inference_cache,
+        })
     }
 }

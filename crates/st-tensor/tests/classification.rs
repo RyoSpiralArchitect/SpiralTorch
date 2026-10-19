@@ -76,6 +76,42 @@ fn ignored_rows_do_not_change_mean_normalizer() {
 }
 
 #[test]
+fn vocabulary_sized_smoothed_gradient_matches_f64_distribution() {
+    let classes = 50_257;
+    let values: Vec<_> = (0..3 * classes)
+        .map(|i| ((i as f64 * 0.17).sin() * 5.0 - 80.0) as f32)
+        .collect();
+    let labels = [0, -100, 50_256];
+    let config = CrossEntropyConfig {
+        label_smoothing: 0.1,
+        ..Default::default()
+    };
+    let logits = Tensor::from_vec(3, classes, values.clone()).unwrap();
+    let actual = logits
+        .cross_entropy_with_logits_backward(&labels, config, &scalar(0.5))
+        .unwrap();
+    for ((row, gradient), label) in values
+        .chunks_exact(classes)
+        .zip(actual.data().chunks_exact(classes))
+        .zip(labels)
+    {
+        if label == -100 {
+            assert!(gradient.iter().all(|&g| g == 0.0));
+            continue;
+        }
+        let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+        let partition: f64 = row.iter().map(|&x| (f64::from(x) - max).exp()).sum();
+        for (i, (&x, &g)) in row.iter().zip(gradient).enumerate() {
+            let target = 0.1 / classes as f64 + if i == label as usize { 0.9 } else { 0.0 };
+            let expected = ((f64::from(x) - max).exp() / partition - target) * 0.25;
+            assert!((f64::from(g) - expected).abs() <= 2e-7 * expected.abs() + 2e-12);
+        }
+        // The small uniform terms must not change the derivative of a common shift.
+        assert!(gradient.iter().map(|&g| f64::from(g)).sum::<f64>().abs() < 2e-8);
+    }
+}
+
+#[test]
 fn finite_differences_match_smoothed_cross_entropy_vjp() {
     let values = vec![1.0, -0.4, 0.7, 2.1, -1.3, 0.3, -0.2, 0.4, 0.9];
     let labels = [2, -100, 0];

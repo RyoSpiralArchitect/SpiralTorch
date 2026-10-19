@@ -71,3 +71,50 @@ def retain_detached_failure(directory, request, expected, actuals, round_index):
         json.dump(report, stream, indent=2, allow_nan=False)
         stream.write("\n")
     return report
+
+
+def retain_resume_failure(directory, request, *, full_report, first_report, resumed_report,
+                          full_checkpoint, first_checkpoint, resumed_checkpoint):
+    """Keep the first synthetic resume mismatch, including the restart boundary.
+
+    Independent full and partial runs do not isolate checkpoint restoration:
+    preserve their histories and optimizer states, not just final weights.
+    """
+    payloads = {"request.json": request, "full-report.json": full_report,
+                "first-report.json": first_report, "resumed-report.json": resumed_report,
+                "full-checkpoint.json": full_checkpoint, "first-checkpoint.json": first_checkpoint,
+                "resumed-checkpoint.json": resumed_checkpoint}
+    payloads = {name: raw.encode("utf-8") if isinstance(raw, str) else raw
+                for name, raw in payloads.items()}
+    if any(type(raw) is not bytes or len(raw) > 64 * 1024 * 1024 for raw in payloads.values()):
+        raise ValueError("diagnostic payload must be at most 64 MiB")
+    target = Path(directory)
+    target.mkdir(parents=True, exist_ok=False)
+    ids = {}
+    for name, raw in payloads.items():
+        with (target / name).open("xb") as stream:
+            stream.write(raw)
+        ids[name] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    report = {"schema": "spiraltorch.synthetic_resume_diagnostic.v1",
+              "comparison": "exact_json_bytes_no_tolerance", "files": ids,
+              "report_differences": exact_report_differences(full_report, resumed_report),
+              "checkpoint_differences": exact_report_differences(full_checkpoint, resumed_checkpoint)}
+    with (target / "summary.json").open("x") as stream:
+        json.dump(report, stream, indent=2, allow_nan=False)
+        stream.write("\n")
+    return report
+
+
+def assert_exact_resume(directory, request, *, full_report, first_report, resumed_report,
+                        full_checkpoint, first_checkpoint, resumed_checkpoint):
+    """Fail either exact comparison, whether or not retention is enabled."""
+    if full_report == resumed_report and full_checkpoint == resumed_checkpoint:
+        return
+    if directory:
+        retain_resume_failure(directory, request, full_report=full_report, first_report=first_report,
+                              resumed_report=resumed_report, full_checkpoint=full_checkpoint,
+                              first_checkpoint=first_checkpoint, resumed_checkpoint=resumed_checkpoint)
+    raise AssertionError("exact contextual-mixture resume comparison: " + json.dumps({
+        "reports": exact_report_differences(full_report, resumed_report),
+        "checkpoints": exact_report_differences(full_checkpoint, resumed_checkpoint),
+    }))

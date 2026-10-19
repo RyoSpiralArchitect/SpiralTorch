@@ -1,0 +1,101 @@
+{
+  "schema": "spiraltorch.native_lm_readout_provenance.v1",
+  "native_before_commit": "8a6422cfde00649a2aa5bf309d5627e1fd318861",
+  "native_after": "source files below from this change; development-only binaries, not PyPI0.4.32",
+  "source_sha256": {
+    "bindings/st-py/src/causal_lm.rs": "4cb02770e9555dcef6b36f04e5ccffde947f2130c9443eb87bbc447601bbf8a7",
+    "bindings/st-py/src/causal_lm/accumulation.rs": "52d0358c68792277c79312afcd00a2c438ae2fe689de46a0dc0cd22ecfa07942",
+    "crates/st-nn/src/causal_lm.rs": "b8a8f1d961ee24cb5087fb8149fdf63a5c57b75d6b0609528901c4a4a825b510",
+    "crates/st-nn/src/causal_lm/learning.rs": "b3f8b352d22cdb7abc3bb2816c519733629cdb6ad0d3044f93281974968e149a",
+    "crates/st-nn/src/causal_lm/learning/accumulation.rs": "11b6eed3f314c54ce6ad58c61768eb162c673244fe6c7187a0d7ac25a4e1742e",
+    "crates/st-nn/src/causal_lm/objective.rs": "43aae07536841fb2f778e0b3a9ecde6a0f71a41bd32ec99e95e19523404e0a08",
+    "crates/st-nn/src/causal_lm/objective_tests.rs": "a69e1c174085e505d6ad8e856a3b0b45c1161678fb0a38b5816aa7e11598c142",
+    "crates/st-tensor/src/backend/cpu_dense.rs": "f3a21354c1e225eb05db224b673f1e9592897ca11b02c9c57db73f52f4be4165",
+    "tools/bench_native_lm_readout.py": "aed30f28eafe413f3eb6e5659922ba1f72831edcdf729b934042f5100a3ffaca",
+    "tools/compare_native_lm_readout.py": "cfe32b654f81dd4aa9c9b774956430903ad6edfbaa9fe831742a9c4773ae7e2d",
+    "tests/test_native_lm_readout_bench.py": "f29db60253dcc3eb7b824262853d25640bc3f55926d170c3c6123debeebb0a85"
+  },
+  "cohort_order": {
+    "initial": [
+      "native-before",
+      "torch-selected",
+      "native-after",
+      "torch-full"
+    ],
+    "autotune-v6": [
+      "torch-full",
+      "native-after",
+      "torch-selected",
+      "native-before"
+    ]
+  },
+  "head_autotune_selection": [
+    {
+      "stage": "initial_compaction",
+      "key": "cpu.matmul.v05|aarch64|macos|baseline|simd=false|prepacked_columns|8x768x50240|runs3",
+      "params": {
+        "kernel": "m8n12"
+      },
+      "context": {
+        "cols": 50240,
+        "inner": 768,
+        "revision": 5,
+        "rhs_layout": "prepacked_columns",
+        "rows": 8,
+        "runs": 3,
+        "sample_cols": 2048,
+        "sample_inner": 768,
+        "sample_rows": 8
+      }
+    },
+    {
+      "stage": "compaction_v6",
+      "key": "cpu.matmul.v06|aarch64|macos|baseline|simd=false|prepacked_columns|4x768x50240|runs3",
+      "params": {
+        "kernel": "m4n16"
+      },
+      "context": {
+        "cols": 50240,
+        "inner": 768,
+        "revision": 6,
+        "rhs_layout": "prepacked_columns",
+        "rows": 4,
+        "runs": 3,
+        "sample_cols": 2048,
+        "sample_inner": 768,
+        "sample_rows": 4
+      }
+    }
+  ],
+  "raw_autotune_store_sha256": {
+    "initial_after": "9eb2b861c17179b8dc83366ed63e8254c538087daab9e4d3d25b5ee6023bab51",
+    "v6_after": "6f9c1a9c12f2c4985f3187548a484db6e2f8ca73d9e2470b34aae38fd4517a1e"
+  },
+  "published_artifacts_sha256": {
+    "geometry-report.json": "a9d7ef05d6897567ba43c7b2cde5863241a2d78646281d7db3defea38fb36813",
+    "initial/comparison.json": "50670ebf004af87c5450fe814aee936c721b60c356df8185dd4b9fdd2f616ffc",
+    "autotune-v6/comparison.json": "b6550765afadc3ee91872973a3081ec82fe326117b61121d63d4759b3a25c1c2",
+    "initial/native-before/report.json": "95e796802f1cbfcd57c9cbed60b9dc5fa71eafb7e6ee366e75368c47338caf68",
+    "initial/torch-full/report.json": "d420efd650349465221dbe89df3c4681fe38c3eb6fe696c62cad6a989f66f9e7",
+    "initial/torch-selected/report.json": "7c26ca5b27d3b346da5b6a4b3223df1df814147d710893928c23d1543d2be6f3",
+    "initial/native-after/report.json": "429ce536b24c129487dfc78c2280a0598b93fa93a42b23653346bbdf035640e3",
+    "autotune-v6/native-before/report.json": "cbae4037383c040668c320557ee4d506c346f6dccd2885635060306ec4621e90",
+    "autotune-v6/torch-full/report.json": "da4f46bb492f9316bffca44e865a1a0f812f7e967940621b15a77e9c12616b13",
+    "autotune-v6/torch-selected/report.json": "ab904cbd8b482c0897655b5381d70a02d4204125eaca003010471b9ff47162f8",
+    "autotune-v6/native-after/report.json": "1e34e1a8a9df1e1a3869c4b7c669d9f28684fa3eb06728625df98c54c93b5774",
+    "validation.json": "2e20f96705dcd9954616e0e79c3ed46edcf6810ca3108a96de43db256361feb8"
+  },
+  "limitations": [
+    "local raw states and full autotune stores retained privately",
+    "first native test attempt failed because fixture max_activation_elements=12 could not fit a single16-lane MLP row; corrected to16, no core workaround",
+    "small-row rounding regression test failed before autotune fix and passed after",
+    "no PyPI upload; published0.4.32 unchanged"
+  ],
+  "independent_review": {
+    "agent_id": "01a14f0c-ecc8-79c2-a858-6e50c1e7cd90",
+    "finding": "reference runtime metadata could differ silently",
+    "fix": "require matching reference versions and reported intra-op thread count1; retain both runtime records; negative tests",
+    "scope": "source review only; parent owns runtime validation",
+    "verification": "fix rechecked source-only; no remaining finding"
+  }
+}

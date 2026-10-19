@@ -182,6 +182,28 @@ DIST="/tmp/spiraltorch-${VERSION}-dist"
 
 ## Readiness Snapshot
 
+### Verified 0.4.32 Publication
+
+On 2026-10-18, `v0.4.32` was published from merge commit
+`48482a5b1d139d04b9146c132131dd1d558d0cd2`. The immutable
+[official wheel run](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39122773040)
+built, installed/tested and attached all three signed platform wheels. The
+[publish dry-run](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39123861810)
+passed before the explicit token-based
+[publish and index/install verification](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39123982908).
+
+The version JSON, latest-version JSON and Simple index were checked against
+the Release's `wheels.sha256`; all three digests matched. One local cached
+readiness response still reported 0.4.31 after CI verification; cache-revalidated
+requests confirmed 0.4.32. No second upload was attempted. The public package
+is [spiraltorch 0.4.32](https://pypi.org/project/spiraltorch/0.4.32/).
+
+This release contains the fixed affine/Wave native geometry milestone. Later
+source-only GPT-2/elliptic/Topos/fractional extensions and native geometry AdamW
+are **not** part of these immutable wheel bytes.
+
+### Before the Next Upload
+
 Run this before any publish attempt. It does not print secret values; the
 explicit flag also avoids reading the clipboard.
 
@@ -193,9 +215,9 @@ python scripts/release_status.py \
   --no-clipboard
 ```
 
-The 0.4.32 source candidate is preparation, not confirmation of publication.
-Expected pre-publish shape for `0.4.32`, after the official wheel build and
-verified GitHub Release have completed, is:
+Expected pre-publish shape for `0.4.32` (historical, before its successful
+publication), after the official wheel build and verified GitHub Release:
+For a future release, choose a new unused version first; do not re-upload 0.4.32.
 
 ```text
 local_versions ... consistent=yes

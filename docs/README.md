@@ -25,6 +25,7 @@ older installed wheel.
 - [HF geometry Trainer](python/hf-geometry-training.md): train geometric adapters through HF clipping, checkpoints and resume.
 - [Torch-free GPT-2 geometry learning](python/native-causal-lm.md): Rust-owned checkpoint import, inference and language-loss gradients through a frozen decoder; CPU, source-only after the fixed 0.4.32 candidate.
 - [Native weights](python/native-weights.md) and [geometry runtime](python/native-geometry-runtime.md): owning tensor views and standalone geometric updates without an optional ML framework.
+- [Native geometry AdamW](python/native-geometry-adamw.md): shared Rust adaptive updates, clipping and exact optimizer/artifact resume for geometry and language-loss learning; source-only after 0.4.32.
 - [Document-safe HF geometry data](python/hf-geometry-data.md): Rust-owned contexts, spawned workers and an offline pretrained-model example.
 - [Training reference](reference/learning.md): language models, GoldenRetriever, RL, Rec, coherence, and Rust training examples.
 - [Geometric toolkits](reference/geometry.md): topos, GNNs, desire, quantum overlays, and telemetry.

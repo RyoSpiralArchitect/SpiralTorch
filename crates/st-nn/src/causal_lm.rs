@@ -11,10 +11,24 @@ use st_tensor::{
 };
 use std::sync::{Arc, OnceLock};
 
+mod context;
 mod decoder;
+mod generation;
 mod gpt2;
 mod learning;
-pub use learning::NativeCausalLmGradients;
+mod objective;
+mod training;
+pub use context::NativeCausalLmContext;
+pub use generation::{
+    CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,
+    NativeCausalLmGenerator,
+};
+pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
+pub use objective::CausalLmObjective;
+use objective::PreparedCausalWindow;
+pub use training::{
+    CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
+};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
@@ -206,6 +220,20 @@ impl NativeCausalLm {
 
     /// Validate work before a binding extracts token IDs or any activation is allocated.
     pub fn input_count(&self, shape: [usize; 2], last_only: bool) -> CausalLmResult<usize> {
+        let rows = self.context_input_count(shape)?;
+        self.logit_count(if last_only { shape[0] } else { rows })?;
+        Ok(rows)
+    }
+
+    fn logit_count(&self, rows: usize) -> CausalLmResult<usize> {
+        product(
+            &[rows, self.config.vocabulary],
+            self.limits.max_logit_elements,
+            "logits",
+        )
+    }
+
+    fn context_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
         let [batch, steps] = shape;
         let c = &self.config;
         if batch == 0 || steps == 0 || steps > c.positions {
@@ -228,11 +256,6 @@ impl NativeCausalLm {
             &[c.layers, batch, c.heads, steps, steps],
             self.limits.max_attention_pairs,
             "total attention pairs",
-        )?;
-        product(
-            &[if last_only { batch } else { rows }, c.vocabulary],
-            self.limits.max_logit_elements,
-            "logits",
         )?;
         if let Some(runtime) = &self.geometry {
             for placement in &runtime.artifact().record().placements {
@@ -278,47 +301,16 @@ impl NativeCausalLm {
     }
 
     /// Mean teacher-forced next-token NLL for B independent windows of T+1 IDs.
-    /// Labels are shifted within each row only; there is no padding or ignore mask.
+    /// Labels are shifted within each row only; all shifted targets participate.
     pub fn next_token_loss(&self, windows: &[usize], shape: [usize; 2]) -> CausalLmResult<f32> {
-        let (input, labels, shape) = self.shift_windows(windows, shape)?;
-        Ok(self
-            .logits(&input, shape, false)?
-            .cross_entropy_with_logits(&labels, CrossEntropyConfig::default())?
-            .data()[0])
-    }
-
-    fn shift_windows(
-        &self,
-        windows: &[usize],
-        shape: [usize; 2],
-    ) -> CausalLmResult<(Vec<usize>, Vec<i64>, [usize; 2])> {
-        if shape[1] < 2 {
-            return Err("next-token loss needs at least two IDs per window".into());
-        }
-        let steps = shape[1] - 1;
-        let count = self.input_count([shape[0], steps], false)?;
-        if windows.len() != product(&shape, usize::MAX, "window IDs")?
-            || windows.iter().any(|&id| id >= self.config.vocabulary)
-        {
-            return Err("invalid next-token window length or token ID".into());
-        }
-        let mut input = Vec::with_capacity(count);
-        let mut labels = Vec::with_capacity(count);
-        for window in windows.chunks_exact(shape[1]) {
-            input.extend_from_slice(&window[..steps]);
-            labels.extend(window[1..].iter().map(|&id| id as i64));
-        }
-        Ok((input, labels, [shape[0], steps]))
+        self.next_token_loss_with_objective(windows, shape, None, CausalLmObjective::default())
     }
 
     fn logits(&self, ids: &[usize], shape: [usize; 2], last_only: bool) -> CausalLmResult<Tensor> {
         self.input_count(shape, last_only)?;
         let c = &self.config;
         let [batch, steps] = shape;
-        let mut hidden = self.embed(ids, shape)?;
-        for index in 0..self.blocks.len() {
-            hidden = self.run_block(index, hidden, shape, false)?.output;
-        }
+        let hidden = self.decode_hidden(ids, shape)?;
         let hidden = if last_only {
             hidden.gather_rows(&(0..batch).map(|b| (b + 1) * steps - 1).collect::<Vec<_>>())?
         } else {
@@ -326,5 +318,13 @@ impl NativeCausalLm {
         };
         let normalized = self.final_norm.forward(&hidden, c.norm_epsilon)?;
         Ok(normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?)
+    }
+
+    fn decode_hidden(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {
+        let mut hidden = self.embed(ids, shape)?;
+        for index in 0..self.blocks.len() {
+            hidden = self.run_block(index, hidden, shape, false)?.output;
+        }
+        Ok(hidden)
     }
 }

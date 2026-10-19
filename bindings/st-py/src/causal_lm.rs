@@ -1,11 +1,20 @@
 //! Token transport only; model loading, execution, loss and geometry stay in Rust.
 use crate::channel_affine::{dimension, reject_bool};
 use crate::geometry_artifact::PyGeometryAdapterArtifact;
+use crate::geometry_runtime::{adamw_step, PyNativeGeometryAdamW};
 use crate::weights::{PyNdTensor, PySafeTensorArchive};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use st_nn::causal_lm::{CausalLmLimits, NativeCausalLm, NativeCausalLmGradients};
+use st_nn::causal_lm::{
+    CausalLmLimits, CausalLmObjective, NativeCausalLm, NativeCausalLmGradients,
+};
 use std::collections::BTreeMap;
+
+mod accumulation;
+mod context;
+mod generation;
+mod training;
+use accumulation::PyNativeCausalLmAccumulator;
 
 fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
@@ -31,6 +40,34 @@ fn tokens(value: &Bound<'_, PyAny>, count: usize) -> PyResult<Vec<usize>> {
         result.push(dimension(&value.get_item(i)?)?);
     }
     Ok(result)
+}
+
+fn loss_objective(value: Option<&Bound<'_, PyAny>>) -> PyResult<CausalLmObjective> {
+    let label_smoothing = match value {
+        Some(value) => {
+            reject_bool(value)?;
+            value.extract::<f64>()?
+        }
+        None => 0.,
+    };
+    let objective = CausalLmObjective { label_smoothing };
+    objective.validate().map_err(error)?;
+    Ok(objective)
+}
+
+fn loss_labels(value: Option<&Bound<'_, PyAny>>, count: usize) -> PyResult<Option<Vec<i64>>> {
+    let Some(value) = value else { return Ok(None) };
+    if value.len()? != count {
+        return Err(error("label count differs from window shape"));
+    }
+    let mut result = Vec::new();
+    result.try_reserve_exact(count).map_err(error)?;
+    for i in 0..count {
+        let item = value.get_item(i)?;
+        reject_bool(&item)?;
+        result.push(item.extract::<i64>()?);
+    }
+    Ok(Some(result))
 }
 
 fn limit(value: Option<&Bound<'_, PyAny>>, default: usize) -> PyResult<usize> {
@@ -71,6 +108,14 @@ impl PyNativeCausalLmGradients {
     fn window_shape(&self) -> Vec<usize> {
         self.inner.window_shape().to_vec()
     }
+    #[getter]
+    fn target_tokens(&self) -> usize {
+        self.inner.target_tokens()
+    }
+    #[getter]
+    fn label_smoothing(&self) -> f64 {
+        self.inner.objective().label_smoothing
+    }
     fn parameter_gradients(&self) -> BTreeMap<String, BTreeMap<String, Vec<f32>>> {
         self.inner.parameters().clone()
     }
@@ -78,6 +123,24 @@ impl PyNativeCausalLmGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
+    #[staticmethod]
+    fn from_training_checkpoint(
+        py: Python<'_>,
+        base: &Self,
+        payload: &str,
+        expected_id: &str,
+    ) -> PyResult<Self> {
+        py.detach(|| {
+            NativeCausalLm::from_training_checkpoint(
+                base.inner.clone(),
+                payload.as_bytes(),
+                expected_id,
+            )
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
+    }
+
     #[staticmethod]
     #[pyo3(signature = (config_json, weights, *, max_parameter_elements=None, max_activation_elements=None, max_attention_pairs=None, max_logit_elements=None, max_training_checkpoint_elements=None))]
     fn from_gpt2(
@@ -135,21 +198,45 @@ impl PyNativeCausalLm {
             .map(|inner| PyGeometryAdapterArtifact { inner })
     }
 
+    #[pyo3(signature = (*, label_smoothing=None))]
+    fn geometry_accumulator(
+        &self,
+        py: Python<'_>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyNativeCausalLmAccumulator> {
+        let objective = loss_objective(label_smoothing)?;
+        py.detach(|| self.inner.geometry_accumulator_with_objective(objective))
+            .map(|inner| PyNativeCausalLmAccumulator { inner })
+            .map_err(error)
+    }
+
+    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None))]
     fn geometry_loss_gradients(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmGradients> {
+        let objective = loss_objective(label_smoothing)?;
         let shape = self::shape(shape)?;
         let count = self
             .inner
-            .geometry_gradient_input_count(shape)
+            .geometry_objective_input_count(shape, labels.is_some())
             .map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.geometry_loss_gradients(&windows, shape))
-            .map(|inner| PyNativeCausalLmGradients { inner })
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner.geometry_loss_gradients_with_objective(
+                &windows,
+                shape,
+                labels.as_deref(),
+                objective,
+            )
+        })
+        .map(|inner| PyNativeCausalLmGradients { inner })
+        .map_err(error)
     }
 
     fn step_geometry_sgd(
@@ -165,6 +252,24 @@ impl PyNativeCausalLm {
                 .step_geometry_sgd(&gradients.inner, learning_rate)
         })
         .map(|inner| Self { inner })
+        .map_err(error)
+    }
+
+    #[pyo3(signature = (gradients, optimizer, learning_rate, *, weight_decay=None))]
+    fn step_geometry_adamw(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmGradients,
+        optimizer: &PyNativeGeometryAdamW,
+        learning_rate: &Bound<'_, PyAny>,
+        weight_decay: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(Self, PyNativeGeometryAdamW)> {
+        let step = adamw_step(learning_rate, weight_decay)?;
+        py.detach(|| {
+            self.inner
+                .step_geometry_adamw(&gradients.inner, &optimizer.inner, step)
+        })
+        .map(|(inner, optimizer)| (Self { inner }, PyNativeGeometryAdamW { inner: optimizer }))
         .map_err(error)
     }
 
@@ -207,31 +312,37 @@ impl PyNativeCausalLm {
             .map_err(error)
     }
 
+    #[pyo3(signature = (windows, shape, *, labels=None, label_smoothing=None))]
     fn next_token_loss(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<f32> {
+        let objective = loss_objective(label_smoothing)?;
         let shape = self::shape(shape)?;
-        let steps = shape[1]
-            .checked_sub(1)
-            .filter(|&n| n > 0)
-            .ok_or_else(|| error("next-token loss needs at least two IDs per window"))?;
-        self.inner
-            .input_count([shape[0], steps], false)
+        let count = self
+            .inner
+            .loss_objective_input_count(shape, labels.is_some())
             .map_err(error)?;
-        let count = shape[0]
-            .checked_mul(shape[1])
-            .ok_or_else(|| error("window shape overflow"))?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.next_token_loss(&windows, shape))
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner
+                .next_token_loss_with_objective(&windows, shape, labels.as_deref(), objective)
+        })
+        .map_err(error)
     }
 }
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLm>()?;
+    module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;
+    training::register(module)?;
+    generation::register(module)?;
+    context::register(module)?;
     Ok(())
 }

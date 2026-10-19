@@ -1,0 +1,35 @@
+{
+  "cross_entropy_gradient": {
+    "max_absolute": 2.514803782105446e-06,
+    "l2_error_over_reference": 0.00013378909036419317
+  },
+  "native_cross_entropy_vs_f64": {
+    "max_absolute": 3.0154141510141397e-10,
+    "l2_error_over_reference": 2.0693390437920415e-08
+  },
+  "torch_f32_cross_entropy_vs_f64": {
+    "max_absolute": 2.5148124248048492e-06,
+    "l2_error_over_reference": 0.00013378391091547497
+  },
+  "head_matmul_gradient": {
+    "max_absolute": 2.962537109851837e-06,
+    "l2_error_over_reference": 0.0002646516140061008
+  },
+  "head_matmul_vs_f64": {
+    "max_absolute": 7.56274435663367e-07,
+    "l2_error_over_reference": 9.712489901705113e-06
+  },
+  "f64_head_vs_torch": {
+    "max_absolute": 3.033334278271238e-06,
+    "l2_error_over_reference": 0.0002650918701778444
+  },
+  "final_norm_gradient": {
+    "max_absolute": 8.740956900510355e-07,
+    "l2_error_over_reference": 0.0009759107655934307
+  },
+  "final_norm_after_f64_head": {
+    "max_absolute": 8.739849590710946e-07,
+    "l2_error_over_reference": 0.0009773854690197533
+  },
+  "contract_sha256": "bfa504dd7639a08b7f8fdc5fab4f3d6aff5fb4d301781b6f5a02a748a0aa3e13"
+}

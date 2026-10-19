@@ -27,7 +27,7 @@ from test_byte_corpus_query import fixture as query_fixture
 from test_verify_byte_corpus_resume import fixture as resume_fixture
 from test_byte_corpus_optimizer import wrap as optimizer_request, recipe as optimizer_recipe
 from test_byte_corpus_gradient_clip import bind as clipping_request, learning_design
-from byte_study_diagnostics import exact_report_differences, retain_detached_failure
+from byte_study_diagnostics import assert_exact_resume, exact_report_differences, retain_detached_failure
 
 NAMES = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
@@ -448,9 +448,14 @@ class StudyGpu(unittest.TestCase):
         request["rate"] = .001
         study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
         full, first = study.advance_wgpu(), study.advance_wgpu(1)
-        resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
-        self.assertEqual(full.report_json, resumed.report_json)
-        self.assertEqual(full.checkpoint.to_json(), resumed.checkpoint.to_json())
+        saved = first.checkpoint.to_json()
+        resumed = study.advance_wgpu(resume=study.checkpoint_from_json(saved))
+        full_checkpoint, resumed_checkpoint = full.checkpoint.to_json(), resumed.checkpoint.to_json()
+        assert_exact_resume(os.environ.get("SPIRALTORCH_RESUME_STUDY_DIAGNOSTICS"), protocol.encoded(request),
+                            full_report=full.report_json, first_report=first.report_json,
+                            resumed_report=resumed.report_json, full_checkpoint=full_checkpoint,
+                            first_checkpoint=saved, resumed_checkpoint=resumed_checkpoint)
+        self.assertEqual(first.checkpoint.to_json(), saved)
         self.assertEqual(len(request["cases"]), 25)
         for case, row in zip(request["cases"], protocol.decode_json(full.report_json)["cases"]):
             protocol.load_reference("byte_corpus_optimizer").validate_state(

@@ -335,7 +335,7 @@ pub fn project_zspace_softmax(
     })
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ZSpaceGenerationControlConfig {
     pub curvature: f64,

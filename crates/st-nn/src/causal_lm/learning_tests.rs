@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "objective_tests.rs"]
+mod objective;
+#[path = "training_tests.rs"]
+mod training;
+
 fn trainable(model: &NativeCausalLm) -> GeometryAdapterArtifact {
     let mut record = artifact(model, "transformer.h.0.attn", 0.2)
         .record()
@@ -23,7 +28,14 @@ fn trainable(model: &NativeCausalLm) -> GeometryAdapterArtifact {
 }
 
 fn objective(model: &NativeCausalLm, windows: &[usize], shape: [usize; 2]) -> f64 {
-    let (input, labels, shape) = model.shift_windows(windows, shape).unwrap();
+    let PreparedCausalWindow {
+        input,
+        labels,
+        shape,
+        ..
+    } = model
+        .prepare_objective(windows, shape, None, CausalLmObjective::default())
+        .unwrap();
     let logits = model.logits(&input, shape, false).unwrap();
     logits
         .data()
@@ -200,6 +212,188 @@ fn training_admission_and_invalid_updates_fail_without_changes() {
     .unwrap();
     let other = other.with_geometry(trainable(&other)).unwrap();
     assert!(other.step_geometry_sgd(&gradient, 0.1).is_err());
+}
+
+#[test]
+fn native_adamw_learns_and_resumes_without_changing_the_base() {
+    use crate::geometry_runtime::{AdamWStep, GlobalNormClip, NativeGeometryAdamW};
+    let base = load();
+    let mut model = base.with_geometry(trainable(&base)).unwrap();
+    let original = model.geometry_artifact().unwrap().clone();
+    let mut optimizer = NativeGeometryAdamW::new(
+        &original,
+        Default::default(),
+        Some(GlobalNormClip::new(0.1).unwrap()),
+    )
+    .unwrap();
+    let windows = [1, 2, 3, 4, 5, 6, 7, 8];
+    let first = model.geometry_loss_gradients(&windows, [2, 4]).unwrap();
+    let step = AdamWStep::new(0.05, 0.01).unwrap();
+    for _ in 0..20 {
+        let gradient = model.geometry_loss_gradients(&windows, [2, 4]).unwrap();
+        (model, optimizer) = model
+            .step_geometry_adamw(&gradient, &optimizer, step)
+            .unwrap();
+    }
+    assert!(model.next_token_loss(&windows, [2, 4]).unwrap() < first.loss() - 1e-4);
+    assert_eq!(base.token.data(), model.token.data());
+    assert_eq!(base.head.as_slice(), model.head.as_slice());
+    assert!(model.step_geometry_adamw(&first, &optimizer, step).is_err());
+    assert_eq!(optimizer.revision(), 20);
+    for (before, after) in original
+        .record()
+        .placements
+        .iter()
+        .zip(&model.geometry_artifact().unwrap().record().placements)
+    {
+        for (p, q) in before.tensors.iter().zip(&after.tensors) {
+            if !p.requires_grad {
+                assert_eq!(p.values, q.values);
+            }
+        }
+    }
+    let saved = model.geometry_artifact().unwrap();
+    let restored = base
+        .with_geometry(
+            GeometryAdapterArtifact::from_json(
+                saved.to_json().as_bytes(),
+                saved.artifact_id(),
+                base.base_model_identity(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let restored_state = NativeGeometryAdamW::from_json(
+        optimizer.to_json().unwrap().as_bytes(),
+        &optimizer.checkpoint_id().unwrap(),
+        restored.geometry_artifact().unwrap(),
+    )
+    .unwrap();
+    let gradients = model.geometry_loss_gradients(&windows, [2, 4]).unwrap();
+    let a = model
+        .step_geometry_adamw(&gradients, &optimizer, step)
+        .unwrap();
+    let b = restored
+        .step_geometry_adamw(&gradients, &restored_state, step)
+        .unwrap();
+    assert_eq!(
+        a.0.geometry_artifact().unwrap().to_json(),
+        b.0.geometry_artifact().unwrap().to_json()
+    );
+    assert_eq!(a.1.to_json().unwrap(), b.1.to_json().unwrap());
+}
+
+#[test]
+fn microbatch_mean_matches_full_batch_and_one_clipped_optimizer_step() {
+    use crate::geometry_runtime::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
+    let base = load();
+    let model = base.with_geometry(trainable(&base)).unwrap();
+    let windows = [1, 2, 3, 4, 5, 6, 7, 8, 2, 4, 6, 8];
+    let combined = model.geometry_loss_gradients(&windows, [3, 4]).unwrap();
+    let mut accumulated = model.geometry_accumulator().unwrap();
+    accumulated
+        .accumulate_loss(&model, &windows[..4], [1, 4])
+        .unwrap();
+    accumulated
+        .add(
+            &model
+                .geometry_loss_gradients(&windows[4..], [2, 4])
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(accumulated.target_tokens(), 9);
+    assert_eq!(accumulated.microbatches(), 2);
+    assert!((accumulated.loss().unwrap() - f64::from(combined.loss())).abs() < 2e-6);
+    let means = accumulated.parameter_gradients().unwrap();
+    let mut squared_norm = 0f64;
+    for (path, parameters) in combined.parameters() {
+        for (name, values) in parameters {
+            for (i, &value) in values.iter().enumerate() {
+                assert!((means[path][name][i] - value).abs() < 1e-7);
+                if name == "gate" {
+                    squared_norm += f64::from(value).powi(2);
+                }
+            }
+        }
+    }
+    assert!(squared_norm.sqrt() > 1e-5);
+    let optimizer = NativeGeometryAdamW::new(
+        model.geometry_artifact().unwrap(),
+        AdamWConfig::new(0.8, 0.9, 0.1).unwrap(),
+        Some(GlobalNormClip::new(1e-5).unwrap()),
+    )
+    .unwrap();
+    let step = AdamWStep::new(0.01, 0.02).unwrap();
+    let (a, a_state) = accumulated.step_adamw(&model, &optimizer, step).unwrap();
+    let (b, b_state) = model
+        .step_geometry_adamw(&combined, &optimizer, step)
+        .unwrap();
+    assert_eq!(a_state.revision(), 1);
+    assert_eq!(accumulated.microbatches(), 2); // Applying does not clear the source.
+    for slot in &a_state.state().slots {
+        assert_eq!(slot.steps, 1);
+    }
+    for (left, right) in a_state.state().slots.iter().zip(&b_state.state().slots) {
+        for (x, y) in left.first.iter().zip(&right.first) {
+            assert!((x - y).abs() < 1e-8);
+        }
+    }
+    for (left, right) in a
+        .geometry_artifact()
+        .unwrap()
+        .record()
+        .placements
+        .iter()
+        .zip(&b.geometry_artifact().unwrap().record().placements)
+    {
+        for (x, y) in left.tensors.iter().zip(&right.tensors) {
+            for (p, q) in x.values.iter().zip(&y.values) {
+                assert!((p - q).abs() < 1e-7);
+            }
+        }
+    }
+    assert_eq!(base.token.data(), a.token.data());
+    assert_eq!(base.head.as_slice(), a.head.as_slice());
+}
+
+#[test]
+fn ragged_accumulation_uses_shifted_target_counts_and_is_failure_atomic() {
+    let base = load();
+    assert!(base.geometry_accumulator().is_err());
+    let model = base.with_geometry(trainable(&base)).unwrap();
+    let mut state = model.geometry_accumulator().unwrap();
+    assert!(state.step_sgd(&model, 0.1).is_err());
+    let a = model.geometry_loss_gradients(&[1, 2, 3], [1, 3]).unwrap();
+    let b = model
+        .geometry_loss_gradients(&[2, 4, 6, 8, 1], [1, 5])
+        .unwrap();
+    state.add(&a).unwrap();
+    state.add(&b).unwrap();
+    assert_eq!(state.target_tokens(), 6);
+    assert_eq!(
+        state.loss().unwrap(),
+        (f64::from(a.loss()) * 2. + f64::from(b.loss()) * 4.) / 6.
+    );
+    let means = state.parameter_gradients().unwrap();
+    for (path, parameters) in a.parameters() {
+        for (name, values) in parameters {
+            for (i, &v) in values.iter().enumerate() {
+                let expected = ((f64::from(v) * 2. + f64::from(b.parameters()[path][name][i]) * 4.)
+                    / 6.) as f32;
+                assert_eq!(means[path][name][i], expected);
+            }
+        }
+    }
+    let before = format!("{state:?}");
+    assert!(state.accumulate_loss(&model, &[1, 11, 3], [1, 3]).is_err());
+    assert_eq!(format!("{state:?}"), before);
+    let next = state.step_sgd(&model, 0.5).unwrap();
+    assert!(state.validate_model(&next).is_err());
+    assert!(state.step_sgd(&next, 0.5).is_err());
+    assert!(state
+        .add(&next.geometry_loss_gradients(&[1, 2, 3], [1, 3]).unwrap())
+        .is_err());
+    assert_eq!(format!("{state:?}"), before);
 }
 
 fn overflowing_frozen_base_fixture() -> NativeCausalLm {

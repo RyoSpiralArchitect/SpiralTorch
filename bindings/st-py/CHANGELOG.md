@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+- Add `NativeCausalLmGenerator` for Rust-owned greedy/seeded sampling, EOS,
+  ordinary or Z-Space token control, and pinned continuation. Explicit
+  `execution.kind="kv_cache"` reuses native K/V through `NativeCausalLmContext`;
+  default full-prefix v1 checkpoint bytes remain unchanged. Row-local geometry
+  evaluates new rows; causal geometry retains and replays its native input
+  history. Atomic updates preserve context on errors, and cached resume rebuilds
+  the original prefill/append chronology. No Torch/NumPy fallback, GPU serving
+  claim or change to the already-published 0.4.32 wheels.
+
+- Add Rust-owned `NativeCausalLmTrainer` for fixed-order document-safe geometry
+  learning, token-weighted microbatch groups and atomic model/optimizer/cursor
+  updates. Native checkpoints bind base, complete tokens/labels, recipe and
+  accepted-update position. Expose thin Python handles and an offline example;
+  no Torch fallback, shuffle or base-weight FT is implied.
+
+- Compact native selected-label readout before final normalization and the
+  vocabulary head, including reverse scatter into the unchanged full decoder
+  context. Logit budgets now cover actual scored rows after bounded label
+  extraction; ordinary full/last-only forward admission is unchanged. Reuse
+  shared row-gather/scatter kernels, with no added gather when all targets
+  participate. Unrequested vocabulary overflow cannot suppress a valid loss.
+  CPU autotuning v6 retains exact small row counts instead of treating 1/4 rows
+  as an 8-row trial; old cached selections are not reused.
+  This is source-only after 0.4.32, not GPU or whole-training speed evidence.
+
+- Add optional unshifted causal `labels` and `label_smoothing` to native LM
+  loss/geometry learning. Shared Rust CE/VJP handles `-100` exclusions and
+  uniform smoothing; input context is not removed. Accumulation weights by
+  non-ignored shifted targets and rejects mixed smoothing objectives. Default
+  full-target behavior is unchanged. No padding/attention mask is inferred,
+  and fully ignored microbatches fail before decoder execution. Source-only
+  after 0.4.32; the optional HF Trainer remains an explicit foreign client.
+
+- Add Rust-owned `NativeCausalLmAccumulator` for token-weighted geometry
+  learning over variable-length, unpadded microbatches. Loss and parameter
+  means accumulate without Python tensor arithmetic or retained decoder tapes;
+  shared SGD/AdamW applies once per group, with clipping after reduction.
+  Invalid additions are atomic, and stale model snapshots are rejected.
+  Pending accumulations are not checkpointed; resume at optimizer boundaries.
+  Source-only after 0.4.32, not full-model FT or a memory/speed measurement.
+
+- Add `NativeGeometryAdamW` for standalone geometry and frozen GPT-2
+  language-loss learning. The shared Rust AdamW/global-norm kernels own
+  adaptive updates; Python only transports inputs. Atomic model/optimizer
+  pairs preserve frozen and absent placements, reject invalid candidates,
+  and resume from pinned geometry plus bounded moment/clock checkpoints.
+  Zero rate freezes values, moments and clocks by the existing ST contract.
+  Source-only after the immutable 0.4.32 release; no whole-model FT or GPU
+  optimizer execution is claimed.
+
 - Add native `vjp_parameters` / `vjp_parameters_buffer` for all 14 geometry
   recipe configurations. Shared Rust pullbacks omit unused input adjoints in
   standalone SGD and at the earliest frozen-GPT-2 geometry site, preventing
@@ -54,7 +104,9 @@
 
 ## 0.4.32
 
-0.4.32 is prepared in source; this does not confirm PyPI publication.
+0.4.32 was published and its three official wheel hashes verified on 2026-10-18.
+See the [release receipt](../../docs/ops/release.md). The newer native LM,
+AdamW and accumulation APIs above are not included in those immutable wheels.
 
 - Add `NativeGeometryRuntime` and immutable `NativeGeometryBatch` to execute
   portable channel-affine and WaveGate v1/v2 placements without Torch, NumPy or

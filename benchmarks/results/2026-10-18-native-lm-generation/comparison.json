@@ -1,0 +1,308 @@
+{
+  "contract": {
+    "schema": "spiraltorch.native_generation_qualification.v1",
+    "source_sha256": {
+      "benchmarks/results/2026-10-18-native-lm-generation/qualify.py": "88c0434bfb0f4ef5ae128a5bbb367aea21e87928c896b812f614c4fe046f6061",
+      "benchmarks/results/2026-10-18-native-corpus-training/qualify.py": "2a5cfc2c54c5ad2b03672cbd3de27537848d620dd5a6cc02eadbb3ae06bbbc35",
+      "crates/st-core/src/inference/token_decoding.rs": "109e3e35f7c1488ae2b1e984e9fe2cd16bfeef772aeaa4598f5b84d7ea744e5d",
+      "crates/st-core/src/inference/generation_control.rs": "27d07d524b53b30860a44cd7ccb8b1ed667082e8e06e0138834a0bac475e238d",
+      "crates/st-nn/src/causal_lm/generation.rs": "e8422370b5879ea6665aa6269dbe1f10d3718f9dc3f7b95132623791bb5da6ee",
+      "bindings/st-py/src/causal_lm/generation.rs": "626f9374d4ded436abbfcdd9b0fe46e9c45bba9a4fdbed30382b276efab8ff22",
+      "bindings/st-py/examples/native_geometry_generation.py": "2453e5e28d898fc3f8b05e37ecb2257691e5350e3c83122b32abc54cc62b0fa4"
+    },
+    "configs": {
+      "greedy": {
+        "max_new_tokens": 8,
+        "eos_token_ids": [
+          50256
+        ]
+      },
+      "sample": {
+        "max_new_tokens": 8,
+        "eos_token_ids": [
+          50256
+        ],
+        "seed": 714,
+        "decoding": {
+          "selection": "sample",
+          "top_k": 40,
+          "top_p": 0.9,
+          "distribution": {
+            "kind": "softmax",
+            "temperature": 0.8
+          }
+        }
+      },
+      "zspace": {
+        "max_new_tokens": 8,
+        "eos_token_ids": [
+          50256
+        ],
+        "seed": 714,
+        "decoding": {
+          "selection": "sample",
+          "top_k": 40,
+          "top_p": 0.9,
+          "distribution": {
+            "kind": "zspace",
+            "config": {
+              "curvature": -1.0,
+              "temperature": 0.8,
+              "repression_window": 32,
+              "repression_strength": 0.6,
+              "last_token_repression": 0.3,
+              "ngram_size": 3,
+              "ngram_repression_strength": 0.4
+            }
+          }
+        }
+      }
+    },
+    "gates": {
+      "probability_atol": 2e-05,
+      "probability_rtol": 0.0002,
+      "entropy_atol": 0.0002,
+      "greedy_ids_exact": true,
+      "resume_steps_and_checkpoint_exact": true
+    },
+    "model_sha256": {
+      "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+      "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+      "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+    },
+    "checkpoint_sha256": "1ed13924961efe03330d1e16407382e3fcb0b3255504939215215a9375f62e6e",
+    "data_sha256": "d95c8c6161a6ad91b67be1d477890daf3adc15b90f804a83a1350b955bd40fee",
+    "base_model_identity": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+    "learned_geometry_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+    "prompt_offsets": [
+      0,
+      128,
+      512
+    ],
+    "prompt_length": 8,
+    "resume_after_tokens": 3,
+    "scope": "18 fixed train-chapter continuations; no held-out quality, speed, or Torch RNG claim"
+  },
+  "cases": [
+    {
+      "case": "base-0-greedy",
+      "generated_tokens": 8,
+      "mean_entropy": 5.011653863173732,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:ad4f4c9aee255d806804cbfed5c530fdcfe7e18675b328ae26e9be12deb8866c",
+      "raw_sha256": "5a217e4206cf44156da7c976d60953c9390659b1281f5e04ffef60566f98850d"
+    },
+    {
+      "case": "base-0-sample",
+      "generated_tokens": 8,
+      "mean_entropy": 2.0005626379765085,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:e3fb871b25bafb9dc6e0b6950c9b91f1ae32b83b9c06062960f0d6da183d6fab",
+      "raw_sha256": "8af7d75d837e720ad1a3c9160b335f5c2d9e1999c565822c82ae32f547ddd02b"
+    },
+    {
+      "case": "base-0-zspace",
+      "generated_tokens": 8,
+      "mean_entropy": 1.9365378789624437,
+      "control_top_changes": 2,
+      "final_checkpoint_id": "sha256:418fe148a3d043762fe54643ee3d68d80fb4601d6148815da5c0e78bb38f541f",
+      "raw_sha256": "b978dee8db5aea38b16aeb15919c5eac91f4a43c0ea21a682d793da5bc49c910"
+    },
+    {
+      "case": "base-128-greedy",
+      "generated_tokens": 8,
+      "mean_entropy": 4.02159268938622,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:bf1c58b13664136ba821f3d96085ac2632251349cdd6aec12e210f29c52acf98",
+      "raw_sha256": "325b296e15a6034dafcce22ccea7537f016b6b56cc6a29d0741edb21d7e7ef24"
+    },
+    {
+      "case": "base-128-sample",
+      "generated_tokens": 8,
+      "mean_entropy": 1.734633770028438,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:9d60abf8c94f8d06fc110129d9f04490e902031aa3dba1cb3fa535c3caec23f1",
+      "raw_sha256": "69e48cad1f6b19b07ee316a558bce2a6b738de4864d2c7d7ebaafba9d536c956"
+    },
+    {
+      "case": "base-128-zspace",
+      "generated_tokens": 8,
+      "mean_entropy": 1.6753402280481928,
+      "control_top_changes": 1,
+      "final_checkpoint_id": "sha256:7f6568b3a78a7134d7a04086f70be0e1941d18485ac6fef736c240f4060c0cc9",
+      "raw_sha256": "34f2cdbcad36ae69bf0db77f2615dacd06267996c33874a789834285a9b51aa8"
+    },
+    {
+      "case": "base-512-greedy",
+      "generated_tokens": 8,
+      "mean_entropy": 4.963417055406937,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:eaac198263e02b66812d95a673e3bb6f803de2f853279d8882bd23fced426e7e",
+      "raw_sha256": "e58ff9d5a44c17f4be2c6771e6079b72c08e21b5ce4fbe90260c1a6c045d525f"
+    },
+    {
+      "case": "base-512-sample",
+      "generated_tokens": 8,
+      "mean_entropy": 1.9300284340689184,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:0176f7b8b8b7eeb8fabbccc0f11e206fbae7ecc8fec731c5c72648d8f9b5bbf0",
+      "raw_sha256": "6ffc5f94ecd2af4f600c38e54c926730ad7fdf372bd0685b5b7f1e7f7548ceb7"
+    },
+    {
+      "case": "base-512-zspace",
+      "generated_tokens": 8,
+      "mean_entropy": 2.245905834638754,
+      "control_top_changes": 1,
+      "final_checkpoint_id": "sha256:856db7df34f5576ac91bfc6f95326172bb46180ee11c25533ef3b28391f37449",
+      "raw_sha256": "5e1adea06495cea467a50e0d6e7d51fb0922049c960bbe6fd4eafcc46f4c3825"
+    },
+    {
+      "case": "learned-0-greedy",
+      "generated_tokens": 8,
+      "mean_entropy": 5.016199578312035,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:95d1c3bfd14600111d47d73c850934665ae2bce4e17e69424d99014e9836aa8b",
+      "raw_sha256": "ecad89f065bb73b7a4329bd684c757b308091569325ad96a1cfc14d23a92fb66"
+    },
+    {
+      "case": "learned-0-sample",
+      "generated_tokens": 8,
+      "mean_entropy": 2.00077963758108,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:7c848f7d122527e960a6275bcd4f596c99ea88ae53713701b7b1eb47675aff32",
+      "raw_sha256": "4015d86d7d419a052ba75ace1007faa12041e6b0396392b6fbd1c9bec3030b94"
+    },
+    {
+      "case": "learned-0-zspace",
+      "generated_tokens": 8,
+      "mean_entropy": 1.9367274675242687,
+      "control_top_changes": 2,
+      "final_checkpoint_id": "sha256:6f67837241325c7ad9011a409bfaf6cda84d74f125f348c4a97ae76fff3c2199",
+      "raw_sha256": "139bffeaaaf9d257ea00ff7c647a173483c80df51aa722321d70816d5723d7a9"
+    },
+    {
+      "case": "learned-128-greedy",
+      "generated_tokens": 8,
+      "mean_entropy": 4.022325809613098,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:ddd361e2a733f199260c14debaab70a2311eaa65ab702ea037fdf1a7a44924b7",
+      "raw_sha256": "daaf42452aa2336183dcb1d8cadec0ec363f62df1124de225d751b591d720915"
+    },
+    {
+      "case": "learned-128-sample",
+      "generated_tokens": 8,
+      "mean_entropy": 1.7346767150956262,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:8ff9e92dddd68dcd6bfcd24418115608c4cafbd678257aef0af4b0920013acf1",
+      "raw_sha256": "35171bc3ca2fecda3b2a7f0c3ba895c7dc8f8fe984efc255f47d27966bb7a31a"
+    },
+    {
+      "case": "learned-128-zspace",
+      "generated_tokens": 8,
+      "mean_entropy": 1.6751188851829333,
+      "control_top_changes": 1,
+      "final_checkpoint_id": "sha256:1c4777f896a00f8d0f2ed42f3a245db4c4b40653cebb96a0f54ec134a8bd921a",
+      "raw_sha256": "30ad07b32161599921e9005f863f0c463a537578c868b7f81eb4b1c4a3e943fa"
+    },
+    {
+      "case": "learned-512-greedy",
+      "generated_tokens": 8,
+      "mean_entropy": 4.963235252222642,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:1f3cff79102bbe50e8146a615ddfe3cd6b2da75b025924b2f1c88622dad06580",
+      "raw_sha256": "da7d48cd800a0b90266f49fed1b53a522ade569986a0a60b83bc6193dde54a88"
+    },
+    {
+      "case": "learned-512-sample",
+      "generated_tokens": 8,
+      "mean_entropy": 1.930848795194376,
+      "control_top_changes": 0,
+      "final_checkpoint_id": "sha256:70da1b6e75fe8f216c8ad509490a8740656de1625909645e4a6ca21bcdff35aa",
+      "raw_sha256": "00fef31996f78398198ae61e9da66183432f27aedebce176a99eca1fcdbde605"
+    },
+    {
+      "case": "learned-512-zspace",
+      "generated_tokens": 8,
+      "mean_entropy": 2.2428703305917432,
+      "control_top_changes": 1,
+      "final_checkpoint_id": "sha256:c2d4920422da52976063c9132ae67fcd05f0c330a171209de4a6716c4496ce58",
+      "raw_sha256": "e8a682b8860991640b0092a79cc29f43d9d7207e4fcd87dabd14292101b7a043"
+    }
+  ],
+  "base_learned_deltas": [
+    {
+      "offset": 0,
+      "kind": "greedy",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 0,
+      "kind": "sample",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 0,
+      "kind": "zspace",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 128,
+      "kind": "greedy",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 128,
+      "kind": "sample",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 128,
+      "kind": "zspace",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 512,
+      "kind": "greedy",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 512,
+      "kind": "sample",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    },
+    {
+      "offset": 512,
+      "kind": "zspace",
+      "sequence_identical": true,
+      "different_token_positions": 0
+    }
+  ],
+  "resume_cases": 18,
+  "resume_exact": true,
+  "reference_cases": 12,
+  "reference_steps": 96,
+  "max_probability_abs": 8.820909040530012e-06,
+  "max_entropy_abs": 3.293801335324531e-05,
+  "reference_all_pass": true,
+  "runtime": {
+    "python": "3.12.6",
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "extension_sha256": "ddcf654d1b1007a120c86cbe5e379e85f1368a63f888d4948bf4815cea6ab73a",
+    "optional_ml_imports_forbidden": true
+  },
+  "torch": "2.12.1",
+  "transformers": "4.57.6",
+  "receipt_sha256": {
+    "contract.json": "20c3961103cc479231fab5f180d8e130c27e25d11742375c1e337a9cfc5013f4",
+    "resume.json": "038db096ba3410ee7c684f9ae1c89e2523c6db9456ed7c6a5603c89475dffd22",
+    "reference.json": "98d8d571e8c56b932c651f85a7f82c068224b112066512fb18f6a76089fcce1e"
+  }
+}

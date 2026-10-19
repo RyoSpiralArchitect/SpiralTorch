@@ -8,12 +8,17 @@ use std::collections::BTreeMap;
 
 type Parameters = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
 
+mod accumulation;
+pub use accumulation::NativeCausalLmAccumulator;
+
 /// Sealed gradients from one model/artifact snapshot, not a caller-authored update.
 #[derive(Debug)]
 pub struct NativeCausalLmGradients {
     base_id: String,
     geometry_id: String,
     shape: [usize; 2],
+    target_tokens: usize,
+    objective: CausalLmObjective,
     loss: f32,
     parameters: Parameters,
 }
@@ -30,6 +35,12 @@ impl NativeCausalLmGradients {
     }
     pub fn window_shape(&self) -> [usize; 2] {
         self.shape
+    }
+    pub fn target_tokens(&self) -> usize {
+        self.target_tokens
+    }
+    pub fn objective(&self) -> CausalLmObjective {
+        self.objective
     }
     pub fn parameters(&self) -> &Parameters {
         &self.parameters
@@ -106,6 +117,14 @@ impl NativeCausalLm {
     /// Existing forward/geometry limits apply to each replay; checkpoints have
     /// an additional aggregate element bound. This is not a peak-RSS guarantee.
     pub fn geometry_gradient_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        self.geometry_objective_input_count(shape, false)
+    }
+
+    pub fn geometry_objective_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         let runtime = self
             .geometry
             .as_ref()
@@ -117,11 +136,8 @@ impl NativeCausalLm {
         }) {
             return Err("attached geometry has no trainable parameters".into());
         }
-        let steps = shape[1]
-            .checked_sub(1)
-            .filter(|&n| n > 0)
-            .ok_or("geometry loss needs at least two IDs per window")?;
-        self.input_count([shape[0], steps], false)?;
+        let count = self.loss_objective_input_count(shape, has_labels)?;
+        let steps = shape[1] - 1;
         let (first_layer, _) = self.first_geometry_site()?;
         product(
             &[
@@ -133,7 +149,7 @@ impl NativeCausalLm {
             self.limits.max_training_checkpoint_elements,
             "training checkpoints",
         )?;
-        product(&shape, usize::MAX, "window IDs")
+        Ok(count)
     }
 
     /// Mean next-token NLL and all placement parameter gradients, with base
@@ -144,8 +160,40 @@ impl NativeCausalLm {
         windows: &[usize],
         window_shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmGradients> {
-        self.geometry_gradient_input_count(window_shape)?;
-        let (ids, labels, shape) = self.shift_windows(windows, window_shape)?;
+        self.geometry_loss_gradients_with_objective(
+            windows,
+            window_shape,
+            None,
+            CausalLmObjective::default(),
+        )
+    }
+
+    pub fn geometry_loss_gradients_with_objective(
+        &self,
+        windows: &[usize],
+        window_shape: [usize; 2],
+        labels: Option<&[i64]>,
+        objective: CausalLmObjective,
+    ) -> CausalLmResult<NativeCausalLmGradients> {
+        objective.validate()?;
+        self.geometry_objective_input_count(window_shape, labels.is_some())?;
+        let prepared = self.prepare_objective(windows, window_shape, labels, objective)?;
+        self.geometry_loss_gradients_prepared(prepared)
+    }
+
+    fn geometry_loss_gradients_prepared(
+        &self,
+        prepared: PreparedCausalWindow,
+    ) -> CausalLmResult<NativeCausalLmGradients> {
+        let PreparedCausalWindow {
+            input: ids,
+            labels,
+            shape,
+            window_shape,
+            target_tokens,
+            selected_rows,
+            objective,
+        } = prepared;
         let runtime = self.geometry.as_ref().unwrap();
         let c = &self.config;
         let (first_layer, first_site) = self.first_geometry_site()?;
@@ -158,25 +206,30 @@ impl NativeCausalLm {
             hidden = self.run_block(index, hidden, shape, false)?.output;
         }
         checkpoints.push(hidden.clone());
-        let normalized = self.final_norm.forward(&hidden, c.norm_epsilon)?;
+        let selected = match &selected_rows {
+            Some(rows) => hidden.gather_rows(rows)?,
+            None => hidden.clone(),
+        };
+        let normalized = self.final_norm.forward(&selected, c.norm_epsilon)?;
         let logits =
             normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?;
         let loss = logits
-            .cross_entropy_with_logits(&labels, CrossEntropyConfig::default())?
+            .cross_entropy_with_logits(&labels, objective.kernel_config())?
             .data()[0];
         let seed = Tensor::from_vec(1, 1, vec![1.])?;
-        let d_logits = logits.cross_entropy_with_logits_backward(
-            &labels,
-            CrossEntropyConfig::default(),
-            &seed,
-        )?;
+        let d_logits =
+            logits.cross_entropy_with_logits_backward(&labels, objective.kernel_config(), &seed)?;
         let d_normalized = frozen_pullback(&self.head, &self.backward_head, &d_logits)?;
-        let mut gradient = hidden.layer_norm_input_backward(
+        let d_selected = selected.layer_norm_input_backward(
             &self.final_norm.gamma,
             &d_normalized,
             c.norm_epsilon,
         )?;
-        drop((hidden, normalized, logits, d_logits, d_normalized));
+        let mut gradient = match &selected_rows {
+            Some(rows) => d_selected.scatter_add_rows(rows, hidden.shape().0)?,
+            None => d_selected,
+        };
+        drop((hidden, selected, normalized, logits, d_logits, d_normalized));
         checkpoints.pop();
         let mut parameters = BTreeMap::new();
         for index in (first_layer..c.layers).rev() {
@@ -262,6 +315,8 @@ impl NativeCausalLm {
             base_id: self.base_id.clone(),
             geometry_id: runtime.artifact().artifact_id().to_owned(),
             shape: window_shape,
+            target_tokens,
+            objective,
             loss,
             parameters,
         })
@@ -274,20 +329,70 @@ impl NativeCausalLm {
         gradients: &NativeCausalLmGradients,
         learning_rate: f32,
     ) -> CausalLmResult<Self> {
-        if gradients.base_id != self.base_id {
+        self.with_geometry_sgd(
+            &gradients.base_id,
+            &gradients.geometry_id,
+            &gradients.parameters,
+            learning_rate,
+        )
+    }
+
+    fn with_geometry_sgd(
+        &self,
+        base_id: &str,
+        geometry_id: &str,
+        parameters: &Parameters,
+        learning_rate: f32,
+    ) -> CausalLmResult<Self> {
+        if base_id != self.base_id {
             return Err("LM gradients belong to a different base model".into());
         }
         let runtime = self
             .geometry
             .as_ref()
             .ok_or("native LM has no attached geometry")?;
-        let geometry = runtime.with_gradients_sgd(
-            &gradients.geometry_id,
-            &gradients.parameters,
-            learning_rate,
-        )?;
+        let geometry = runtime.with_gradients_sgd(geometry_id, parameters, learning_rate)?;
         let mut next = self.clone();
         next.geometry = Some(Arc::new(geometry));
         Ok(next)
+    }
+
+    /// Geometry-only AdamW with shared native clipping, moments and clocks.
+    /// Both returned owners commit together; the original pair and base stay unchanged.
+    pub fn step_geometry_adamw(
+        &self,
+        gradients: &NativeCausalLmGradients,
+        optimizer: &crate::geometry_runtime::NativeGeometryAdamW,
+        step: crate::geometry_runtime::AdamWStep,
+    ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
+        self.with_geometry_adamw(
+            &gradients.base_id,
+            &gradients.geometry_id,
+            &gradients.parameters,
+            optimizer,
+            step,
+        )
+    }
+
+    fn with_geometry_adamw(
+        &self,
+        base_id: &str,
+        geometry_id: &str,
+        parameters: &Parameters,
+        optimizer: &crate::geometry_runtime::NativeGeometryAdamW,
+        step: crate::geometry_runtime::AdamWStep,
+    ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
+        if base_id != self.base_id {
+            return Err("LM gradients belong to a different base model".into());
+        }
+        let runtime = self
+            .geometry
+            .as_ref()
+            .ok_or("native LM has no attached geometry")?;
+        let (geometry, optimizer) =
+            runtime.with_gradients_adamw(geometry_id, parameters, optimizer, step)?;
+        let mut next = self.clone();
+        next.geometry = Some(Arc::new(geometry));
+        Ok((next, optimizer))
     }
 }

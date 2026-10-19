@@ -1,0 +1,113 @@
+{
+  "schema": "spiraltorch.native_lm_readout_validation.v1",
+  "counts": {
+    "rust_lm": 28,
+    "rust_geometry": 27,
+    "rust_cpu": 15,
+    "isolated_native_python": 45,
+    "release_compatibility": 32,
+    "optional_reference_regression": 333,
+    "comparison_validator": 4
+  },
+  "wasm32_core_check": "passed with Rust1.99.0, no-default-features",
+  "binding_clippy": "passed with warnings; not a warning-free whole-tree claim",
+  "formatting_and_ruff": "passed for changed source files",
+  "source_sha256": {
+    "bindings/st-py/src/causal_lm.rs": "4cb02770e9555dcef6b36f04e5ccffde947f2130c9443eb87bbc447601bbf8a7",
+    "bindings/st-py/src/causal_lm/accumulation.rs": "52d0358c68792277c79312afcd00a2c438ae2fe689de46a0dc0cd22ecfa07942",
+    "crates/st-nn/src/causal_lm.rs": "b8a8f1d961ee24cb5087fb8149fdf63a5c57b75d6b0609528901c4a4a825b510",
+    "crates/st-nn/src/causal_lm/learning.rs": "b3f8b352d22cdb7abc3bb2816c519733629cdb6ad0d3044f93281974968e149a",
+    "crates/st-nn/src/causal_lm/learning/accumulation.rs": "11b6eed3f314c54ce6ad58c61768eb162c673244fe6c7187a0d7ac25a4e1742e",
+    "crates/st-nn/src/causal_lm/objective.rs": "43aae07536841fb2f778e0b3a9ecde6a0f71a41bd32ec99e95e19523404e0a08",
+    "crates/st-nn/src/causal_lm/objective_tests.rs": "a69e1c174085e505d6ad8e856a3b0b45c1161678fb0a38b5816aa7e11598c142",
+    "crates/st-tensor/src/backend/cpu_dense.rs": "f3a21354c1e225eb05db224b673f1e9592897ca11b02c9c57db73f52f4be4165",
+    "tools/bench_native_lm_readout.py": "aed30f28eafe413f3eb6e5659922ba1f72831edcdf729b934042f5100a3ffaca",
+    "tools/compare_native_lm_readout.py": "cfe32b654f81dd4aa9c9b774956430903ad6edfbaa9fe831742a9c4773ae7e2d",
+    "tests/test_native_lm_readout_bench.py": "f29db60253dcc3eb7b824262853d25640bc3f55926d170c3c6123debeebb0a85"
+  },
+  "log_sha256": {
+    "test_native_causal_lm_objective-3.log": "b95b5805bef96b568b1b2424b637003cd6f306e6312d682e4f2e4e23f635b26a",
+    "test_release_workflows-2.log": "f3c930d08877d4766715f8e0afc706874e2d9ebee39b291d6a422d15344ea749",
+    "test_release_workflows-3.log": "87bbd46904eb1613ceb226fd29ca30f0e5253bee3b9d190b44943065f8ab7a5c",
+    "test_native_causal_lm_objective-2.log": "484819fc6115ded4f95980c301dc1cb3bd42b75d97061c070633332d47142c79",
+    "test_native_weights-3.log": "c6352adff70a6982c739a1cd77bbb43d2425eefd2dc2112b92b0ceebf2a6ca31",
+    "test_native_weights-2.log": "c6352adff70a6982c739a1cd77bbb43d2425eefd2dc2112b92b0ceebf2a6ca31",
+    "binding-clippy.log": "a60b6c9d05c970f05863e6189fb44e463e99c276534fa4d11b841bebd30771a1",
+    "test_release_runbook-3.log": "fe008aab760eb03ccac7578e2b84665b1b50b0d7f855b17a0c7a8d039435b658",
+    "test_native_geometry_adamw-3.log": "e73c3805f810fdcf3d0167ced7085c48306c9482a952ffb710551d230cdb3e51",
+    "test_native_geometry_adamw-2.log": "120fcf1e1b1ef6883b716f1b33b4fbea79c7089f1d1ff950e98c9608d82abb42",
+    "test_native_lm_readout_bench-3.log": "8eae2b9341a0dcb125032f79cad90f202e4eb531cdb3380fe7f24c8dd0b7dda6",
+    "test_release_runbook-2.log": "a6707d4eff38012da33ddc34bc6dc076a3b17151cfc9aef223c8790cbe64c3da",
+    "test_native_lm_readout_bench-review-fix.log": "7d1461f08534b948438fb941919fd98874513233d01f311956b60134240b8417",
+    "test_native_causal_lm-3.log": "670a39115e7523a8984e4842e16547cb2094b03fad392b037b4b9dc8b2656e62",
+    "test_native_causal_lm_accumulation-2.log": "56e03afda220e7ba78bbcecf9a2e53a0149cfc3e311fa10bbd01b25e8e5ba671",
+    "cpu-small-row-red.log": "c7eabdd5472520e81fcd1ffd274d45fe1a20879b6b04053b3b7346e3634aff47",
+    "test_native_causal_lm_accumulation-3.log": "d094b1bd2c8318c96097f80c50da282add5b2972970a77046de8db6c8935f6ca",
+    "format-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "test_native_causal_lm-2.log": "21c7e48d0b1ec908feef784bbce1fa55f2c9a7acf76382fa7578754a78bd1ed8",
+    "install-dev-autotune-v6.log": "5af59b265ceb31c58ebee766a1697b6641c5e8401e5955489cc41579ca6ba16c",
+    "wasm-core-2.log": "d4bdb362c02dbce280ffc7c40f628a05c82bc4d72c8316de4bf15e717737ac89",
+    "wheel-build-2.log": "f677faf6786ba80bfe7c665aab858aaf8f172eb87c5b36bf101ddf7f7fdf44eb",
+    "real-gpt2-geometry-v6.log": "933f6805d7ee76bc02affe2e167fde1439fd0c96771a87623f3a1082b0a746b8",
+    "baseline-install.log": "8e82a4fd8e626719a50ce790afd91fa9c15d7c0394db9fb41515dc7f92caa4f6",
+    "wheel-build-1.log": "c59e00d14b4bde7582e5d5c834a8b9916f7c346a4a922a6f20efa61b3b08ea59",
+    "rust-geometry.log": "ecd76873899ce01db74f15f7f92df99f79a91a9d69ec98bd56e6304b88f20fc0",
+    "wasm-core.log": "046a2c3733282e00cff7577cb19066a9a93088ac56e2f8f25acf120304e77022",
+    "test_native_causal_lm_objective.log": "ef9dfddd9437c8aa5c3d9e6deceae158a32253e89e15bd835a2b6190c0d6a82f",
+    "optional-comparison-3.log": "6ba9117c68630c58ddae8c1801cffb6cbd07c3506d7d0b90c7986ed00fd44fc2",
+    "optional-comparison-2.log": "1c5de4e23ce9158b7b8ddcb080573214f9c0efe0cfe199239f9f99dd46393ee9",
+    "test_native_geometry_runtime-2.log": "8d07bcca4d98c58e6e61982273d511fc9a19d64a50b606a43b2218d829583a76",
+    "test_native_geometry_runtime-3.log": "65bdfd7bd329ce1a1332cb4c87debefe340b8a42705cb8843110a73dd70e0b8c",
+    "native-before.log": "b2b6e3004c58766479ffc5e21adc445cccdd71aa1d3915d97eb5784654f3f28c",
+    "rust-lm-2.log": "c7d5ccc0c750abc81a1cc03517faba2349f157ac9aa61731afd90929d8a6d71c",
+    "rust-lm-1.log": "e4a2111f31cf13ab9aedaaabea44c3104f1e34f37fd086fb8d26a8df09dd988b",
+    "ruff-final.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "test_python_compatibility-3.log": "39945c1ff5a756ac9c8f633f458ec99b9cd76549ba49bd8eff9c74643c617dad",
+    "install-dev.log": "05e2216be5bcd240fe736e8131139ee16fb5f8af05f8e291703baf5d2ade8bfc",
+    "test_release_learning_smoke-3.log": "e81fd27d363e85f390e268d2651a38ac59cd3a9cbdb8bd93fee7e90ab48005ce",
+    "cpu-small-row-green.log": "136439cc0238ec323b8d27f83ed5c71fdf5b39514756661d6ac2a2068a88ef68",
+    "torch-selected.log": "76f38d62959e680125e36b5edb68ecd15edb0fd75367f76a8348e3f349d3db89",
+    "test_release_learning_smoke-2.log": "b47837459067d21d4dd8eae06886e9136d71e6634acc4f24e218e31a883c404f",
+    "test_python_compatibility-2.log": "384045b159f1905a874a1a4dc4a17a1efa2e953830211a5ca7ea0a945e0fa304",
+    "binding-clippy-2.log": "bb07ebe0a803c1ddf415523e852d3baee80ed1201469af6e19d5d7588e3f322b",
+    "torch-full.log": "127d25a902a5128c7ab2a8b9b9473b97a247b6303b9bfb245d8ee7f965aac1af",
+    "rust-geometry-2.log": "bbdd00ff5e0812c6df3475ee484c5a2874e94809588fb023fedaba53d1260dea",
+    "whitespace-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-after.log": "61086af0ad082e3772b9e8f1944720330e60b79a99f587a0a2a20be5fc3191fb",
+    "autotune-v6/native-before.log": "0b9ceba7ff6b696141606e5382fcdeab82fdd607d5a7e907e4048e526bbbecf1",
+    "autotune-v6/torch-selected.log": "821b0e1d0387164c2cbd420740745657fc6fd3ab59340eeb0184e05522e78bae",
+    "autotune-v6/torch-full.log": "4c3c0efe719f573dfcc9e8bfac61cfa8243f47e276eaf52461e442680dd5482c",
+    "autotune-v6/native-after.log": "b7c15ed018482c9fef95790e9ad217cba87ca2a3fa8e91106e765d00be3f4c69"
+  },
+  "development_wheels": {
+    "dist-dev-autotune-v6/spiraltorch-0.4.32-cp38-abi3-macosx_14_0_arm64.whl": "44c2837c793f4df1afe3127c705021aeafa246bce37b83e5f65b03a5e3080f26",
+    "dist-dev/spiraltorch-0.4.32-cp38-abi3-macosx_14_0_arm64.whl": "1b501552bc0420118ed1b6c11bb228ec19c5a37f7ff6d4ebb716c6f9238b63c9"
+  },
+  "reviews": [
+    {
+      "id": "01a14f00-592b-77a3-93b3-fd7ca77b9afc",
+      "scope": "selected readout, label mapping, admission and reverse scatter",
+      "result": "no actionable source finding",
+      "limits": "current-source inspection only, no reviewer runtime validation"
+    },
+    {
+      "id": "01a14f0c-ecc8-79c2-a858-6e50c1e7cd90",
+      "scope": "CPU autotune and benchmark comparator",
+      "finding": "reference runtime differences were not rejected",
+      "resolution": "fixed and independently rechecked; no remaining source finding",
+      "limits": "no reviewer runtime validation"
+    }
+  ],
+  "attempt_history": [
+    "native objective fixture initially used budget12 but single-row MLP needs16; fixture corrected, initial failed log retained",
+    "small-row autotune regression test failed before fix, passed afterward",
+    "initial compaction benchmark regressed16/4; all timings retained; follow-up v6 benchmark recovered locally"
+  ],
+  "real_model": "3 selected-target geometry updates;10targets/group; frozen base probe unchanged; next restored update exact within runtime",
+  "claims": [
+    "no Torch-family imports in native tests/probes; optional reference only",
+    "CPU local frozen loss timings only, no training speed or quality claim",
+    "native remains substantially slower than Torch here",
+    "source-only after published0.4.32; do not upload development wheels"
+  ]
+}

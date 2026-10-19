@@ -1,0 +1,27 @@
+{
+  "kind": "post_result_diagnostic_not_a_replacement_gate",
+  "cases": [
+    {
+      "prompt_length": 16,
+      "evaluated_tokens": 24,
+      "raw_logit_max_abs": 0.000213623046875,
+      "mean_logit_shift": 1.34501533213035e-07,
+      "centered_logit_max_abs": 0.00021375754840821304,
+      "probability_max_abs": 3.5983442644438313e-06,
+      "top1_exact": true,
+      "original_logit_gate_passed": true
+    },
+    {
+      "prompt_length": 64,
+      "evaluated_tokens": 72,
+      "raw_logit_max_abs": 0.000701904296875,
+      "mean_logit_shift": -3.0207890621890982e-05,
+      "centered_logit_max_abs": 0.000732112187496891,
+      "probability_max_abs": 9.562561853471152e-09,
+      "top1_exact": true,
+      "original_logit_gate_passed": false
+    }
+  ],
+  "script_sha256": "21fe524346e4b67af55cd7ce1b2fcceebb9bb195d3e7286302d9f5ec4f039031",
+  "extension_sha256": "29ac8f457d14f1ff17f0573df306c51a742a7d2cd915803f704cc9f8562c93a4"
+}

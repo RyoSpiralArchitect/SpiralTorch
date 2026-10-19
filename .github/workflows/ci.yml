@@ -25,6 +25,7 @@ jobs:
         run: python3 -I -B tests/test_build_wasm_web.py
       - name: Test resident benchmark admission
         run: |
+          python3 -I -S -B tests/test_native_lm_readout_bench.py
           python3 -I -S -B -m unittest discover -s tools -p 'test_byte_corpus*.py'
           python3 -I -S -B -m unittest discover -s tools -p 'test_verify_byte_corpus*.py'
           python3 -I -S -B benchmarks/results/2026-10-15-language-learning-diagnosis/test_diagnose.py
@@ -348,6 +349,7 @@ jobs:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
           SPIRALTORCH_DETACHED_STUDY_DIAGNOSTICS: ${{ runner.temp }}/byte-study-detached
+          SPIRALTORCH_RESUME_STUDY_DIAGNOSTICS: ${{ runner.temp }}/byte-study-resume
         run: |
           python -m pip install "maturin>=1.9,<2"
           maturin build --release --locked -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/attention-wheel"
@@ -365,6 +367,15 @@ jobs:
         with:
           name: synthetic-byte-study-detached-failure
           path: ${{ runner.temp }}/byte-study-detached/
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Retain exact contextual-mixture resume failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-byte-study-resume-failure
+          path: ${{ runner.temp }}/byte-study-resume/
           if-no-files-found: ignore
           retention-days: 1
 
@@ -585,8 +596,15 @@ jobs:
       - name: Portable byte corpus study contracts
         run: |
           python -I -B bindings/st-py/tests/test_native_geometry_runtime.py -v
+          python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_training.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_generation.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_context.py -v
+          python -I -B benchmarks/results/2026-10-18-native-lm-cache/test_qualification.py -v
           python -I -B bindings/st-py/examples/native_weights_geometry.py
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
@@ -876,9 +894,15 @@ jobs:
             bindings/st-py/tests/test_geometry_artifact.py \
             bindings/st-py/tests/test_channel_affine.py \
             bindings/st-py/tests/test_native_geometry_parity.py \
+            bindings/st-py/tests/test_native_geometry_adamw_parity.py \
             bindings/st-py/tests/test_native_weights_parity.py \
             bindings/st-py/tests/test_native_causal_lm_parity.py \
             bindings/st-py/tests/test_native_causal_lm_learning_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_accumulation_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_objective_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_training_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_generation_parity.py \
+            bindings/st-py/tests/test_native_causal_lm_context_parity.py \
             bindings/st-py/tests/test_hf_geometry_trainer.py \
             bindings/st-py/tests/test_hf_geometry_dataset.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \
