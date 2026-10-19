@@ -105,6 +105,14 @@ impl PyNativeCausalLmTrainingStep {
         self.inner.loss
     }
     #[getter]
+    fn repetition_loss(&self) -> Option<f64> {
+        self.inner.repetition_loss
+    }
+    #[getter]
+    fn repetition_positions(&self) -> Option<u64> {
+        self.inner.repetition_positions
+    }
+    #[getter]
     fn pre_geometry_artifact_id(&self) -> &str {
         &self.inner.pre_geometry_artifact_id
     }
@@ -125,7 +133,7 @@ impl PyNativeCausalLmTrainer {
     const MAX_DOCUMENTS: usize = MAX_DOCUMENTS;
 
     #[new]
-    #[pyo3(signature=(model, optimizer, token_documents, context_length, *, learning_rate, microbatch_windows=None, accumulation_steps=None, epochs=None, weight_decay=None, label_smoothing=None, labels=None))]
+    #[pyo3(signature=(model, optimizer, token_documents, context_length, *, learning_rate, microbatch_windows=None, accumulation_steps=None, epochs=None, weight_decay=None, label_smoothing=None, labels=None, repetition=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -140,8 +148,10 @@ impl PyNativeCausalLmTrainer {
         weight_decay: Option<&Bound<'_, PyAny>>,
         label_smoothing: Option<&Bound<'_, PyAny>>,
         labels: Option<&Bound<'_, PyAny>>,
+        repetition: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let step = adamw_step(learning_rate, weight_decay)?;
+        let objective = loss_objective(label_smoothing, repetition)?;
         let config = CausalLmTrainingConfig {
             context_length: u32::try_from(dimension(context_length)?).map_err(error)?,
             microbatch_windows: limit(microbatch_windows, 1)?,
@@ -149,7 +159,8 @@ impl PyNativeCausalLmTrainer {
             epochs: u32::try_from(limit(epochs, 1)?).map_err(error)?,
             learning_rate: step.rate(),
             weight_decay: step.weight_decay(),
-            label_smoothing: loss_objective(label_smoothing)?.label_smoothing,
+            label_smoothing: objective.label_smoothing,
+            repetition: objective.repetition,
         };
         NativeCausalLmTrainer::validate_owners(&model.inner, &optimizer.inner, config)
             .map_err(error)?;

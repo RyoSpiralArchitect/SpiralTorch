@@ -42,6 +42,7 @@ fn masked_smoothed_loss_and_pullback_match_explicit_objective() {
     for smoothing in [0., 0.2, 1.] {
         let objective = CausalLmObjective {
             label_smoothing: smoothing,
+            repetition: None,
         };
         let gradient = model
             .geometry_loss_gradients_with_objective(&windows, [2, 4], Some(&labels), objective)
@@ -99,6 +100,7 @@ fn shifted_selected_targets_control_microbatch_weights_not_window_sizes() {
     let labels = [8, -100, -100, 3, -100, -100, 1, 2];
     let objective = CausalLmObjective {
         label_smoothing: 0.2,
+        repetition: None,
     };
     let full = model
         .geometry_loss_gradients_with_objective(&windows, [2, 4], Some(&labels), objective)
@@ -195,7 +197,10 @@ fn invalid_labels_and_objectives_fail_before_pullback() {
             .is_err());
     }
     for label_smoothing in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
-        let objective = CausalLmObjective { label_smoothing };
+        let objective = CausalLmObjective {
+            label_smoothing,
+            repetition: None,
+        };
         assert!(model
             .geometry_loss_gradients_with_objective(&windows, [1, 3], None, objective)
             .is_err());
@@ -217,6 +222,7 @@ fn selected_readout_admits_only_actual_logits_without_losing_context_rows() {
     let labels = [-100, -100, 8, -100, 4, -100, 3, 1];
     let objective = CausalLmObjective {
         label_smoothing: 0.2,
+        repetition: None,
     };
     let prepared = model
         .prepare_objective(&ids, [2, 4], Some(&labels), objective)

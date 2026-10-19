@@ -72,9 +72,10 @@ def main(argv=None):
         stream.write(payload)
     result = {"schema": "spiraltorch.native_generation_example.v1", "base_model_identity": model.base_model_identity,
               "geometry_artifact_id": model.geometry_artifact_id, "config": recipe, "initial_id": initial_id,
+              "execution": recipe.get("execution", {"kind": "full_prefix"}),
               "checkpoint_id": generator.checkpoint_id, "generated_tokens": len(generator.generated_ids),
               "finished": generator.finished, "finish_reason": generator.finish_reason,
-              "scope": "full-prefix frozen GPT-2 CPU generation; no KV cache, corpus validation or quality claim"}
+              "scope": "frozen GPT-2 CPU generation; no corpus validation or quality claim"}
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")

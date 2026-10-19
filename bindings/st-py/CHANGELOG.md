@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Add opt-in native repetition-unlikelihood learning for the frozen GPT-2
+  decoder and attached geometry. Shared Rust tensor loss/VJP and candidate
+  selection feed decoder gradients, independently normalized accumulation,
+  SGD/AdamW and pinned trainer continuation. Python transports a versioned
+  `repetition` recipe; it performs no Torch/NumPy computation. Three candidate
+  sources are supported with deterministic native proposal ties. Default CE
+  and checkpoint formats are unchanged; legacy HF v3 remains an explicit
+  foreign-model path. No language-quality or speed improvement is claimed.
+  Qualify the public corpus-to-generation examples through separate-process
+  continuation; generation summaries identify the effective full-prefix/KV
+  execution instead of always claiming no cache.
+
 - Optimize ordinary packed CPU projections across eight independent columns,
   retaining each default f32 dot's reduction order; advance autotuning to v7.
   Add opt-in `NativeCausalLm.with_readout_accumulator("f64")` for the vocabulary

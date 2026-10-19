@@ -1,0 +1,192 @@
+{
+  "contract": {
+    "schema": "spiraltorch.native_example_integration.v1",
+    "source_sha256": {
+      "benchmarks/results/2026-10-19-native-repetition/integration.py": "40d50fef0d1be0fded5c19ebf659a3a9b7754ce7fce08cbaefcc4fd10ca7932b",
+      "benchmarks/results/2026-10-19-native-repetition/qualify.py": "2c33b1aa9b5351e610f3e917fd2d4e23ad883d8f0f46d7d7b8cc7b6c5e70ad85",
+      "bindings/st-py/examples/native_geometry_corpus_training.py": "3266dc6a703ef803ad1b1aee256b7c3c418528a0a5612a1315461c26b5237568",
+      "bindings/st-py/examples/native_geometry_generation.py": "ae81beedd541b3721eea531f3bc29ede61802448f0cb5fe596e6d30938443445",
+      "benchmarks/results/2026-10-18-native-lm-generation/qualify.py": "88c0434bfb0f4ef5ae128a5bbb367aea21e87928c896b812f614c4fe046f6061",
+      "benchmarks/results/2026-10-18-native-corpus-training/qualify.py": "2a5cfc2c54c5ad2b03672cbd3de27537848d620dd5a6cc02eadbb3ae06bbbc35",
+      "crates/st-tensor/src/classification/unlikelihood.rs": "89ae3a7565e189ae4a5a8c9120eea4c52b12c6b3670311227e12788bbe09cfb5",
+      "crates/st-core/src/runtime/zspace_repetition_unlikelihood.rs": "828bbac21139948dc9804dc515d96afc312c1d5345c23c0cf3104dc18eab5819",
+      "crates/st-nn/src/causal_lm/repetition.rs": "c3b665dbecd1f54677756dd50abbfe9b3a46823d904e02e66cdb5a074c19a857",
+      "crates/st-nn/src/causal_lm/objective.rs": "953f263152dd61b04f0a99c376e7c82cc322cc89ff0e103b0fa0a2bb61bc7b50",
+      "crates/st-nn/src/causal_lm/learning.rs": "9c6acdb104f775a7a373c4835bdf922cee686fe54b759aa78decd8a45958ef0c",
+      "crates/st-nn/src/causal_lm/learning/accumulation.rs": "11661528e60ffaafa2e43fd92488ac29ea572ce30e20a2e41b4a6f6a4ad24128",
+      "crates/st-nn/src/causal_lm/training.rs": "da13e616cfcae1fe33e10be114a99934823646c71f972553e465635b1077f410",
+      "bindings/st-py/src/causal_lm.rs": "6ddd0b600bbc1e39859c911ca7116b9617726726b3bb6d536e675f55a1549802",
+      "bindings/st-py/src/causal_lm/accumulation.rs": "5b8f909fbeb46ec5474424a4d173dcce2a22818734b090aef993c15d30c38696",
+      "bindings/st-py/src/causal_lm/training.rs": "68272d2b412074d3d204f71258ba0e783224e4defe56c937d6ce0ed004853c02"
+    },
+    "extension_sha256": "8f9ef5615e428e22665f32a46f43920b7ad7b26bdbd253761d38b3b1de4876ff",
+    "model_sha256": {
+      "config.json": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+      "model.safetensors": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+      "tokenizer.json": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"
+    },
+    "data_sha256": "d95c8c6161a6ad91b67be1d477890daf3adc15b90f804a83a1350b955bd40fee",
+    "checkpoint_sha256": "1ed13924961efe03330d1e16407382e3fcb0b3255504939215215a9375f62e6e",
+    "input_sha256": {
+      "data.json": "4d46d9dc716b00082405ba419fad729e48ce89e6cbc6b54189ec70dc4cf719e3",
+      "artifact.json": "429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+      "train.json": "984e87b9e01d2c24ff9df3f88bcbece62a6c136f228c9a35a7ef906e7a4383a1",
+      "prompt.json": "964416ff3f78fbb7687b390155281934bf416a2e68865caa9378939bc2601ad1",
+      "full_prefix.json": "78b1381a545d3eee928cd78983321f646400a1e6fb6c125e144ec2ee6c2f4051",
+      "kv_cache.json": "eb798838a28742530a5c58ba63d1e7b318fa46c9cdf95ee464fb9912e022d0c3"
+    },
+    "training_recipe": {
+      "context_length": 32,
+      "microbatch_windows": 1,
+      "accumulation_steps": 2,
+      "epochs": 2,
+      "learning_rate": 0.001,
+      "weight_decay": 0.01,
+      "label_smoothing": 0.1,
+      "max_gradient_norm": 0.1,
+      "repetition": {
+        "kind": "native_v1",
+        "config": {
+          "strength": 0.3,
+          "context_window": 32,
+          "max_candidates_per_position": 8,
+          "candidate_source": {
+            "kind": "model_topk_periodic",
+            "proposal_top_k": 32
+          }
+        }
+      }
+    },
+    "generation_recipe": {
+      "max_new_tokens": 4,
+      "seed": 714,
+      "decoding": {
+        "selection": "sample",
+        "top_k": 40,
+        "top_p": 0.9,
+        "distribution": {
+          "kind": "zspace",
+          "config": {
+            "curvature": -1.0,
+            "temperature": 0.8,
+            "repression_window": 32,
+            "repression_strength": 0.6,
+            "last_token_repression": 0.3,
+            "ngram_size": 3,
+            "ngram_repression_strength": 0.4
+          }
+        }
+      }
+    },
+    "executions": {
+      "full_prefix": {
+        "kind": "full_prefix"
+      },
+      "kv_cache": {
+        "kind": "kv_cache",
+        "max_values": 1000000
+      }
+    },
+    "readout": "f32",
+    "documents": [
+      "train_doc0[0:32]",
+      "synthetic:train_doc0[128:130]*15+train_doc0[130:132]"
+    ],
+    "gates": {
+      "training_resume_bytes_exact": true,
+      "generation_resume_bytes_exact": true,
+      "all_step_reports_exact": true,
+      "learned_geometry_changes": true
+    },
+    "scope": "public CLI mechanics on frozen GPT-2 with learned geometry; not quality, speed, or full FT"
+  },
+  "validated_by": "Rust re-execution from sealed inputs; all summaries, checkpoints and ordered reports match",
+  "training": {
+    "updates": 2,
+    "resume_checkpoint_exact": true,
+    "resume_reports_exact": true,
+    "geometry_artifact_id": "sha256:b4c142601c97206ea9f8838b13ce0da606b127f62e42d3da1f1a83d1f9192b9d",
+    "reports": [
+      {
+        "update": 1,
+        "epoch": 0,
+        "window_start": 0,
+        "window_end": 2,
+        "microbatches": 2,
+        "target_tokens": 62,
+        "loss": 4.828564858436584,
+        "repetition_loss": 2.459679365158081,
+        "repetition_positions": 1,
+        "pre_geometry_artifact_id": "sha256:429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+        "post_geometry_artifact_id": "sha256:d02ec2483b8c4caea5f8f73e3fca7ecca86a9eee650ed51514b63690857677b6"
+      },
+      {
+        "update": 2,
+        "epoch": 1,
+        "window_start": 0,
+        "window_end": 2,
+        "microbatches": 2,
+        "target_tokens": 62,
+        "loss": 4.8261923551559445,
+        "repetition_loss": 2.452604293823242,
+        "repetition_positions": 1,
+        "pre_geometry_artifact_id": "sha256:d02ec2483b8c4caea5f8f73e3fca7ecca86a9eee650ed51514b63690857677b6",
+        "post_geometry_artifact_id": "sha256:b4c142601c97206ea9f8838b13ce0da606b127f62e42d3da1f1a83d1f9192b9d"
+      }
+    ]
+  },
+  "generation": {
+    "full_prefix": {
+      "generated_tokens": 4,
+      "resume_checkpoint_exact": true,
+      "resume_reports_exact": true,
+      "checkpoint_id": "sha256:54cbabac975eaa312ffeb92b7f0a2c76c05f5c76f3c66f934e0c1f62cd0701d5"
+    },
+    "kv_cache": {
+      "generated_tokens": 4,
+      "resume_checkpoint_exact": true,
+      "resume_reports_exact": true,
+      "checkpoint_id": "sha256:908590959f59bdfd7036ae97ca65e7d9738f6b45f4a8e026f71ff43f8bdfc248"
+    }
+  },
+  "raw_sha256": {
+    "artifact.json": "429f2f2a85fd2e870e81ff23e1f294b24370100e0dd8adccf770e5f7aec3d4a2",
+    "contract.json": "71541215c1f5e6fe3db1745376ed80ac24ca0865faa019955afc7e828dd970fa",
+    "data.json": "4d46d9dc716b00082405ba419fad729e48ce89e6cbc6b54189ec70dc4cf719e3",
+    "full_prefix-full/generation.json": "54cbabac975eaa312ffeb92b7f0a2c76c05f5c76f3c66f934e0c1f62cd0701d5",
+    "full_prefix-full/result.json": "60ba7f04dcafb70c03b0fc62539252858cc7c6da5c83821dcccb62f69c627915",
+    "full_prefix-full/steps.jsonl": "6728d02f3bfa2a012d1292ee0c32b471b80586e0b23fe2bf9aef8497ffbcfc65",
+    "full_prefix-part/generation.json": "d3a7e86bf150969a76f884b3be681d604842319083456b21d2abf35aceecadbf",
+    "full_prefix-part/result.json": "2e351a1023af66edc9adc0915268dfc5598aeca5527b8170a53971e3c058b9d4",
+    "full_prefix-part/steps.jsonl": "88df47d9dd9ebd7e8d4b98a2189177004afe0fabf4d5e5f7767c983c1da10f67",
+    "full_prefix-resume/generation.json": "54cbabac975eaa312ffeb92b7f0a2c76c05f5c76f3c66f934e0c1f62cd0701d5",
+    "full_prefix-resume/result.json": "2aa2bdcbde10ea60643c6887201e1d4300641643880fa507b2e843de55e346a7",
+    "full_prefix-resume/steps.jsonl": "9dddd9dbedb091d38c3b4caeae79fe13de950464cc014967892024d719c6fb0b",
+    "full_prefix.json": "78b1381a545d3eee928cd78983321f646400a1e6fb6c125e144ec2ee6c2f4051",
+    "kv_cache-full/generation.json": "908590959f59bdfd7036ae97ca65e7d9738f6b45f4a8e026f71ff43f8bdfc248",
+    "kv_cache-full/result.json": "a6ae2010491d7bf4f156ff522b7f5d9e30e5763263f9d990b9a4ba4196461d85",
+    "kv_cache-full/steps.jsonl": "6728d02f3bfa2a012d1292ee0c32b471b80586e0b23fe2bf9aef8497ffbcfc65",
+    "kv_cache-part/generation.json": "460a7438e730f4051b1cb902a29884bde2ea4e63558d3f10e6596b9ad24573d2",
+    "kv_cache-part/result.json": "b951aaf52d70cd1edf2411c5b60958473b3fff2a41405115ee92a7d5480fe3de",
+    "kv_cache-part/steps.jsonl": "88df47d9dd9ebd7e8d4b98a2189177004afe0fabf4d5e5f7767c983c1da10f67",
+    "kv_cache-resume/generation.json": "908590959f59bdfd7036ae97ca65e7d9738f6b45f4a8e026f71ff43f8bdfc248",
+    "kv_cache-resume/result.json": "3a31afdddc3a637494d35a53739bf1555aca2607bef3133279c2ee9af89bf942",
+    "kv_cache-resume/steps.jsonl": "9dddd9dbedb091d38c3b4caeae79fe13de950464cc014967892024d719c6fb0b",
+    "kv_cache.json": "eb798838a28742530a5c58ba63d1e7b318fa46c9cdf95ee464fb9912e022d0c3",
+    "prompt.json": "964416ff3f78fbb7687b390155281934bf416a2e68865caa9378939bc2601ad1",
+    "train-full/checkpoint-000000.json": "82cbbcdc076107692f20a5bafa63f0167ca1a2c5b216f25878e763d3064b3d88",
+    "train-full/checkpoint-000001.json": "6f3b6b25cd2f2b6d9d48bf2f47e86a8a8e1ace3d8759b16a8c145f3e42ed65bc",
+    "train-full/checkpoint-000002.json": "03e607d43d1f1c5cef909a585e0340c9542fbc3c5ac9978dadaa805fc6be1e6c",
+    "train-full/result.json": "6c2cc822da2a168aa830e35c90dd8ab2aff1abc5efe0406a83e4996dc549f409",
+    "train-full/steps.jsonl": "59c627f9c05877e59e3b823ec416e62c36deaec6e194bca682da91b673460b1b",
+    "train-part/checkpoint-000000.json": "82cbbcdc076107692f20a5bafa63f0167ca1a2c5b216f25878e763d3064b3d88",
+    "train-part/checkpoint-000001.json": "6f3b6b25cd2f2b6d9d48bf2f47e86a8a8e1ace3d8759b16a8c145f3e42ed65bc",
+    "train-part/result.json": "211ddf616d792853f3eb6e00ea948c457c578de76028d2de17079a3b0adddf6c",
+    "train-part/steps.jsonl": "bd4ca2ac3a05fcb8316132570a96b430c907dffb2738f253c2aab06035cf9ad1",
+    "train-resume/checkpoint-000001.json": "6f3b6b25cd2f2b6d9d48bf2f47e86a8a8e1ace3d8759b16a8c145f3e42ed65bc",
+    "train-resume/checkpoint-000002.json": "03e607d43d1f1c5cef909a585e0340c9542fbc3c5ac9978dadaa805fc6be1e6c",
+    "train-resume/result.json": "60e2df13e2af19314695753cda706c5c7a11e283d04176d123e7c8ad5d2dcd49",
+    "train-resume/steps.jsonl": "f85a1ba9beb961ca86dd16359097daa21dc8d4a2800f5f4c381210d3e1007bba",
+    "train.json": "984e87b9e01d2c24ff9df3f88bcbece62a6c136f228c9a35a7ef906e7a4383a1"
+  }
+}

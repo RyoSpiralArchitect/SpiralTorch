@@ -187,6 +187,7 @@ jobs:
           python -I ../../tools/smoke_autograd.py
           python -I ../../tools/smoke_learning_stack.py
           python -I -B ../../bindings/st-py/tests/test_native_causal_lm_readout.py -v
+          python -I -B ../../bindings/st-py/tests/test_native_causal_lm_repetition.py -v
       - name: Select minimum supported CPython (Linux)
         if: runner.os == 'Linux'
         uses: actions/setup-python@v6
@@ -199,6 +200,7 @@ jobs:
           python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
           python -I tools/smoke_learning_stack.py
           python -I -B bindings/st-py/tests/test_native_causal_lm_readout.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_lm_repetition.py -v
       - name: Upload
         uses: actions/upload-artifact@v7
         with:

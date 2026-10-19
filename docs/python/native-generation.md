@@ -137,6 +137,8 @@ and geometry source, and **no** replacement prompt or recipe.
 Output is a new POSIX-0700 directory containing step reports, a generation
 checkpoint and a summary. Treat IDs, text and checkpoints as private experiment
 data. The example does not promise power-loss durability or public serving.
+The summary records the effective `execution`, including `full_prefix` when
+the recipe omits it; a KV run is not reported as a no-cache run.
 
 Rust exposes the same session and context through
 `st_nn::causal_lm::{NativeCausalLmGenerator, CausalLmGenerationConfig, NativeCausalLmContext}` and pure
