@@ -303,6 +303,31 @@ mod tests {
     }
 
     #[test]
+    fn saturated_router_has_zero_vjp_even_with_large_components() {
+        let spec = HeadwiseMixtureSpec::new([1, 1, 1, 2]).unwrap();
+        let large = 2f32.powi(120);
+        for logits in [
+            [-f32::MAX, f32::MAX],
+            [-f32::MAX, f32::MAX / 4.],
+            [-f32::MAX / 4., f32::MAX],
+            [-128., f32::MIN_POSITIVE],
+            [-f32::MIN_POSITIVE, 128.],
+        ] {
+            let forward = HeadwiseMixtureForward::new(spec, &[0., large], &logits).unwrap();
+            assert_eq!(forward.weights(), [0., 1.]);
+            assert_eq!(forward.output(), [large]);
+            let gradient = forward.backward(&[1.]).unwrap();
+            assert_eq!(gradient.input, [0., 1.]);
+            assert_eq!(gradient.logits, [0., 0.]);
+        }
+        // A small but representable mass still matters to a large component.
+        let forward = HeadwiseMixtureForward::new(spec, &[0., large], &[-40., 40.]).unwrap();
+        let gradient = forward.backward(&[1.]).unwrap();
+        assert!(forward.weights()[0] > 0.);
+        assert!(gradient.logits[0] < -1. && gradient.logits[1] > 1.);
+    }
+
+    #[test]
     fn nonfinite_and_shape_mismatches_are_not_silently_ignored() {
         let s = HeadwiseMixtureSpec::new([1, 1, 1, 2]).unwrap();
         assert!(HeadwiseMixtureForward::new(s, &[1., f32::NAN], &[0., 0.]).is_err());

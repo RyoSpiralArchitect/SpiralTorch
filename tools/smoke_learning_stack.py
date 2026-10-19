@@ -1,13 +1,33 @@
 """Installed-wheel mechanics only: no model download, Torch, or GPU requirement."""
 
 from array import array
+import ast
 import hashlib
 import importlib
+import importlib.abc
 import importlib.machinery
+import inspect
 import json
 import math
+from pathlib import Path
+import sys
 
-import spiraltorch as st
+FOREIGN = {"torch", "transformers", "peft", "accelerate", "numpy", "safetensors"}
+
+
+class NativeOnly(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in FOREIGN:
+            raise AssertionError("native release smoke must not import " + fullname)
+
+
+if __name__ == "__main__":
+    if any(name.split(".")[0] in FOREIGN and module is not None
+           for name, module in sys.modules.items()):
+        raise RuntimeError("native release smoke requires a fresh process")
+    sys.meta_path.insert(0, NativeOnly())
+
+import spiraltorch as st  # noqa: E402 - forbid foreign ML before package import.
 
 
 def close(actual, expected, *, atol=3e-4, rtol=3e-3):
@@ -106,7 +126,7 @@ def wave_gate():
         close(expected[index], finite_difference(objective, values))
     output = list(batch.output)
     x[:] = [float("nan")] * len(x)
-    del kernel
+    kernel = None
     assert batch.output == output and batch.vjp(seed) == expected
     return "input/gate/bias VJPs checked; captured values owned"
 
@@ -162,6 +182,44 @@ def resident_plan():
     assert [stage["kind"] for stage in payload["stages"]] == ["linear", "layer_norm", "topos_resonator"]
     assert st.nn.InferencePlan.from_json(plan.to_json()).to_json() == plan.to_json()
     return {"schema": payload["schema"], "gpu_execution": "not attempted"}
+
+
+def byte_clipped_api():
+    """Validate shipped signatures without constructing a device or model."""
+    native = importlib.import_module("spiraltorch.spiraltorch")
+    owner = st.nn.ResidentByteDecoder
+    assert owner is native.nn.ResidentByteDecoder, "clipped decoder native owner"
+    package = Path(st.__file__).resolve().parent
+    assert Path(native.__file__).resolve().parent == package, "native package mismatch"
+    classes = {node.name: node for node in ast.parse(
+        (package / "__init__.pyi").read_text(encoding="utf-8")).body
+        if isinstance(node, ast.ClassDef)}
+    methods = {node.name: node for node in classes["_NnResidentByteDecoder"].body
+               if isinstance(node, ast.FunctionDef)}
+    gpu_enabled = st.wgpu_kernel_reports_available()
+    for name, keywords in (("sgd_with_rates_clipped", ["max_norm"]),
+                           ("adamw_with_rates_clipped", ["max_norm", "weight_decays"])):
+        stub = methods[name]
+        args = stub.args
+        assert [arg.arg for arg in args.posonlyargs + args.args] == ["self", "gradients", "rates"], name
+        assert not args.defaults and args.vararg is None and args.kwarg is None, name
+        assert [arg.arg for arg in args.kwonlyargs] == keywords, name
+        assert args.kw_defaults[0] is None, name
+        if len(keywords) == 2:
+            assert isinstance(args.kw_defaults[1], ast.Constant) and args.kw_defaults[1].value is Ellipsis, name
+        assert isinstance(stub.returns, ast.Name) and stub.returns.id == "_NnResidentParameterUpdate", name
+        if gpu_enabled:
+            method = getattr(owner, name)
+            assert callable(method), name
+            signature = inspect.signature(method)
+            assert list(signature.parameters) == ["self", "gradients", "rates"] + keywords, name
+            for keyword in keywords:
+                assert signature.parameters[keyword].kind == inspect.Parameter.KEYWORD_ONLY, name
+            assert signature.parameters["max_norm"].default is inspect.Parameter.empty, name
+            if len(keywords) == 2:
+                assert signature.parameters["weight_decays"].default is None, name
+    return {"installed_stub_signatures": 2, "native_methods": 2 if gpu_enabled else 0,
+            "gpu_execution": "not attempted"}
 
 
 def byte_decoder_portable():
@@ -309,6 +367,7 @@ def main():
         "elliptic": elliptic(),
         "fractional_history": fractional_history(),
         "resident_plan": resident_plan(),
+        "byte_clipping_api": byte_clipped_api(),
         "byte_decoder": byte_decoder_portable(),
         "byte_corpus": byte_corpus_portable(),
     }

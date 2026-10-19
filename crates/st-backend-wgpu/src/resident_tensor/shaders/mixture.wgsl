@@ -13,8 +13,15 @@ fn weights(@builtin(workgroup_id) wid:vec3<u32>,@builtin(local_invocation_index)
     for(var k=1u;k<params.components;k++) { maximum=max(maximum,checked(raw_logits[begin+k])); }
     var total=0.0;
     for(var k=0u;k<params.components;k++) {
-        let d=raw_logits[begin+k]-maximum;
-        let w=checked(exp(d)); mass[begin+k]=w; total=sum(total,w);
+        let v=raw_logits[begin+k];
+        var w=0.0;
+        // Opposite-sign extremes can overflow before exp. In this branch the
+        // gap is at least 128, so its exponential rounds to zero even in f32
+        // with subnormals. Same-sign differences cannot overflow.
+        if (!(v<0.0 && maximum>0.0 && (v<=-128.0 || maximum>=128.0))) {
+            w=checked(exp(v-maximum));
+        }
+        mass[begin+k]=w; total=sum(total,w);
     }
     for(var k=0u;k<params.components;k++) { mass[begin+k]=checked(mass[begin+k]/total); }
 }

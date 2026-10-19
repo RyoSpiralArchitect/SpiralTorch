@@ -158,3 +158,45 @@ failure; private training runs are not automatically published. Strict report
 and checkpoint equality remains required. The next investigation must use the
 first differing histories, parameter values and optimizer states, rather than
 rerunning until green or treating local success as a correctness repair.
+
+When retention is enabled, a mismatch also records a hash-bound `runtime.json`
+with the active process-default GPU's name/backend/type, OS/Python versions,
+and the installed native library's basename and SHA-256. Collection runs only
+after a mismatch, without tensor dispatch/readback; passing comparisons do not
+change their execution cadence. No environment, host name or absolute library
+path is collected. Context is bounded to 16 KiB; a metadata-collection failure
+retains its exception type, not its message, alongside the original comparison
+payloads. This improves failure localization, not numerical correctness.
+
+On 2026-10-19, [PR #2288's GPU job](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39187825231/job/117853890234)
+passed that clipped-AdamW comparison but failed the preparation-chain
+uninterrupted/resumed report comparison for v6 headwise and v8 query-mixture
+SGD. Logged values differed substantially, not merely by serialization or an
+acceptable rounding tolerance. This separate comparison had not retained its
+full payloads; its failure log is preserved and no root cause is asserted.
+The retained full job log has SHA-256
+`e83c019f7f4e4a9057848b463b545f96a9cc773e483a9d68cba6ccee9928c1bf`.
+
+`SPIRALTORCH_PREPARED_STUDY_DIAGNOSTICS` now retains these mismatches separately
+by request version, including exact request/full/first/resumed reports and the
+available first/resumed checkpoints. The original `run_wgpu()` path is preserved:
+no full-run checkpoint is fabricated or obtained by substituting `advance_wgpu`.
+Boundary serialization and runtime-identity collection occur only on failure.
+This capture change does not repair either numerical discrepancy.
+
+```bash
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 SPIRALTORCH_STRICT_GPU=1 \
+SPIRALTORCH_PREPARED_STUDY_DIAGNOSTICS=/trusted/new-prepared-failure-directory \
+python -I -B bindings/st-py/tests/test_nn_byte_study.py \
+  StudyGpu.test_preparation_chain_uses_one_shared_runner -v
+```
+
+Independent shader review also found an extreme-logit portability defect:
+`value - maximum` could overflow before `exp` for finite opposite-sign values.
+[WGSL permits indeterminate runtime results after such overflow](https://www.w3.org/TR/WGSL/#floating-point-evaluation).
+The mixture shader now avoids that subtraction when the signs differ and one
+magnitude is at least 128: the exponential is already below the smallest f32
+subnormal. Same-sign differences and all representable nonzero exponential
+masses follow the original path. Tests include amplified router gradients so
+a small nonzero mass cannot be silently discarded. This is a separate fix,
+not evidence explaining the ordinary-logit v6/v8 study failures.
