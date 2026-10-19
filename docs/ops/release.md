@@ -195,6 +195,17 @@ main commit `a4e376b548d1fd8b9fc4ec7c61b90b318ceb0fed` has tree
 `df5999a65f20e6955f5be884f10de44381b46ddf`, exactly matching the candidate
 qualified by [PR #2287 CI](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39168206446).
 This integrates the native language source; it is not a new published wheel.
+The [main push CI](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39187056630)
+also passed, including its real-GPU lane.
+
+The [build-only preflight](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39187880502)
+for qualification head `7ad0c100e9b5beddb224182b728e648d376ac8b8` built and
+installed/tested Linux, macOS universal2 and Windows wheels, including actual
+CPython 3.8 on Linux. Release attachment and PyPI publication were disabled.
+These development artifacts do not qualify later source changes. Separately,
+that head's [GPU CI failed](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39187825231/job/117853890234)
+the exact prepared-study SGD comparison; PR #2288 remains draft while this is
+investigated. A portable wheel check passing cannot override a numerical failure.
 
 Before a new immutable tag, qualify the actual three platform wheels and
 resolve the separately recorded [GPU resume discrepancy](../python/byte-study-runs.md#exact-resume-qualification).

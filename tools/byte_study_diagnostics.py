@@ -160,3 +160,40 @@ def assert_exact_resume(directory, request, *, full_report, first_report, resume
         "reports": exact_report_differences(full_report, resumed_report),
         "checkpoints": exact_report_differences(full_checkpoint, resumed_checkpoint),
     }))
+
+
+def assert_exact_run_resume(directory, request, full_report, resumed_report, *,
+                            boundaries, runtime_context=None):
+    """Compare the uninterrupted API without replacing it by checkpoint capture.
+
+    `run_wgpu` deliberately returns no checkpoint. Collect only the already
+    available partial/resumed boundaries, lazily after an actual mismatch.
+    """
+    if full_report == resumed_report:
+        return
+    differences = exact_report_differences(full_report, resumed_report)
+    if directory:
+        first_report, first_checkpoint, resumed_checkpoint = boundaries()
+        payloads = {"request.json": request, "full-report.json": full_report,
+                    "resumed-report.json": resumed_report, "first-report.json": first_report,
+                    "first-checkpoint.json": first_checkpoint, "resumed-checkpoint.json": resumed_checkpoint}
+        if runtime_context is not None:
+            payloads["runtime.json"] = _runtime_payload(runtime_context)
+        payloads = {name: raw.encode("utf-8") if isinstance(raw, str) else raw
+                    for name, raw in payloads.items()}
+        if any(type(raw) is not bytes or len(raw) > 64 * 1024 * 1024 for raw in payloads.values()):
+            raise ValueError("diagnostic payload must be at most 64 MiB")
+        target = Path(directory)
+        target.mkdir(parents=True, exist_ok=False)
+        ids = {}
+        for name, raw in payloads.items():
+            with (target / name).open("xb") as stream:
+                stream.write(raw)
+            ids[name] = "sha256:" + hashlib.sha256(raw).hexdigest()
+        report = {"schema": "spiraltorch.synthetic_run_resume_diagnostic.v1", "files": ids,
+                  "comparison": "exact_report_bytes_no_tolerance", "report_differences": differences,
+                  "full_checkpoint": "not_returned_by_run_api"}
+        with (target / "summary.json").open("x") as stream:
+            json.dump(report, stream, indent=2, allow_nan=False)
+            stream.write("\n")
+    raise AssertionError("exact uninterrupted/resumed study comparison: " + json.dumps(differences))

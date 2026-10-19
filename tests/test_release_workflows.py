@@ -15,6 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_gpu_study_failures_retain_each_original_comparison(self) -> None:
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        gpu = ci.split("\n  wgpu-macos:\n", 1)[1].split("\n  wasm-build:\n", 1)[0]
+        self.assertIn("bindings/st-py/tests/test_nn_byte_study.py", gpu)
+        self.assertNotIn("continue-on-error", gpu)
+        for kind in ("detached", "resume", "prepared"):
+            self.assertIn(f'SPIRALTORCH_{kind.upper()}_STUDY_DIAGNOSTICS: ${{{{ runner.temp }}}}/byte-study-{kind}', gpu)
+            artifact = next(step for step in gpu.split("\n      - ")
+                            if f"name: synthetic-byte-study-{kind}-failure" in step)
+            self.assertIn("if: failure()", artifact)
+            self.assertIn("uses: actions/upload-artifact@v7", artifact)
+            self.assertIn(f"path: ${{{{ runner.temp }}}}/byte-study-{kind}/", artifact)
+            self.assertIn("retention-days: 1", artifact)
+
     def test_license_metadata_is_checked_before_wheel_builds(self) -> None:
         command = "python -I -B scripts/security/generate_repo_manifest.py --check-only"
         official = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")

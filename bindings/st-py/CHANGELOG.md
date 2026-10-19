@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Avoid overflowing the shifted-logit subtraction in resident headwise/querywise
+  mixture softmax. Opposite-sign extreme logits receive zero mass before the
+  subtraction only where their exponential is already below f32 range; ordinary
+  masses and large-component router pullbacks retain the existing contract.
+  Separately retain exact prepared-study SGD replay failures. This portability
+  fix is not an identified cause or repair of the unresolved GPU study failures.
+
 - Harden installed-wheel qualification: verify clipped byte-decoder method and
   shipped stub signatures without acquiring a GPU, forbid foreign ML imports
   in the shared native smoke, and run standalone geometry AdamW in manual and

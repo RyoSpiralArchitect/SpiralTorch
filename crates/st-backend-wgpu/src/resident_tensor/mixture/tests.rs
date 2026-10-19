@@ -315,6 +315,70 @@ fn mixture_native_forward_and_vjps_support_strided_inputs_and_repeated_backward(
 }
 
 #[test]
+fn extreme_router_gaps_preserve_weights_and_amplified_vjps() {
+    let Some(d) = device() else { return };
+    let large = 2f32.powi(120);
+    for logits in [
+        [-f32::MAX, f32::MAX],
+        [-f32::MAX, f32::MAX / 4.],
+        [-f32::MAX / 4., f32::MAX],
+        [-f32::MAX, -f32::MAX / 2.],
+        [f32::MAX / 2., f32::MAX],
+        [-f32::MAX, -f32::MAX],
+        [f32::MAX, f32::MAX],
+        [-128., f32::MIN_POSITIVE],
+        [-f32::MIN_POSITIVE, 128.],
+        [-64., 64.],
+        [-129., -128.],
+        [-128., -127.],
+        [127., 128.],
+        [128., 129.],
+        [-40., 40.],
+        [-80., 0.],
+    ] {
+        let oracle = HeadwiseMixtureForward::new(
+            HeadwiseMixtureSpec::new([1, 1, 1, 2]).unwrap(),
+            &[0., large],
+            &logits,
+        )
+        .unwrap();
+        let expected = oracle.backward(&[1.]).unwrap();
+        let shared = d
+            .upload(&[1, 1, 1, 2], &[0., large])
+            .unwrap()
+            .headwise_mixture(&d.upload(&[1, 2], &logits).unwrap())
+            .unwrap();
+        close(&read(shared.weights()), oracle.weights());
+        close(&read(shared.output()), oracle.output());
+        let gradient = shared
+            .backward(&d.upload(&[1, 1, 1], &[1.]).unwrap())
+            .unwrap();
+        close(&read(gradient.components()), &expected.input);
+        close(&read(gradient.logits()), &expected.logits);
+        if oracle.weights()[0] == 0. {
+            assert_eq!(read(shared.weights()), [0., 1.]);
+            assert_eq!(read(gradient.logits()), [0., 0.]);
+        }
+        let query = d
+            .upload(&[1, 1, 1, 1, 2], &[0., large])
+            .unwrap()
+            .querywise_mixture(&d.upload(&[1, 1, 1, 2], &logits).unwrap())
+            .unwrap();
+        close(&read(query.weights()), oracle.weights());
+        close(&read(query.output()), oracle.output());
+        let gradient = query
+            .backward(&d.upload(&[1, 1, 1, 1], &[1.]).unwrap())
+            .unwrap();
+        close(&read(gradient.components()), &expected.input);
+        close(&read(gradient.logits()), &expected.logits);
+        if oracle.weights()[0] == 0. {
+            assert_eq!(read(query.weights()), [0., 1.]);
+            assert_eq!(read(gradient.logits()), [0., 0.]);
+        }
+    }
+}
+
+#[test]
 fn mixture_extreme_logits_do_not_hide_inherited_failures() {
     let Some(d) = device() else { return };
     let x = d.upload(&[2, 1, 1, 3], &[1., 2., 3., 4., 5., 6.]).unwrap();

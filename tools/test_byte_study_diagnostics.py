@@ -12,6 +12,45 @@ API = runpy.run_path(str(Path(__file__).with_name("byte_study_diagnostics.py")))
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_uninterrupted_replay_keeps_actual_reports_without_inventing_checkpoint(self):
+        boundaries = mock.Mock(return_value=(b'{ "step": 1 }', '{"cursor":1}', '{"cursor":2}'))
+        context = mock.Mock(return_value={"adapter": "synthetic"})
+        with tempfile.TemporaryDirectory() as name:
+            target = Path(name) / "version-6"
+            API["assert_exact_run_resume"](target, b"{}", '{"w":1}', '{"w":1}',
+                                           boundaries=boundaries, runtime_context=context)
+            boundaries.assert_not_called()
+            context.assert_not_called()
+            self.assertFalse(target.exists())
+            with self.assertRaisesRegex(AssertionError, "exact uninterrupted/resumed"):
+                API["assert_exact_run_resume"](None, b"{}", '{"w":1}', '{"w":100}',
+                                               boundaries=boundaries, runtime_context=context)
+            boundaries.assert_not_called()
+            with self.assertRaisesRegex(AssertionError, "exact uninterrupted/resumed"):
+                API["assert_exact_run_resume"](target, b'{ "request": true }', '{"w":1}', '{"w":100}',
+                                               boundaries=boundaries, runtime_context=context)
+            boundaries.assert_called_once_with()
+            context.assert_called_once_with()
+            summary = json.loads((target / "summary.json").read_text())
+            self.assertEqual(len(summary["files"]), 7)
+            self.assertEqual(summary["full_checkpoint"], "not_returned_by_run_api")
+            self.assertFalse((target / "full-checkpoint.json").exists())
+            self.assertEqual((target / "first-report.json").read_bytes(), b'{ "step": 1 }')
+            self.assertEqual(summary["report_differences"][0]["path"], "$.w")
+            for filename, digest in summary["files"].items():
+                self.assertEqual(digest, "sha256:" + hashlib.sha256((target / filename).read_bytes()).hexdigest())
+            with self.assertRaises(FileExistsError):
+                API["assert_exact_run_resume"](target, b"{}", "{}", "[]", boundaries=boundaries)
+            self.assertEqual((target / "request.json").read_bytes(), b'{ "request": true }')
+
+    def test_uninterrupted_replay_rejects_invalid_payloads_before_retention(self):
+        for raw in ({}, bytearray(b"{}"), b" " * (64 * 1024 * 1024 + 1)):
+            with tempfile.TemporaryDirectory() as name:
+                target = Path(name) / "version-8"
+                with self.assertRaises(ValueError):
+                    API["assert_exact_run_resume"](target, raw, "{}", "[]", boundaries=lambda: ("{}", "{}", "{}"))
+                self.assertFalse(target.exists())
+
     def test_runtime_context_is_lazy_bounded_and_hash_bound(self):
         payloads = dict(full_report='{"ce":1}', first_report='{"ce":3}', resumed_report='{"ce":1}',
                         full_checkpoint="{}", first_checkpoint="{}", resumed_checkpoint="{}")

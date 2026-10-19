@@ -27,7 +27,10 @@ from test_byte_corpus_query import fixture as query_fixture
 from test_verify_byte_corpus_resume import fixture as resume_fixture
 from test_byte_corpus_optimizer import wrap as optimizer_request, recipe as optimizer_recipe
 from test_byte_corpus_gradient_clip import bind as clipping_request, learning_design
-from byte_study_diagnostics import assert_exact_resume, exact_report_differences, retain_detached_failure, runtime_identity
+from byte_study_diagnostics import (
+    assert_exact_resume, assert_exact_run_resume, exact_report_differences,
+    retain_detached_failure, runtime_identity,
+)
 
 NAMES = (
     "ByteCorpusStudy", "ByteCorpusStudyCheckpoint", "ByteCorpusStudySegment",
@@ -572,7 +575,8 @@ class StudyGpu(unittest.TestCase):
                 study = prepared.study()
                 first = study.advance_wgpu(1)
                 resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
-                self.assertEqual(resumed.report_json, study.run_wgpu())
+                full_report = study.run_wgpu()
+                self.check_prepared_resume(version, prepared.request_json, full_report, first, resumed)
                 if version == 8:
                     self.check_fresh_case_inference(study, prepared.request_json, resumed.checkpoint)
         request = optimizer_request(protocol.decode_json(query.request_json))
@@ -581,12 +585,22 @@ class StudyGpu(unittest.TestCase):
         study = st.nn.ByteCorpusStudy.from_json(raw)
         first = study.advance_wgpu(1)
         resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
-        self.assertEqual(resumed.report_json, study.run_wgpu())
+        full_report = study.run_wgpu()
+        self.check_prepared_resume(9, raw, full_report, first, resumed)
         for case, row in zip(request["cases"], protocol.decode_json(resumed.report_json)["cases"]):
             protocol.load_reference("byte_corpus_optimizer").validate_state(
                 case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
                 protocol.parameter_frozen)
         self.check_fresh_case_inference(study, raw, resumed.checkpoint)
+
+    def check_prepared_resume(self, version, request, full_report, first, resumed):
+        directory = os.environ.get("SPIRALTORCH_PREPARED_STUDY_DIAGNOSTICS")
+        assert_exact_run_resume(
+            Path(directory) / f"version-{version}" if directory else None,
+            request, full_report, resumed.report_json,
+            boundaries=lambda: (first.report_json, first.checkpoint.to_json(), resumed.checkpoint.to_json()),
+            runtime_context=lambda: runtime_identity(st),
+        )
 
     def check_fresh_case_inference(self, study, raw, saved):
         request = protocol.decode_json(raw)
