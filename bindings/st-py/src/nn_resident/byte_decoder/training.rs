@@ -5,7 +5,7 @@ use super::*;
 #[cfg(feature = "wgpu")]
 use crate::wgpu_tensor::{PyWgpuTensor, PyWgpuTensorDevice};
 #[cfg(feature = "wgpu")]
-use st_nn::resident::{AdamWConfig, AdamWStep};
+use st_nn::resident::{AdamWConfig, AdamWStep, GlobalNormClip};
 #[cfg(feature = "wgpu")]
 use st_nn::resident::{
     ByteDecoderBias, ByteDecoderCheckpointReadback, ByteDecoderQueryPullback, ResidentByteBatch,
@@ -21,6 +21,28 @@ fn adamw_control(value: f64) -> PyResult<f32> {
         ));
     }
     Ok(narrowed)
+}
+
+#[cfg(feature = "wgpu")]
+fn adamw_steps(
+    count: usize,
+    rates: Vec<f64>,
+    weight_decays: Option<Vec<f64>>,
+) -> PyResult<Vec<AdamWStep>> {
+    let decays = weight_decays.unwrap_or_else(|| vec![0.0; count]);
+    if rates.len() != count || decays.len() != count {
+        return Err(PyValueError::new_err(
+            "AdamW rates and decays must cover every parameter tensor",
+        ));
+    }
+    rates
+        .into_iter()
+        .zip(decays)
+        .map(|(r, d)| {
+            AdamWStep::new(adamw_control(r)?, adamw_control(d)?)
+                .map_err(|e| PyValueError::new_err(e.to_string()))
+        })
+        .collect()
 }
 
 #[pyclass(name = "ResidentByteBatch", module = "spiraltorch.nn", frozen)]
@@ -126,24 +148,33 @@ impl PyResidentByteDecoder {
         rates: Vec<f64>,
         weight_decays: Option<Vec<f64>>,
     ) -> PyResult<PyResidentParameterUpdate> {
-        let count = self.inner.parameter_layout().len();
-        let decays = weight_decays.unwrap_or_else(|| vec![0.0; count]);
-        if rates.len() != count || decays.len() != count {
-            return Err(PyValueError::new_err(
-                "AdamW rates and decays must cover every parameter tensor",
-            ));
-        }
-        let steps = rates
-            .into_iter()
-            .zip(decays)
-            .map(|(r, d)| {
-                AdamWStep::new(adamw_control(r)?, adamw_control(d)?)
-                    .map_err(|e| PyValueError::new_err(e.to_string()))
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+        let steps = adamw_steps(self.inner.parameter_layout().len(), rates, weight_decays)?;
         Ok(PyResidentParameterUpdate {
             inner: py
                 .detach(|| self.inner.adamw_with_steps(&gradients.inner, &steps))
+                .map_err(plan_error)?,
+        })
+    }
+    /// Clip active gradients on GPU before moments, then atomically update.
+    /// Zero-rate tensors remain validated but do not contribute to the norm.
+    #[pyo3(signature = (gradients, rates, *, max_norm, weight_decays=None))]
+    fn adamw_with_rates_clipped(
+        &mut self,
+        py: Python<'_>,
+        gradients: &PyByteDecoderGradients,
+        rates: Vec<f64>,
+        max_norm: f32,
+        weight_decays: Option<Vec<f64>>,
+    ) -> PyResult<PyResidentParameterUpdate> {
+        let clip =
+            GlobalNormClip::new(max_norm).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let steps = adamw_steps(self.inner.parameter_layout().len(), rates, weight_decays)?;
+        Ok(PyResidentParameterUpdate {
+            inner: py
+                .detach(|| {
+                    self.inner
+                        .adamw_with_steps_clipped(&gradients.inner, &steps, clip)
+                })
                 .map_err(plan_error)?,
         })
     }
@@ -272,6 +303,27 @@ impl PyResidentByteDecoder {
         Ok(PyResidentParameterUpdate {
             inner: py
                 .detach(|| self.inner.sgd_with_rates(&gradients.inner, &rates))
+                .map_err(plan_error)?,
+        })
+    }
+    /// One global active-gradient norm before rates; no host readback or scaling.
+    /// Clipping and rates are caller state and must be reapplied after restore.
+    #[pyo3(signature = (gradients, rates, *, max_norm))]
+    fn sgd_with_rates_clipped(
+        &mut self,
+        py: Python<'_>,
+        gradients: &PyByteDecoderGradients,
+        rates: Vec<f32>,
+        max_norm: f32,
+    ) -> PyResult<PyResidentParameterUpdate> {
+        let clip =
+            GlobalNormClip::new(max_norm).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(PyResidentParameterUpdate {
+            inner: py
+                .detach(|| {
+                    self.inner
+                        .sgd_with_rates_clipped(&gradients.inner, &rates, clip)
+                })
                 .map_err(plan_error)?,
         })
     }

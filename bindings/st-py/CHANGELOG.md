@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- Integrate native projection/readout policy, repetition learning, clipping and
+  corpus evaluation. Evaluation reports the active readout accumulator and
+  stays unsmoothed NLL without repetition penalties; combined learning/evaluation
+  resume tests cover both f32 and opt-in f64 vocabulary-head accumulation.
+
+- Add `NativeCausalLm.evaluate_documents`: native, read-only corpus NLL and
+  perplexity for the supported decoder and attached geometry. Rust covers
+  within-document targets including short tails, masks selected labels and
+  reduces by target count. Python only transports bounded documents. The corpus
+  training example can score a separate corpus periodically without Torch or
+  changing optimizer/cursor state. Source-only after 0.4.32; no release or
+  resolution of the independent contextual-study CI discrepancy is implied.
+
+- Expose resident byte-decoder `sgd_with_rates_clipped` and
+  `adamw_with_rates_clipped` directly to Python. Shared Rust/WGPU kernels
+  compute one norm over nonzero-rate gradients before SGD or AdamW moments;
+  frozen derivatives still validate and zero rates preserve weights/moments/
+  clocks. No Torch or host-gradient scaling is involved. Clipping/rates remain
+  explicit caller state after checkpoint restoration. The packaged geometric
+  byte-LM example accepts `--optimizer`, `--rate`, and `--max-norm`.
+  Source-only after 0.4.32; this does not resolve the separately recorded
+  contextual-study CI resume discrepancy or qualify a new release.
+
+- Align native Linear/LoRA parameter and accumulated-gradient layouts before
+  SGD, Realgrad or AmegaHypergrad updates, canonicalizing storage to row-major
+  during nonempty backward. Column-major state now follows the
+  same logical update as row-major state, including warmed projection caches
+  and multiple microbatches. Add installed-wheel learning gates with foreign ML
+  imports forbidden and remove the legacy Linear/LoRA test's fake Torch module.
+  This fixes native layer primitives; it does not add PEFT import or LoRA
+  placement/learning inside `NativeCausalLm`.
+
 - Add opt-in native repetition-unlikelihood learning for the frozen GPT-2
   decoder and attached geometry. Shared Rust tensor loss/VJP and candidate
   selection feed decoder gradients, independently normalized accumulation,

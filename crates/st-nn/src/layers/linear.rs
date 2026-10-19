@@ -251,8 +251,8 @@ impl Module for Linear {
         )?;
         validate_finite_tensor("linear_input_grad", &grad_input)?;
 
-        self.weight.accumulate_euclidean(&grad_w)?;
-        self.bias.accumulate_euclidean(&grad_b)?;
+        self.weight.accumulate_euclidean_row_major(&grad_w)?;
+        self.bias.accumulate_euclidean_row_major(&grad_b)?;
         Ok(grad_input)
     }
 

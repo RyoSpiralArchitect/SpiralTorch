@@ -16,9 +16,11 @@ models; they must not be mistaken for the native path below.
 | Read local checkpoint tensors | [`SafeTensorArchive`, `NdTensor`](native-weights.md) | Rust safetensors ingress; no pickle, remote code or implicit model conversion |
 | Execute a supported GPT-2 | [`NativeCausalLm.from_gpt2`](native-causal-lm.md) | Frozen base, f32 CPU storage, exact integer token IDs; not an arbitrary HF architecture loader |
 | Learn attached geometry from language loss | [`geometry_loss_gradients`, `NativeGeometryAdamW`, `NativeCausalLmTrainer`](native-corpus-training.md) | Rust decoder pullback, optimizer and document cursor; base weights stay frozen |
+| Score an encoded corpus | [`NativeCausalLm.evaluate_documents`](native-corpus-training.md#native-corpus-evaluation) | Rust target coverage and token-weighted NLL; explicit readout policy, no training auxiliary loss |
 | Add repetition-aware language learning | [Native repetition objective](native-repetition.md) | Shared Rust candidates, loss/VJP, two-normalizer reduction and pinned recipe; no Torch auxiliary loss |
 | Generate with ordinary or Z-Space control | [`NativeCausalLmGenerator`, `NativeCausalLmContext`](native-generation.md) | Rust selection, RNG and explicit K/V reuse; no Torch generation loop |
 | Execute portable geometry independently | [`NativeGeometryRuntime`](native-geometry-runtime.md) | Same admitted artifact recipes without a foreign model; standalone MSE is not LM fine-tuning |
+| Train a native dense or low-rank layer | `st.nn.Linear`, `st.nn.LoraLinear` | Rust forward/VJP and SGD, Realgrad or AmegaHypergrad; LoRA freezes its base, but is not a native decoder attachment or PEFT importer |
 | Run other HF models or PEFT adapters today | `load_hf_causal_lm_artifact`, `prepare_hf_finetune_model`, HF Trainer helpers | Explicit optional Transformers/Torch/PEFT path, not a fallback inside `NativeCausalLm` |
 
 The native importer rejects unsupported configurations and extra tensors,
@@ -28,6 +30,10 @@ Supported native geometry and source-owned checkpoint continuation are described
 in the linked guides, including memory/work budgets and numerical policies.
 Core WASM compilation does not imply a browser HF checkpoint importer, and the
 native GPT-2 CPU path is not a resident WGPU execution claim.
+
+The [integrated local qualification](../../benchmarks/results/2026-10-19-native-language-integration/README.md)
+records installed-wheel, optional-reference and saved-checkpoint checks together,
+without equating local passes with release readiness or language-quality gains.
 
 ## Remaining Foreign Computation
 

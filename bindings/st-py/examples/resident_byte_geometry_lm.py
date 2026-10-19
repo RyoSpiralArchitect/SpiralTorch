@@ -85,11 +85,22 @@ def main():
     parser.add_argument("--mode", choices=("none", "headwise", "mixture", "query_mixture") + METRICS,
                         default="query_mixture")
     parser.add_argument("--updates", type=int, default=16)
+    parser.add_argument("--optimizer", choices=("sgd", "adamw"), default="sgd")
+    parser.add_argument("--rate", type=float, help="default: 0.125 for SGD, 0.005 for AdamW")
+    parser.add_argument("--max-norm", type=float, help="optional Rust-owned global gradient clipping")
     parser.add_argument("--checkpoint", type=Path)
     args = parser.parse_args()
     if args.updates < 1:
         parser.error("--updates must be positive")
+    rate = args.rate if args.rate is not None else (0.125 if args.optimizer == "sgd" else 0.005)
+    if not math.isfinite(rate) or rate < 0:
+        parser.error("--rate must be finite and nonnegative")
+    if args.max_norm is not None and (not math.isfinite(args.max_norm) or args.max_norm <= 0):
+        parser.error("--max-norm must be finite and positive")
     model = make_plan(args.mode).compile_training_wgpu()
+    if args.optimizer == "adamw":
+        model.enable_adamw()
+    rates = [rate] * model.parameter_layout()["count"]
     batch = model.prepare_batch(st.nn.ByteLmBatch.from_documents(
         [b"SpiralTorch learns bytes.", b"Geometry changes attention."], [(0, 0), (1, 0)], 4))
     losses = []
@@ -97,7 +108,12 @@ def main():
         forward = model.forward(batch)
         loss = forward.next_byte_loss()
         gradients = model.backward(forward, loss.prediction_gradient_tensor())
-        update = model.sgd(gradients, 0.125)
+        if args.optimizer == "adamw":
+            update = (model.adamw_with_rates_clipped(gradients, rates, max_norm=args.max_norm)
+                      if args.max_norm is not None else model.adamw(gradients, rate))
+        else:
+            update = (model.sgd_with_rates_clipped(gradients, rates, max_norm=args.max_norm)
+                      if args.max_norm is not None else model.sgd(gradients, rate))
         update.read()  # Submission alone is not proof that an update was accepted.
         losses.append(loss.loss_tensor().snapshot().read_values()[0])
     checkpoint = model.checkpoint_snapshot().read()
@@ -111,7 +127,8 @@ def main():
     observed = restored.forward(restored_batch).prediction_tensor().snapshot().read_values()
     if observed != expected:
         raise RuntimeError("checkpoint restore changed the prediction")
-    print(json.dumps({"mode": args.mode, "losses": losses,
+    print(json.dumps({"mode": args.mode, "optimizer": args.optimizer, "rate": rate,
+                      "max_norm": args.max_norm, "losses": losses,
                       "attempted_revision": checkpoint.attempted_revision,
                       "resume_prediction_exact": True,
                       "scope": "tiny repeated-window mechanics, not language quality"}))

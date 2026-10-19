@@ -116,6 +116,76 @@ guarantee; retain inputs and backups with equivalent care.
 The optional HF Trainer remains an explicit interoperability path for its
 supported models and policies. Neither client silently falls back to the other.
 
+## Native Corpus Evaluation
+
+Source builds after 0.4.32 also expose read-only evaluation on either the frozen
+base or a trained geometry snapshot, with no HF Trainer or Torch dependency:
+
+```python
+score = trainer.model.evaluate_documents(
+    heldout_token_documents, 128, microbatch_windows=2,
+    # labels=heldout_unshifted_labels,  # Optional; -100 excludes a loss term.
+)
+print(score.nll, score.perplexity, score.target_tokens)
+```
+
+Rust computes **unsmoothed** next-token NLL and reduces batch losses by their
+actual selected-target counts, never an unweighted average of batch means.
+Perplexity is `exp(nll)`, or `None` if exponentiation would overflow f64; a
+non-finite NLL is an error. With custom labels this scores those labels, not an
+assertion about the original text's likelihood. Evaluation neither updates
+parameters/optimizer clocks nor advances the training cursor. Inserting it
+between native training steps does not change the checkpoint recipe.
+
+Evaluation deliberately differs from the disjoint, drop-tail training plan:
+each window has at most `context_length` IDs, including its last target, and
+adjacent windows share exactly one context token. Every within-document target
+at positions `1..len` is covered once, including short tails. Empty/single-token
+documents have no targets and are never joined to another document. Positions
+and geometric history reset at each window; this is **not** full-history or
+maximal-overlap sliding-window perplexity. Compare models using the same policy
+and context length. All IDs/labels are validated, even first labels or lone IDs
+that are not scored. All-masked windows are counted in `skipped_windows`; an
+entire corpus without selected targets is rejected before model execution.
+
+Only equal-width consecutive windows share a microbatch; tails are not padded.
+The result's `to_json()` retains the config, base/geometry identities, plan/data
+IDs, active `readout_accumulator` (`f32` or opt-in `f64`), window counts,
+selected/ignored target counts and executed microbatches. The score also exposes
+`.readout_accumulator`; scoring follows the model's selected policy without
+changing it. Evaluation always excludes the trainer's label smoothing and
+optional repetition-unlikelihood auxiliary objective. It remains plain NLL
+when inserted between repetition-training steps or after checkpoint restoration.
+The data ID binds exact documents, labels and window policy, including unscored
+content, but not batch size. Different batch sizes can change floating-point
+rounding; no across-engine bitwise score guarantee is made. These identities do
+not certify that supplied documents are independent of training data.
+
+Admission checks at most 1,048,576 documents/windows and 16,777,216 transported
+IDs, plus the model's context/geometry and exact selected-logit budgets.
+The corpus is copied at the Python boundary; native execution releases the GIL.
+This is bounded in-memory evaluation, not an unbounded streaming loader or an
+RSS guarantee. Execution uses the existing `rust_f32_cpu_prepacked` decoder;
+there is no GPU fallback or speed claim. The Rust API uses
+`CausalLmEvaluationConfig` and `NativeCausalLm::evaluate_documents`.
+
+To evaluate a separate encoded corpus during the packaged training example,
+add `--eval-data-json "$HELDOUT" --eval-every 10` to the command above. It uses
+the training context/batch size but always unsmoothed evaluation NLL. Evaluation
+runs before the first update, at the requested interval (default `save-every`)
+and at the stopping boundary, and writes `evaluation.jsonl` under the private
+run directory. The supplied evaluation data is validated/scored before creating
+that directory. The holdout is separate caller state, not embedded into a
+trainer checkpoint; supply it explicitly again on resume. There is no automatic
+best-checkpoint selection, early stopping, data-split inference or claim that
+lower training/evaluation loss proves improved generation quality.
+
+[Local evaluation qualification](native-corpus-evaluation-validation.md) records
+the complete four-condition GPT-2 comparison and the optional 30-case geometry
+reference suite, separately from training quality and speed claims.
+The later [stack integration qualification](../../benchmarks/results/2026-10-19-native-language-integration/README.md)
+adds active readout-policy, repetition-training and saved-generation combinations.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)

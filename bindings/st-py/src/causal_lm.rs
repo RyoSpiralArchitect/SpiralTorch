@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 
 mod accumulation;
 mod context;
+mod documents;
+mod evaluation;
 mod generation;
 mod training;
 use accumulation::PyNativeCausalLmAccumulator;
@@ -161,6 +163,25 @@ impl PyNativeCausalLmGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
+    #[pyo3(signature=(token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_documents(
+        &self,
+        py: Python<'_>,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<evaluation::PyNativeCausalLmEvaluation> {
+        evaluation::evaluate(
+            self,
+            py,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
     #[getter]
     fn readout_accumulator(&self) -> &'static str {
         self.inner.readout_accumulator().as_str()
@@ -404,6 +425,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLm>()?;
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;
+    evaluation::register(module)?;
     training::register(module)?;
     generation::register(module)?;
     context::register(module)?;
