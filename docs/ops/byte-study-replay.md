@@ -88,3 +88,9 @@ python -I -B tools/run_byte_study_replay.py \
 
 Use the same two-phase protocol for any comparison; do not silently replace the
 historical source with a later build. No publication command belongs in this flow.
+
+After preserving that first outcome, a separate
+[first-update boundary probe](byte-study-boundary-probe.md) can capture an
+intermediate checkpoint without mapping it between updates. It is explicitly
+instrumented, changes GPU commands and buffer lifetimes, and does not replace
+the fixed replay protocol or clear the release hold.
