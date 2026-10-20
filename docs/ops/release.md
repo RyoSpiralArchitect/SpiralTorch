@@ -4,6 +4,15 @@ This runbook keeps the PyPI path explicit and auditable. The safe default is a
 GitHub Actions dry-run: it validates the signed release wheels and PyPI state
 without uploading.
 
+## GPU Replay Publication Hold
+
+As of 2026-10-20, the maintainer requires the cause of the historical GPU study
+divergence to be identified and its repair validated before publication, tags,
+or a version bump. Track that decision in [issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289).
+Green CI or an unreproduced failure does not remove the hold. The
+[manual hosted replay diagnosis](byte-study-replay.md) preserves a fixed,
+non-publishing investigation path independently of the release workflows.
+
 ## Release Cadence
 
 Prefer a small release after a coherent, reviewed user-visible milestone rather
