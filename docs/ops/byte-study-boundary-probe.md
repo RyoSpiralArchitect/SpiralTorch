@@ -86,6 +86,40 @@ Host/native-binary changes are additional confounders. Keep original payloads
 private; publish only summaries, hashes and reproduction instructions. This
 probe creates no release, tag, wheel upload or publication authorization.
 
+## Hosted post-failure capture
+
+The ordinary macOS GPU CI retains its original Python test commands and failure
+status. Only after that step fails **and** the prepared-failure artifact upload
+succeeds does `tools/run_byte_study_boundary.py` select a diagnostic.
+It checks the original manifest's file hashes, request identity, update-1 cursor,
+report schemas and case order. Eligibility is limited to the existing v4-v9,
+two-update fixtures with at most 32 cases.
+
+Selection is deterministic: the lowest retained version, then the first
+canonical-JSON case difference in its original request order. This distinguishes
+booleans, integer/float spellings and signed zero; it does not use Python's loose
+numeric equality. Missing prepared evidence or no canonical case difference
+causes no build or GPU attempt.
+Malformed or mismatched evidence fails closed. It never hunts another case or
+version for a passing result.
+
+There is at most one build and one probe process, each with a 900-second owned
+process-group deadline; the enclosing step allows 35 minutes including evidence
+handling. The executable must come from Cargo's JSON artifact record for this
+example, within the declared target directory, not a possibly stale hard-coded
+binary. Terminal records precede post-processing. Completion identity, original
+input bytes and boundary hashes are checked; a nonzero probe exit stays nonzero.
+The original failed CI step remains failed even if this diagnostic succeeds.
+
+This is the same hosted job but a **separate, instrumented process and binary**,
+not capture of the already-finished original process. Its new outcome cannot
+retroactively explain that process. `release_ready` is always false.
+The separate one-day `synthetic-byte-study-boundary-diagnostic` artifact retains
+the toy-fixture inputs, observations, source/compiler identity, hashes and logs.
+It contains no executable, wheel, credentials or external corpus/model weights.
+Download it into private validation storage before expiry; commit only bounded
+summaries, hashes and procedures, as with the original failure artifact.
+
 ## Local instrument check, 2026-10-20
 
 One fresh-process, 600-second-bounded attempt per preserved condition ran on
