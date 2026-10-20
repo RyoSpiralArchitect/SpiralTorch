@@ -32,9 +32,24 @@ runner image, GPU, or driver. Actual image/runtime identity is retained.
 
 The intentional CPU-artifact-only test skip is allowed. Any other skip, zero
 tests, or missing completion record prevents a valid result. All foreign ML
-imports are blocked before execution. The historical facade's blocked optional
-Torch probe during module import is recorded separately; any import attempt
-during the actual tests, or any loaded foreign ML module, invalidates the run.
+imports are blocked before execution in the worker **and each fresh inference
+interpreter**. The historical facade's blocked optional Torch probe during each
+interpreter's setup is recorded separately; any import attempt during the
+subsequent test/inference phase, including one swallowed by the test code, or
+any loaded foreign ML module invalidates it.
+The eight expected fresh interpreters run the original inference source with
+unchanged stdin, stdout and 120-second child timeout. Each verifies its native
+extension against the selected wheel and writes an exclusive completion record.
+The parent checks those records and rejects missing, malformed or mismatched
+ones even after exit code zero, retaining captured stdout/stderr on rejection or
+timeout. Both ordinary imports and `importlib.import_module` are guarded.
+Setup permits and records only the historical facade's read-only Git identity
+commands, `uname -p`, and CPython's `file -b` lookup of its own executable with
+only `LC_ALL=C` added to the inherited environment. They are not allowed during
+inference.
+Undeclared launches through `subprocess`, `os.system`, fork, spawn and exec audit
+events are rejected. These hooks audit the trusted test programs, not arbitrary
+native-code sandboxing. No child adds a success-path device probe or tensor readback.
 The supervisor owns the worker process group, imposes a two-hour deadline, and
 retains a terminal record even on timeout. The enclosing job has a larger
 three-hour limit for compilation and artifact retention.

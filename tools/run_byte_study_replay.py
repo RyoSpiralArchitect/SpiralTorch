@@ -27,6 +27,28 @@ FOREIGN = ("torch", "numpy", "transformers", "peft", "accelerate", "safetensors"
 DIAGNOSTICS = ("DETACHED", "RESUME", "PREPARED")
 PREPARED_TEST = "test_preparation_chain_uses_one_shared_runner"
 CPU_ONLY_TEST = "StudyPortable.test_cpu_only_execution_is_not_a_fallback"
+EXPECTED_CHILDREN = 8
+PROCESS_EVENTS = frozenset((
+    "subprocess.Popen", "os.system", "os.posix_spawn", "os.fork", "os.forkpty",
+    "os.exec", "os.startfile", "os.startfile/2",
+))
+
+
+def interpreter_file_command():
+    # Match platform.architecture's symlink handling, including directory aliases.
+    target = os.path.abspath(sys.executable)
+    while os.path.islink(target):
+        target = os.path.normpath(os.path.join(os.path.dirname(target), os.readlink(target)))
+    return ("file", "-b", target)
+
+
+SETUP_COMMANDS = (
+    ("git", "rev-parse", "HEAD"),
+    ("git", "describe", "--tags", "--always"),
+    ("git", "status", "--porcelain"),
+    ("uname", "-p"),
+    interpreter_file_command(),
+)
 
 
 def digest(path):
@@ -77,9 +99,193 @@ def import_guard(attempts):
     return audit
 
 
+def install_import_guards(attempts):
+    sys.addaudithook(import_guard(attempts))
+    original = importlib.import_module
+
+    def guarded_import_module(name, package=None):
+        # import_module does not consistently emit CPython's "import" event.
+        resolved = importlib.util.resolve_name(name, package) if name.startswith(".") else name
+        if resolved.split(".")[0] in FOREIGN:
+            attempts.append(resolved)
+            raise RuntimeError("foreign ML import prohibited in native replay: " + resolved)
+        return original(name, package) if package is not None else original(name)
+
+    importlib.import_module = guarded_import_module
+
+
+class SetupSubprocesses:
+    """The historical facade runs only these read-only metadata commands."""
+
+    def __init__(self, record):
+        self.record, self.active = record, True
+        record.setdefault("unexpected_child_spawns", 0)
+        record["setup_subprocesses"] = []
+
+    def audit(self, event, args):
+        if event not in PROCESS_EVENTS or not self.active:
+            return
+        if (event == "subprocess.Popen" and tuple(args[1]) in SETUP_COMMANDS
+                and args[0] == args[1][0]
+                and ((args[0] != "file" and args[3] is None)
+                     or (args[0] == "file" and args[2] is None
+                         and args[3] == dict(os.environ, LC_ALL="C")))):
+            self.record["setup_subprocesses"].append(list(args[1]))
+            return
+        self.record["unexpected_child_spawns"] += 1
+        raise RuntimeError("undeclared setup subprocess")
+
+
 def require_native_runtime(attempts, setup_count):
     if attempts[setup_count:] or any(name.split(".")[0] in FOREIGN for name in sys.modules):
         raise RuntimeError("foreign ML import observed during replay")
+
+
+def require_foreign_free_environment():
+    if any(name.split(".")[0] in FOREIGN for name in sys.modules):
+        raise RuntimeError("foreign ML module already loaded")
+    if any(importlib.util.find_spec(name) is not None for name in FOREIGN):
+        raise RuntimeError("replay requires an environment without foreign ML packages")
+
+
+def child_worker(output, wheel, source):
+    """Guard the fresh interpreter without changing its inference code or stdout."""
+    output, wheel = Path(output), Path(wheel)
+    record = {"schema": "spiraltorch.hosted_byte_replay.child.v1",
+              "release_ready": False, "outcome": "execution_error", "pid": os.getpid(),
+              "harness_sha256": digest(__file__),
+              "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+              "foreign_import_attempts": [], "unexpected_child_spawns": 0}
+    started = time.monotonic()
+    setup = SetupSubprocesses(record)
+
+    def reject_nested_spawn(event, args):
+        if event in PROCESS_EVENTS:
+            record["unexpected_child_spawns"] += 1
+            raise RuntimeError("undeclared nested replay process")
+
+    try:
+        require_foreign_free_environment()
+        install_import_guards(record["foreign_import_attempts"])
+        sys.addaudithook(setup.audit)
+        importlib.import_module("spiraltorch")
+        record["native_library"] = native_identity(
+            wheel, importlib.import_module("spiraltorch.spiraltorch"))
+        setup_count = len(record["foreign_import_attempts"])
+        record["blocked_setup_import_attempts"] = list(record["foreign_import_attempts"])
+        require_native_runtime(record["foreign_import_attempts"], setup_count)
+        if record["unexpected_child_spawns"]:
+            raise RuntimeError("undeclared setup subprocess")
+        setup.active = False
+        sys.addaudithook(reject_nested_spawn)
+        exec(compile(source, "<byte-study-fresh-inference>", "exec"), {"__name__": "__main__"})
+        require_native_runtime(record["foreign_import_attempts"], setup_count)
+        if record["unexpected_child_spawns"]:
+            raise RuntimeError("undeclared nested replay process")
+        record["outcome"] = "no_foreign_ml_observed"
+    except BaseException as error:
+        record["error_type"] = type(error).__name__
+        raise
+    finally:
+        setup.active = False
+        record["seconds"] = time.monotonic() - started
+        save(output / "child-result.json", record)
+
+
+class GuardedChildren:
+    """Only the declared fresh-inference command may spawn during the tests."""
+
+    def __init__(self, output, wheel, source, native, record):
+        self.output, self.wheel, self.source, self.native = output, wheel, source, native
+        self.source_hash = hashlib.sha256(source.encode()).hexdigest()
+        self.harness_hash = record.get("harness_sha256", digest(__file__))
+        self.record = record
+        record["child_runs"] = []
+        record.setdefault("unexpected_child_spawns", 0)
+        self.active = False
+        self.authorized = None
+        self.spawn_seen = False
+        (output / "children").mkdir()
+
+    def audit(self, event, args):
+        if event not in PROCESS_EVENTS or not self.active:
+            return
+        if (event != "subprocess.Popen" or self.authorized is None
+                or self.spawn_seen or args[0] != sys.executable
+                or args[1] != self.authorized or args[2] is not None or args[3] is not None):
+            self.record["unexpected_child_spawns"] += 1
+            raise RuntimeError("undeclared replay subprocess")
+        self.spawn_seen = True
+
+    def run(self, command, **kwargs):
+        expected = [sys.executable, "-I", "-B", "-c", self.source]
+        if (command != expected or set(kwargs) != {"input", "text", "capture_output", "timeout"}
+                or kwargs["text"] is not True or kwargs["capture_output"] is not True
+                or kwargs["timeout"] != 120):
+            self.record["unexpected_child_spawns"] += 1
+            raise RuntimeError("fresh-inference command differs from the declared protocol")
+        directory = self.output / "children" / f"{len(self.record['child_runs']):04d}"
+        directory.mkdir()
+        row = {"directory": str(directory.relative_to(self.output)), "valid": False}
+        self.record["child_runs"].append(row)
+        bootstrap = (
+            f"import runpy\nrunpy.run_path({str(Path(__file__).resolve())!r})['child_worker']("
+            f"{str(directory)!r}, {str(self.wheel)!r}, {self.source!r})\n"
+        )
+        wrapped = [sys.executable, "-I", "-B", "-c", bootstrap]
+        self.authorized, self.spawn_seen = wrapped, False
+        stdout = stderr = None
+        try:
+            result = subprocess.run(wrapped, **kwargs)
+            stdout, stderr = result.stdout, result.stderr
+            row["returncode"] = result.returncode
+        except BaseException as error:
+            row["error_type"] = type(error).__name__
+            if isinstance(error, subprocess.TimeoutExpired):
+                stdout, stderr = error.output, error.stderr
+            raise
+        finally:
+            self.authorized = None
+            row["spawn_observed"] = self.spawn_seen
+            try:
+                child = json.loads((directory / "child-result.json").read_text())
+                row["child_outcome"] = child.get("outcome")
+                row["valid"] = (
+                    row.get("returncode") == 0 and self.spawn_seen
+                    and child.get("schema") == "spiraltorch.hosted_byte_replay.child.v1"
+                    and child.get("outcome") == "no_foreign_ml_observed"
+                    and child.get("source_sha256") == self.source_hash
+                    and child.get("harness_sha256") == self.harness_hash
+                    and child.get("native_library") == self.native
+                    and isinstance(child.get("foreign_import_attempts"), list)
+                    and isinstance(child.get("blocked_setup_import_attempts"), list)
+                    and child.get("foreign_import_attempts")
+                    == child.get("blocked_setup_import_attempts")
+                    and isinstance(child.get("setup_subprocesses"), list)
+                    and all(tuple(command) in SETUP_COMMANDS
+                            for command in child["setup_subprocesses"])
+                    and child.get("unexpected_child_spawns") == 0
+                    and child.get("release_ready") is False
+                )
+            except (OSError, ValueError, TypeError, AttributeError) as error:
+                row["record_error"] = type(error).__name__
+            if not row["valid"]:
+                for name, contents in (("stdout", stdout), ("stderr", stderr)):
+                    if contents is not None:
+                        path = directory / (name + ".log")
+                        with path.open("xb") as stream:
+                            stream.write(contents.encode() if isinstance(contents, str) else contents)
+                        row[name + "_sha256"] = digest(path)
+            save(directory / "parent-result.json", row)
+        if result.returncode == 0 and not row["valid"]:
+            raise RuntimeError("fresh interpreter lacks a valid audited completion record")
+        return result
+
+    def require_complete(self, expected_count):
+        if (self.record["unexpected_child_spawns"]
+                or len(self.record["child_runs"]) != expected_count
+                or any(not row["valid"] for row in self.record["child_runs"])):
+            raise RuntimeError("fresh-interpreter audit is incomplete or invalid")
 
 
 def phase_summary(result):
@@ -158,12 +364,15 @@ def worker(output, wheel):
               "foreign_import_attempts": []}
     started = time.monotonic()
     module = None
+    setup = SetupSubprocesses(record)
     try:
-        if any(name.split(".")[0] in FOREIGN for name in sys.modules):
-            raise RuntimeError("foreign ML module already loaded")
-        if any(importlib.util.find_spec(name) is not None for name in FOREIGN):
-            raise RuntimeError("replay requires an environment without foreign ML packages")
-        sys.addaudithook(import_guard(record["foreign_import_attempts"]))
+        record["harness_sha256"] = digest(__file__)
+        manifest = json.loads((output / "manifest.json").read_text())
+        if record["harness_sha256"] != manifest.get("harness_sha256"):
+            raise RuntimeError("worker source changed after the supervisor manifest")
+        require_foreign_free_environment()
+        install_import_guards(record["foreign_import_attempts"])
+        sys.addaudithook(setup.audit)
         os.environ.update(SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS="1", SPIRALTORCH_STRICT_GPU="1")
         test_path = ROOT / "bindings/st-py/tests/test_nn_byte_study.py"
         spec = importlib.util.spec_from_file_location("_byte_study_replay_target", test_path)
@@ -177,8 +386,21 @@ def worker(output, wheel):
         setup_count = len(record["foreign_import_attempts"])
         record["blocked_setup_import_attempts"] = list(record["foreign_import_attempts"])
         require_native_runtime(record["foreign_import_attempts"], setup_count)
-        code = exercise(module, output, record)
-        require_native_runtime(record["foreign_import_attempts"], setup_count)
+        if record["unexpected_child_spawns"]:
+            raise RuntimeError("undeclared setup subprocess")
+        setup.active = False
+        children = GuardedChildren(output, wheel, module.FRESH_INFERENCE,
+                                   record["native_library"], record)
+        sys.addaudithook(children.audit)
+        original_subprocess = module.subprocess
+        module.subprocess, children.active = children, True
+        try:
+            code = exercise(module, output, record)
+            require_native_runtime(record["foreign_import_attempts"], setup_count)
+            if code == 0:
+                children.require_complete(EXPECTED_CHILDREN)
+        finally:
+            module.subprocess, children.active = original_subprocess, False
         return code
     except BaseException as error:
         if record["outcome"] != "test_failure":
@@ -186,6 +408,7 @@ def worker(output, wheel):
         record["error_type"] = type(error).__name__
         raise
     finally:
+        setup.active = False
         record["seconds"] = time.monotonic() - started
         finish_worker(output, record, module)
 
@@ -224,6 +447,7 @@ def supervise(output, source, wheel, timeout):
             "rustup_toolchain": os.environ.get("RUSTUP_TOOLCHAIN"),
             "timeout_seconds": timeout, "release_ready": False,
             "protocol": ["original_study_suite_once", "same_process_prepared_test_once"],
+            "expected_audited_children": EXPECTED_CHILDREN,
             "stop_on_first_failure": True, "rust_ci_prelude_replayed": False,
             "historical_driver_or_gpu_identity_guaranteed": False,
         }

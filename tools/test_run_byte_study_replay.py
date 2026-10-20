@@ -41,6 +41,256 @@ def fake_module(*, fail_first=False, fail_warm=False, skip=False, expected_failu
     return module
 
 
+CHILD_PROBE = """
+import importlib
+import runpy
+import sys
+import types
+worker = runpy.run_path(sys.argv[1])["child_worker"]
+namespace = worker.__globals__
+original_import = importlib.import_module
+def fake_native_import(name):
+    if name == "spiraltorch":
+        sys.audit("subprocess.Popen", "git", ["git", "rev-parse", "HEAD"], None, None)
+        try:
+            __import__("torch")
+        except RuntimeError:
+            pass
+        return types.SimpleNamespace()
+    if name == "spiraltorch.spiraltorch":
+        return types.SimpleNamespace()
+    return original_import(name)
+importlib.import_module = fake_native_import
+namespace["native_identity"] = lambda *args: {"filename": "fixture.so", "sha256": "a" * 64}
+worker(sys.argv[2], "unused-fixture.whl", sys.argv[3])
+"""
+
+
+class ChildGuardTests(unittest.TestCase):
+    def probe(self, source):
+        # A real isolated interpreter exercises audit-hook lifetime. Only the
+        # native backend import/identity are synthetic; no foreign code runs.
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-I", "-S", "-B", "-c", CHILD_PROBE,
+                 replay.__file__, directory, source],
+                input="original stdin", text=True, capture_output=True, timeout=10)
+            path = Path(directory) / "child-result.json"
+            return result, json.loads(path.read_text()) if path.exists() else None
+
+    def test_child_setup_probe_is_blocked_and_streams_are_preserved(self):
+        result, record = self.probe("import sys\nprint(sys.stdin.read(), end='')")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "original stdin")
+        self.assertEqual(record["outcome"], "no_foreign_ml_observed")
+        self.assertEqual(record["foreign_import_attempts"], ["torch"])
+        self.assertEqual(record["blocked_setup_import_attempts"], ["torch"])
+        self.assertEqual(record["setup_subprocesses"], [["git", "rev-parse", "HEAD"]])
+        self.assertFalse(record["release_ready"])
+        self.assertGreater(record["pid"], 0)
+
+    def test_child_cannot_swallow_test_time_import_or_bypass_with_loaded_module(self):
+        for source in (
+            "try:\n import torch\nexcept RuntimeError:\n pass",
+            "import importlib\ntry:\n importlib.import_module('torch')\nexcept RuntimeError:\n pass",
+            "import importlib\ntry:\n importlib.import_module('.nn', 'torch')\nexcept RuntimeError:\n pass",
+            "import sys, types\nsys.modules['numpy'] = types.ModuleType('numpy')",
+        ):
+            with self.subTest(source=source):
+                result, record = self.probe(source)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(record["outcome"], "execution_error")
+                self.assertEqual(record["error_type"], "RuntimeError")
+
+    def test_child_cannot_hide_nested_interpreter_attempt(self):
+        result, record = self.probe(
+            "import subprocess, sys\ntry:\n"
+            " subprocess.run([sys.executable, '-I', '-c', 'pass'])\n"
+            "except RuntimeError:\n pass")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(record["unexpected_child_spawns"], 1)
+        self.assertEqual(record["outcome"], "execution_error")
+
+    def test_other_process_apis_and_late_metadata_spawns_are_rejected(self):
+        calls = [
+            "os.system('exit 0')",
+            "sys.audit('subprocess.Popen', 'git', ['git', 'rev-parse', 'HEAD'], None, None)",
+        ]
+        if hasattr(os, "posix_spawn"):
+            calls.append("os.posix_spawn(sys.executable, [sys.executable, '-c', 'pass'], os.environ)")
+        if hasattr(os, "fork"):
+            calls.append("os.fork()")
+        for call in calls:
+            with self.subTest(call=call):
+                result, record = self.probe(
+                    "import os, sys\ntry:\n " + call + "\nexcept RuntimeError:\n pass")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(record["unexpected_child_spawns"], 1)
+                self.assertEqual(record["outcome"], "execution_error")
+
+    def test_zero_exit_cannot_claim_completed_child_audit(self):
+        result, record = self.probe("raise SystemExit(0)")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(record["outcome"], "execution_error")
+        self.assertEqual(record["error_type"], "SystemExit")
+        result, record = self.probe("import os\nos._exit(0)")
+        self.assertEqual(result.returncode, 0)
+        self.assertIsNone(record)
+
+    def child_run(self, *, child_update=None, raw=None, omit=False, error=None,
+                  returncode=0, observe=True):
+        with tempfile.TemporaryDirectory() as directory:
+            root, record = Path(directory), {}
+            native = {"filename": "fixture.so", "sha256": "a" * 64}
+            children = replay.GuardedChildren(root, root / "fixture.whl", "pass", native, record)
+            children.active = True
+
+            def run(command, **kwargs):
+                self.assertEqual(kwargs, {
+                    "input": "original stdin", "text": True, "capture_output": True, "timeout": 120})
+                self.assertEqual(command[:4], [sys.executable, "-I", "-B", "-c"])
+                self.assertIn(repr(children.source), command[4])
+                if observe:
+                    children.audit("subprocess.Popen", (sys.executable, command, None, None))
+                if error:
+                    raise error
+                child = {"schema": "spiraltorch.hosted_byte_replay.child.v1",
+                         "release_ready": False, "outcome": "no_foreign_ml_observed",
+                         "harness_sha256": children.harness_hash,
+                         "source_sha256": children.source_hash, "native_library": native,
+                         "foreign_import_attempts": ["torch"],
+                         "blocked_setup_import_attempts": ["torch"], "unexpected_child_spawns": 0,
+                         "setup_subprocesses": []}
+                child.update(child_update or {})
+                path = root / "children/0000/child-result.json"
+                if not omit:
+                    path.write_text(raw if raw is not None else json.dumps(child))
+                return subprocess.CompletedProcess(command, returncode, "original stdout", "original stderr")
+
+            with mock.patch.object(replay.subprocess, "run", side_effect=run) as runner:
+                try:
+                    result = children.run(
+                        [sys.executable, "-I", "-B", "-c", "pass"],
+                        input="original stdin", text=True, capture_output=True, timeout=120)
+                except (RuntimeError, subprocess.TimeoutExpired) as failure:
+                    result = type(failure).__name__
+            retained = json.loads((root / "children/0000/parent-result.json").read_text())
+            self.assertEqual(retained, record["child_runs"][0])
+            self.assertEqual(runner.call_count, 1)
+            if not retained["valid"]:
+                streams = ((error.output, error.stderr) if isinstance(error, subprocess.TimeoutExpired)
+                           else ("original stdout", "original stderr"))
+                for name, contents in zip(("stdout", "stderr"), streams):
+                    path = root / "children/0000" / (name + ".log")
+                    if contents is None:
+                        self.assertFalse(path.exists())
+                    else:
+                        expected = contents.encode() if isinstance(contents, str) else contents
+                        self.assertEqual(path.read_bytes(), expected)
+                        self.assertEqual(retained[name + "_sha256"], replay.digest(path))
+            return result, record
+
+    def test_parent_preserves_child_result_and_deadline(self):
+        result, record = self.child_run()
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, "original stdout", "original stderr"))
+        self.assertTrue(record["child_runs"][0]["valid"])
+
+    def test_parent_rejects_missing_malformed_or_incomplete_child_record(self):
+        for change in ({"omit": True}, {"raw": "{"}, {"raw": "null"},
+                       {"observe": False},
+                       {"child_update": {"outcome": "execution_error"}},
+                       {"child_update": {"source_sha256": "wrong"}},
+                       {"child_update": {"harness_sha256": "wrong"}},
+                       {"child_update": {"native_library": {}}},
+                       {"child_update": {"foreign_import_attempts": ["torch", "torch"]}},
+                       {"child_update": {"foreign_import_attempts": None,
+                                         "blocked_setup_import_attempts": None}},
+                       {"child_update": {"setup_subprocesses": None}},
+                       {"child_update": {"setup_subprocesses": [["git", "push"]]}},
+                       {"child_update": {"unexpected_child_spawns": 1}}):
+            with self.subTest(change=change):
+                result, record = self.child_run(**change)
+                self.assertEqual(result, "RuntimeError")
+                self.assertFalse(record["child_runs"][0]["valid"])
+
+    def test_parent_retains_first_child_failure_without_retry(self):
+        result, record = self.child_run(returncode=7)
+        self.assertEqual((result.returncode, result.stderr), (7, "original stderr"))
+        self.assertFalse(record["child_runs"][0]["valid"])
+        result, record = self.child_run(error=subprocess.TimeoutExpired(
+            "child", 120, output=b"partial stdout", stderr=b"partial stderr"))
+        self.assertEqual(result, "TimeoutExpired")
+        self.assertEqual(record["child_runs"][0]["error_type"], "TimeoutExpired")
+        self.assertFalse(record["child_runs"][0]["valid"])
+
+    def test_parent_rejects_unwrapped_spawn_and_duplicate_authorization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            record = {}
+            children = replay.GuardedChildren(Path(directory), Path("unused"), "pass", {}, record)
+            children.active = True
+            command = [sys.executable, "-I", "-B", "-c", "pass"]
+            with self.assertRaisesRegex(RuntimeError, "undeclared"):
+                children.audit("subprocess.Popen", (sys.executable, command, None, None))
+            children.authorized = command
+            children.audit("subprocess.Popen", (sys.executable, command, None, None))
+            with self.assertRaisesRegex(RuntimeError, "undeclared"):
+                children.audit("subprocess.Popen", (sys.executable, command, None, None))
+            self.assertEqual(record["unexpected_child_spawns"], 2)
+            with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                children.require_complete(0)
+
+    def test_setup_allowlist_and_parent_guard_cover_all_process_events(self):
+        record = {}
+        setup = replay.SetupSubprocesses(record)
+        for command in replay.SETUP_COMMANDS:
+            environment = dict(os.environ, LC_ALL="C") if command[0] == "file" else None
+            cwd = None if command[0] == "file" else "/metadata"
+            setup.audit("subprocess.Popen", (command[0], list(command), cwd, environment))
+        self.assertEqual(len(record["setup_subprocesses"]), len(replay.SETUP_COMMANDS))
+        with self.assertRaisesRegex(RuntimeError, "setup"):
+            setup.audit("subprocess.Popen", ("git", ["git", "push"], None, None))
+        with self.assertRaisesRegex(RuntimeError, "setup"):
+            setup.audit("subprocess.Popen",
+                        ("file", ["file", "-b", "/not-the-interpreter"], None,
+                         dict(os.environ, LC_ALL="C")))
+        with self.assertRaisesRegex(RuntimeError, "setup"):
+            setup.audit("subprocess.Popen",
+                        ("file", list(replay.interpreter_file_command()), None, {}))
+        with tempfile.TemporaryDirectory() as directory:
+            children = replay.GuardedChildren(Path(directory), Path("unused"), "pass", {}, {})
+            children.active = True
+            for event in replay.PROCESS_EVENTS - {"subprocess.Popen"}:
+                with self.subTest(event=event), self.assertRaisesRegex(RuntimeError, "undeclared"):
+                    children.audit(event, ())
+                with self.subTest(setup_event=event), self.assertRaisesRegex(RuntimeError, "setup"):
+                    setup.audit(event, ())
+
+    def test_child_command_and_launch_options_cannot_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            children = replay.GuardedChildren(Path(directory), Path("unused"), "pass", {}, {})
+            with mock.patch.object(replay.subprocess, "run") as runner:
+                with self.assertRaisesRegex(RuntimeError, "differs"):
+                    children.run([sys.executable, "-c", "pass"])
+                with self.assertRaisesRegex(RuntimeError, "differs"):
+                    children.run(
+                        [sys.executable, "-I", "-B", "-c", "pass"],
+                        input="", text=True, capture_output=True, timeout=120, env={})
+                runner.assert_not_called()
+            self.assertEqual(children.record["child_runs"], [])
+
+    def test_parent_requires_every_declared_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            children = replay.GuardedChildren(Path(directory), Path("unused"), "pass", {}, {})
+            with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                children.require_complete(replay.EXPECTED_CHILDREN)
+            children.record["child_runs"] = [{"valid": True}] * replay.EXPECTED_CHILDREN
+            children.require_complete(replay.EXPECTED_CHILDREN)
+            children.record["child_runs"][0] = {"valid": False}
+            with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                children.require_complete(replay.EXPECTED_CHILDREN)
+
+
 class ReplayTests(unittest.TestCase):
     def exercise(self, module):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
@@ -179,6 +429,18 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(json.loads((root / "worker-result.json").read_text()), record)
             self.assertEqual(json.loads((root / "runtime.json").read_text()),
                              {"status": "collection_failed", "error_type": "RuntimeError"})
+
+    def test_worker_rejects_source_changes_before_importing_native_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay.save(root / "manifest.json", {"harness_sha256": "wrong"})
+            with mock.patch.object(replay, "require_foreign_free_environment") as preflight:
+                with self.assertRaisesRegex(RuntimeError, "source changed"):
+                    replay.worker(root, Path("unused.whl"))
+                preflight.assert_not_called()
+            record = json.loads((root / "worker-result.json").read_text())
+            self.assertEqual(record["outcome"], "execution_error")
+            self.assertEqual(record["error_type"], "RuntimeError")
 
     def supervise(self, run_effect, *, source=None, worker_record=None, worker_code=0):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
