@@ -51,6 +51,8 @@ class BoundaryPortable(unittest.TestCase):
         stub = ast.parse((source.ROOT / "bindings/st-py/spiraltorch/__init__.pyi").read_text())
         classes = {node.name: node for node in stub.body if isinstance(node, ast.ClassDef)}
         self.assertIn("_NnByteCorpusBoundaryObservation", classes)
+        self.assertIn("report_json", {node.name for node in classes["_NnByteCorpusBoundaryObservation"].body
+                                     if isinstance(node, ast.FunctionDef)})
         self.assertIn(name, {node.target.id for node in classes["_NnModule"].body
                              if isinstance(node, ast.AnnAssign)})
         self.assertIn("run_wgpu_with_retained_boundary", {
@@ -92,10 +94,12 @@ class BoundaryGpu(unittest.TestCase):
         self.assertFalse(outcome["boundary_captured"])
         self.assertFalse(outcome["release_ready"])
         self.assertTrue(outcome["error"])
+        self.assertIsNone(observed.report_json)
         for _ in range(2):
             with self.assertRaisesRegex(RuntimeError, "boundary unavailable"):
                 observed.read_boundary()
             self.assertEqual(observed.run_outcome_json, original)
+            self.assertIsNone(observed.report_json)
 
     def test_same_process_outcome_then_one_shot_boundary_for_sgd_and_adamw(self):
         design = source.protocol.decode_json(source.frozen_fixture()[0])
@@ -114,7 +118,10 @@ class BoundaryGpu(unittest.TestCase):
                 self.assertFalse(outcome["release_ready"])
                 self.assertEqual(outcome["request_sha256"], study.request_sha256)
                 self.assertEqual(outcome["case"], "frozen")
-                self.assertEqual(outcome["report"], json.loads(study.run_wgpu()))
+                raw_report = observed.report_json
+                self.assertIsInstance(raw_report, str)
+                self.assertEqual(raw_report, study.run_wgpu())
+                self.assertEqual(outcome["report"], json.loads(raw_report))
                 reference = study.case_checkpoint(first.checkpoint, "frozen").to_json()
                 self.assertEqual(first.checkpoint.to_json(), saved)
                 del study
@@ -136,8 +143,11 @@ class BoundaryGpu(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "already consumed"):
                     observed.read_boundary()
                 self.assertEqual(observed.run_outcome_json, raw_outcome)
+                self.assertEqual(observed.report_json, raw_report)
                 with self.assertRaises(AttributeError):
                     observed.run_outcome_json = "{}"
+                with self.assertRaises(AttributeError):
+                    observed.report_json = "{}"
 
 
 if __name__ == "__main__":

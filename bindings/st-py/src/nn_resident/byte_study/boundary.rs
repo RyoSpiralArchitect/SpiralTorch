@@ -10,6 +10,7 @@ use std::sync::Mutex;
 )]
 pub(super) struct PyByteCorpusBoundaryObservation {
     run_outcome_json: String,
+    report_json: Option<String>,
     #[cfg(feature = "wgpu")]
     boundary: Mutex<Option<st_nn::resident::ByteDecoderCheckpointHandles>>,
 }
@@ -20,6 +21,12 @@ impl PyByteCorpusBoundaryObservation {
         observation: st_nn::resident::ByteCorpusBoundaryObservation,
     ) -> PyResult<Self> {
         Ok(Self {
+            report_json: observation
+                .run_outcome
+                .get("report")
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(value_error)?,
             run_outcome_json: serde_json::to_string(&observation.run_outcome)
                 .map_err(value_error)?,
             boundary: Mutex::new(observation.boundary),
@@ -33,6 +40,13 @@ impl PyByteCorpusBoundaryObservation {
     #[getter]
     fn run_outcome_json(&self) -> &str {
         &self.run_outcome_json
+    }
+
+    /// Rust's exact report serialization, or None on run failure. Do not
+    /// reconstruct it from decoded Python values for byte-exact comparisons.
+    #[getter]
+    fn report_json(&self) -> Option<&str> {
+        self.report_json.as_deref()
     }
 
     /// Consume once, even on failure. Save run_outcome_json before calling this.

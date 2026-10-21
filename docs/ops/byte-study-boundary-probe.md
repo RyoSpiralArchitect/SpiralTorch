@@ -136,6 +136,11 @@ WASM callers too. WASM callers use the existing async readback after `snapshot()
 no synchronous browser wait or new browser binding is introduced here.
 Python's `ByteCorpusBoundaryObservation` has no public constructor, keeps its
 `run_outcome_json` immutable, and consumes `read_boundary()` once, even on failure.
+Its read-only `report_json` is the completed report serialized directly by Rust,
+with the same serializer as `run_wgpu()`; it is `None` when the run fails. Use
+that string for the existing exact-byte comparison. Rebuilding it with Python's
+`json.dumps(json.loads(...)["report"])` can change number spelling and create a
+serialization-only mismatch, even if decoded numeric values are equal.
 
 The outcome schema `spiraltorch.byte_retained_boundary.v1` distinguishes the
 completed study report from an execution error and records whether a boundary
@@ -149,10 +154,17 @@ even though the run's update receipt was rejected; it is not acceptance evidence
 
 This is **still instrumented**: buffer lifetimes and host work change. A new
 binary also differs from any previously failing extension. The ordinary
-`run_wgpu()`/`advance_wgpu()`, original prepared-study tests and hosted workflow
-remain unchanged. A same-process diagnostic must be selected in advance, never
+`run_wgpu()`/`advance_wgpu()` and original prepared-study tests remain unchanged.
+A same-process diagnostic must be selected in advance, never
 substituted for a failed original run or used as retry-until-green. It is not a
 release gate and does not lift the publication hold.
+
+Normal CI qualifies this client in a separate, ten-minute-bounded step after
+the original GPU suite and its failure-evidence handling. It runs only on prior
+success, does not replace any original comparison, and is not a post-failure
+retry. Its synthetic fixtures test the client contract, not the historical
+failure. The portable lane checks exports and CPU-only preflight without GPU
+opt-in; its CPU-artifact-only rejection test skips when the wheel includes WGPU.
 
 ## Hosted post-failure capture
 
