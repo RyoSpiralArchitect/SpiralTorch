@@ -84,6 +84,56 @@ fn update_observer_freezes_first_boundary_without_reading_until_completion() {
 }
 
 #[test]
+fn update_observer_retains_first_boundary_without_copying_until_completion() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.observer.retained")
+            .unwrap();
+    for adamw in [false, true] {
+        let study = request(adamw);
+        let mut handles = Vec::new();
+        let observed = pollster::block_on(study.run_with_update_observer(
+            runtime.clone(),
+            |name, step, model| {
+                if step == 1 {
+                    handles.push((name.to_owned(), model.retain_checkpoint()?));
+                }
+                Ok(())
+            },
+        ))
+        .unwrap();
+        assert_eq!(handles.len(), 3);
+        // All model owners have been dropped, and each has submitted update 2.
+        // Only now do we submit diagnostic copies, then map their results.
+        let boundaries: Vec<_> = handles
+            .into_iter()
+            .map(|(name, handles)| (name, handles.snapshot().unwrap().read().unwrap()))
+            .collect();
+        assert_eq!(
+            observed,
+            pollster::block_on(study.run(runtime.clone())).unwrap(),
+            "retained-handle fixture, adamw={adamw}"
+        );
+        let first = pollster::block_on(study.advance(runtime.clone(), None, 1)).unwrap();
+        for (name, boundary) in boundaries {
+            assert_eq!(boundary.attempted_revision(), 1);
+            assert_eq!(boundary.adamw_state().is_some(), adamw);
+            assert_eq!(
+                boundary.to_json().unwrap(),
+                study
+                    .case_checkpoint(&first.checkpoint, &name)
+                    .unwrap()
+                    .to_json()
+                    .unwrap(),
+                "retained first-boundary weights, moments and clocks, case={name}, adamw={adamw}"
+            );
+        }
+    }
+}
+
+#[test]
 fn update_observer_error_aborts_before_the_next_callback() {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
         return;
@@ -114,4 +164,121 @@ fn update_observer_error_aborts_before_the_next_callback() {
             .unwrap()
     );
     assert_eq!(first.checkpoint.to_json().unwrap(), before);
+}
+
+#[test]
+fn retained_boundary_client_preserves_outcome_and_matches_selected_first_state() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.boundary.client").unwrap();
+    for adamw in [false, true] {
+        let study = request(adamw);
+        let first = pollster::block_on(study.advance(runtime.clone(), None, 1)).unwrap();
+        let reference = study.case_checkpoint(&first.checkpoint, "frozen").unwrap();
+        let saved = first.checkpoint.to_json().unwrap();
+        let observed = pollster::block_on(study.run_with_retained_boundary(
+            runtime.clone(),
+            &first.checkpoint,
+            "frozen",
+        ))
+        .unwrap();
+        assert_eq!(observed.run_outcome["status"], "completed");
+        assert_eq!(observed.run_outcome["all_cases_completed"], true);
+        assert_eq!(observed.run_outcome["boundary_captured"], true);
+        assert_eq!(observed.run_outcome["release_ready"], false);
+        assert_eq!(observed.run_outcome["case"], "frozen");
+        assert_eq!(
+            observed.run_outcome["request_sha256"],
+            study.request_sha256()
+        );
+        assert_eq!(
+            observed.run_outcome["report"],
+            pollster::block_on(study.run(runtime.clone())).unwrap()
+        );
+        assert_eq!(first.checkpoint.to_json().unwrap(), saved);
+        drop(study);
+        let boundary = observed
+            .boundary
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        assert_eq!(boundary.to_json().unwrap(), reference.to_json().unwrap());
+        assert_eq!(boundary.attempted_revision(), 1);
+        assert_eq!(boundary.adamw_state().is_some(), adamw);
+        // Reading diagnostic state cannot replace the completed study outcome.
+        assert_eq!(observed.run_outcome["status"], "completed");
+    }
+}
+
+#[test]
+fn retained_boundary_keeps_real_study_errors_before_and_after_capture() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.boundary.failure").unwrap();
+    for fail_before_capture in [true, false] {
+        let mut value = tests::fixture();
+        value["rate"] = json!(f32::MAX);
+        // All-equal extreme head biases keep the initial softmax finite. SGD's
+        // target-bias increase then overflows. Extreme head weights additionally
+        // force initial evaluation to fail, before the selected update exists.
+        for case in value["cases"].as_array_mut().unwrap() {
+            let parameters = case["parameters"].as_array_mut().unwrap();
+            let last = parameters.len() - 1;
+            for slot in [last, last - 1] {
+                if slot == last || fail_before_capture {
+                    for number in parameters[slot]["values"].as_array_mut().unwrap() {
+                        *number = json!(f32::MAX);
+                    }
+                }
+            }
+        }
+        let study = ByteCorpusStudy::from_json(value.to_string().as_bytes()).unwrap();
+        let reference = tests::saved(&study, 1); // Structural reference, not a training claim.
+        let observed = pollster::block_on(study.run_with_retained_boundary(
+            runtime.clone(),
+            &reference,
+            "plain",
+        ))
+        .unwrap();
+        assert_eq!(
+            observed.run_outcome["status"], "error",
+            "before={fail_before_capture}"
+        );
+        assert_eq!(observed.run_outcome["all_cases_completed"], false);
+        assert_eq!(
+            observed.run_outcome["boundary_captured"],
+            !fail_before_capture
+        );
+        assert!(observed.run_outcome["error"]
+            .as_str()
+            .is_some_and(|e| !e.is_empty()));
+        let original = observed.run_outcome.to_string();
+        eprintln!("diagnostic failure fixture before_capture={fail_before_capture}: {original}");
+        if let Some(handles) = observed.boundary {
+            // Rejected SGD preserves the old valid weights and still advances
+            // the attempted revision. Readable state is NOT an accepted update.
+            let boundary = handles
+                .snapshot()
+                .and_then(|capture| capture.read())
+                .unwrap();
+            assert_eq!(boundary.attempted_revision(), 1);
+            assert_eq!(
+                boundary.to_json().unwrap(),
+                study
+                    .case_checkpoint(&reference, "plain")
+                    .unwrap()
+                    .to_json()
+                    .unwrap()
+            );
+        } else {
+            assert!(fail_before_capture);
+        }
+        assert_eq!(observed.run_outcome.to_string(), original);
+    }
 }

@@ -226,6 +226,29 @@ impl ResidentParameters {
         }))
     }
 
+    /// Retain immutable optimizer buffers without submitting GPU commands or
+    /// mapping memory. Later updates replace, rather than mutate, these buffers.
+    /// This extends resource lifetimes; it is not an unperturbed observation.
+    pub fn retain_adamw_snapshot(&self) -> Option<ResidentAdamWSnapshot> {
+        self.adamw.as_ref().map(|state| ResidentAdamWSnapshot {
+            device: self.device.clone(),
+            config: state.config,
+            shapes: self
+                .current
+                .values
+                .iter()
+                .map(|p| p.layout().shape().to_vec())
+                .collect(),
+            revision: self.current.version.revision,
+            slots: state
+                .slots
+                .iter()
+                .zip(&self.current.values)
+                .map(|(slot, p)| (slot.clone(), p.layout().len()))
+                .collect(),
+        })
+    }
+
     pub fn adamw(
         &mut self,
         gradients: &ResidentParameterGradients,
@@ -371,6 +394,38 @@ impl ResidentParameters {
             flags,
             count,
             revision,
+        })
+    }
+}
+
+/// Retained handles for one immutable optimizer revision. Call `snapshot()` to
+/// submit copies later, even after the owner is dropped. Model values must be
+/// retained from the same owner revision by a complete checkpoint API; this
+/// handle alone does not establish update acceptance or checkpoint completeness.
+pub struct ResidentAdamWSnapshot {
+    device: TensorDevice,
+    config: AdamWConfig,
+    shapes: Vec<Vec<usize>>,
+    revision: u64,
+    slots: Vec<(Shared<wgpu::Buffer>, usize)>,
+}
+
+impl ResidentAdamWSnapshot {
+    pub fn snapshot(self) -> Result<ResidentAdamWReadback, TrainingError> {
+        let sources = self
+            .slots
+            .iter()
+            .map(|(slot, len)| Ok((slot.as_ref(), words(*len, 2)?)))
+            .collect::<Result<Vec<_>, TrainingError>>()?;
+        Ok(ResidentAdamWReadback {
+            config: self.config,
+            shapes: self.shapes,
+            revision: self.revision,
+            batch: runtime::ReadbackBatch::copy(
+                self.device.runtime().context(),
+                &sources,
+                "adamw.retained_snapshot",
+            )?,
         })
     }
 }

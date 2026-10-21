@@ -7,7 +7,7 @@ use crate::resident_tensor::{storage_limit, INVALID_TENSOR_FLAG};
 mod adamw;
 mod clipping;
 use adamw::AdamWWorkspace;
-pub use adamw::{AdamWSlot, AdamWState, ResidentAdamWReadback};
+pub use adamw::{AdamWSlot, AdamWState, ResidentAdamWReadback, ResidentAdamWSnapshot};
 use clipping::ClippingKernels;
 
 #[derive(Clone, Debug)]

@@ -247,6 +247,18 @@ impl ByteDecoderPlan {
 }
 
 impl ResidentByteDecoder {
+    /// Retain a complete immutable model revision without submitting GPU
+    /// commands or mapping memory. Call `snapshot()` on the returned handles
+    /// later to copy it. This still extends GPU resource lifetimes.
+    pub fn retain_checkpoint(&self) -> Result<ByteDecoderCheckpointHandles, InferenceError> {
+        require_uncommitted_route()?;
+        Ok(self.checkpoint_template.retain(
+            self.tensor_device(),
+            self.parameter_snapshot(),
+            self.parameters.retain_adamw_snapshot(),
+        ))
+    }
+
     /// Submit one complete immutable model capture without mapping GPU memory.
     /// Read it explicitly (asynchronously in a browser) to obtain a checkpoint.
     pub fn checkpoint_snapshot(&self) -> Result<ByteDecoderCheckpointReadback, InferenceError> {
