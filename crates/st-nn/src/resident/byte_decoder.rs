@@ -8,13 +8,13 @@ pub use geometry::{
     ByteDecoderPairMetric,
 };
 mod checkpoint;
-#[cfg(feature = "wgpu")]
-pub use checkpoint::ByteDecoderCheckpointReadback;
 pub use checkpoint::{
     ByteDecoderCheckpoint, BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA, BYTE_DECODER_CHECKPOINT_SCHEMA,
     BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA, BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA,
     BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA, BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA,
 };
+#[cfg(feature = "wgpu")]
+pub use checkpoint::{ByteDecoderCheckpointHandles, ByteDecoderCheckpointReadback};
 
 #[cfg(feature = "wgpu")]
 mod training;

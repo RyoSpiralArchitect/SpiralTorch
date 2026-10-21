@@ -26,9 +26,9 @@ pub use attention::{
 };
 #[cfg(feature = "wgpu")]
 pub use byte_decoder::{
-    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderCheckpointReadback,
-    ByteDecoderQueryPullback, ResidentByteBatch, ResidentByteDecoder, ResidentByteDecoderForward,
-    ResidentByteDecoderVjp,
+    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderCheckpointHandles,
+    ByteDecoderCheckpointReadback, ByteDecoderQueryPullback, ResidentByteBatch,
+    ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
 pub use byte_decoder::{
     ByteDecoderCheckpoint, ByteDecoderGeometryMixture, ByteDecoderGeometryParameterLayout,
@@ -38,8 +38,6 @@ pub use byte_decoder::{
     BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA, BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA,
     BYTE_LM_VOCAB,
 };
-#[cfg(feature = "wgpu")]
-pub use byte_study::ByteCorpusGeneration;
 pub use byte_study::ByteCorpusServingGate;
 pub use byte_study::{
     ByteCorpusBiasCalibration, ByteCorpusCheckpointSelection, ByteCorpusHeadwiseControls,
@@ -48,6 +46,8 @@ pub use byte_study::{
     ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment,
     BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
+#[cfg(feature = "wgpu")]
+pub use byte_study::{ByteCorpusBoundaryObservation, ByteCorpusGeneration};
 #[cfg(feature = "wgpu")]
 pub use byte_study::{ResidentByteCandidate, ResidentByteServing};
 #[cfg(feature = "wgpu")]

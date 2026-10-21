@@ -32,6 +32,7 @@ type UpdateObserverFn = fn(&str, usize, &ResidentByteDecoder) -> Result<()>;
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
 mod artifact;
+mod boundary;
 mod calibration;
 mod clipping;
 #[cfg(any(feature = "wgpu", test))]
@@ -50,6 +51,8 @@ pub use artifact::{
 };
 #[cfg(feature = "wgpu")]
 pub use artifact::{ResidentByteInference, ResidentByteInferenceForward};
+#[cfg(feature = "wgpu")]
+pub use boundary::ByteCorpusBoundaryObservation;
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
 #[cfg(feature = "wgpu")]
 pub use generation::ByteCorpusGeneration;
@@ -750,8 +753,10 @@ impl ByteCorpusStudy {
     ///
     /// A caller can retain `model.checkpoint_snapshot()` and read it only after
     /// this run returns, freezing weights and optimizer state without a per-step
-    /// CPU wait. Capturing still adds GPU copies and changes resource lifetimes;
-    /// a passing observed run does not establish that `run()` is deterministic.
+    /// CPU wait. Alternatively, retain `model.retain_checkpoint()` and submit its
+    /// `snapshot()` copies only after this run returns. The former adds GPU
+    /// copies between updates; both change resource lifetimes and host work.
+    /// A passing observed run does not establish that `run()` is deterministic.
     /// No observer, snapshots or additional GPU commands are added to `run()`.
     #[cfg(feature = "wgpu")]
     pub async fn run_with_update_observer(

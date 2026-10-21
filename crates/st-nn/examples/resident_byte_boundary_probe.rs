@@ -4,12 +4,71 @@ mod native {
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
     use st_backend_wgpu::runtime;
-    use st_nn::resident::{ByteCorpusStudy, BYTE_CORPUS_STUDY_MAX_BYTES};
+    use st_nn::resident::{
+        ByteCorpusStudy, ByteDecoderCheckpointHandles, ByteDecoderCheckpointReadback,
+        ResidentByteDecoder, BYTE_CORPUS_STUDY_MAX_BYTES,
+    };
     use std::fs::{self, OpenOptions};
     use std::io::{Read, Write};
     use std::path::Path;
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum CaptureMode {
+        Copied,
+        Retained,
+    }
+
+    impl CaptureMode {
+        fn parse(value: Option<&str>) -> Result<Self> {
+            match value {
+                None | Some("copied") => Ok(Self::Copied),
+                Some("retained") => Ok(Self::Retained),
+                _ => Err("capture mode must be copied or retained".into()),
+            }
+        }
+
+        fn label(self) -> &'static str {
+            match self {
+                Self::Copied => "copied",
+                Self::Retained => "retained",
+            }
+        }
+
+        fn scope(self) -> &'static str {
+            match self {
+                Self::Copied => "GPU copies are submitted at update 1; resource lifetimes change.",
+                Self::Retained => {
+                    "Only immutable handles are retained at update 1; diagnostic \
+                    copies are submitted after run returns. Resource lifetimes and host work \
+                    still change, so this is not an unperturbed observation."
+                }
+            }
+        }
+
+        fn capture(self, model: &ResidentByteDecoder) -> Result<Boundary> {
+            Ok(match self {
+                Self::Copied => Boundary::Copied(model.checkpoint_snapshot()?),
+                Self::Retained => Boundary::Retained(model.retain_checkpoint()?),
+            })
+        }
+    }
+
+    enum Boundary {
+        Copied(ByteDecoderCheckpointReadback),
+        Retained(ByteDecoderCheckpointHandles),
+    }
+
+    impl Boundary {
+        fn read(self) -> Result<String> {
+            let capture = match self {
+                Self::Copied(capture) => capture,
+                Self::Retained(handles) => handles.snapshot()?,
+            };
+            Ok(capture.read()?.to_json()?)
+        }
+    }
 
     fn read(path: &Path) -> Result<Vec<u8>> {
         let mut options = OpenOptions::new();
@@ -63,6 +122,7 @@ mod native {
 
     fn finish(
         dir: &Path,
+        mode: CaptureMode,
         result: Result<Value>,
         reference: &str,
         read_boundary: impl FnOnce() -> Result<String>,
@@ -95,13 +155,15 @@ mod native {
             "summary.json",
             &json!({
                 "schema": "spiraltorch.byte_boundary_probe.v1",
+                "capture_mode": mode.label(),
+                "capture_scope": mode.scope(),
                 "release_ready": false,
                 "run_error": run_error,
                 "boundary_error": boundary_error,
                 "boundary_equal_to_reference": equal,
                 "observed_boundary_sha256": boundary_hash,
                 "reference_boundary_sha256": sha256(reference.as_bytes()),
-                "scope": "Instrumented run. GPU copies and resource lifetimes differ from run(). \
+                "scope": "Instrumented run, not an unperturbed observation. \
                     Exact canonical checkpoint comparison, not tolerance or root-cause evidence. \
                     Compare the saved report with the original failure and resumed report separately."
             }),
@@ -123,12 +185,17 @@ mod native {
 
     pub fn run() -> Result<()> {
         let args: Vec<_> = std::env::args_os().skip(1).collect();
-        if args.len() != 4 {
+        if !(4..=5).contains(&args.len()) {
             return Err(
-                "usage: resident_byte_boundary_probe REQUEST FIRST_CHECKPOINT CASE NEW_OUTPUT_DIR"
+                "usage: resident_byte_boundary_probe REQUEST FIRST_CHECKPOINT CASE NEW_OUTPUT_DIR [copied|retained]"
                     .into(),
             );
         }
+        let mode = CaptureMode::parse(
+            args.get(4)
+                .map(|arg| arg.to_str().ok_or("capture mode must be UTF-8"))
+                .transpose()?,
+        )?;
         let request = read(Path::new(&args[0]))?;
         let first_bytes = read(Path::new(&args[1]))?;
         let name = args[2].to_str().ok_or("case name must be UTF-8")?;
@@ -157,6 +224,8 @@ mod native {
                 "request_sha256": study.request_sha256(),
                 "reference_first_checkpoint_sha256": sha256(&first_bytes),
                 "case": name, "requested_capture_after_update": 1, "all_cases_requested": true,
+                "capture_mode": mode.label(),
+                "capture_scope": mode.scope(),
                 "boundary_read_policy": "after_run_returns",
                 "executable_sha256": executable_hash,
                 "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
@@ -182,23 +251,52 @@ mod native {
                         if snapshot.is_some() {
                             return Err("selected first boundary observed more than once".into());
                         }
-                        snapshot = Some(model.checkpoint_snapshot()?);
+                        snapshot = Some(mode.capture(model)?);
                     }
                     Ok(())
                 }),
             )
         })();
-        finish(dir, result, &reference, || {
-            Ok(snapshot
+        finish(dir, mode, result, &reference, || {
+            snapshot
                 .ok_or("selected first boundary was not reached")?
-                .read()?
-                .to_json()?)
+                .read()
         })
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn capture_mode_is_explicit_and_default_stays_copied() {
+            assert_eq!(CaptureMode::parse(None).unwrap(), CaptureMode::Copied);
+            assert_eq!(
+                CaptureMode::parse(Some("copied")).unwrap(),
+                CaptureMode::Copied
+            );
+            assert_eq!(
+                CaptureMode::parse(Some("retained")).unwrap(),
+                CaptureMode::Retained
+            );
+            assert!(CaptureMode::parse(Some("retain")).is_err());
+            assert!(CaptureMode::parse(Some("")).is_err());
+        }
+
+        #[test]
+        fn both_capture_modes_preserve_exact_comparison_and_release_hold() {
+            for mode in [CaptureMode::Copied, CaptureMode::Retained] {
+                let dir = tempfile::tempdir().unwrap();
+                finish(dir.path(), mode, Ok(json!({})), "{}", || Ok("{}".into())).unwrap();
+                let summary: Value =
+                    serde_json::from_slice(&read(&dir.path().join("summary.json")).unwrap())
+                        .unwrap();
+                assert_eq!(summary["capture_mode"], mode.label());
+                assert_eq!(summary["capture_scope"], mode.scope());
+                assert_eq!(summary["boundary_equal_to_reference"], true);
+                assert_eq!(summary["release_ready"], false);
+            }
+        }
 
         #[test]
         fn output_is_exclusive_and_input_is_bounded_and_regular() {
@@ -220,14 +318,21 @@ mod native {
         fn failing_boundary_keeps_successful_primary_report() {
             let dir = tempfile::tempdir().unwrap();
             let report = json!({"original": "full outcome"});
-            let error = finish(dir.path(), Ok(report.clone()), "{}", || {
-                let saved: Value =
-                    serde_json::from_slice(&read(&dir.path().join("run-outcome.json")).unwrap())
-                        .unwrap();
-                assert_eq!(saved["report"], report);
-                assert_eq!(saved["all_cases_completed"], true);
-                Err("injected readback failure".into())
-            })
+            let error = finish(
+                dir.path(),
+                CaptureMode::Copied,
+                Ok(report.clone()),
+                "{}",
+                || {
+                    let saved: Value = serde_json::from_slice(
+                        &read(&dir.path().join("run-outcome.json")).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(saved["report"], report);
+                    assert_eq!(saved["all_cases_completed"], true);
+                    Err("injected readback failure".into())
+                },
+            )
             .unwrap_err();
             assert!(error.to_string().contains("injected readback failure"));
             let summary: Value =
@@ -242,6 +347,7 @@ mod native {
             let dir = tempfile::tempdir().unwrap();
             let error = finish(
                 dir.path(),
+                CaptureMode::Copied,
                 Err("original study failure".into()),
                 "{}",
                 || {
@@ -261,9 +367,13 @@ mod native {
         #[test]
         fn mismatch_is_not_accepted_or_tolerance_adjusted() {
             let dir = tempfile::tempdir().unwrap();
-            assert!(finish(dir.path(), Ok(json!({})), "{\"weight\":1.0}", || {
-                Ok("{\"weight\":1.0000001}".into())
-            })
+            assert!(finish(
+                dir.path(),
+                CaptureMode::Copied,
+                Ok(json!({})),
+                "{\"weight\":1.0}",
+                || { Ok("{\"weight\":1.0000001}".into()) }
+            )
             .is_err());
             let summary: Value =
                 serde_json::from_slice(&read(&dir.path().join("summary.json")).unwrap()).unwrap();

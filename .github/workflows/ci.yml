@@ -412,6 +412,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
+      - name: Qualify the separate Python retained-boundary client
+        if: success()
+        timeout-minutes: 10
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+          SPIRALTORCH_STRICT_GPU: "1"
+        run: python -I -B bindings/st-py/tests/test_nn_byte_study_boundary.py -v
+
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
     runs-on: ubuntu-latest
@@ -647,6 +655,7 @@ jobs:
           python -I -B benchmarks/results/2026-10-19-native-lm-projections/test_publication.py -v
           python -I -B bindings/st-py/examples/native_weights_geometry.py
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
+          python -I -B bindings/st-py/tests/test_nn_byte_study_boundary.py BoundaryPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
       - name: Resident classifier surface and handoff verifier
         run: |

@@ -7,7 +7,9 @@ use st_nn::resident::ByteCorpusStudySegment;
 use st_nn::resident::{ByteCorpusStudy, ByteCorpusStudyCheckpoint, BYTE_CORPUS_STUDY_MAX_BYTES};
 use std::sync::Arc;
 
+mod boundary;
 mod preparation;
+use boundary::PyByteCorpusBoundaryObservation;
 
 fn value_error(error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(error.to_string())
@@ -252,6 +254,38 @@ impl PyByteCorpusStudy {
         }
     }
 
+    /// Diagnostic run in this process, not ordinary run/resume qualification.
+    /// Save run_outcome_json before explicitly reading the retained boundary.
+    /// Retention changes host work and resource lifetimes, not the optimizer.
+    fn run_wgpu_with_retained_boundary(
+        &self,
+        py: Python<'_>,
+        first_checkpoint: &PyByteCorpusStudyCheckpoint,
+        case_name: &str,
+    ) -> PyResult<PyByteCorpusBoundaryObservation> {
+        py.detach(|| {
+            self.inner
+                .validate_retained_boundary_reference(&first_checkpoint.inner, case_name)
+                .map_err(value_error)
+        })?;
+        #[cfg(feature = "wgpu")]
+        {
+            on_gpu(py, |runtime| {
+                let observed = pollster::block_on(self.inner.run_with_retained_boundary(
+                    runtime,
+                    &first_checkpoint.inner,
+                    case_name,
+                ))
+                .map_err(value_error)?;
+                PyByteCorpusBoundaryObservation::from_observation(observed)
+            })
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            requires_wgpu()
+        }
+    }
+
     /// Advance every case atomically to one absolute accepted-update boundary.
     #[pyo3(signature = (stop_after=None, *, resume=None))]
     fn advance_wgpu(
@@ -349,6 +383,7 @@ pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyByteCorpusStudy>()?;
     module.add_class::<PyByteCorpusStudyCheckpoint>()?;
     module.add_class::<PyByteCorpusStudySegment>()?;
+    module.add_class::<PyByteCorpusBoundaryObservation>()?;
     module.add("BYTE_CORPUS_STUDY_MAX_BYTES", BYTE_CORPUS_STUDY_MAX_BYTES)?;
     preparation::register(module)
 }

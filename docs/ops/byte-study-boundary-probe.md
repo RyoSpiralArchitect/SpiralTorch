@@ -30,18 +30,27 @@ The native `resident_byte_boundary_probe` example:
 
 - Validates the exact request and request-bound, all-case update-1 checkpoint
   before requesting a GPU. Inputs must be regular files of at most 64 MiB.
-- Runs every case in the request's original order, retaining a single
-  `checkpoint_snapshot()` after update 1 of the selected case.
-- Does not map that snapshot until the entire observed study has returned.
-  Its original scheduled drains/evaluations still occur.
+- Runs every case in the request's original order. The default `copied` mode
+  submits a single `checkpoint_snapshot()` after update 1 of the selected case.
+- The optional `retained` mode calls `retain_checkpoint()` instead. It only
+  clones immutable parameter and optimizer handles at update 1. Diagnostic
+  GPU copies are not submitted until the observed study has returned.
+- Neither mode maps the captured boundary until the observed study has returned.
+  Its original scheduled drains/evaluations still occur. Mode and limitations
+  are recorded in both the invocation and summary.
 - Saves `run-outcome.json` **before** attempting the boundary readback. A
   failed study or diagnostic read does not replace the other result.
 - Saves both canonical model checkpoints, compares them exactly, and records
   their hashes, the executable hash, adapter, original inputs and run metadata.
   Output must be a new directory. Mismatch or execution error exits nonzero.
 
-GPU copies and retained staging buffers alter submissions, timing and memory
-lifetimes. Even an equal boundary and passing report do **not** prove the
+The default mode adds GPU copies and retains staging buffers between updates.
+Retained-handle mode avoids those additional submissions, but still changes host
+work and GPU resource lifetimes; it is not an unperturbed control. Neither mode
+changes the ordinary `run()` or checkpoint path. Later parameter/AdamW updates
+allocate new buffers, so delayed copies still read the retained revision, even
+after the model is dropped. Neither retention nor copying proves acceptance.
+Even an equal boundary and passing report do **not** prove the
 uninstrumented path is fixed. The full original fixture is synthetic; no
 language-quality or throughput claim is made.
 
@@ -50,6 +59,8 @@ language-quality or throughput claim is made.
 Retain the first original failure before building or running the probe. Declare
 the selected case, source/patch, toolchain, build flags, execution deadline and
 one attempt in the private run receipt. Do not retry unchanged runs until green.
+Declare the capture mode too; do not switch modes in response to a failure and
+discard the previous outcome. The hosted supervisor retains the `copied` default.
 Record the build/source identity separately; an executable hash alone does not
 attest the Git checkout. Use a process-owning supervisor for a finite deadline;
 the example itself does not impose a whole-process timeout.
@@ -64,6 +75,13 @@ target/debug/examples/resident_byte_boundary_probe \
   mixture-11-3-train-query-train \
   /absolute/private/new-boundary-run
 ```
+
+To predeclare the retained-handle variant, append `retained` after the new output
+directory. Omitting the argument or passing `copied` preserves the existing
+capture path. The retained checkpoint's explicit API is
+`model.retain_checkpoint()?.snapshot()?.read()?` on native, or `read_async().await`
+on WASM; keep the handles until the chosen observation window has ended before
+calling `snapshot()`.
 
 The case name must exist in that request. For the preserved v6 failure, use its
 `headwise-11-1-0-frozen` case instead. These are separate declared conditions,
@@ -85,6 +103,68 @@ strings across hosts. Do not remove fields or relax numeric equality:
 Host/native-binary changes are additional confounders. Keep original payloads
 private; publish only summaries, hashes and reproduction instructions. This
 probe creates no release, tag, wheel upload or publication authorization.
+
+## Same-process Python observation
+
+The separate native probe cannot inherit the original Python process history.
+For a separately declared instrumented comparison, Python can now call the
+same Rust runner without starting another process:
+
+```python
+observed = study.run_wgpu_with_retained_boundary(first.checkpoint, case_name)
+# Persist this before readback; a failed diagnostic must not erase the run.
+with (new_output_dir / "run-outcome.json").open("x") as stream:
+    stream.write(observed.run_outcome_json)
+boundary = observed.read_boundary()  # one-shot, including on read failure
+with (new_output_dir / "observed-boundary.json").open("x") as stream:
+    stream.write(boundary.to_json())
+```
+
+`first` is an existing all-case update-1 segment for this exact request.
+Preflight checks its complete ownership/layout/history contract, the selected
+case name, and at least two requested updates before acquiring a Python GPU
+runtime. It does **not** initialize the observed run from that reference.
+The observed run executes all cases in their original order from their original
+initialization. Only the chosen case's first-update handles are retained.
+Their copies and mapping start only at the explicit `read_boundary()` call,
+after the whole run has returned, potentially after its model owners are dropped.
+
+Rust owns this contract through `validate_retained_boundary_reference()` and
+`run_with_retained_boundary()`. The returned Rust `ByteCorpusBoundaryObservation`
+separates `run_outcome` from optional `boundary` handles, usable by native and
+WASM callers too. WASM callers use the existing async readback after `snapshot()`;
+no synchronous browser wait or new browser binding is introduced here.
+Python's `ByteCorpusBoundaryObservation` has no public constructor, keeps its
+`run_outcome_json` immutable, and consumes `read_boundary()` once, even on failure.
+Its read-only `report_json` is the completed report serialized directly by Rust,
+with the same serializer as `run_wgpu()`; it is `None` when the run fails. Use
+that string for the existing exact-byte comparison. Rebuilding it with Python's
+`json.dumps(json.loads(...)["report"])` can change number spelling and create a
+serialization-only mismatch, even if decoded numeric values are equal.
+
+The outcome schema `spiraltorch.byte_retained_boundary.v1` distinguishes the
+completed study report from an execution error and records whether a boundary
+was captured. Save either outcome. A successful diagnostic read does not turn an
+errored study into an accepted run; a read error leaves the original outcome
+available. Callers must preserve the read error separately and compare the
+completed report against the reference run, not infer a repair from read success.
+In particular, rejected SGD preserves the old valid parameter bits while
+advancing the attempted revision. That diagnostic checkpoint can be readable
+even though the run's update receipt was rejected; it is not acceptance evidence.
+
+This is **still instrumented**: buffer lifetimes and host work change. A new
+binary also differs from any previously failing extension. The ordinary
+`run_wgpu()`/`advance_wgpu()` and original prepared-study tests remain unchanged.
+A same-process diagnostic must be selected in advance, never
+substituted for a failed original run or used as retry-until-green. It is not a
+release gate and does not lift the publication hold.
+
+Normal CI qualifies this client in a separate, ten-minute-bounded step after
+the original GPU suite and its failure-evidence handling. It runs only on prior
+success, does not replace any original comparison, and is not a post-failure
+retry. Its synthetic fixtures test the client contract, not the historical
+failure. The portable lane checks exports and CPU-only preflight without GPU
+opt-in; its CPU-artifact-only rejection test skips when the wheel includes WGPU.
 
 ## Hosted post-failure capture
 

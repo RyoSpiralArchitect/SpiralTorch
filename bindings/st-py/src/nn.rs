@@ -11051,6 +11051,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "ResidentByteServing",
             "ByteCorpusStudyCheckpoint",
             "ByteCorpusStudySegment",
+            "ByteCorpusBoundaryObservation",
             "ByteCorpusPreparedBiasStudy",
             "ByteCorpusBiasCalibration",
             "ByteCorpusHeadwiseControls",

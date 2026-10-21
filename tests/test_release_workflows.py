@@ -15,6 +15,50 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_retained_boundary_client_is_qualified_after_original_failure_handling(self) -> None:
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        gpu = ci.split("\n  wgpu-macos:\n", 1)[1].split("\n  wasm-build:\n", 1)[0]
+        original = next(step for step in gpu.split("\n      - ")
+                        if "id: byte_python\n" in step)
+        commands = [line.strip() for line in original.splitlines()
+                    if line.strip().startswith("python -I -B ")]
+        self.assertEqual(commands, [f"python -I -B bindings/st-py/tests/{name}.py -v" for name in (
+            "test_wgpu_attention", "test_nn_attention_training",
+            "test_nn_residual_attention_training", "test_nn_byte_decoder",
+            "test_nn_byte_study", "test_nn_byte_serving", "test_nn_byte_generation",
+        )])
+        name = "name: Qualify the separate Python retained-boundary client"
+        diagnostic = next(step for step in gpu.split("\n      - ") if name in step)
+        command = "python -I -B bindings/st-py/tests/test_nn_byte_study_boundary.py -v"
+        self.assertIn("if: success()\n", diagnostic)
+        self.assertIn("timeout-minutes: 10\n", diagnostic)
+        self.assertIn('SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"', diagnostic)
+        self.assertIn('SPIRALTORCH_STRICT_GPU: "1"', diagnostic)
+        self.assertEqual(diagnostic.split("        run: ", 1)[1].strip(), command)
+        self.assertEqual(gpu.count(command), 1)
+        self.assertNotIn("continue-on-error", diagnostic)
+        self.assertNotIn("SPIRALTORCH_PREPARED_STUDY_DIAGNOSTICS", diagnostic)
+        order = [
+            "id: byte_python\n",
+            "name: Retain exact detached-study failure diagnostics",
+            "name: Retain exact contextual-mixture resume failure diagnostics",
+            "name: Retain exact prepared-study replay failure diagnostics",
+            "id: byte_boundary\n",
+            "name: Retain separate byte-study boundary diagnostics",
+            name,
+        ]
+        for marker in order:
+            self.assertEqual(gpu.count(marker), 1)
+        positions = [gpu.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        portable = re.split(r"\n  [a-zA-Z0-9_-]+:\n",
+                            ci.split("\n  python-docs-smoke:\n", 1)[1], maxsplit=1)[0]
+        self.assertIn("python -I -B bindings/st-py/tests/test_nn_byte_study_boundary.py BoundaryPortable -v",
+                      portable)
+        for scope in (ci.split("\njobs:\n", 1)[0], portable):
+            self.assertNotIn("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS:", scope)
+            self.assertNotIn("SPIRALTORCH_STRICT_GPU:", scope)
+
     def test_gpu_study_failures_retain_each_original_comparison(self) -> None:
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         gpu = ci.split("\n  wgpu-macos:\n", 1)[1].split("\n  wasm-build:\n", 1)[0]
