@@ -35,6 +35,8 @@ jobs:
           python3 -I -S -B tools/test_run_byte_corpus_segments.py
           python3 -I -S -B tools/test_hf_affine_replay.py
           python3 -I -S -B tools/test_byte_study_diagnostics.py
+          python3 -I -S -B tools/test_run_byte_study_replay.py
+          python3 -I -S -B tools/test_run_byte_study_boundary.py
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-book-controls -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-geometry-observation -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-learned-radius -p 'test_*.py'
@@ -345,6 +347,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Public Python attention and byte-LM handles on a real GPU
+        id: byte_python
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
@@ -381,11 +384,31 @@ jobs:
           retention-days: 1
 
       - name: Retain exact prepared-study replay failure diagnostics
+        id: prepared_evidence
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: synthetic-byte-study-prepared-failure
           path: ${{ runner.temp }}/byte-study-prepared/
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Observe one retained byte-study first-update boundary
+        id: byte_boundary
+        if: failure() && steps.byte_python.outcome == 'failure' && steps.prepared_evidence.outcome == 'success'
+        timeout-minutes: 35
+        run: |
+          python -I -S -B tools/run_byte_study_boundary.py \
+            --failures "$RUNNER_TEMP/byte-study-prepared" \
+            --output "$RUNNER_TEMP/byte-study-boundary" \
+            --build-timeout-seconds 900 --probe-timeout-seconds 900
+
+      - name: Retain separate byte-study boundary diagnostics
+        if: always() && steps.byte_boundary.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-byte-study-boundary-diagnostic
+          path: ${{ runner.temp }}/byte-study-boundary/
           if-no-files-found: ignore
           retention-days: 1
 

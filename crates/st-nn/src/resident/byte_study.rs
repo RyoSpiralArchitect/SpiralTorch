@@ -26,6 +26,8 @@ use std::collections::BTreeSet;
 /// Errors retain the underlying model, JSON, GPU or study validation error.
 pub type ByteCorpusStudyResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type Result<T> = ByteCorpusStudyResult<T>;
+#[cfg(feature = "wgpu")]
+type UpdateObserverFn = fn(&str, usize, &ResidentByteDecoder) -> Result<()>;
 /// Input and checkpoint JSON are bounded before deserialization.
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
@@ -36,6 +38,8 @@ mod clipping;
 mod generation;
 mod headwise;
 mod mixture;
+#[cfg(all(test, feature = "wgpu", not(target_arch = "wasm32")))]
+mod observer_tests;
 mod optimizer;
 mod policy;
 mod query;
@@ -727,7 +731,36 @@ impl ByteCorpusStudy {
     #[cfg(feature = "wgpu")]
     pub async fn run(&self, runtime: WgpuRuntime) -> Result<Value> {
         Ok(self
-            .execute(runtime, None, self.total_updates(), false)
+            .execute(
+                runtime,
+                None,
+                self.total_updates(),
+                false,
+                None::<UpdateObserverFn>,
+            )
+            .await?
+            .0)
+    }
+
+    /// Observe each submitted update before the next forward or scheduled drain.
+    ///
+    /// The callback receives the case name, one-based attempted update, and an
+    /// immutable model. Submission is not acceptance: ordinary receipt checks
+    /// still apply. Returning an error aborts the observed run.
+    ///
+    /// A caller can retain `model.checkpoint_snapshot()` and read it only after
+    /// this run returns, freezing weights and optimizer state without a per-step
+    /// CPU wait. Capturing still adds GPU copies and changes resource lifetimes;
+    /// a passing observed run does not establish that `run()` is deterministic.
+    /// No observer, snapshots or additional GPU commands are added to `run()`.
+    #[cfg(feature = "wgpu")]
+    pub async fn run_with_update_observer(
+        &self,
+        runtime: WgpuRuntime,
+        observer: impl FnMut(&str, usize, &ResidentByteDecoder) -> Result<()>,
+    ) -> Result<Value> {
+        Ok(self
+            .execute(runtime, None, self.total_updates(), false, Some(observer))
             .await?
             .0)
     }
@@ -743,7 +776,9 @@ impl ByteCorpusStudy {
         resume: Option<&ByteCorpusStudyCheckpoint>,
         stop_after: usize,
     ) -> Result<ByteCorpusStudySegment> {
-        let (report, checkpoint) = self.execute(runtime, resume, stop_after, true).await?;
+        let (report, checkpoint) = self
+            .execute(runtime, resume, stop_after, true, None::<UpdateObserverFn>)
+            .await?;
         Ok(ByteCorpusStudySegment {
             report,
             checkpoint: checkpoint.ok_or("missing captured checkpoint")?,
@@ -751,13 +786,17 @@ impl ByteCorpusStudy {
     }
 
     #[cfg(feature = "wgpu")]
-    async fn execute(
+    async fn execute<F>(
         &self,
         runtime: WgpuRuntime,
         resume: Option<&ByteCorpusStudyCheckpoint>,
         stop_after: usize,
         capture: bool,
-    ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)> {
+        mut observer: Option<F>,
+    ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)>
+    where
+        F: FnMut(&str, usize, &ResidentByteDecoder) -> Result<()>,
+    {
         if capture || self.request.optimizer.is_some() {
             self.validate_segment(resume, stop_after)?;
         }
@@ -845,6 +884,9 @@ impl ByteCorpusStudy {
                     (None, None) => model.sgd_with_rates(&gradients, &rates)?,
                 };
                 pending.push((update, loss.value().clone()));
+                if let Some(observe) = observer.as_mut() {
+                    observe(&case.name, step + 1, &model)?;
+                }
                 if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
                     // Bounded bursts; all receipts are drained even at a pause
                     // that is not a scheduled evaluation boundary.
