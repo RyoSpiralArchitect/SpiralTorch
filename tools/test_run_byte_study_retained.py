@@ -307,6 +307,7 @@ class Supervision(unittest.TestCase):
         return {"schema": "spiraltorch.retained_study.worker.v1", "protocol": API.PROTOCOL,
                 "release_ready": False, "returncode": code, "stage": "finished",
                 "study_status": "completed", "outcome": "no_mismatch_observed",
+                "native_execution_completed": True,
                 "native_calls": ["partial_1", "resume_2", "retained_full_2"],
                 "report_comparison": {"exact_bytes_equal": True,
                     "full_sha256": API.boundary.digest(report().encode()),
@@ -346,6 +347,8 @@ class Supervision(unittest.TestCase):
 
     def test_zero_exit_with_incomplete_or_contradictory_record_fails_closed(self):
         changes = [lambda r: r.pop("boundary_comparison"),
+                   lambda r: r.pop("native_execution_completed"),
+                   lambda r: r.update(native_execution_completed=False),
                    lambda r: r.update(release_ready=True),
                    lambda r: r.update(execution_error={"type": "RuntimeError"}),
                    lambda r: r["native_calls"].append("retained_full_2")]
@@ -469,6 +472,7 @@ class Worker(unittest.TestCase):
         API.boundary.save(self.output / "manifest.json", manifest)
         self.study = Study(self, self.output)
         self.native = types.SimpleNamespace()
+        self.runtime_collections = 0
         self.factory = mock.Mock(return_value=self.study)
         self.st = types.SimpleNamespace(nn=types.SimpleNamespace(
             ByteCorpusStudy=types.SimpleNamespace(from_json=self.factory,
@@ -480,6 +484,7 @@ class Worker(unittest.TestCase):
             return {"spiraltorch": self.st, "spiraltorch.spiraltorch": self.native}[name]
 
         def runtime(_collect):
+            self.runtime_collections += 1
             self.assertTrue((self.output / "worker-result.json").is_file())
             if postlude_error:
                 raise RuntimeError("synthetic postlude error")
@@ -504,6 +509,7 @@ class Worker(unittest.TestCase):
         self.assertEqual(value["outcome"], "no_mismatch_observed")
         self.assertFalse(value["release_ready"])
         self.assertTrue((self.output / "runtime.json").is_file())
+        self.assertEqual(self.runtime_collections, 1)
 
     def test_old_wheel_surface_rejects_before_the_first_gpu_call(self):
         self.st.nn.ByteCorpusBoundaryObservation = None
@@ -512,6 +518,41 @@ class Worker(unittest.TestCase):
         self.assertEqual(self.study.events, [])
         value = json.loads((self.output / "worker-result.json").read_bytes())
         self.assertEqual(value["outcome"], "execution_error")
+        self.assertEqual(self.runtime_collections, 0)
+        self.assertFalse(value["native_execution_completed"])
+
+    def test_cpu_validation_failure_skips_native_execution_and_metadata(self):
+        self.study.validate_segment = mock.Mock(side_effect=ValueError("synthetic validation"))
+        self.assertEqual(self.run_worker(), 1)
+        self.assertEqual(self.study.events, [])
+        self.assertEqual(self.runtime_collections, 0)
+
+    def test_first_persistence_failure_still_records_completed_native_phase(self):
+        with mock.patch.object(API, "save_raw", side_effect=OSError("synthetic write failure")):
+            with self.assertRaisesRegex(OSError, "write failure"):
+                self.run_worker()
+        value = json.loads((self.output / "worker-result.json").read_bytes())
+        self.assertTrue(value["native_execution_completed"])
+        self.assertEqual(value["outcome"], "execution_error")
+        self.assertEqual(value["stage"], "partial")
+        self.assertEqual(self.runtime_collections, 1)
+
+    def test_first_native_failure_does_not_initialize_runtime_for_metadata(self):
+        self.study.fail_phase = "partial"
+        self.assertEqual(self.run_worker(), 1)
+        self.assertEqual(self.runtime_collections, 0)
+        self.assertEqual(self.study.events[-1], "partial")
+        value = json.loads((self.output / "runtime.json").read_bytes())
+        self.assertEqual(value["status"], "not_collected")
+        self.assertEqual(value["reason"], "no_completed_native_phase")
+
+    def test_later_native_failure_collects_metadata_only_after_partial_completes(self):
+        self.study.fail_phase = "resume"
+        self.assertEqual(self.run_worker(), 1)
+        self.assertEqual(self.runtime_collections, 1)
+        value = json.loads((self.output / "worker-result.json").read_bytes())
+        self.assertTrue(value["native_execution_completed"])
+        self.assertEqual(value["stage"], "resume")
 
     def test_late_audit_failure_preserves_completed_comparison_but_fails_attempt(self):
         self.assertEqual(self.run_worker(late_audit=True), 1)

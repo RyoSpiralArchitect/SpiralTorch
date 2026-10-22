@@ -83,8 +83,12 @@ different case is not evidence about the selected case's captured boundary.
 
 `worker-result.json` precedes runtime metadata collection. The supervisor keeps
 worker outcomes separate from timeout/metadata/exit status, preserves partial
-files, and hashes retained evidence. A readable checkpoint does not establish
-update acceptance; even a rejected SGD update can leave readable old values.
+files, and hashes retained evidence. The metadata collector may acquire a GPU
+device, so it only runs after the first native phase has returned successfully.
+Preflight or first-phase failures record `not_collected` instead; they do not
+initialize another runtime merely to describe the failure. A readable checkpoint
+does not establish update acceptance; even a rejected SGD update can leave
+readable old values.
 
 Different update-1 weights localize divergence to or before that boundary, not
 to a specific kernel. Equal weights with different next-forward loss narrow

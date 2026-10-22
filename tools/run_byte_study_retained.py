@@ -105,6 +105,7 @@ def exercise(study, selected, output, record):
     record["stage"] = "partial"
     record["native_calls"] = ["partial_1"]
     first = study.advance_wgpu(1)
+    record["native_execution_completed"] = True
     first_report = save_raw(output / "first-report.json", first.report_json)
     first_bytes = save_raw(output / "first-checkpoint.json", first.checkpoint.to_json())
     validate_report(first_report, selected, 1)
@@ -234,6 +235,7 @@ def worker(output, wheel):
     manifest = claim_worker(output)
     record = {"schema": "spiraltorch.retained_study.worker.v1", "protocol": PROTOCOL,
               "release_ready": False, "outcome": "execution_error", "stage": "setup",
+              "native_execution_completed": False,
               "foreign_import_attempts": [], "pid": os.getpid()}
     setup = replay.SetupSubprocesses(record)
     st = None
@@ -278,9 +280,12 @@ def worker(output, wheel):
         record["returncode"] = code
         record["seconds"] = time.monotonic() - started
         boundary.save(output / "worker-result.json", record)
-    # Identity collection is a postlude, never a prerequisite for saving failure.
-    if st is not None:
+    # Creating a device for metadata must not turn a preflight failure into GPU work.
+    if record["native_execution_completed"]:
         save_raw(output / "runtime.json", _runtime_payload(lambda: runtime_identity(st)))
+    else:
+        boundary.save(output / "runtime.json", {"status": "not_collected",
+                                               "reason": "no_completed_native_phase"})
     return code
 
 
@@ -329,6 +334,7 @@ def supervise(selected, output, source, wheel, timeout):
             valid = (valid and first.get("outcome") == "no_mismatch_observed"
                      and first.get("stage") == "finished" and first.get("study_status") == "completed"
                      and first.get("native_calls") == ["partial_1", "resume_2", "retained_full_2"]
+                     and first.get("native_execution_completed") is True
                      and first.get("report_comparison", {}).get("exact_bytes_equal") is True
                      and first.get("boundary_comparison", {}).get("exact_bytes_equal") is True
                      and first.get("unexpected_child_spawns") == 0
