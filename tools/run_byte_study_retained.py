@@ -231,6 +231,25 @@ def verify_success_files(output, record):
             raise ValueError("saved comparison bytes disagree with successful worker record")
 
 
+def runtime_status(output, record):
+    value = boundary.decode(boundary.read(output / "runtime.json", 16 * 1024))
+    if (record.get("native_execution_completed") is False
+            and value == {"status": "not_collected", "reason": "no_completed_native_phase"}):
+        return "not_collected"
+    if not isinstance(value, dict) or record.get("native_execution_completed") is not True:
+        raise ValueError("runtime provenance is missing or inconsistent")
+    native, adapter = value.get("native_library"), value.get("adapter")
+    expected = record.get("native_library", {}).get("sha256")
+    if (value.get("schema") != "spiraltorch.synthetic_gpu_runtime.v1"
+            or not expected or not isinstance(native, dict) or native.get("sha256") != expected
+            or not isinstance(adapter, dict)
+            or any(not isinstance(adapter.get(key), str) or not adapter[key]
+                   for key in ("name", "backend", "device_type"))
+            or adapter["device_type"] == "Cpu"):
+        raise ValueError("runtime provenance was not collected for the admitted native GPU")
+    return "collected"
+
+
 def worker(output, wheel):
     manifest = claim_worker(output)
     record = {"schema": "spiraltorch.retained_study.worker.v1", "protocol": PROTOCOL,
@@ -286,6 +305,10 @@ def worker(output, wheel):
     else:
         boundary.save(output / "runtime.json", {"status": "not_collected",
                                                "reason": "no_completed_native_phase"})
+    try:
+        runtime_status(output, record)
+    except (OSError, ValueError):
+        return 1
     return code
 
 
@@ -327,10 +350,17 @@ def supervise(selected, output, source, wheel, timeout):
         record.update(supervision_outcome="completed", worker_returncode=result.returncode)
         first = boundary.decode(boundary.read(output / "worker-result.json"))
         record["worker_outcome"] = first.get("outcome")
+        try:
+            record["metadata_status"] = runtime_status(output, first)
+        except (OSError, ValueError) as error:
+            record.update(metadata_status="failed", metadata_error=error_record(error))
+        numeric_code = first.get("returncode")
+        expected_exit = 1 if numeric_code != 0 or record["metadata_status"] == "failed" else 0
         valid = (first.get("schema") == "spiraltorch.retained_study.worker.v1"
                  and first.get("protocol") == PROTOCOL and first.get("release_ready") is False
-                 and type(first.get("returncode")) is int and first["returncode"] == result.returncode)
-        if result.returncode == 0:
+                 and type(numeric_code) is int and numeric_code in (0, 1)
+                 and result.returncode == expected_exit)
+        if numeric_code == 0:
             valid = (valid and first.get("outcome") == "no_mismatch_observed"
                      and first.get("stage") == "finished" and first.get("study_status") == "completed"
                      and first.get("native_calls") == ["partial_1", "resume_2", "retained_full_2"]
@@ -342,8 +372,10 @@ def supervise(selected, output, source, wheel, timeout):
                                  ("execution_error", "report_export_error", "boundary_error")))
             if valid:
                 verify_success_files(output, first)
-        code = 0 if valid and result.returncode == 0 else 1
+        code = 0 if valid and result.returncode == 0 and record["metadata_status"] == "collected" else 1
         record["outcome"] = first.get("outcome") if valid else "invalid_worker_record"
+        if valid and numeric_code == 0 and record["metadata_status"] != "collected":
+            record["outcome"] = "metadata_error"
     except subprocess.TimeoutExpired:
         code = 124
         record.update(outcome="timeout", supervision_outcome="timeout")

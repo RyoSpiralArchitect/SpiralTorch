@@ -45,6 +45,12 @@ def checkpoint(revision=1):
                     "optimizer": {"m": [0.1], "v": [0.01], "steps": [revision]}})
 
 
+def runtime_metadata():
+    return {"schema": "spiraltorch.synthetic_gpu_runtime.v1",
+            "native_library": {"sha256": "mock"},
+            "adapter": {"name": "mock GPU", "backend": "Metal", "device_type": "VirtualGpu"}}
+
+
 class Checkpoint:
     def __init__(self, raw):
         self.raw = raw
@@ -308,6 +314,7 @@ class Supervision(unittest.TestCase):
                 "release_ready": False, "returncode": code, "stage": "finished",
                 "study_status": "completed", "outcome": "no_mismatch_observed",
                 "native_execution_completed": True,
+                "native_library": {"sha256": "mock"},
                 "native_calls": ["partial_1", "resume_2", "retained_full_2"],
                 "report_comparison": {"exact_bytes_equal": True,
                     "full_sha256": API.boundary.digest(report().encode()),
@@ -329,6 +336,7 @@ class Supervision(unittest.TestCase):
                           ("observed-boundary.json", checkpoint())):
             API.save_raw(self.output / name, raw)
         API.boundary.save(self.output / "worker-result.json", self.completion())
+        API.boundary.save(self.output / "runtime.json", runtime_metadata())
         return subprocess.CompletedProcess(command, 0)
 
     def supervise(self, runner=None):
@@ -395,6 +403,58 @@ class Supervision(unittest.TestCase):
                 result = json.loads((self.output / "result.json").read_bytes())
                 self.assertEqual(result["supervision_outcome"], "error")
                 self.assertEqual(result["worker_outcome"], "no_mismatch_observed")
+
+    def test_missing_or_failed_runtime_provenance_never_qualifies_success(self):
+        for mode in ("failed", "missing", "native_mismatch", "cpu", "incomplete"):
+            with self.subTest(mode=mode):
+                self.output = self.root / mode
+                def run(command, **kwargs):
+                    self.runner(command, **kwargs)
+                    path = self.output / "runtime.json"
+                    value = runtime_metadata()
+                    if mode == "missing":
+                        path.unlink()
+                    else:
+                        if mode == "failed":
+                            value = {"status": "collection_failed", "error_type": "RuntimeError"}
+                        elif mode == "native_mismatch":
+                            value["native_library"]["sha256"] = "different"
+                        elif mode == "cpu":
+                            value["adapter"]["device_type"] = "Cpu"
+                        elif mode == "incomplete":
+                            value = {}
+                        path.write_text(encoded(value))
+                    return subprocess.CompletedProcess(command, 1)
+                self.assertEqual(self.supervise(run), 1)
+                result = json.loads((self.output / "result.json").read_bytes())
+                self.assertEqual(result["outcome"], "metadata_error")
+                self.assertEqual(result["metadata_status"], "failed")
+                self.assertEqual(result["worker_outcome"], "no_mismatch_observed")
+
+    def test_zero_exit_cannot_hide_metadata_failure(self):
+        def run(command, **kwargs):
+            completed = self.runner(command, **kwargs)
+            (self.output / "runtime.json").write_text('{"status":"collection_failed"}')
+            return completed
+        self.assertEqual(self.supervise(run), 1)
+        result = json.loads((self.output / "result.json").read_bytes())
+        self.assertEqual(result["metadata_status"], "failed")
+        self.assertEqual(result["outcome"], "invalid_worker_record")
+
+    def test_metadata_failure_does_not_replace_a_preceding_mismatch(self):
+        def run(command, **kwargs):
+            self.runner(command, **kwargs)
+            value = self.completion(1)
+            value["outcome"] = "mismatch_observed"
+            value["report_comparison"]["exact_bytes_equal"] = False
+            (self.output / "worker-result.json").write_text(encoded(value))
+            (self.output / "runtime.json").write_text('{"status":"collection_failed"}')
+            return subprocess.CompletedProcess(command, 1)
+        self.assertEqual(self.supervise(run), 1)
+        result = json.loads((self.output / "result.json").read_bytes())
+        self.assertEqual(result["metadata_status"], "failed")
+        self.assertEqual(result["outcome"], "mismatch_observed")
+        self.assertEqual(result["worker_outcome"], "mismatch_observed")
 
     def test_source_or_deadline_rejection_prevents_spawn(self):
         for field, value in (("commit", "wrong"), ("tracked_changes", 1), ("untracked_files", 1)):
@@ -479,17 +539,18 @@ class Worker(unittest.TestCase):
                 run_wgpu_with_retained_boundary=Study.run_wgpu_with_retained_boundary),
             ByteCorpusBoundaryObservation=Observation))
 
-    def run_worker(self, *, late_audit=False, postlude_error=False):
+    def run_worker(self, *, late_audit=False, postlude_error=False, collection_error=False):
         def imported(name):
             return {"spiraltorch": self.st, "spiraltorch.spiraltorch": self.native}[name]
 
-        def runtime(_collect):
+        def runtime(_st):
             self.runtime_collections += 1
             self.assertTrue((self.output / "worker-result.json").is_file())
-            if postlude_error:
-                raise RuntimeError("synthetic postlude error")
-            return b'{"scope":"mock metadata, not runtime evidence"}'
+            if collection_error:
+                raise RuntimeError("private synthetic collection failure")
+            return runtime_metadata()
 
+        payload = API._runtime_payload
         with mock.patch.object(API, "select_fixed", return_value=selection()), \
                 mock.patch.object(API.replay, "require_foreign_free_environment"), \
                 mock.patch.object(API.replay, "install_import_guards"), \
@@ -498,7 +559,9 @@ class Worker(unittest.TestCase):
                 mock.patch.object(API.replay, "native_identity", return_value={"sha256": "mock"}), \
                 mock.patch.object(API.replay, "require_native_runtime", side_effect=(
                     [None, RuntimeError("synthetic late import violation")] if late_audit else None)), \
-                mock.patch.object(API, "_runtime_payload", side_effect=runtime), \
+                mock.patch.object(API, "runtime_identity", side_effect=runtime), \
+                mock.patch.object(API, "_runtime_payload", side_effect=(
+                    RuntimeError("synthetic postlude error") if postlude_error else payload)), \
                 mock.patch.dict(API.os.environ):
             return API.worker(self.output, self.wheel)
 
@@ -553,6 +616,25 @@ class Worker(unittest.TestCase):
         value = json.loads((self.output / "worker-result.json").read_bytes())
         self.assertTrue(value["native_execution_completed"])
         self.assertEqual(value["stage"], "resume")
+
+    def test_real_metadata_wrapper_failure_preserves_comparison_and_exits_nonzero(self):
+        self.assertEqual(self.run_worker(collection_error=True), 1)
+        value = json.loads((self.output / "worker-result.json").read_bytes())
+        self.assertEqual(value["outcome"], "no_mismatch_observed")
+        self.assertEqual(value["returncode"], 0)
+        raw = (self.output / "runtime.json").read_text()
+        self.assertEqual(json.loads(raw)["status"], "collection_failed")
+        self.assertNotIn("private synthetic", raw)
+        self.assertEqual(self.runtime_collections, 1)
+
+    def test_real_metadata_failure_cannot_erase_a_numeric_mismatch(self):
+        self.study.observed.full_report = report().replace('"ce":4.0', '"ce":4.5')
+        self.assertEqual(self.run_worker(collection_error=True), 1)
+        value = json.loads((self.output / "worker-result.json").read_bytes())
+        self.assertEqual(value["outcome"], "mismatch_observed")
+        self.assertEqual(value["returncode"], 1)
+        self.assertEqual(self.study.events.count("full"), 1)
+        self.assertEqual(self.study.events.count("read"), 1)
 
     def test_late_audit_failure_preserves_completed_comparison_but_fails_attempt(self):
         self.assertEqual(self.run_worker(late_audit=True), 1)

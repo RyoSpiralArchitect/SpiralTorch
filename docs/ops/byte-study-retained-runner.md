@@ -90,6 +90,13 @@ initialize another runtime merely to describe the failure. A readable checkpoint
 does not establish update acceptance; even a rejected SGD update can leave
 readable old values.
 
+The worker record's `returncode` describes the comparison before the postlude,
+not necessarily the eventual process exit. Missing or failed metadata makes
+the process and supervisor fail without rewriting that comparison record.
+The supervisor validates the saved adapter/native identity and records
+`metadata_status` separately. Equal numerical results with missing provenance
+produce `metadata_error`, not a successful diagnostic.
+
 Different update-1 weights localize divergence to or before that boundary, not
 to a specific kernel. Equal weights with different next-forward loss narrow
 the next inquiry to inputs, rebinding/transient state and forward execution.
