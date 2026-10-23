@@ -215,9 +215,12 @@ mod go_bridge {
             ]
         });
 
-        let response = ureq::post(endpoint)
+        let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_millis(50))
             .timeout_read(Duration::from_millis(50))
+            .build();
+        let response = agent
+            .post(endpoint)
             .set("content-type", "application/json")
             .send_json(payload)
             .ok()?;
