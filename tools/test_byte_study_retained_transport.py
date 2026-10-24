@@ -148,6 +148,12 @@ class HostedWorkflowTests(unittest.TestCase):
         self.assertIn("tools/test_byte_study_retained_transport.py", self.workflow)
         self.assertIn("tools/test_run_byte_study_retained.py", self.workflow)
 
+    def test_runner_paths_are_set_after_runner_assignment(self):
+        job_settings = self.workflow.split("    steps:", 1)[0]
+        self.assertNotIn("runner.temp", job_settings)
+        self.assertIn('TRANSPORT_ROOT="$RUNNER_TEMP/retained-20261024"', self.workflow)
+        self.assertIn('>> "$GITHUB_ENV"', self.workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
