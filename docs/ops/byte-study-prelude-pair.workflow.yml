@@ -1,0 +1,165 @@
+# INERT TEMPLATE: not a registered workflow. Separate human approval is required.
+# Render the three public placeholders, then review the exact commit before push.
+# The existing byte_study_replay.yml may be overridden on the diagnostic branch
+# only; do not add this to main as an automatic execution path.
+name: Byte Study Replay Diagnosis
+run-name: Fixed-wheel historical-prelude pair - one approved campaign
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness_commit:
+        description: "Exact reviewed diagnostic commit; no publication"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prelude-pair-20261024-once
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -e -o pipefail {0}
+
+jobs:
+  diagnose:
+    runs-on: macos-26
+    timeout-minutes: 210
+    env:
+      INPUT_CIPHERTEXT_SHA256: __INPUT_CIPHERTEXT_SHA256__
+      INPUT_PLAINTEXT_SHA256: __INPUT_PLAINTEXT_SHA256__
+      RESULT_RECIPIENT: __RESULT_RECIPIENT__
+    steps:
+      - name: Admit only the reviewed first attempt
+        env:
+          EXPECTED_HARNESS: ${{ inputs.harness_commit }}
+        run: |
+          test "$GITHUB_REPOSITORY" = "RyoSpiralArchitect/SpiralTorch"
+          test "$GITHUB_REF" = "refs/heads/spiralreality/retained-prelude-pair-20261024"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          test "$EXPECTED_HARNESS" = "$GITHUB_SHA"
+          [[ "$EXPECTED_HARNESS" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INPUT_CIPHERTEXT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$INPUT_PLAINTEXT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RESULT_RECIPIENT" =~ ^age1[0-9a-z]{58}$ ]]
+          umask 077
+          TRANSPORT_ROOT="$RUNNER_TEMP/prelude-pair-20261024"
+          EVIDENCE_ROOT="$TRANSPORT_ROOT/evidence"
+          printf 'TRANSPORT_ROOT=%s\nEVIDENCE_ROOT=%s\n' "$TRANSPORT_ROOT" "$EVIDENCE_ROOT" >> "$GITHUB_ENV"
+          mkdir -m 700 "$TRANSPORT_ROOT"
+          mkdir -m 700 "$EVIDENCE_ROOT"
+          printf 'run_id=%s\nrun_attempt=%s\nharness=%s\nimage_os=%s\nimage_version=%s\nrelease_ready=false\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SHA" "$ImageOS" "$ImageVersion" \
+            > "$EVIDENCE_ROOT/hosted-admission.txt"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - name: Install pinned authenticated-encryption tool
+        run: |
+          umask 077
+          curl --fail --silent --show-error --location --max-time 120 \
+            https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-darwin-arm64.tar.gz \
+            --output "$TRANSPORT_ROOT/age.tar.gz"
+          printf '%s  %s\n' e2020b073c44f692685a24d6abc378817eb81ffaaf49fd0531ef8565f767f2f5 \
+            "$TRANSPORT_ROOT/age.tar.gz" | shasum -a 256 --check
+          tar -xzf "$TRANSPORT_ROOT/age.tar.gz" -C "$TRANSPORT_ROOT"
+          test "$("$TRANSPORT_ROOT/age/age" --version)" = "v1.3.2"
+      - name: Validate result recipient before any diagnosis
+        run: |
+          umask 077
+          printf 'SpiralTorch private result recipient preflight\n' | \
+            "$TRANSPORT_ROOT/age/age" --encrypt --recipient "$RESULT_RECIPIENT" \
+            --output "$TRANSPORT_ROOT/result-recipient-probe.age"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: e053c314d54be06b346e30e5ea1a065d7f3fdc90
+          path: native-source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12.10"
+      - name: Test transport and supervisor without native imports
+        working-directory: harness
+        run: |
+          python -I -S -B tools/test_byte_study_pair_transport.py > "$EVIDENCE_ROOT/transport-tests.log" 2>&1
+          python -I -S -B tools/test_byte_study_prelude_pair.py > "$EVIDENCE_ROOT/pair-tests.log" 2>&1
+          python -I -S -B tools/test_run_byte_study_retained.py > "$EVIDENCE_ROOT/retained-tests.log" 2>&1
+          python -I -S -B tools/test_run_byte_study_boundary.py > "$EVIDENCE_ROOT/boundary-tests.log" 2>&1
+          python -I -S -B ../native-source/tools/test_run_byte_study_replay.py > "$EVIDENCE_ROOT/replay-tests.log" 2>&1
+      - name: Decrypt and verify original packet and exact saved wheel
+        working-directory: harness
+        env:
+          INPUT_IDENTITY: ${{ secrets.ST_PRELUDE_PAIR_20261024_INPUT_IDENTITY }}
+        run: |
+          umask 077
+          test -n "$INPUT_IDENTITY"
+          input_key="$TRANSPORT_ROOT/input-key.txt"
+          trap 'rm -f "$input_key"' EXIT
+          printf '%s\n' "$INPUT_IDENTITY" > "$input_key"
+          unset INPUT_IDENTITY
+          {
+            input=.github/diagnostics/prelude-pair-20261024/input.tar.gz.age
+            printf '%s  %s\n' "$INPUT_CIPHERTEXT_SHA256" "$input" | shasum -a 256 --check
+            "$TRANSPORT_ROOT/age/age" --decrypt --identity "$input_key" \
+              --output "$TRANSPORT_ROOT/input.tar.gz" "$input"
+            python -I -S -B tools/byte_study_pair_transport.py unpack-input \
+              --input "$TRANSPORT_ROOT/input.tar.gz" --output "$TRANSPORT_ROOT/input" \
+              --sha256 "$INPUT_PLAINTEXT_SHA256"
+            python -I -S -B tools/run_byte_study_prelude_pair.py \
+              --failure-root "$TRANSPORT_ROOT/input/original" --source-root ../native-source \
+              --wheel "$TRANSPORT_ROOT/input/wheel/spiraltorch-0.4.32-cp38-abi3-macosx_11_0_arm64.whl"
+          } > "$EVIDENCE_ROOT/input-preflight.log" 2>&1
+      - name: Install the saved wheel without rebuilding or fetching dependencies
+        run: |
+          umask 077
+          {
+            python --version
+            python -m venv "$TRANSPORT_ROOT/venv"
+            "$TRANSPORT_ROOT/venv/bin/python" -I -m pip install --no-index --no-deps --no-cache-dir \
+              "$TRANSPORT_ROOT/input/wheel/spiraltorch-0.4.32-cp38-abi3-macosx_11_0_arm64.whl"
+            "$TRANSPORT_ROOT/venv/bin/python" -I -m pip freeze
+          } > "$EVIDENCE_ROOT/install.log" 2>&1
+      - name: Execute the ordinary and retained arms once each
+        working-directory: harness
+        run: |
+          umask 077
+          set +e
+          "$TRANSPORT_ROOT/venv/bin/python" -I -B tools/run_byte_study_prelude_pair.py \
+            --failure-root "$TRANSPORT_ROOT/input/original" --source-root ../native-source \
+            --wheel "$TRANSPORT_ROOT/input/wheel/spiraltorch-0.4.32-cp38-abi3-macosx_11_0_arm64.whl" \
+            --output "$EVIDENCE_ROOT/diagnostic" --timeout-seconds 5400 --execute-pair \
+            > "$EVIDENCE_ROOT/launch.log" 2>&1
+          code=$?
+          printf '%s\n' "$code" > "$EVIDENCE_ROOT/diagnostic-exit.txt"
+          exit "$code"
+      - name: Seal evidence including partial failures
+        if: ${{ always() && env.TRANSPORT_ROOT != '' }}
+        working-directory: harness
+        run: |
+          umask 077
+          test -d "$EVIDENCE_ROOT"
+          test -x "$TRANSPORT_ROOT/age/age"
+          python -I -S -B tools/byte_study_pair_transport.py pack-result \
+            --input "$EVIDENCE_ROOT" --output "$TRANSPORT_ROOT/evidence.tar.gz" \
+            > "$TRANSPORT_ROOT/packing.json"
+          mkdir -m 700 "$TRANSPORT_ROOT/public"
+          "$TRANSPORT_ROOT/age/age" --encrypt --recipient "$RESULT_RECIPIENT" \
+            --output "$TRANSPORT_ROOT/public/evidence.tar.gz.age" "$TRANSPORT_ROOT/evidence.tar.gz"
+          cd "$TRANSPORT_ROOT/public"
+          shasum -a 256 evidence.tar.gz.age > SHA256SUMS
+      - name: Upload ciphertext only
+        if: ${{ always() && env.TRANSPORT_ROOT != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: prelude-pair-encrypted-20261024-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/prelude-pair-20261024/public/evidence.tar.gz.age
+            ${{ runner.temp }}/prelude-pair-20261024/public/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
