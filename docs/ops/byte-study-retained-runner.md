@@ -102,3 +102,8 @@ to a specific kernel. Equal weights with different next-forward loss narrow
 the next inquiry to inputs, rebinding/transient state and forward execution.
 Neither observation alone attributes a driver bug. `release_ready` stays false,
 including on exit zero. Do not retry to green or lift the publication hold.
+
+For an explicitly scoped comparison that restores the historical same-process
+prelude while reusing the exact recovered wheel, see the separate
+[prelude-pair caller](byte-study-prelude-pair.md). It does not change this
+single-attempt cold-process protocol or inherit its execution authorization.
