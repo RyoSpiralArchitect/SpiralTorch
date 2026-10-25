@@ -6,6 +6,9 @@ not release qualification or a replacement for the
 [unmodified replay protocol](byte-study-replay.md).
 PyPI publication remains held until the cause and repair are validated.
 
+For actual graph bindings and stage values at the next forward, see the separate
+[selected forward graph diagnostic](byte-study-forward-graph-diagnostic.md).
+
 ## Question
 
 The complete hosted v6 (SGD) and v9 (AdamW) failures agree on their first

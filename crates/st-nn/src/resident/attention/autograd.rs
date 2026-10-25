@@ -1,5 +1,6 @@
 //! Reusable attention execution without an optimizer or parameter owner.
 use super::*;
+use crate::resident::diagnostic::GraphDiagnosticSource;
 use st_backend_wgpu::{
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulTile},
     resident_tensor::{ResidentTensor, TensorDevice},
@@ -110,6 +111,32 @@ impl AttentionAutograd {
         self.qkv.set_parameter_tensors(&values[..2])?;
         self.output.set_parameter_tensors(&values[2..])?;
         Ok(())
+    }
+
+    pub(crate) fn diagnostic_graphs<'a>(
+        &'a self,
+        tape: &'a AttentionTape,
+        prefix: &str,
+        first_slot: usize,
+    ) -> Result<Vec<GraphDiagnosticSource<'a>>, InferenceError> {
+        let middle = first_slot.checked_add(2).ok_or(TrainingError::Overflow)?;
+        let end = middle.checked_add(2).ok_or(TrainingError::Overflow)?;
+        Ok(vec![
+            GraphDiagnosticSource::new(
+                format!("{prefix}.qkv"),
+                first_slot..middle,
+                None,
+                &self.qkv,
+                &tape.qkv,
+            )?,
+            GraphDiagnosticSource::new(
+                format!("{prefix}.output"),
+                middle..end,
+                None,
+                &self.output,
+                &tape.output,
+            )?,
+        ])
     }
 
     pub(crate) fn forward(

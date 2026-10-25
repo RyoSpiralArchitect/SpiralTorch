@@ -1,15 +1,21 @@
 //! Thin clients of the same bounded study runner used by native and WASM.
 use super::byte_decoder::{PyByteCorpusModelArtifact, PyByteDecoderCheckpoint};
 use super::*;
-use pyo3::types::{PyBytes, PyString};
+use pyo3::types::{PyBytes, PyInt, PyString};
 #[cfg(feature = "wgpu")]
 use st_nn::resident::ByteCorpusStudySegment;
-use st_nn::resident::{ByteCorpusStudy, ByteCorpusStudyCheckpoint, BYTE_CORPUS_STUDY_MAX_BYTES};
+use st_nn::resident::{
+    ByteCorpusStudy, ByteCorpusStudyCheckpoint, BYTE_CORPUS_STUDY_MAX_BYTES,
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS,
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES,
+};
 use std::sync::Arc;
 
 mod boundary;
+mod forward_diagnostic;
 mod preparation;
 use boundary::PyByteCorpusBoundaryObservation;
+use forward_diagnostic::PyByteCorpusForwardDiagnosticObservation;
 
 fn value_error(error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(error.to_string())
@@ -44,6 +50,15 @@ fn index(value: &Bound<'_, PyAny>) -> PyResult<usize> {
     if value.is_instance_of::<PyBool>() {
         return Err(PyTypeError::new_err(
             "study indices must be integers, not bool",
+        ));
+    }
+    value.extract()
+}
+
+fn diagnostic_index(value: &Bound<'_, PyAny>) -> PyResult<usize> {
+    if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
+        return Err(PyTypeError::new_err(
+            "diagnostic indices and budgets must be Python integers, not bool or coerced values",
         ));
     }
     value.extract()
@@ -286,6 +301,75 @@ impl PyByteCorpusStudy {
         }
     }
 
+    /// CPU-only selection and all-case resume validation; no runtime selection.
+    #[pyo3(signature = (case_name, before_update, *, resume=None, max_bytes=None))]
+    fn validate_forward_diagnostic(
+        &self,
+        py: Python<'_>,
+        case_name: &str,
+        before_update: &Bound<'_, PyAny>,
+        resume: Option<&PyByteCorpusStudyCheckpoint>,
+        max_bytes: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        let before_update = diagnostic_index(before_update)?;
+        let max_bytes = max_bytes
+            .map(diagnostic_index)
+            .transpose()?
+            .unwrap_or(BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES);
+        py.detach(|| {
+            self.inner
+                .validate_forward_diagnostic(
+                    resume.map(|c| c.inner.as_ref()),
+                    case_name,
+                    before_update,
+                    max_bytes,
+                )
+                .map_err(value_error)
+        })
+    }
+
+    /// Explicit graph-only diagnostic, after forward/loss and before backward.
+    /// Save the outcome before consuming read_diagnostic_json(). No retries.
+    #[pyo3(signature = (case_name, before_update, *, resume=None, max_bytes=None))]
+    fn run_wgpu_with_forward_diagnostic(
+        &self,
+        py: Python<'_>,
+        case_name: &str,
+        before_update: &Bound<'_, PyAny>,
+        resume: Option<&PyByteCorpusStudyCheckpoint>,
+        max_bytes: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyByteCorpusForwardDiagnosticObservation> {
+        let before_update = diagnostic_index(before_update)?;
+        let max_bytes = max_bytes
+            .map(diagnostic_index)
+            .transpose()?
+            .unwrap_or(BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES);
+        let checkpoint = resume.map(|c| c.inner.as_ref());
+        py.detach(|| {
+            self.inner
+                .validate_forward_diagnostic(checkpoint, case_name, before_update, max_bytes)
+                .map_err(value_error)
+        })?;
+        #[cfg(feature = "wgpu")]
+        {
+            on_gpu(py, |runtime| {
+                let observation = pollster::block_on(self.inner.run_with_forward_diagnostic(
+                    runtime,
+                    checkpoint,
+                    case_name,
+                    before_update,
+                    max_bytes,
+                ))
+                .map_err(value_error)?;
+                PyByteCorpusForwardDiagnosticObservation::from_observation(observation)
+            })
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            requires_wgpu()
+        }
+    }
+
     /// Advance every case atomically to one absolute accepted-update boundary.
     #[pyo3(signature = (stop_after=None, *, resume=None))]
     fn advance_wgpu(
@@ -384,6 +468,19 @@ pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyByteCorpusStudyCheckpoint>()?;
     module.add_class::<PyByteCorpusStudySegment>()?;
     module.add_class::<PyByteCorpusBoundaryObservation>()?;
+    module.add_class::<PyByteCorpusForwardDiagnosticObservation>()?;
     module.add("BYTE_CORPUS_STUDY_MAX_BYTES", BYTE_CORPUS_STUDY_MAX_BYTES)?;
+    module.add(
+        "BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES",
+        BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES,
+    )?;
+    module.add(
+        "BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS",
+        BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS,
+    )?;
+    module.add(
+        "BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES",
+        BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES,
+    )?;
     preparation::register(module)
 }

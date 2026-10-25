@@ -1,6 +1,7 @@
 //! Reusable residual execution. Parameter ownership belongs to the outer model.
 use super::*;
 use crate::resident::attention::{AttentionAutograd, AttentionTape};
+use crate::resident::diagnostic::GraphDiagnosticSource;
 use st_backend_wgpu::{
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulTile},
     resident_tensor::{ResidentTensor, TensorDevice, TensorError},
@@ -132,6 +133,44 @@ impl ResidualAutograd {
         self.attention.set_parameters(&values[n..n + 4])?;
         self.feed_forward.set_parameter_tensors(&values[n + 4..])?;
         Ok(())
+    }
+
+    pub(crate) fn diagnostic_graphs<'a>(
+        &'a self,
+        tape: &'a ResidualTape,
+        prefix: &str,
+        range: std::ops::Range<usize>,
+    ) -> Result<Vec<GraphDiagnosticSource<'a>>, InferenceError> {
+        if range.end.checked_sub(range.start) != Some(self.parameters) {
+            return Err(TrainingError::ParameterLayout.into());
+        }
+        let attention_start = range
+            .start
+            .checked_add(self.pre_parameters)
+            .ok_or(TrainingError::Overflow)?;
+        let feed_start = attention_start
+            .checked_add(4)
+            .ok_or(TrainingError::Overflow)?;
+        let mut graphs = vec![GraphDiagnosticSource::new(
+            format!("{prefix}.pre"),
+            range.start..attention_start,
+            None,
+            &self.pre,
+            &tape.pre,
+        )?];
+        graphs.extend(self.attention.diagnostic_graphs(
+            &tape.attention,
+            &format!("{prefix}.attention"),
+            attention_start,
+        )?);
+        graphs.push(GraphDiagnosticSource::new(
+            format!("{prefix}.feed_forward"),
+            feed_start..range.end,
+            None,
+            &self.feed_forward,
+            &tape.feed_forward,
+        )?);
+        Ok(graphs)
     }
 
     pub(crate) fn forward(

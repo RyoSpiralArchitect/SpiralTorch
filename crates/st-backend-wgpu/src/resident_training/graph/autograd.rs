@@ -3,12 +3,16 @@ use super::*;
 use crate::resident_tensor::guard_capture::GuardCapture;
 use crate::resident_training::parameters::ParameterVersion as ParameterState;
 mod cotangent;
+mod diagnostic;
 mod learner;
 mod outputs;
 mod parameters;
 mod prediction;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod topos_tests;
+pub use diagnostic::{
+    GraphForwardDiagnostic, GraphForwardDiagnosticReadback, GRAPH_FORWARD_DIAGNOSTIC_MAX_BYTES,
+};
 pub use learner::{
     GraphGradientAccumulator, GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner,
 };

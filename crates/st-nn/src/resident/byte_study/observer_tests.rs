@@ -11,6 +11,65 @@ fn observer_accepts_locally_owned_state_without_a_send_requirement() {
     };
 }
 
+#[test]
+fn forward_observer_accepts_locally_owned_state_without_running_a_future() {
+    let _compile_only = |study: &ByteCorpusStudy, runtime: WgpuRuntime| {
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let _future = study.execute(
+            runtime,
+            None,
+            study.total_updates(),
+            false,
+            None::<UpdateObserverFn>,
+            Some(
+                move |_: &str, _, _: &ResidentByteDecoder, _: &ResidentByteDecoderForward| {
+                    count.set(count.get() + 1);
+                    Ok(())
+                },
+            ),
+        );
+    };
+}
+
+#[test]
+#[ignore = "Requires a separately authorized real-GPU diagnostic run"]
+fn forward_diagnostic_captures_before_second_backward_and_reads_after_model_drop() {
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.forward.diagnostic")
+            .unwrap();
+    let study = request(true);
+    let observation = pollster::block_on(study.run_with_forward_diagnostic(
+        runtime,
+        None,
+        "frozen",
+        2,
+        crate::resident::BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES,
+    ))
+    .unwrap();
+    assert_eq!(observation.run_outcome["status"], "completed");
+    assert_eq!(
+        observation.run_outcome["capture_status"],
+        "copies_submitted"
+    );
+    assert_eq!(observation.run_outcome["release_ready"], false);
+    let original = observation.run_outcome.to_string();
+    drop(study);
+    let diagnostic = observation.diagnostic.unwrap().read().unwrap();
+    assert_eq!(diagnostic.parameter_revision, 1);
+    assert_eq!(diagnostic.graphs.len(), 6);
+    for graph in diagnostic.graphs {
+        assert_eq!(graph.diagnostic.submitted_backwards_at_capture, 1);
+        assert_eq!(graph.diagnostic.prediction_flags, 0);
+        assert!(graph
+            .diagnostic
+            .forward_flags
+            .iter()
+            .all(|&flags| flags == 0));
+        assert!(!graph.diagnostic.activation_bits.is_empty());
+    }
+    assert_eq!(observation.run_outcome.to_string(), original);
+}
+
 fn request(adamw: bool) -> ByteCorpusStudy {
     let mut value = optimizer::tests::designs()[1].clone();
     for case in value["cases"].as_array_mut().unwrap() {
