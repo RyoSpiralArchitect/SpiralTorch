@@ -1,5 +1,6 @@
 use super::super::geometry::query_graph;
 use super::*;
+use crate::resident::diagnostic::GraphDiagnosticSource;
 use st_backend_wgpu::resident_tensor::{
     causal_wave::ResidentCausalWaveForward,
     euclidean::{ResidentEuclideanBiasForward, ResidentPairBiasVjp},
@@ -324,6 +325,79 @@ impl GeometryAutograd {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn diagnostic_graphs<'a>(
+        &'a self,
+        tape: &'a GeometryTape,
+        layout: &ByteDecoderGeometryParameterLayout,
+        blocks: usize,
+    ) -> Result<Vec<GraphDiagnosticSource<'a>>, InferenceError> {
+        if &self.layout != layout
+            || layout.raw_gains().len() != blocks
+            || tape.metrics.len() != blocks
+        {
+            return Err(TrainingError::ParameterLayout.into());
+        }
+        let mut graphs = vec![GraphDiagnosticSource::new(
+            "geometry.projection".into(),
+            layout.projection(),
+            None,
+            &self.projection,
+            &tape.projection,
+        )?];
+        match &self.mixture {
+            None => {
+                if layout.mixture_logits().is_some()
+                    || !layout.query_projections().is_empty()
+                    || self.head_groups.len() != blocks
+                    || tape.metrics.iter().any(|m| m.mixture.is_some())
+                {
+                    return Err(TrainingError::ParameterLayout.into());
+                }
+            }
+            Some(mixture) => {
+                let routers = layout
+                    .mixture_logits()
+                    .ok_or(TrainingError::ParameterLayout)?;
+                if routers.len() != blocks
+                    || mixture.scales.len() != blocks
+                    || mixture.queries.len() != layout.query_projections().len()
+                    || (!mixture.queries.is_empty() && mixture.queries.len() != blocks)
+                {
+                    return Err(TrainingError::ParameterLayout.into());
+                }
+                for (block, metric) in tape.metrics.iter().enumerate() {
+                    let (kind, scales) = metric
+                        .mixture
+                        .as_ref()
+                        .ok_or(TrainingError::ParameterLayout)?;
+                    if metric.groups.len() != mixture.metrics.len()
+                        || scales.len() != mixture.metrics.len()
+                    {
+                        return Err(TrainingError::ParameterLayout.into());
+                    }
+                    match (mixture.queries.get(block), kind) {
+                        (None, MixtureTape::Shared(_)) => {}
+                        (Some(query), MixtureTape::Query(_, forward)) => {
+                            let router = routers
+                                .start
+                                .checked_add(block)
+                                .ok_or(TrainingError::Overflow)?;
+                            graphs.push(GraphDiagnosticSource::new(
+                                format!("geometry.query.{block}"),
+                                layout.query_projections()[block].clone(),
+                                Some(router),
+                                query,
+                                forward,
+                            )?);
+                        }
+                        _ => return Err(TrainingError::ParameterLayout.into()),
+                    }
+                }
+            }
+        }
+        Ok(graphs)
     }
 
     pub(super) fn forward(

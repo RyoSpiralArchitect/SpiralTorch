@@ -9566,7 +9566,26 @@ class _NnByteCorpusStudy:
     def validate_artifact(self, checkpoint: _NnByteCorpusStudyCheckpoint, artifact: _NnByteCorpusModelArtifact) -> None: ...
     def validate_segment(self, stop_after: int | None = ..., *, resume: _NnByteCorpusStudyCheckpoint | None = ...) -> None: ...
     def run_wgpu(self) -> str: ...
+    def run_wgpu_with_retained_boundary(self, first_checkpoint: _NnByteCorpusStudyCheckpoint, case_name: str) -> _NnByteCorpusBoundaryObservation: ...
+    def validate_forward_diagnostic(self, case_name: str, before_update: int, *, resume: _NnByteCorpusStudyCheckpoint | None = ..., max_bytes: int | None = ...) -> None: ...
+    def run_wgpu_with_forward_diagnostic(self, case_name: str, before_update: int, *, resume: _NnByteCorpusStudyCheckpoint | None = ..., max_bytes: int | None = ...) -> _NnByteCorpusForwardDiagnosticObservation: ...
     def advance_wgpu(self, stop_after: int | None = ..., *, resume: _NnByteCorpusStudyCheckpoint | None = ...) -> _NnByteCorpusStudySegment: ...
+
+class _NnByteCorpusBoundaryObservation:
+    """Diagnostic only; persist the outcome before the one-shot boundary read."""
+    @property
+    def run_outcome_json(self) -> str: ...
+    @property
+    def report_json(self) -> str | None: ...
+    def read_boundary(self) -> _NnByteDecoderCheckpoint: ...
+
+class _NnByteCorpusForwardDiagnosticObservation:
+    """Graph-only diagnostic; save the outcome before the one-shot raw-bit read."""
+    @property
+    def run_outcome_json(self) -> str: ...
+    @property
+    def report_json(self) -> str | None: ...
+    def read_diagnostic_json(self) -> str: ...
 
 class _NnByteCorpusModelArtifact:
     @staticmethod
@@ -10892,6 +10911,9 @@ class _NnScaler:
 
 class _NnModule(ModuleType):
     BYTE_CORPUS_STUDY_MAX_BYTES: int
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES: int
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS: int
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES: int
     ByteCorpusStudy: type[_NnByteCorpusStudy]
     ByteCorpusModelArtifact: type[_NnByteCorpusModelArtifact]
     ResidentByteInference: type[_NnResidentByteInference]
@@ -10900,6 +10922,8 @@ class _NnModule(ModuleType):
     ResidentByteServing: type[_NnResidentByteServing]
     ByteCorpusStudyCheckpoint: type[_NnByteCorpusStudyCheckpoint]
     ByteCorpusStudySegment: type[_NnByteCorpusStudySegment]
+    ByteCorpusBoundaryObservation: type[_NnByteCorpusBoundaryObservation]
+    ByteCorpusForwardDiagnosticObservation: type[_NnByteCorpusForwardDiagnosticObservation]
     ByteCorpusPreparedBiasStudy: type[_NnByteCorpusPreparedBiasStudy]
     ByteCorpusBiasCalibration: type[_NnByteCorpusBiasCalibration]
     ByteCorpusHeadwiseControls: type[_NnByteCorpusHeadwiseControls]

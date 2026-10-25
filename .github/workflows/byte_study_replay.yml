@@ -1,0 +1,86 @@
+name: Byte Study Replay Diagnosis
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: "Native source: historical failure or integrated hardening; never publishes"
+        type: choice
+        required: true
+        default: "7ad0c100e9b5beddb224182b728e648d376ac8b8"
+        options:
+          - "7ad0c100e9b5beddb224182b728e648d376ac8b8"
+          - "073254cf5dce4074a930ff29aef6e2e48aa7fce3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: byte-study-replay-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - name: Validate the declared native source
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          case "$SOURCE_COMMIT" in
+            7ad0c100e9b5beddb224182b728e648d376ac8b8|073254cf5dce4074a930ff29aef6e2e48aa7fce3) ;;
+            *) echo "Source is not a declared immutable revision." >&2; exit 1 ;;
+          esac
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: native-source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.10"
+      - name: Test the non-GPU replay supervisor
+        working-directory: harness
+        run: python -I -S -B tools/test_run_byte_study_replay.py
+      - name: Build a private native wheel
+        working-directory: native-source
+        run: |
+          git diff --exit-code HEAD --
+          test "$(rustc --version | cut -d ' ' -f 2)" = "1.99.1"
+          rustc --version --verbose
+          cargo --version --verbose
+          python -m venv "$RUNNER_TEMP/replay-env"
+          "$RUNNER_TEMP/replay-env/bin/python" -m pip install "maturin==1.15.0"
+          "$RUNNER_TEMP/replay-env/bin/maturin" build --release --locked \
+            -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/replay-wheel"
+          "$RUNNER_TEMP/replay-env/bin/python" -m pip install --no-deps \
+            --no-cache-dir "$RUNNER_TEMP/replay-wheel/"*.whl
+      - name: Run the fixed two-phase diagnosis once
+        working-directory: harness
+        run: |
+          wheels=("$RUNNER_TEMP/replay-wheel/"*.whl)
+          test "${#wheels[@]}" -eq 1
+          "$RUNNER_TEMP/replay-env/bin/python" -I -B tools/run_byte_study_replay.py \
+            --source-root ../native-source \
+            --wheel "${wheels[0]}" \
+            --output "$RUNNER_TEMP/byte-study-replay" \
+            --timeout-seconds 7200
+      - name: Retain the first outcome, including incomplete runs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-byte-study-replay-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/byte-study-replay/
+          if-no-files-found: warn
+          retention-days: 1

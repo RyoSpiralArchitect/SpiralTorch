@@ -113,6 +113,10 @@ name = "resident_byte_gradient_probe"
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_byte_boundary_probe"
+required-features = ["wgpu"]
+
+[[example]]
 name = "resident_byte_learning_browser"
 crate-type = ["cdylib"]
 required-features = ["wgpu"]

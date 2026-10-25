@@ -665,7 +665,7 @@ impl CheckpointTemplate {
 #[cfg(feature = "wgpu")]
 mod gpu;
 #[cfg(feature = "wgpu")]
-pub use gpu::ByteDecoderCheckpointReadback;
+pub use gpu::{ByteDecoderCheckpointHandles, ByteDecoderCheckpointReadback};
 
 #[cfg(test)]
 mod optimizer_tests;

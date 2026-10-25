@@ -7,14 +7,14 @@ Counts describe repository size, not runtime performance or learning quality.
 ## Code stats
 
 <!-- STATS:START -->
-> _auto-generated: 2026-10-12 15:22 UTC_
+> _auto-generated: 2026-10-19 13:12 UTC_
 
 | Metric | Value |
 |---|---:|
-| Rust code LOC | **508,892** |
-| Rust files | 1,151 |
-| Total code LOC (all langs) | 4,925,597 |
-| Workspace+deps crates | 427 |
+| Rust code LOC | **547,202** |
+| Rust files | 1,303 |
+| Total code LOC (all langs) | 5,715,034 |
+| Workspace+deps crates | 430 |
 
 <p>
 <img src="badges/rust-loc.svg" alt="rust loc" />

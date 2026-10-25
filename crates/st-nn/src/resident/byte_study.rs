@@ -1,7 +1,7 @@
 //! Bounded matched corpus studies with request-bound, all-case resume.
 //! Native and browser clients share model math, data order and acceptance gates.
 #[cfg(feature = "wgpu")]
-use crate::resident::ResidentByteDecoder;
+use crate::resident::{ResidentByteDecoder, ResidentByteDecoderForward};
 use crate::{
     resident::{
         AttentionInferencePlan, AttentionMask, ByteDecoderCheckpoint, ByteDecoderGeometryPlan,
@@ -26,16 +26,25 @@ use std::collections::BTreeSet;
 /// Errors retain the underlying model, JSON, GPU or study validation error.
 pub type ByteCorpusStudyResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type Result<T> = ByteCorpusStudyResult<T>;
+#[cfg(feature = "wgpu")]
+type UpdateObserverFn = fn(&str, usize, &ResidentByteDecoder) -> Result<()>;
+#[cfg(feature = "wgpu")]
+type ForwardObserverFn =
+    fn(&str, usize, &ResidentByteDecoder, &ResidentByteDecoderForward) -> Result<()>;
 /// Input and checkpoint JSON are bounded before deserialization.
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
 mod artifact;
+mod boundary;
 mod calibration;
 mod clipping;
+mod forward_diagnostic;
 #[cfg(any(feature = "wgpu", test))]
 mod generation;
 mod headwise;
 mod mixture;
+#[cfg(all(test, feature = "wgpu", not(target_arch = "wasm32")))]
+mod observer_tests;
 mod optimizer;
 mod policy;
 mod query;
@@ -46,7 +55,11 @@ pub use artifact::{
 };
 #[cfg(feature = "wgpu")]
 pub use artifact::{ResidentByteInference, ResidentByteInferenceForward};
+#[cfg(feature = "wgpu")]
+pub use boundary::ByteCorpusBoundaryObservation;
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
+#[cfg(feature = "wgpu")]
+pub use forward_diagnostic::ByteCorpusForwardDiagnosticObservation;
 #[cfg(feature = "wgpu")]
 pub use generation::ByteCorpusGeneration;
 pub use headwise::ByteCorpusHeadwiseControls;
@@ -727,7 +740,46 @@ impl ByteCorpusStudy {
     #[cfg(feature = "wgpu")]
     pub async fn run(&self, runtime: WgpuRuntime) -> Result<Value> {
         Ok(self
-            .execute(runtime, None, self.total_updates(), false)
+            .execute(
+                runtime,
+                None,
+                self.total_updates(),
+                false,
+                None::<UpdateObserverFn>,
+                None::<ForwardObserverFn>,
+            )
+            .await?
+            .0)
+    }
+
+    /// Observe each submitted update before the next forward or scheduled drain.
+    ///
+    /// The callback receives the case name, one-based attempted update, and an
+    /// immutable model. Submission is not acceptance: ordinary receipt checks
+    /// still apply. Returning an error aborts the observed run.
+    ///
+    /// A caller can retain `model.checkpoint_snapshot()` and read it only after
+    /// this run returns, freezing weights and optimizer state without a per-step
+    /// CPU wait. Alternatively, retain `model.retain_checkpoint()` and submit its
+    /// `snapshot()` copies only after this run returns. The former adds GPU
+    /// copies between updates; both change resource lifetimes and host work.
+    /// A passing observed run does not establish that `run()` is deterministic.
+    /// No observer, snapshots or additional GPU commands are added to `run()`.
+    #[cfg(feature = "wgpu")]
+    pub async fn run_with_update_observer(
+        &self,
+        runtime: WgpuRuntime,
+        observer: impl FnMut(&str, usize, &ResidentByteDecoder) -> Result<()>,
+    ) -> Result<Value> {
+        Ok(self
+            .execute(
+                runtime,
+                None,
+                self.total_updates(),
+                false,
+                Some(observer),
+                None::<ForwardObserverFn>,
+            )
             .await?
             .0)
     }
@@ -743,7 +795,16 @@ impl ByteCorpusStudy {
         resume: Option<&ByteCorpusStudyCheckpoint>,
         stop_after: usize,
     ) -> Result<ByteCorpusStudySegment> {
-        let (report, checkpoint) = self.execute(runtime, resume, stop_after, true).await?;
+        let (report, checkpoint) = self
+            .execute(
+                runtime,
+                resume,
+                stop_after,
+                true,
+                None::<UpdateObserverFn>,
+                None::<ForwardObserverFn>,
+            )
+            .await?;
         Ok(ByteCorpusStudySegment {
             report,
             checkpoint: checkpoint.ok_or("missing captured checkpoint")?,
@@ -751,13 +812,19 @@ impl ByteCorpusStudy {
     }
 
     #[cfg(feature = "wgpu")]
-    async fn execute(
+    async fn execute<F, G>(
         &self,
         runtime: WgpuRuntime,
         resume: Option<&ByteCorpusStudyCheckpoint>,
         stop_after: usize,
         capture: bool,
-    ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)> {
+        mut observer: Option<F>,
+        mut forward_observer: Option<G>,
+    ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)>
+    where
+        F: FnMut(&str, usize, &ResidentByteDecoder) -> Result<()>,
+        G: FnMut(&str, usize, &ResidentByteDecoder, &ResidentByteDecoderForward) -> Result<()>,
+    {
         if capture || self.request.optimizer.is_some() {
             self.validate_segment(resume, stop_after)?;
         }
@@ -835,6 +902,9 @@ impl ByteCorpusStudy {
                 let tape = model.forward(&resident)?;
                 let loss =
                     tape.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
+                if let Some(observe) = forward_observer.as_mut() {
+                    observe(&case.name, step + 1, &model, &tape)?;
+                }
                 let gradients = model.backward(&tape, loss.prediction_gradient())?;
                 let update = match (&adamw_steps, gradient_clip) {
                     (Some(steps), Some(clip)) => {
@@ -845,6 +915,9 @@ impl ByteCorpusStudy {
                     (None, None) => model.sgd_with_rates(&gradients, &rates)?,
                 };
                 pending.push((update, loss.value().clone()));
+                if let Some(observe) = observer.as_mut() {
+                    observe(&case.name, step + 1, &model)?;
+                }
                 if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
                     // Bounded bursts; all receipts are drained even at a pause
                     // that is not a scheduled evaluation boundary.

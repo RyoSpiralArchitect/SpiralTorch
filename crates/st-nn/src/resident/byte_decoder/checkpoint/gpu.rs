@@ -2,7 +2,9 @@ use super::*;
 use st_backend_wgpu::{
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulTile},
     resident_tensor::{TensorDevice, TensorReadbackBatch},
-    resident_training::parameters::{ResidentAdamWReadback, ResidentParameterSnapshot},
+    resident_training::parameters::{
+        ResidentAdamWReadback, ResidentAdamWSnapshot, ResidentParameterSnapshot,
+    },
     runtime::WgpuRuntime,
 };
 
@@ -15,7 +17,50 @@ pub struct ByteDecoderCheckpointReadback {
     optimizer: Option<ResidentAdamWReadback>,
 }
 
+/// One attempted revision retained without GPU copies or mapping. Model values
+/// and optimizer handles come from the same owner; later updates and owner drop
+/// cannot change them. Retention still changes resource lifetimes and host work.
+pub struct ByteDecoderCheckpointHandles {
+    model: ModelRecord,
+    device: TensorDevice,
+    parameters: ResidentParameterSnapshot,
+    optimizer: Option<ResidentAdamWSnapshot>,
+}
+
+impl ByteDecoderCheckpointHandles {
+    /// Submit copies only now. Read the returned capture explicitly to obtain a
+    /// checkpoint; neither retention nor copying establishes update acceptance.
+    pub fn snapshot(self) -> Result<ByteDecoderCheckpointReadback, InferenceError> {
+        let optimizer = self
+            .optimizer
+            .map(ResidentAdamWSnapshot::snapshot)
+            .transpose()?;
+        Ok(ByteDecoderCheckpointReadback {
+            model: self.model,
+            attempted_revision: self.parameters.revision(),
+            readback: self
+                .device
+                .snapshot_many(&self.parameters.values().iter().collect::<Vec<_>>())?,
+            optimizer,
+        })
+    }
+}
+
 impl CheckpointTemplate {
+    pub(in crate::resident::byte_decoder) fn retain(
+        &self,
+        device: &TensorDevice,
+        parameters: ResidentParameterSnapshot,
+        optimizer: Option<ResidentAdamWSnapshot>,
+    ) -> ByteDecoderCheckpointHandles {
+        ByteDecoderCheckpointHandles {
+            model: self.0.clone(),
+            device: device.clone(),
+            parameters,
+            optimizer,
+        }
+    }
+
     pub(in crate::resident::byte_decoder) fn capture(
         &self,
         device: &TensorDevice,
