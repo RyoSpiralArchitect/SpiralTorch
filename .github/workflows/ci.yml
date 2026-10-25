@@ -38,6 +38,7 @@ jobs:
           python3 -I -S -B tools/test_run_byte_study_replay.py
           python3 -I -S -B tools/test_run_byte_study_boundary.py
           python3 -I -S -B tools/test_run_byte_study_retained.py
+          python3 -I -S -B tools/test_byte_release_long_resume.py
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-book-controls -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-geometry-observation -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-learned-radius -p 'test_*.py'
@@ -661,6 +662,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_study_boundary.py BoundaryPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_study_forward_diagnostic.py ForwardDiagnosticPortable -v
+          python -I -B bindings/st-py/tests/test_nn_byte_release_qualification.py LongResumePortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
       - name: Resident classifier surface and handoff verifier
         run: |

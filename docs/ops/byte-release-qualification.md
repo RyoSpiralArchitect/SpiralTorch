@@ -1,0 +1,133 @@
+# Bounded byte-learning release qualification
+
+Maintainer-approved direction, 2026-10-25. This changes the publication decision
+rule, not the interpretation of historical evidence. Rust owns learning and
+restoration; Python only selects inputs, orchestrates calls and compares saved
+outputs. No numerical tolerance, kernel or diagnostic API is changed here.
+
+## Two separate completion decisions
+
+Historical investigation is resolved only by an explanatory, same-condition
+failure-before/fix-after regression. Otherwise retain it as unresolved in
+[issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289).
+Do not close that issue as fixed merely because a candidate qualifies.
+
+[PR #2294](https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2294)'s
+[first CI attempt](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40189776388)
+passed all ten jobs at `9300b6a6aa0b70cf8cc578d3bee37f7d5b96b082`, including
+ordinary real-GPU learning/resume. It was merged as
+`448b056d3312400dc753e99030fa096b39d45045`. This is the investigation cutoff,
+not qualification of a future binary. Without new failing evidence, stop
+historical binary searches, diagnostic API expansion and repeated reproductions.
+
+The next release may qualify independently under the rules below. This is a
+finite acceptance test for named artifacts/environments, not proof that a rare
+defect cannot exist, cross-GPU bitwise determinism, or LLM quality superiority.
+
+## Freeze the candidate before execution
+
+Close only this release's prerequisites, including review of #2291's TLS and
+optional Go-bridge repairs against current main. Its old failed GPU run stays
+failed; do not merge its red revision or transfer its old audit result to a new
+revision. Review the resulting source and require its ordinary CI and unchanged
+security/license gates. Do not expand this release into the ecosystem roadmap.
+
+Choose a new unused package version. Record the final clean source commit,
+Cargo.lock, toolchain/features, exact three platform wheel digests, installed
+native digests, qualification tooling/test hashes and requests before testing.
+The release must publish those same wheel bytes, not a rebuild. Existing
+0.4.32 development wheels are engineering evidence only and cannot be uploaded.
+If current workflow sequencing cannot retain/test those final bytes before
+publication, fix that sequencing first; do not waive artifact identity.
+
+The two named GPU environments are local macOS Metal and hosted macOS Metal.
+Both install the same admitted macOS wheel, with package/native identity checked
+in each fresh process, including inference children. Require a non-CPU adapter;
+no fallback. Record the actual architecture, adapter, OS/image and Python.
+No GPU execution claim is made for untested platforms or an unexecuted universal2
+slice. Torch, NumPy, Transformers, PEFT, Accelerate and safetensors are absent.
+
+## Fixed acceptance matrix
+
+Each environment runs three predeclared fresh-process rounds, sequentially.
+Each round includes, without numerical diagnostic capture:
+
+- All six existing `StudyGpu` tests in `test_nn_byte_study.py`, preserving their
+  order and original `run_wgpu`/`advance_wgpu` calls. This includes the 25-case
+  clipped contextual-AdamW comparison, unclipped v6/v8 SGD preparation paths,
+  v4-v9 preparation chain, detached calls, freeze clocks and four audited fresh
+  inference handoffs. Do not replace these with a selected-case-only comparison.
+- The three existing `ByteGpu` clipping tests: query-boundary exact resume,
+  active-norm SGD and active-norm AdamW moments.
+- `LongResumeGpu.test_128_updates_and_two_saved_cursors`: the fixed three-arm
+  plain/trainable-Poincare/frozen-Poincare AdamW study, 128 updates, split after
+  updates 1 and 64. This complements, not replaces, the short contextual-query
+  tests. It checks ordinary `run_wgpu`, complete `advance_wgpu`, resumed reports
+  and checkpoints, finite histories, active learning and frozen optimizer clocks.
+
+The long request is 143,920 bytes with SHA-256
+`6c8feea42a494c855fd659a86b2f3b132b3d877277f3912b66af1be215f440f2`.
+It uses batch 1, four bytes per window, width 4, hidden width 8, two heads,
+one non-Topos residual block, two geometry columns and curvature -0.75.
+This deliberately small mechanics fixture is not a long-corpus quality study.
+
+Require exact report/checkpoint equality within each environment. Do not add
+tolerances, discard fields, average runs or use captures to turn a failure green.
+Offline negative controls must catch changed weights/moments, dropped histories,
+empty or reordered cases and changed serialization. Existing CPU-only validation
+must remain available; optional-feature skips must be explicitly expected, never
+accepted as execution of a GPU test.
+
+Every round retains the exact inputs and available outputs before comparison,
+including failures. No normal-path diagnostic observer is enabled. Metadata
+collection is after numerical execution, not a new GPU prelude. All descendants
+are owned by the enclosing supervisor; a child success without a complete audit
+is incomplete evidence.
+
+## Hard stop rules
+
+- Maximum two candidates for this release decision: the initial candidate and
+  one reviewed implementation repair. An unchanged retry is not a repair.
+- Per candidate, each environment has one 90-minute wall-clock budget covering
+  all three rounds, children and postludes, not 90 minutes per test or per round.
+  Thus additional GPU qualification is at most six environment-hours across
+  both candidates. Ordinary source CI and wheel builds are recorded separately;
+  they do not replace these rounds or reset their budgets.
+- Stop at the first unexpected numerical failure, process error, missing
+  evidence, cancellation or timeout. Preserve it. Do not start remaining rounds
+  or the other environment after a failure is known. Infrastructure interruption
+  is incomplete, not a pass; it does not authorize an automatic restart.
+- Changing the source, native bytes or numerical build settings after an attempt
+  invalidates qualification of affected artifacts and consumes the repair
+  candidate slot. Renaming a branch/output directory does not reset the limit.
+- At the limit, stop publication and make an explicit implementation/scope
+  decision. Do not quietly disable a failing route, relax equality, add retries
+  or grow the test matrix. Do not expand historical diagnosis by default.
+
+Preparation and CPU-only tests do not consume a GPU round. Freeze the complete
+harness before admitting candidate 1. A bare unittest invocation without the
+artifact checks, shared deadline, process ownership and audit is engineering
+evidence only; it cannot count as a candidate round.
+
+## Publication done
+
+All named GPU rounds, the actual Linux/macOS/Windows wheel gates, native
+dependency-free smoke, existing security/license checks and publication dry-run
+must pass for the frozen candidate. Review the finite evidence and unresolved
+limitations before release. Upload only the tested wheels under the new version;
+verify PyPI digests, index visibility and clean installed-package origin/version.
+Keep the historical issue open and disclose the qualified scope in release notes.
+
+Then return the main workstream to language learning/inference development.
+Reopen investigation for a new retained mismatch on the supported path, not
+merely because a new model, geometry idea or optimization is available.
+
+## Implementation status
+
+The long-study recipe and portable checks are implemented in
+`tools/byte_release_long_resume.py` and
+`bindings/st-py/tests/test_nn_byte_release_qualification.py`.
+Their real-GPU test requires both existing runtime opt-in and
+`SPIRALTORCH_RUN_BYTE_RELEASE_QUALIFICATION=1`; it is not added to ordinary CI.
+The artifact-bound two-environment supervisor and final candidate admission
+remain prerequisites. This document does not claim that qualification has run.
