@@ -45,7 +45,7 @@ defaults:
 jobs:
   qualify:
     runs-on: macos-26
-    timeout-minutes: 120
+    timeout-minutes: 270
     env:
       CANDIDATE: ${{ inputs.candidate }}
       SOURCE_COMMIT: ${{ inputs.source_commit }}
@@ -127,7 +127,7 @@ jobs:
             "$TRANSPORT_ROOT/venv/bin/python" -I -B -m pip install --no-index --no-deps --no-cache-dir --no-compile "${wheels[0]}"
             "$TRANSPORT_ROOT/venv/bin/python" -I -B -m pip freeze
           } > "$EVIDENCE_ROOT/install.log" 2>&1
-      - name: Execute the three rounds once within one 90-minute budget
+      - name: Execute the three rounds once within one four-hour budget
         working-directory: source
         run: |
           umask 077

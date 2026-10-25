@@ -43,6 +43,7 @@ class HostedOffline(unittest.TestCase):
                 shutil.copytree(directory / "local-metal", remote / "hosted-metal")
                 result = c.read(remote / "hosted-metal/result.json")
                 result["environment"] = "hosted-metal"
+                result["budget_seconds"] = admission["environment_budget_seconds"]["hosted-metal"]
                 (remote / "hosted-metal/result.json").write_bytes(c.encoded(result))
                 c.save(remote / "hosted-metal.start.json", dict(environment="hosted-metal", admission_sha256=c.digest(admission)))
                 c.finish_environment(remote, "hosted-metal", result)
@@ -266,7 +267,7 @@ class HostedOffline(unittest.TestCase):
         self.assertIn("workflow_dispatch:", source)
         self.assertNotIn("pull_request:", source)
         self.assertNotIn("schedule:", source)
-        self.assertIn("timeout-minutes: 120", source)
+        self.assertIn("timeout-minutes: 270", source)
         self.assertIn("cancel-in-progress: false", source)
         self.assertEqual(source.count("--environment hosted-metal --execute"), 1)
         self.assertIn("--no-index --no-deps --no-cache-dir --no-compile", source)

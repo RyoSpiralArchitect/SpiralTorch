@@ -81,6 +81,21 @@ class HandoffOffline(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "acceptance receipt"):
                 handoff.verify_environment(directory, "local-metal")
 
+    def test_resealed_result_cannot_borrow_the_other_environment_budget(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            ledger, _wheel, _admission = accepted_ledger(root)
+            directory = ledger / "candidate-1"
+            result_path = directory / "local-metal/result.json"
+            receipt_path = directory / "local-metal.result.json"
+            result, receipt = c.read(result_path), c.read(receipt_path)
+            result["budget_seconds"] = 14400
+            receipt["evidence_sha256"] = c.digest(result)
+            result_path.write_bytes(c.encoded(result))
+            receipt_path.write_bytes(c.encoded(receipt))
+            with self.assertRaisesRegex(ValueError, "acceptance receipt"):
+                handoff.verify_environment(directory, "local-metal")
+
     def test_hosted_reservation_cannot_be_repacked_as_a_fresh_attempt(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

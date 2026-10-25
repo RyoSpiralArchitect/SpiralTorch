@@ -8,11 +8,11 @@ import argparse
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import byte_release_artifacts as artifacts
 import byte_release_contract as contract
 
+ROOT = Path(__file__).resolve().parents[1]
 PLATFORMS = ("linux", "macos", "windows")
 
 
@@ -38,7 +38,8 @@ def freeze(root, wheels, receipts, candidate=1, prior=None, repair_review=None):
         raise ValueError("source changed during preparation")
     value = dict(schema=contract.SCHEMA, decision=contract.DECISION, candidate=candidate,
                  version=inventories["macos"]["version"], source=source, wheels=inventories, builds=builds,
-                 tests=[list(row) for row in contract.TESTS], rounds=3, budget_seconds=5400,
+                 tests=[list(row) for row in contract.TESTS], rounds=3,
+                 environment_budget_seconds=dict(contract.schedule.ENVIRONMENT_BUDGET_SECONDS),
                  long_request_sha256=contract.long_resume.REQUEST_SHA256, release_ready=False,
                  prior_admission_sha256=contract.digest(contract.validate_admission(prior)) if prior is not None else None,
                  repair_review=repair_review)

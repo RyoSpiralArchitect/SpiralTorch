@@ -87,7 +87,8 @@ def verify_environment(directory, environment, *, receipt=None):
             or result.get("schema") != "spiraltorch.byte_release.environment_schedule.v1"
             or result.get("admission_sha256") != contract.digest(admission)
             or result.get("environment") != environment or result.get("status") != "verified_rounds"
-            or result.get("release_ready") is not False or result.get("budget_seconds") != 5400
+            or result.get("release_ready") is not False
+            or result.get("budget_seconds") != admission["environment_budget_seconds"][environment]
             or result.get("planned_rounds") != 3 or len(result.get("rounds", [])) != 3):
         raise ValueError("environment lacks a matching complete acceptance receipt")
     claimed = contract.read(directory / (environment + ".start.json"))

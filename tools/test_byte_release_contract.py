@@ -15,7 +15,8 @@ from test_byte_release_artifacts import wheel as fabricated_wheel
 
 def fabricated_admission():
     value = dict(schema=contract.SCHEMA, decision=contract.DECISION, candidate=1,
-                 tests=[list(row) for row in contract.TESTS], rounds=3, budget_seconds=5400,
+                 tests=[list(row) for row in contract.TESTS], rounds=3,
+                 environment_budget_seconds={"local-metal": 5400, "hosted-metal": 14400},
                  long_request_sha256=contract.long_resume.REQUEST_SHA256, release_ready=False,
                  version="0.4.33", source={"commit": "a" * 40, "tree": "b" * 40,
                                           "files": {"Cargo.lock": "c" * 64}}, wheels={}, builds={})
@@ -31,7 +32,8 @@ def fabricated_admission():
 def fabricated_result(admission, environment="local-metal", status="verified_rounds"):
     return dict(schema="spiraltorch.byte_release.environment_schedule.v1",
                 admission_sha256=contract.digest(admission), environment=environment,
-                planned_rounds=3, budget_seconds=5400, status=status, release_ready=False,
+                planned_rounds=3, budget_seconds=admission["environment_budget_seconds"][environment],
+                status=status, release_ready=False,
                 rounds=[dict(round=i + 1, status="verified", returncode=0, evidence_sha256="f" * 64)
                         for i in range(3)] if status == "verified_rounds" else [])
 
@@ -51,6 +53,8 @@ class AdmissionOffline(unittest.TestCase):
                               toolchain="synthetic only", features=["wgpu", "logic", "kdsl"]))
             value = preparation.freeze(root, wheels, receipts)
             self.assertEqual(value["tests"], [list(row) for row in contract.TESTS])
+            self.assertEqual(value["environment_budget_seconds"], {"local-metal": 5400, "hosted-metal": 14400})
+            self.assertNotIn("budget_seconds", value)
             for platform in wheels:
                 self.assertEqual(value["builds"][platform]["receipt_sha256"], contract.artifacts.sha256(receipts[platform]))
                 self.assertIn("spiraltorch/__init__.py", value["wheels"][platform]["files"])
@@ -70,6 +74,13 @@ class AdmissionOffline(unittest.TestCase):
                      lambda v: v.update(version="0.4.32"), lambda v: v["tests"].pop(),
                      lambda v: v["tests"].reverse(), lambda v: v.update(rounds=1),
                      lambda v: v.update(budget_seconds=5401), lambda v: v.update(release_ready=True),
+                     lambda v: v.update(schema="spiraltorch.byte_release.admission.v1"),
+                     lambda v: v["environment_budget_seconds"].update({"local-metal": 14400}),
+                     lambda v: v["environment_budget_seconds"].update({"hosted-metal": 5400}),
+                     lambda v: v["environment_budget_seconds"].update({"hosted-metal": 14401}),
+                     lambda v: v["environment_budget_seconds"].update({"hosted-metal": 14400.0}),
+                     lambda v: v["environment_budget_seconds"].pop("hosted-metal"),
+                     lambda v: v["environment_budget_seconds"].update({"other": 5400}),
                      lambda v: v["wheels"].pop("windows"), lambda v: v["builds"].pop("linux"),
                      lambda v: v["source"]["files"].update({"../escape": "a" * 64}),
                      lambda v: v["wheels"]["macos"].update(native=None),
@@ -165,6 +176,7 @@ class LedgerOffline(unittest.TestCase):
         contract.claim_environment(directory, "local-metal")
         result = fabricated_result(self.admission)
         for mutate in (lambda r: r["rounds"].pop(), lambda r: r["rounds"].reverse(),
+                       lambda r: r.update(budget_seconds=14400),
                        lambda r: r.update(admission_sha256="0" * 64),
                        lambda r: r["rounds"][1].update(returncode=1)):
             bad = copy.deepcopy(result)
@@ -175,6 +187,10 @@ class LedgerOffline(unittest.TestCase):
         self.assertEqual(contract.claim_environment(directory, "hosted-metal"), directory / "hosted-metal")
         with self.assertRaises(FileExistsError):
             contract.claim_environment(directory, "hosted-metal")
+        hosted = fabricated_result(self.admission, "hosted-metal")
+        with self.assertRaisesRegex(ValueError, "three verified rounds"):
+            contract.finish_environment(directory, "hosted-metal", dict(hosted, budget_seconds=5400))
+        contract.finish_environment(directory, "hosted-metal", hosted)
 
     def test_failure_blocks_hosted_and_admits_only_one_changed_repair(self):
         directory = self.admitted()

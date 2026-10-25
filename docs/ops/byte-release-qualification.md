@@ -5,6 +5,16 @@ rule, not the interpretation of historical evidence. Rust owns learning and
 restoration; Python only selects inputs, orchestrates calls and compares saved
 outputs. No numerical tolerance, kernel or diagnostic API is changed here.
 
+The maintainer approved a hosted-only budget amendment on 2026-10-26 after
+[main CI 40203512490](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40203512490)
+passed all ten jobs: its six required `StudyGpu` tests took approximately 59
+minutes, making three rounds inconsistent with the original 90-minute estimate.
+Hosted Metal now has four hours; local Metal remains at 90 minutes. This changes
+neither the test matrix nor the two-candidate limit, and does not reset the
+original decision or reinterpret old results. No candidate had been admitted
+before this amendment. Timings from that engineering wheel are planning
+evidence, not final-wheel qualification or a runtime guarantee.
+
 ## Two separate completion decisions
 
 Historical investigation is resolved only by an explanatory, same-condition
@@ -88,9 +98,10 @@ is incomplete evidence.
 
 - Maximum two candidates for this release decision: the initial candidate and
   one reviewed implementation repair. An unchanged retry is not a repair.
-- Per candidate, each environment has one 90-minute wall-clock budget covering
-  all three rounds, children and postludes, not 90 minutes per test or per round.
-  Thus additional GPU qualification is at most six environment-hours across
+- Per candidate, local Metal has one 90-minute wall-clock budget and hosted
+  Metal has one four-hour budget. Each covers all three rounds, children and
+  postludes, not a new budget per test or per round.
+  Thus additional GPU qualification is at most eleven environment-hours across
   both candidates. Ordinary source CI and wheel builds are recorded separately;
   they do not replace these rounds or reset their budgets.
 - Stop at the first unexpected numerical failure, process error, missing
@@ -193,7 +204,9 @@ python3 -I -B tools/prepare_byte_release_qualification.py freeze \
 ```
 
 Retain the printed admission digest independently as `ADMISSION_SHA256`. Do not
-hand-edit the admission. Candidate 2 additionally requires `--candidate 2`, the
+hand-edit the admission. Admission schema v2 freezes both environment budgets;
+the ambiguous old scalar-budget format is rejected, not silently upgraded.
+The canonical decision and candidate slots remain unchanged. Candidate 2 additionally requires `--candidate 2`, the
 previous `--prior-admission`, and the reviewed implementation `--repair-review`
 PR URL. Admission requires a retained terminal failure of candidate 1; it rejects
 unchanged retries, unfinished environments and third candidates. Review URLs
@@ -278,8 +291,9 @@ than 1, any prior/duplicate dispatch on that candidate branch, controller/source
 drift and wrong input digests before accessing the input secret. A shared
 non-cancelling concurrency group prevents overlapping hosted candidates. This
 is a single-coordinator policy, not protection against a repository administrator
-bypassing it. The native worker still owns the one 90-minute GPU budget; the
-job's 120-minute outer limit leaves bounded setup/sealing time. An exhausted job
+bypassing it. The native supervisor owns one four-hour hosted budget across all
+three rounds; the job's 270-minute outer limit preserves the existing 30-minute
+setup/sealing allowance, not extra GPU execution time. An exhausted job
 or unavailable result artifact is incomplete evidence, never a retry trigger.
 
 Only `result.zip.age` and its ciphertext checksum are uploaded. Download the

@@ -15,8 +15,8 @@ import time
 from owned_process import run as owned_run
 
 ROUNDS = 3
-BUDGET_SECONDS = 90 * 60
-ENVIRONMENTS = ("local-metal", "hosted-metal")
+ENVIRONMENT_BUDGET_SECONDS = {"local-metal": 90 * 60, "hosted-metal": 4 * 60 * 60}
+ENVIRONMENTS = tuple(ENVIRONMENT_BUDGET_SECONDS)
 
 
 def save(path, value):
@@ -25,8 +25,8 @@ def save(path, value):
         stream.write("\n")
 
 
-def remaining(started):
-    available = BUDGET_SECONDS - (time.monotonic() - started)
+def remaining(started, budget_seconds):
+    available = budget_seconds - (time.monotonic() - started)
     if available <= 0:
         raise TimeoutError("shared environment deadline exhausted")
     return available
@@ -45,15 +45,16 @@ def run_three_rounds(output, admission_sha256, environment, command_factory, ver
         raise ValueError("a frozen admission digest and declared environment are required")
     output = Path(output)
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    budget_seconds = ENVIRONMENT_BUDGET_SECONDS[environment]
     started = time.monotonic()
     record = {"schema": "spiraltorch.byte_release.environment_schedule.v1",
               "admission_sha256": admission_sha256, "environment": environment,
-              "budget_seconds": BUDGET_SECONDS, "planned_rounds": ROUNDS,
+              "budget_seconds": budget_seconds, "planned_rounds": ROUNDS,
               "rounds": [], "status": "incomplete", "release_ready": False}
     try:
         save(output / "start.json", record)
         for index in range(ROUNDS):
-            available = remaining(started)
+            available = remaining(started, budget_seconds)
             directory = output / f"round-{index + 1}"
             directory.mkdir()
             command = command_factory(index, directory)
@@ -66,16 +67,16 @@ def run_three_rounds(output, admission_sha256, environment, command_factory, ver
             record["rounds"].append(row)
             save(directory / "start.json", dict(row, admission_sha256=admission_sha256))
             with (directory / "process.log").open("x", encoding="utf-8") as stream:
-                completed = owned_run(command, timeout=remaining(started), stdout=stream)
+                completed = owned_run(command, timeout=remaining(started, budget_seconds), stdout=stream)
             row["returncode"] = completed.returncode
             if completed.returncode != 0:
                 row["status"] = "process_failed"
                 raise RuntimeError("round failed; later rounds must not run")
-            remaining(started)
+            remaining(started, budget_seconds)
             evidence = verify_round(directory, index)
             if type(evidence) is not str or not re.fullmatch("[0-9a-f]{64}", evidence):
                 raise ValueError("round lacks a verified evidence digest")
-            remaining(started)
+            remaining(started, budget_seconds)
             row.update(status="verified", evidence_sha256=evidence)
             save(directory / "result.json", row)
         record["status"] = "verified_rounds"

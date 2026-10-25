@@ -12,7 +12,7 @@ import byte_release_long_resume as long_resume
 import byte_release_schedule as schedule
 
 DECISION = "spiraltorch.byte_release.2026-10-25.v1"
-SCHEMA = "spiraltorch.byte_release.admission.v1"
+SCHEMA = "spiraltorch.byte_release.admission.v2"
 STUDY = "bindings/st-py/tests/test_nn_byte_study.py"
 DECODER = "bindings/st-py/tests/test_nn_byte_decoder.py"
 LONG = "bindings/st-py/tests/test_nn_byte_release_qualification.py"
@@ -131,7 +131,10 @@ def validate_admission(value):
     if (type(value) is not dict or value.get("schema") != SCHEMA or value.get("decision") != DECISION
             or type(value.get("candidate")) is not int or value["candidate"] not in (1, 2)
             or value.get("tests") != [list(row) for row in TESTS]
-            or value.get("rounds") != 3 or value.get("budget_seconds") != 5400
+            or value.get("rounds") != 3 or "budget_seconds" in value
+            or type(value.get("environment_budget_seconds")) is not dict
+            or value["environment_budget_seconds"] != schedule.ENVIRONMENT_BUDGET_SECONDS
+            or any(type(seconds) is not int for seconds in value["environment_budget_seconds"].values())
             or value.get("long_request_sha256") != long_resume.REQUEST_SHA256
             or value.get("release_ready") is not False):
         raise ValueError("admission does not match the frozen release policy")
@@ -242,7 +245,7 @@ def claim_environment(directory, environment):
 
 
 def finish_environment(directory, environment, result):
-    admission = read(Path(directory) / "admission.json")
+    admission = validate_admission(read(Path(directory) / "admission.json"))
     start = read(Path(directory) / (environment + ".start.json"))
     if (environment not in schedule.ENVIRONMENTS or start.get("admission_sha256") != digest(admission)
             or start.get("environment") != environment
@@ -253,7 +256,7 @@ def finish_environment(directory, environment, result):
         raise ValueError("environment result belongs to another admission")
     if result["status"] == "verified_rounds" and (
             len(result.get("rounds", [])) != 3 or result.get("planned_rounds") != 3
-            or result.get("budget_seconds") != 5400
+            or result.get("budget_seconds") != admission["environment_budget_seconds"][environment]
             or any(row.get("round") != index + 1 or row.get("status") != "verified"
                    or row.get("returncode") != 0 or not is_hash(row.get("evidence_sha256"))
                    for index, row in enumerate(result["rounds"]))):
