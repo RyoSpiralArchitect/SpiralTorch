@@ -31,13 +31,14 @@ def inference_source():
 def emit_short(index):
     for label, count in c.CAPTURES[index].items():
         for _ in range(count):
-            files = {"report.json": b'{"synthetic":true}', "checkpoint.json": b'{"synthetic":true}'}
+            files = {name: b'{"synthetic":true}' if name.endswith(".json") else b"synthetic"
+                     for name in c.CAPTURE_FILES[label]}
             if label == "contextual_input":
                 files = {"request.json": c.encoded({"cases": list(range(25))})}
             if label == "detached_round":
                 files = {f"report-{i}.json": b'{"synthetic":true}' for i in range(2)}
             if label == "sgd_before":
-                files = {"parameters.json": b"[[1.0]]"}
+                files["parameters.json"] = b"[[1.0]]"
             e.retain(label, lambda: files)
     if index == 7:
         e.retain("sgd_retained_gradient", lambda: {"expected.bin": b"raw", "observed.bin": b"raw"})
@@ -71,7 +72,8 @@ def fake_children(directory, record, admission, package):
 def fake_round(directory, admission, package):
     """A structural fixture, never evidence of native execution."""
     directory.mkdir()
-    native = {"filename": "spiraltorch.abi3.so", "sha256": "d" * 64}
+    native = {"filename": Path(admission["wheels"]["macos"]["native"]["path"]).name,
+              "sha256": admission["wheels"]["macos"]["native"]["sha256"]}
     source_sha = runner.replay.hashlib.sha256(inference_source().encode()).hexdigest()
     audit = dict(foreign_import_attempts=[], blocked_setup_import_attempts=[],
                  unexpected_child_spawns=0, setup_subprocesses=[])
@@ -155,6 +157,47 @@ class PreflightOffline(unittest.TestCase):
 
 
 class EvidenceOffline(unittest.TestCase):
+    def test_native_retention_call_sites_match_payload_contract(self):
+        seen = set()
+        for path in (c.STUDY, c.DECODER):
+            for node in ast.walk(ast.parse((runner.ROOT / path).read_text())):
+                if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name)
+                        or node.func.id not in ("retain", "retain_segment") or not node.args
+                        or not isinstance(node.args[0], ast.Constant)):
+                    continue
+                label = node.args[0].value
+                seen.add(label)
+                if node.func.id == "retain_segment":
+                    actual = {"report.json", "checkpoint.json"}
+                else:
+                    payload = node.args[1].body
+                    if isinstance(payload, ast.DictComp):
+                        self.assertEqual(label, "detached_round")
+                        actual = {"report-0.json", "report-1.json"}
+                    else:
+                        self.assertIsInstance(payload, ast.Dict)
+                        actual = {ast.literal_eval(key) for key in payload.keys}
+                self.assertEqual(actual, set(c.CAPTURE_FILES[label]), label)
+        self.assertEqual(seen, set(c.CAPTURE_FILES))
+
+    def test_required_payload_cannot_disappear_from_both_file_and_index(self):
+        labels = set().union(*c.CAPTURES) | {"sgd_retained_gradient"}
+        self.assertEqual(labels, set(c.CAPTURE_FILES))
+        for label, names in c.CAPTURE_FILES.items():
+            for missing in names:
+                with self.subTest(label=label, missing=missing), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary) / "retained"
+                    with e.recording(root):
+                        e.retain(label, lambda: {name: b"{}" if name.endswith(".json") else b"raw" for name in names})
+                    runner.verify_retained(root, {label: 1})
+                    index = c.read(root / "index.json")
+                    event = index["events"][0]
+                    index["bytes"] -= event["files"].pop(missing)["bytes"]
+                    (root / event["directory"] / missing).unlink()
+                    (root / "index.json").write_bytes(c.encoded(index))
+                    with self.assertRaisesRegex(ValueError, "retained event|payload filenames"):
+                        runner.verify_retained(root, {label: 1})
+
     def test_complete_fabricated_round_and_each_missing_audit_rejects(self):
         admission, package = fabricated_admission(), {"synthetic": True}
         with tempfile.TemporaryDirectory() as temporary, patch.object(c, "source_identity", return_value=admission["source"]):
@@ -189,7 +232,7 @@ class EvidenceOffline(unittest.TestCase):
             with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary) / "raw"
                 with e.recording(root):
-                    e.retain("input", lambda: {"expected.bin": b"a", "observed.bin": b"a"})
+                    e.retain("query_losses", lambda: {"expected.bin": b"a", "observed.bin": b"a"})
                 index = c.read(root / "index.json")
                 event = index["events"][0]
                 path = root / event["directory"] / "observed.bin"
@@ -210,7 +253,7 @@ class EvidenceOffline(unittest.TestCase):
                     event["label"] = "wrong"
                 (root / "index.json").write_bytes(c.encoded(index))
                 with self.assertRaises((ValueError, AssertionError, FileNotFoundError)):
-                    runner.verify_retained(root, {"input": 1})
+                    runner.verify_retained(root, {"query_losses": 1})
 
     def test_long_verifier_requires_all_boundaries_and_original_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -12,8 +12,7 @@ import sys
 import time
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import byte_release_artifacts as artifacts
 import byte_release_contract as contract
 import byte_release_evidence as evidence
@@ -21,6 +20,8 @@ import byte_release_long_resume as long_resume
 import byte_release_schedule as schedule
 import run_byte_study_replay as replay
 from byte_study_diagnostics import runtime_identity
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_admission(path, expected):
@@ -178,7 +179,6 @@ def worker(output, wheel, admission_path, admission_sha256, round_index):
         os.environ.update(SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS="1", SPIRALTORCH_STRICT_GPU="1",
                           SPIRALTORCH_RUN_BYTE_RELEASE_QUALIFICATION="1")
         modules = load_tests()
-        st = modules[contract.STUDY].st
         record["native_library"] = replay.native_identity(wheel, importlib.import_module("spiraltorch.spiraltorch"))
         setup_count = len(record["foreign_import_attempts"])
         record["blocked_setup_import_attempts"] = list(record["foreign_import_attempts"])
@@ -264,6 +264,9 @@ def verify_retained(directory, required):
                 or not contract.relative_file(event.get("directory"))
                 or event["directory"] in locations):
             raise ValueError("incomplete retained event")
+        if (type(event.get("label")) is not str or event["label"] not in contract.CAPTURE_FILES
+                or set(event["files"]) != set(contract.CAPTURE_FILES[event["label"]])):
+            raise ValueError("required retained payload filenames differ")
         locations.add(event["directory"])
         location = directory / event["directory"]
         if location.is_symlink() or not location.resolve().is_relative_to(directory.resolve()):

@@ -43,6 +43,29 @@ CAPTURES = (
     {"decoder_input": 1, "moments_before": 1, "moments_after": 1, "moments_clock": 1},
     {},
 )
+CAPTURE_FILES = {
+    **dict.fromkeys(("adamw_input", "contextual_source", "contextual_input", "learning_legacy_input",
+                    "learning_disabled_input", "learning_input", "detached_input", "full_input",
+                    "prepared_source", "prepared_input"), ("request.json",)),
+    **dict.fromkeys(("adamw_full", "adamw_partial", "adamw_resumed", "contextual_full", "contextual_partial",
+                    "contextual_resumed", "learning_full", "learning_partial", "learning_resumed",
+                    "full_partial", "full_resumed", "full_complete_noop", "prepared_partial", "prepared_resumed"),
+                   ("report.json", "checkpoint.json")),
+    **dict.fromkeys(("adamw_ordinary", "learning_legacy", "learning_disabled", "detached_expected",
+                    "full_ordinary", "full_repeated", "prepared_full"), ("report.json",)),
+    **dict.fromkeys(("query_losses", "query_continued_loss", "sgd_retained_gradient"), ("expected.bin", "observed.bin")),
+    **dict.fromkeys(("query_checkpoint", "query_continued_checkpoint", "query_restored", "query_continued_clock"),
+                   ("expected.json", "observed.json")),
+    **dict.fromkeys(("query_clock", "sgd_clock", "moments_clock"), ("revision.json",)),
+    "detached_round": ("report-0.json", "report-1.json"),
+    "decoder_input": ("initial-checkpoint.json", "windows.json"),
+    "query_saved": ("checkpoint.json", "controls.json"),
+    "query_parameters": ("initial.json", "final.json"),
+    "sgd_before": ("gradients.json", "parameters.json", "controls.json"),
+    "sgd_after": ("parameters.json",),
+    "moments_before": ("gradients.json", "parameters.bin", "controls.json"),
+    "moments_after": ("checkpoint.json",),
+}
 
 
 def encoded(value):
@@ -95,7 +118,8 @@ def source_identity(root):
     selected = [name for name in names if (
         name.endswith(".py") and name.startswith(("tools/", "bindings/st-py/tests/", "bindings/st-py/examples/")))
         or name in ("Cargo.lock", "bindings/st-py/Cargo.toml", "bindings/st-py/pyproject.toml",
-                    ".github/workflows/release_wheels.yml", "docs/ops/byte-release-qualification.md")]
+                    ".github/workflows/release_wheels.yml", ".github/workflows/byte_release_qualification.yml",
+                    "docs/ops/byte-release-qualification.md")]
     for directory in ("tools", "bindings/st-py/tests", "bindings/st-py/examples"):
         if any((Path(root) / directory).rglob("*.pyc")):
             raise ValueError("source tooling must not load stale cached bytecode")
