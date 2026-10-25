@@ -23,6 +23,10 @@ use st_kernel_contracts::gradient_clip::GlobalNormClip;
 
 mod geometry;
 use geometry::{GeometryAutograd, GeometryTape};
+mod diagnostic;
+pub use diagnostic::{
+    ByteDecoderGraphDiagnostic, ByteDecoderGraphDiagnosticReadback, ByteDecoderNamedGraphDiagnostic,
+};
 
 /// An explicit stop-gradient control, not a different forward or a freeze of
 /// router parameters. The caller must reapply its choice after checkpoint load.

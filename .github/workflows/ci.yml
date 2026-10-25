@@ -657,6 +657,7 @@ jobs:
           python -I -B bindings/st-py/examples/native_weights_geometry.py
           python -I -B bindings/st-py/tests/test_nn_byte_study.py StudyPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_study_boundary.py BoundaryPortable -v
+          python -I -B bindings/st-py/tests/test_nn_byte_study_forward_diagnostic.py ForwardDiagnosticPortable -v
           python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v
       - name: Resident classifier surface and handoff verifier
         run: |

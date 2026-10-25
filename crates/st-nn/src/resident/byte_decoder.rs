@@ -20,11 +20,17 @@ pub use checkpoint::{ByteDecoderCheckpointHandles, ByteDecoderCheckpointReadback
 mod training;
 #[cfg(feature = "wgpu")]
 pub use training::{
-    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderQueryPullback, ResidentByteBatch,
-    ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
+    ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderGraphDiagnostic,
+    ByteDecoderGraphDiagnosticReadback, ByteDecoderNamedGraphDiagnostic, ByteDecoderQueryPullback,
+    ResidentByteBatch, ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
 
 pub const BYTE_LM_VOCAB: usize = 256;
+/// Combined graph-diagnostic staging payload ceiling, not a peak host-memory bound.
+pub const BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES: usize = 64 * 1024 * 1024;
+pub const BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS: usize = 256;
+/// Encoded diagnostic JSON limit; distinct from staging and peak host memory.
+pub const BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES: usize = 256 * 1024 * 1024;
 
 /// Each row is one already-selected document window of T+1 bytes. Rows never
 /// attend to one another. No concatenation, padding, EOS, UTF-8 decoding or

@@ -27,16 +27,18 @@ pub use attention::{
 #[cfg(feature = "wgpu")]
 pub use byte_decoder::{
     ByteDecoderBias, ByteDecoderBiasGradient, ByteDecoderCheckpointHandles,
-    ByteDecoderCheckpointReadback, ByteDecoderQueryPullback, ResidentByteBatch,
+    ByteDecoderCheckpointReadback, ByteDecoderGraphDiagnostic, ByteDecoderGraphDiagnosticReadback,
+    ByteDecoderNamedGraphDiagnostic, ByteDecoderQueryPullback, ResidentByteBatch,
     ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp,
 };
 pub use byte_decoder::{
     ByteDecoderCheckpoint, ByteDecoderGeometryMixture, ByteDecoderGeometryParameterLayout,
     ByteDecoderGeometryPlan, ByteDecoderPairMetric, ByteDecoderParameterLayout, ByteDecoderPlan,
     ByteLmBatch, BYTE_DECODER_ADAMW_CHECKPOINT_SCHEMA, BYTE_DECODER_CHECKPOINT_SCHEMA,
-    BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA, BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA,
-    BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA, BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA,
-    BYTE_LM_VOCAB,
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS,
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES, BYTE_DECODER_HEADWISE_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA, BYTE_DECODER_MIXTURE_CHECKPOINT_SCHEMA,
+    BYTE_DECODER_QUERY_MIXTURE_CHECKPOINT_SCHEMA, BYTE_LM_VOCAB,
 };
 pub use byte_study::ByteCorpusServingGate;
 pub use byte_study::{
@@ -47,7 +49,9 @@ pub use byte_study::{
     BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 #[cfg(feature = "wgpu")]
-pub use byte_study::{ByteCorpusBoundaryObservation, ByteCorpusGeneration};
+pub use byte_study::{
+    ByteCorpusBoundaryObservation, ByteCorpusForwardDiagnosticObservation, ByteCorpusGeneration,
+};
 #[cfg(feature = "wgpu")]
 pub use byte_study::{ResidentByteCandidate, ResidentByteServing};
 #[cfg(feature = "wgpu")]
@@ -55,6 +59,8 @@ pub use byte_study::{ResidentByteInference, ResidentByteInferenceForward};
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]
 mod convolution;
+#[cfg(feature = "wgpu")]
+mod diagnostic;
 mod graph;
 mod residual_attention;
 #[cfg(feature = "wgpu")]
