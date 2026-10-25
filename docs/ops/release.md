@@ -4,14 +4,21 @@ This runbook keeps the PyPI path explicit and auditable. The safe default is a
 GitHub Actions dry-run: it validates the signed release wheels and PyPI state
 without uploading.
 
-## GPU Replay Publication Hold
+## GPU Replay Publication Gate
 
-As of 2026-10-20, the maintainer requires the cause of the historical GPU study
-divergence to be identified and its repair validated before publication, tags,
-or a version bump. Track that decision in [issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289).
-Green CI or an unreproduced failure does not remove the hold. The
-[manual hosted replay diagnosis](byte-study-replay.md) preserves a fixed,
-non-publishing investigation path independently of the release workflows.
+On 2026-10-25, the maintainer accepted the
+[bounded candidate qualification policy](byte-release-qualification.md).
+It supersedes the 2026-10-20 requirement that historical root-cause resolution
+must precede every version bump, tag or publication. The historical failures in
+[issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289) remain
+unresolved; subsequent passes are not a repair finding.
+
+Publication remains blocked until the fixed final candidate meets that policy,
+all platform-wheel gates below, and the explicit artifact publication checks.
+Version/tag preparation is not publication approval. Green source CI, an older
+wheel or an instrumented replay alone cannot qualify a new wheel. The
+[manual hosted replay diagnosis](byte-study-replay.md) remains historical
+evidence, not an invitation to extend the investigation indefinitely.
 
 ## Release Cadence
 
@@ -216,9 +223,10 @@ that head's [GPU CI failed](https://github.com/RyoSpiralArchitect/SpiralTorch/ac
 the exact prepared-study SGD comparison; PR #2288 remains draft while this is
 investigated. A portable wheel check passing cannot override a numerical failure.
 
-Before a new immutable tag, qualify the actual three platform wheels and
-resolve the separately recorded [GPU resume discrepancy](../python/byte-study-runs.md#exact-resume-qualification).
-Later exact passes do not establish its cause or a numerical repair. Do not
+For the next release, qualify the actual three platform wheels under the
+[current candidate policy](byte-release-qualification.md). The separately
+recorded [GPU resume discrepancy](../python/byte-study-runs.md#exact-resume-qualification)
+remains unresolved; later exact passes do not establish its cause or a repair. Do not
 publish development wheels labeled 0.4.32, reuse its tag, weaken the comparison,
 or describe this integration as general HF/PEFT or full-model fine-tuning.
 
