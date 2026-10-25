@@ -129,8 +129,10 @@ The long-study recipe and portable checks are implemented in
 `bindings/st-py/tests/test_nn_byte_release_qualification.py`.
 Their real-GPU test requires both existing runtime opt-in and
 `SPIRALTORCH_RUN_BYTE_RELEASE_QUALIFICATION=1`; it is not added to ordinary CI.
-The artifact-bound two-environment supervisor and final candidate admission
-remain prerequisites. This document does not claim that qualification has run.
+The artifact-bound worker, fixed matrix, child verification and local attempt
+ledger are implemented. Hosted transport/ownership integration, final build
+receipts and actual candidate admission remain prerequisites. This document
+does not claim that qualification has run.
 
 The read-only `tools/byte_release_artifacts.py` component inventories complete
 wheel bytes and checks the installed native extension, Python facade, shipped
@@ -145,4 +147,69 @@ and decreasing-budget primitive. A zero exit requires independent evidence
 verification; failure, cancellation, timeout and incomplete evidence stop the
 sequence. It has no standalone execution CLI or publication authority. Candidate
 ledger admission, the frozen test worker and its child/evidence verification
-must be integrated before this primitive can count toward qualification.
+are integrated by `tools/run_byte_release_qualification.py`. It runs the frozen
+matrix in three fresh interpreters, checks complete parent/child wheel identity,
+rejects missing evidence despite zero exits, and verifies saved exact bytes.
+Existing numerical calls/assertions stay in their original tests; opt-in
+`byte_release_evidence` hooks retain already available host bytes. They add no
+GPU snapshot or diagnostic dispatch and do not evaluate factories in normal CI.
+Raw inputs/results and failure records are private by default. Offline tests
+exercise synthetic success, tampering, missing audits, failure and timeout;
+they are not evidence of GPU execution.
+
+## Preparing and running the frozen acceptance
+
+After reviewing/merging the release prerequisites, choose an unused version and
+build the final three wheels once, with publication and release attachment off.
+Keep the complete build logs and a JSON receipt for each platform containing
+`source_commit`, `wheel_sha256`, `toolchain` (the actual compiler identity), and
+`features` (the resolved release feature list). The freeze tool hashes the whole
+receipt; it cannot establish the truth of operator-authored build records, review
+approval, unused PyPI versions or successful platform CI. Verify those separately.
+
+Use one persistent private ledger outside the source tree for this decision.
+Initialize it once, then never choose a new ledger to reset the attempt budget:
+
+```sh
+python3 -I -B tools/prepare_byte_release_qualification.py init-ledger "$LEDGER"
+python3 -I -B tools/prepare_byte_release_qualification.py freeze \
+  --linux-wheel "$LINUX_WHEEL" --linux-build-receipt "$LINUX_RECEIPT" \
+  --macos-wheel "$MACOS_WHEEL" --macos-build-receipt "$MACOS_RECEIPT" \
+  --windows-wheel "$WINDOWS_WHEEL" --windows-build-receipt "$WINDOWS_RECEIPT" \
+  --output "$ADMISSION"
+```
+
+Retain the printed admission digest independently as `ADMISSION_SHA256`. Do not
+hand-edit the admission. Candidate 2 additionally requires `--candidate 2`, the
+previous `--prior-admission`, and the reviewed implementation `--repair-review`
+PR URL. Admission requires a retained terminal failure of candidate 1; it rejects
+unchanged retries, unfinished environments and third candidates. Review URLs
+record provenance, not proof that review was approved.
+
+Install the final macOS wheel into a fresh environment with `--no-compile`, no
+foreign ML packages, and a clean checkout of the frozen commit. `PYTHON` below
+is that environment's interpreter. Default invocation only checks CPU-side
+identity; it neither starts GPU tests nor consumes the environment claim:
+
+```sh
+"$PYTHON" -I -B tools/run_byte_release_qualification.py \
+  --admission "$ADMISSION" --admission-sha256 "$ADMISSION_SHA256" --wheel "$MACOS_WHEEL"
+"$PYTHON" -I -B tools/run_byte_release_qualification.py \
+  --admission "$ADMISSION" --admission-sha256 "$ADMISSION_SHA256" --wheel "$MACOS_WHEEL" \
+  --ledger "$LEDGER" --environment local-metal --execute
+```
+
+One exclusive environment claim is written before launching any round. A failed
+or interrupted claim is not reusable, even if its output folder was renamed or
+removed. Hosted execution is sequential, using the exact same admission and
+wheel, and is permitted only after all three local rounds verify. The ledger is
+an operator-owned filesystem record, not a distributed lock or authenticated
+remote attestation. Before hosted execution, the coordinator must transfer and
+verify the canonical admission/local-result evidence, ensure no other owner is
+running, and preserve/return the first hosted claim and outcome. Do not initialize
+an independent hosted ledger. That transport integration is not provided by this
+CLI yet; do not launch it as an untracked manual substitute.
+
+All receipts keep `release_ready=false`. Even six verified GPU rounds do not
+perform publication, close #2289, or substitute for the three wheel gates,
+security/license checks, review and same-byte upload verification above.

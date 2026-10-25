@@ -207,6 +207,18 @@ class GuardedChildren:
         self.spawn_seen = False
         (output / "children").mkdir()
 
+    def child_bootstrap(self, directory):
+        return (
+            f"import runpy\nrunpy.run_path({str(Path(__file__).resolve())!r})['child_worker']("
+            f"{str(directory)!r}, {str(self.wheel)!r}, {self.source!r})\n"
+        )
+
+    def before_child(self, directory, input_text):
+        pass
+
+    def additional_child_valid(self, child):
+        return True
+
     def audit(self, event, args):
         if event not in PROCESS_EVENTS or not self.active:
             return
@@ -228,10 +240,8 @@ class GuardedChildren:
         directory.mkdir()
         row = {"directory": str(directory.relative_to(self.output)), "valid": False}
         self.record["child_runs"].append(row)
-        bootstrap = (
-            f"import runpy\nrunpy.run_path({str(Path(__file__).resolve())!r})['child_worker']("
-            f"{str(directory)!r}, {str(self.wheel)!r}, {self.source!r})\n"
-        )
+        self.before_child(directory, kwargs["input"])
+        bootstrap = self.child_bootstrap(directory)
         wrapped = [sys.executable, "-I", "-B", "-c", bootstrap]
         self.authorized, self.spawn_seen = wrapped, False
         stdout = stderr = None
@@ -266,6 +276,7 @@ class GuardedChildren:
                             for command in child["setup_subprocesses"])
                     and child.get("unexpected_child_spawns") == 0
                     and child.get("release_ready") is False
+                    and self.additional_child_valid(child)
                 )
             except (OSError, ValueError, TypeError, AttributeError) as error:
                 row["record_error"] = type(error).__name__
