@@ -158,6 +158,9 @@ jobs:
         run: |
           bash scripts/check_cpu_feature_isolation.sh
           cargo test --locked -p st-tensor --no-default-features --features cpu --test prepacked_cpu_dispatch
+      - name: Go latency bridge feature isolation
+        if: matrix.run_lints
+        run: cargo check --locked -p st-core --no-default-features --features go-bridge --lib
       - name: Kernel and HIP contract isolation
         if: matrix.run_lints
         env:
