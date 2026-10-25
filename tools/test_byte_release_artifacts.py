@@ -13,10 +13,11 @@ import byte_release_artifacts as artifacts
 
 
 def files(target="macosx_14_0_universal2"):
+    native = "spiraltorch/spiraltorch.pyd" if target == "win_amd64" else "spiraltorch/spiraltorch.abi3.so"
     return {
         "spiraltorch/__init__.py": b"# synthetic, never executed\n",
         "spiraltorch/helper.py": b"value = 1\n",
-        "spiraltorch/spiraltorch.abi3.so": b"synthetic native bytes, never loaded",
+        native: b"synthetic native bytes, never loaded",
         "spiraltorch-0.4.33.dist-info/METADATA": b"Name: spiraltorch\nVersion: 0.4.33\n",
         "spiraltorch-0.4.33.dist-info/WHEEL": ("Wheel-Version: 1.0\nTag: cp38-abi3-" + target + "\n").encode(),
         "spiraltorch-0.4.33.dist-info/RECORD": b"",
@@ -59,7 +60,18 @@ class ArtifactIdentity(unittest.TestCase):
                 inventory = artifacts.wheel_inventory(wheel(temporary, target=target))
                 self.assertEqual(inventory["platform"], family)
                 self.assertEqual(set(inventory["files"]), set(files(target)))
-                self.assertEqual(inventory["native"]["path"], "spiraltorch/spiraltorch.abi3.so")
+                self.assertTrue(inventory["native"]["path"].endswith(".pyd" if family == "windows" else ".so"))
+
+    def test_changed_archive_and_wrong_platform_native_reject(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = wheel(temporary)
+            with patch.object(artifacts, "sha256", side_effect=["a" * 64, "b" * 64]):
+                with self.assertRaisesRegex(ValueError, "changed during"):
+                    artifacts.wheel_inventory(path)
+            contents = files()
+            contents["spiraltorch/spiraltorch.pyd"] = contents.pop("spiraltorch/spiraltorch.abi3.so")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                artifacts.wheel_inventory(wheel(temporary, contents))
 
     def test_compressed_universal2_tags_match_the_filename(self):
         targets = ["macosx_14_0_x86_64", "macosx_14_0_arm64", "macosx_14_0_universal2"]

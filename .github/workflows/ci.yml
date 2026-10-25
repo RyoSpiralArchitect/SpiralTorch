@@ -39,6 +39,8 @@ jobs:
           python3 -I -S -B tools/test_run_byte_study_boundary.py
           python3 -I -S -B tools/test_run_byte_study_retained.py
           python3 -I -S -B tools/test_byte_release_long_resume.py
+          python3 -I -S -B tools/test_byte_release_artifacts.py
+          python3 -I -S -B tools/test_byte_release_schedule.py
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-book-controls -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-geometry-observation -p 'test_*.py'
           python3 -I -S -B -m unittest discover -s benchmarks/results/2026-10-18-hf-learned-radius -p 'test_*.py'

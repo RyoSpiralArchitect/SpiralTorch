@@ -131,3 +131,18 @@ Their real-GPU test requires both existing runtime opt-in and
 `SPIRALTORCH_RUN_BYTE_RELEASE_QUALIFICATION=1`; it is not added to ordinary CI.
 The artifact-bound two-environment supervisor and final candidate admission
 remain prerequisites. This document does not claim that qualification has run.
+
+The read-only `tools/byte_release_artifacts.py` component inventories complete
+wheel bytes and checks the installed native extension, Python facade, shipped
+`spiral`/`examples` files and original metadata. Install the qualification
+environment with `pip --no-compile`: cached bytecode, extra package files,
+symbolic links and shadowed module origins are rejected. Installer-rewritten
+`RECORD` is excluded from original-metadata equality; it is not used to establish
+which bytes came from the wheel. This check does not select a GPU runtime.
+
+`tools/byte_release_schedule.py` supplies the sequential three-process ownership
+and decreasing-budget primitive. A zero exit requires independent evidence
+verification; failure, cancellation, timeout and incomplete evidence stop the
+sequence. It has no standalone execution CLI or publication authority. Candidate
+ledger admission, the frozen test worker and its child/evidence verification
+must be integrated before this primitive can count toward qualification.

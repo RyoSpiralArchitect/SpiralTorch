@@ -29,6 +29,7 @@ def stream_digest(stream):
 def wheel_inventory(path):
     """Freeze every original wheel file, including the facade and metadata."""
     path = Path(path)
+    original_digest = sha256(path)
     files = {}
     with zipfile.ZipFile(path) as archive:
         entries = archive.infolist()
@@ -96,6 +97,8 @@ def wheel_inventory(path):
             raise ValueError("unexpected release wheel platform")
     if len(platforms) != 1:
         raise ValueError("wheel mixes platform families")
+    if native[0].endswith(".pyd") != (platforms == {"windows"}):
+        raise ValueError("native extension does not match the wheel platform")
     if platforms == {"macos"} and not any(tag.endswith("_universal2") for tag in tags):
         raise ValueError("macOS release wheel must include universal2")
     filename_tags = path.name[:-4].split("-")[2:]
@@ -103,7 +106,9 @@ def wheel_inventory(path):
             f"{python}-{abi}-{target}" for python in filename_tags[0].split(".")
             for abi in filename_tags[1].split(".") for target in filename_tags[2].split(".")}:
         raise ValueError("wheel filename tags and metadata differ")
-    return {"filename": path.name, "sha256": sha256(path), "bytes": path.stat().st_size,
+    if sha256(path) != original_digest:
+        raise ValueError("wheel changed during inventory")
+    return {"filename": path.name, "sha256": original_digest, "bytes": path.stat().st_size,
             "version": version, "platform": platforms.pop(), "tags": sorted(tags),
             "native": dict(path=native[0], **files[native[0]]), "files": files}
 
