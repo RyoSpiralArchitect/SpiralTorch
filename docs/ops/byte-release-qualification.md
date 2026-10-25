@@ -161,13 +161,24 @@ they are not evidence of GPU execution.
 
 ## Preparing and running the frozen acceptance
 
-After reviewing/merging the release prerequisites, choose an unused version and
-build the final three wheels once, with publication and release attachment off.
+After reviewing/merging the release prerequisites, choose an unused version,
+merge its reviewed release PR and tag that exact source once. The tag-push
+`release_wheels.yml` run builds/tests all three final wheels, signs and retains
+`signed-release-payload-<tag>`, but does not attach or publish a GitHub Release
+or upload to PyPI. Record that original run and artifact IDs/digests; download
+and verify its exact-tag provenance before admitting those same wheel bytes.
+Do not use `finalize_release=true` or a second build for this candidate.
 Keep the complete build logs and a JSON receipt for each platform containing
 `source_commit`, `wheel_sha256`, `toolchain` (the actual compiler identity), and
 `features` (the resolved release feature list). The freeze tool hashes the whole
 receipt; it cannot establish the truth of operator-authored build records, review
 approval, unused PyPI versions or successful platform CI. Verify those separately.
+
+After the complete candidate gates and evidence review pass, use
+`recover_github_release.yml` with that original tag-push run ID to finalize the
+unchanged signed payload. Then use the separate publish-from-release dry-run
+and upload path. The legacy combined build/publication option is not an
+alternative to qualification; it would build different, unqualified bytes.
 
 Use one persistent private ledger outside the source tree for this decision.
 Initialize it once, then never choose a new ledger to reset the attempt budget:
