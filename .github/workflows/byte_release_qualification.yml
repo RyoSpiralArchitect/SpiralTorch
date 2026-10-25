@@ -1,0 +1,170 @@
+name: Byte Release Qualification
+run-name: Byte release candidate ${{ inputs.candidate }} - ${{ inputs.admission_sha256 }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: "Approved candidate slot; never reset by creating another branch"
+        type: choice
+        options: ['1', '2']
+        required: true
+      source_commit:
+        description: "Frozen source used by all three final wheels"
+        type: string
+        required: true
+      admission_sha256:
+        description: "Canonical admission digest"
+        type: string
+        required: true
+      input_plaintext_sha256:
+        description: "Privately verified handoff ZIP digest"
+        type: string
+        required: true
+      input_ciphertext_sha256:
+        description: "Digest of the single committed age ciphertext"
+        type: string
+        required: true
+      result_recipient:
+        description: "Public age recipient; private result key remains local"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: byte-release-qualification-20261025
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -e -o pipefail {0}
+
+jobs:
+  qualify:
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      CANDIDATE: ${{ inputs.candidate }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      ADMISSION_SHA256: ${{ inputs.admission_sha256 }}
+      INPUT_PLAINTEXT_SHA256: ${{ inputs.input_plaintext_sha256 }}
+      INPUT_CIPHERTEXT_SHA256: ${{ inputs.input_ciphertext_sha256 }}
+      RESULT_RECIPIENT: ${{ inputs.result_recipient }}
+    steps:
+      - name: Create private evidence roots
+        run: |
+          case "$CANDIDATE" in 1|2) ;; *) exit 1 ;; esac
+          umask 077
+          TRANSPORT_ROOT="$RUNNER_TEMP/byte-release-candidate-$CANDIDATE"
+          EVIDENCE_ROOT="$TRANSPORT_ROOT/evidence"
+          mkdir -m 700 "$TRANSPORT_ROOT"
+          mkdir -m 700 "$EVIDENCE_ROOT"
+          printf 'TRANSPORT_ROOT=%s\nEVIDENCE_ROOT=%s\n' "$TRANSPORT_ROOT" "$EVIDENCE_ROOT" >> "$GITHUB_ENV"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.10'
+      - name: Install pinned authenticated encryption and validate the public recipient
+        run: |
+          umask 077
+          curl --fail --silent --show-error --location --max-time 120 \
+            https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-darwin-arm64.tar.gz \
+            --output "$TRANSPORT_ROOT/age.tar.gz"
+          printf '%s  %s\n' e2020b073c44f692685a24d6abc378817eb81ffaaf49fd0531ef8565f767f2f5 \
+            "$TRANSPORT_ROOT/age.tar.gz" | shasum -a 256 --check
+          tar -xzf "$TRANSPORT_ROOT/age.tar.gz" -C "$TRANSPORT_ROOT"
+          test "$("$TRANSPORT_ROOT/age/age" --version)" = 'v1.3.2'
+          printf 'SpiralTorch private release result recipient preflight\n' | \
+            "$TRANSPORT_ROOT/age/age" --encrypt --recipient "$RESULT_RECIPIENT" \
+            --output "$TRANSPORT_ROOT/recipient-probe.age"
+      - name: Reject repeated or unbound invocations before accessing input secrets
+        working-directory: controller
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -I -S -B tools/byte_release_hosted.py admit-run \
+            --output "$EVIDENCE_ROOT/hosted-context.json" > "$EVIDENCE_ROOT/admission.log" 2>&1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: source
+          persist-credentials: false
+      - name: Decrypt the packet without exposing the input identity to execution
+        working-directory: source
+        env:
+          INPUT_IDENTITY: ${{ secrets[format('ST_BYTE_RELEASE_CANDIDATE_{0}_INPUT_IDENTITY', inputs.candidate)] }}
+        run: |
+          umask 077
+          test -n "$INPUT_IDENTITY"
+          key="$TRANSPORT_ROOT/input-key.txt"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$INPUT_IDENTITY" > "$key"
+          unset INPUT_IDENTITY
+          {
+            "$TRANSPORT_ROOT/age/age" --decrypt --identity "$key" \
+              --output "$TRANSPORT_ROOT/input.zip" ../controller/.github/byte-release-input.zip.age
+            python -I -S -B tools/byte_release_handoff.py unpack-input \
+              --input "$TRANSPORT_ROOT/input.zip" --output "$TRANSPORT_ROOT/input" \
+              --sha256 "$INPUT_PLAINTEXT_SHA256" --admission-sha256 "$ADMISSION_SHA256"
+            python -I -S -B tools/byte_release_hosted.py verify-input \
+              --input "$TRANSPORT_ROOT/input" --candidate "$CANDIDATE" --admission-sha256 "$ADMISSION_SHA256"
+          } > "$EVIDENCE_ROOT/input-preflight.log" 2>&1
+      - name: Install the same wheel offline without cached Python code
+        run: |
+          umask 077
+          {
+            python -I -B -m venv "$TRANSPORT_ROOT/venv"
+            wheels=("$TRANSPORT_ROOT/input/wheel/"*.whl)
+            test "${#wheels[@]}" -eq 1
+            "$TRANSPORT_ROOT/venv/bin/python" -I -B -m pip install --no-index --no-deps --no-cache-dir --no-compile "${wheels[0]}"
+            "$TRANSPORT_ROOT/venv/bin/python" -I -B -m pip freeze
+          } > "$EVIDENCE_ROOT/install.log" 2>&1
+      - name: Execute the three rounds once within one 90-minute budget
+        working-directory: source
+        run: |
+          umask 077
+          wheels=("$TRANSPORT_ROOT/input/wheel/"*.whl)
+          test "${#wheels[@]}" -eq 1
+          set +e
+          "$TRANSPORT_ROOT/venv/bin/python" -I -B tools/run_byte_release_qualification.py \
+            --admission "$TRANSPORT_ROOT/input/ledger/candidate-$CANDIDATE/admission.json" \
+            --admission-sha256 "$ADMISSION_SHA256" --wheel "${wheels[0]}" \
+            --ledger "$TRANSPORT_ROOT/input/ledger" --environment hosted-metal --execute \
+            > "$EVIDENCE_ROOT/qualification.log" 2>&1
+          code=$?
+          printf '%s\n' "$code" > "$EVIDENCE_ROOT/qualification-exit.txt"
+          exit "$code"
+      - name: Encrypt the first outcome including incomplete evidence
+        if: ${{ always() && env.TRANSPORT_ROOT != '' }}
+        working-directory: controller
+        run: |
+          umask 077
+          test -x "$TRANSPORT_ROOT/age/age"
+          python -I -S -B tools/byte_release_hosted.py pack-result \
+            --evidence "$EVIDENCE_ROOT" --input "$TRANSPORT_ROOT/input" --candidate "$CANDIDATE" \
+            --output "$TRANSPORT_ROOT/result.zip" --admission-sha256 "$ADMISSION_SHA256" \
+            > "$TRANSPORT_ROOT/packing.json"
+          mkdir -m 700 "$TRANSPORT_ROOT/public"
+          "$TRANSPORT_ROOT/age/age" --encrypt --recipient "$RESULT_RECIPIENT" \
+            --output "$TRANSPORT_ROOT/public/result.zip.age" "$TRANSPORT_ROOT/result.zip"
+          cd "$TRANSPORT_ROOT/public"
+          shasum -a 256 result.zip.age > SHA256SUMS
+      - name: Upload only ciphertext and its digest
+        if: ${{ always() && env.TRANSPORT_ROOT != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: byte-release-encrypted-${{ inputs.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/byte-release-candidate-${{ inputs.candidate }}/public/result.zip.age
+            ${{ runner.temp }}/byte-release-candidate-${{ inputs.candidate }}/public/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
