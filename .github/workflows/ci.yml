@@ -40,6 +40,7 @@ jobs:
           python3 -I -S -B tools/test_run_byte_study_retained.py
           python3 -I -S -B tools/test_byte_release_long_resume.py
           python3 -I -S -B tools/test_byte_release_artifacts.py
+          python3 -I -S -B tools/test_wheel_build_provenance.py
           python3 -I -S -B tools/test_byte_release_schedule.py
           python3 -I -S -B tools/test_byte_release_evidence.py
           python3 -I -S -B tools/test_byte_release_contract.py
@@ -259,8 +260,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
         with:
+          python-version: "3.12"
+      - name: Read wheel build pins
+        id: wheel_pins
+        run: python -I -S -B tools/wheel_build_provenance.py pins >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.wheel_pins.outputs.rust }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: build tensor + wgpu
@@ -355,9 +363,31 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
         run: cargo test --locked -p spiral-selfsup --features wgpu --release --test info_nce_tensor -- --test-threads=1
-      - uses: actions/setup-python@v6
+      - name: Install pinned wheel build tools
+        timeout-minutes: 20
+        run: python -m pip install "maturin==${{ steps.wheel_pins.outputs.maturin }}"
+      - name: Build and retain native engineering wheel
+        id: wheel_build
+        timeout-minutes: 120
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.wheel_pins.outputs.rust }}
+        run: |
+          python -I -S -B tools/wheel_build_provenance.py build --role ci-gpu \
+            --wheel-dir "$RUNNER_TEMP/attention-wheel" --evidence "$RUNNER_TEMP/wheel-build-evidence"
+      - name: Collect raw outputs after failed wheel build
+        if: always() && (steps.wheel_build.outcome == 'failure' || steps.wheel_build.outcome == 'cancelled')
+        timeout-minutes: 10
+        run: |
+          python -I -S -B tools/wheel_build_provenance.py collect-after-step \
+            --wheel-dir "$RUNNER_TEMP/attention-wheel" --evidence "$RUNNER_TEMP/wheel-build-evidence"
+      - name: Preserve unqualified original wheel before Python GPU execution
+        if: always() && steps.wheel_build.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
         with:
-          python-version: "3.12"
+          name: unqualified-wheel-ci-gpu
+          path: ${{ runner.temp }}/wheel-build-evidence/
+          if-no-files-found: error
+          retention-days: 7
       - name: Public Python attention and byte-LM handles on a real GPU
         id: byte_python
         env:
@@ -367,9 +397,9 @@ jobs:
           SPIRALTORCH_RESUME_STUDY_DIAGNOSTICS: ${{ runner.temp }}/byte-study-resume
           SPIRALTORCH_PREPARED_STUDY_DIAGNOSTICS: ${{ runner.temp }}/byte-study-prepared
         run: |
-          python -m pip install "maturin>=1.9,<2"
-          maturin build --release --locked -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/attention-wheel"
-          python -m pip install --no-deps --force-reinstall --no-cache-dir "$RUNNER_TEMP/attention-wheel/"*.whl
+          python -m pip install --no-deps --no-compile --force-reinstall --no-cache-dir "$RUNNER_TEMP/attention-wheel/"*.whl
+          python -I -B tools/wheel_build_provenance.py verify-install \
+            --wheel-dir "$RUNNER_TEMP/attention-wheel" --evidence "$RUNNER_TEMP/wheel-build-evidence"
           python -I -B bindings/st-py/tests/test_wgpu_attention.py -v
           python -I -B bindings/st-py/tests/test_nn_attention_training.py -v
           python -I -B bindings/st-py/tests/test_nn_residual_attention_training.py -v
@@ -405,14 +435,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
-      - name: Retain original engineering wheel after Python GPU failure
-        if: failure() && steps.byte_python.outcome == 'failure'
+      - name: Retain engineering wheel installation identity
+        if: always() && steps.wheel_build.outcome != 'skipped'
         uses: actions/upload-artifact@v7
         with:
-          name: synthetic-byte-study-original-wheel
-          path: ${{ runner.temp }}/attention-wheel/*.whl
-          if-no-files-found: warn
-          retention-days: 1
+          name: unqualified-wheel-records-ci-gpu
+          path: ${{ runner.temp }}/wheel-build-evidence/**/*.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Observe one retained byte-study first-update boundary
         id: byte_boundary
@@ -622,13 +652,39 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Read wheel build pins
+        id: wheel_pins
+        run: python -I -S -B tools/wheel_build_provenance.py pins >> "$GITHUB_OUTPUT"
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.wheel_pins.outputs.rust }}
       - uses: Swatinem/rust-cache@v2
+      - name: Install pinned wheel build tools
+        timeout-minutes: 20
+        run: python -m pip install -U pip wheel "maturin==${{ steps.wheel_pins.outputs.maturin }}"
       - name: Build wheel
+        id: wheel_build
+        timeout-minutes: 120
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.wheel_pins.outputs.rust }}
         run: |
-          python -m pip install -U pip wheel maturin
-          maturin build --release --locked -m bindings/st-py/Cargo.toml --features "logic,kdsl"
+          python -I -S -B tools/wheel_build_provenance.py build --role ci-portable \
+            --wheel-dir target/wheels --evidence "$RUNNER_TEMP/wheel-build-evidence"
+      - name: Collect raw outputs after failed wheel build
+        if: always() && (steps.wheel_build.outcome == 'failure' || steps.wheel_build.outcome == 'cancelled')
+        timeout-minutes: 10
+        run: |
+          python -I -S -B tools/wheel_build_provenance.py collect-after-step \
+            --wheel-dir target/wheels --evidence "$RUNNER_TEMP/wheel-build-evidence"
+      - name: Preserve unqualified original wheel before portable tests
+        if: always() && steps.wheel_build.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unqualified-wheel-ci-portable
+          path: ${{ runner.temp }}/wheel-build-evidence/
+          if-no-files-found: error
+          retention-days: 7
       - name: Check embedded Python benchmark API
         run: cargo check --locked -p st-bench --features python --bench python_bindings
       - name: Verify wheel archive
@@ -654,7 +710,17 @@ jobs:
           PY
       - name: Install wheel
         run: |
-          python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+          python -m pip install --no-compile --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+          python -I -B tools/wheel_build_provenance.py verify-install \
+            --wheel-dir target/wheels --evidence "$RUNNER_TEMP/wheel-build-evidence"
+      - name: Retain portable wheel installation identity
+        if: always() && steps.wheel_build.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unqualified-wheel-records-ci-portable
+          path: ${{ runner.temp }}/wheel-build-evidence/**/*.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Portable byte corpus study contracts
         run: |
           python -I -B bindings/st-py/tests/test_nn_native_learning.py -v

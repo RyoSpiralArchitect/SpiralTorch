@@ -21,7 +21,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         original = next(step for step in gpu.split("\n      - ")
                         if "id: byte_python\n" in step)
         commands = [line.strip() for line in original.splitlines()
-                    if line.strip().startswith("python -I -B ")]
+                    if line.strip().startswith("python -I -B bindings/st-py/tests/")]
         self.assertEqual(commands, [f"python -I -B bindings/st-py/tests/{name}.py -v" for name in (
             "test_wgpu_attention", "test_nn_attention_training",
             "test_nn_residual_attention_training", "test_nn_byte_decoder",
@@ -73,24 +73,22 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertIn(f"path: ${{{{ runner.temp }}}}/byte-study-{kind}/", artifact)
             self.assertIn("retention-days: 1", artifact)
 
-    def test_gpu_failure_retains_original_wheel_without_rebuilding_or_dispatching(self) -> None:
+    def test_gpu_original_wheel_is_retained_before_any_python_gpu_test(self) -> None:
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         gpu = ci.split("\n  wgpu-macos:\n", 1)[1].split("\n  wasm-build:\n", 1)[0]
         artifact = next(step for step in gpu.split("\n      - ")
-                        if "name: synthetic-byte-study-original-wheel" in step)
-        self.assertIn("if: failure() && steps.byte_python.outcome == 'failure'\n", artifact)
+                        if "name: unqualified-wheel-ci-gpu\n" in step)
+        self.assertIn("if: always() && steps.wheel_build.outcome != 'skipped'\n", artifact)
         self.assertIn("uses: actions/upload-artifact@v7\n", artifact)
-        self.assertIn("path: ${{ runner.temp }}/attention-wheel/*.whl\n", artifact)
-        self.assertIn("retention-days: 1\n", artifact)
-        self.assertIn("if-no-files-found: warn\n", artifact)
+        self.assertIn("path: ${{ runner.temp }}/wheel-build-evidence/\n", artifact)
+        self.assertIn("retention-days: 7", artifact)
+        self.assertIn("if-no-files-found: error\n", artifact)
         self.assertNotIn("run:", artifact)
         self.assertNotIn("continue-on-error", artifact)
         self.assertNotIn("overwrite:", artifact)
-        self.assertLess(gpu.index("name: Retain exact prepared-study replay failure diagnostics"),
-                        gpu.index("name: synthetic-byte-study-original-wheel"))
-        self.assertLess(gpu.index("name: synthetic-byte-study-original-wheel"),
-                        gpu.index("name: Observe one retained byte-study first-update boundary"))
-        self.assertEqual(gpu.count('maturin build --release --locked -m bindings/st-py/Cargo.toml'), 1)
+        self.assertLess(gpu.index("id: wheel_build"), gpu.index("name: unqualified-wheel-ci-gpu\n"))
+        self.assertLess(gpu.index("name: unqualified-wheel-ci-gpu\n"), gpu.index("id: byte_python"))
+        self.assertEqual(gpu.count("wheel_build_provenance.py build --role ci-gpu"), 1)
 
     def test_license_metadata_is_checked_before_wheel_builds(self) -> None:
         command = "python -I -B scripts/security/generate_repo_manifest.py --check-only"
@@ -310,8 +308,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     self.assertIn("python -I -B " + prefix + script, normal)
                     self.assertIn("python -I -B " + script, floor)
                     if filename != "ci.yml":
-                        self.assertLess(workflow.index("python -I -B " + script),
-                                        workflow.index("uses: actions/upload-artifact@"))
+                        final_upload = next(step for step in workflow.split("\n      - ")
+                                            if "uses: actions/upload-artifact@" in step
+                                            and re.search(r"name: wheels?-\$", step))
+                        self.assertLess(workflow.index("python -I -B " + script), workflow.index(final_upload))
                 self.assertIn("pip install --no-deps --force-reinstall", floor)
                 self.assertNotIn("continue-on-error", floor)
 

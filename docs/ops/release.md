@@ -69,6 +69,14 @@ generated size counts are not a release or performance gate.
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
+All wheel jobs share the Rust 1.99.1 / maturin 1.15.0 pins and build-byte
+receipts in `tools/wheel_build_provenance.py`. Unqualified original wheels are
+retained before smoke execution, under a namespace excluded from publication.
+The separate successful-wheel and signed-payload gates remain mandatory.
+See [engineering evidence retention](byte-release-qualification.md#preserve-engineering-failures)
+for the role distinctions, installation checks and limits. Changing a build
+pin is not a historical numerical repair or permission to rerun a failed gate.
+
 Tag builds and ordinary manual builds stop after artifact retention; they do not
 publish a GitHub Release or PyPI package. The existing retained-payload finalizer
 is the normal route after qualification. Both PyPI paths use the same
@@ -83,7 +91,7 @@ and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
 They also execute the installed wheel through the Rust-owned runtime protocol
 catalog plus generation-evidence, token-periodicity, repetition-plan, and
-blinded semantic-review lifecycles before any artifact can be uploaded. The
+blinded semantic-review lifecycles before a successful wheel artifact is uploaded. The
 stochastic Schrodinger forward/replay/VJP lifecycle is covered by the same
 installed-wheel smoke, including complex-state forward and joint VJP replay.
 Legacy/versioned DLPack transfers, capsule single-use, explicit copies, and
@@ -91,7 +99,7 @@ copy-on-write mutation are also exercised using the installed native wheel.
 Protected autograd snapshots, a complete 600-step nonlinear learning fixture,
 atomic SGD failure/ownership checks, a 300-step multiclass logits-loss fixture,
 and a 400-step affine LayerNorm learning fixture run
-on every installed release wheel before upload. This is a mechanics gate,
+on every installed release wheel before successful-wheel upload. This is a mechanics gate,
 not a claim about LLM fine-tuning quality.
 `tools/smoke_learning_stack.py` additionally exercises the installed native
 Sequential forward capture, a 24-update shared-Topos learning loop and exact

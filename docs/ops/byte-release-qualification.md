@@ -46,13 +46,68 @@ ambiguous or over-depth JSON has unknown totals. No tolerance or alternate pass
 rule is introduced. Metadata errors are retained separately and do not erase raw
 bytes.
 
-On a Python GPU-step failure, CI also retains the already-built engineering
-wheel as `synthetic-byte-study-original-wheel` for one day, without rebuilding,
-resigning or launching another GPU operation. When present, `runtime.json`
-binds the installed native-library hash and observed runtime. Download and
-verify those original bytes before expiry; the artifact is not a qualified
-release candidate and must never be uploaded to PyPI. This does not recover
-binaries missing from earlier failures or establish a numerical repair.
+The wheel-building jobs use `tools/wheel_build_provenance.py`: Rust 1.99.1 and
+maturin 1.15.0 are selected from one set of pins, and their observed versions
+must match before compilation. The record binds the clean source/tree, lock
+and manifests, actual command, explicit/default feature selection, target,
+runner image, active macOS SDK version, Cargo configuration digests, selected
+build-environment digests and installed Python build-tool versions. This is
+provenance, not a claim that every OS,
+linker, transitive build dependency or runner image is frozen bit-for-bit.
+Undeclared Rust flag/wrapper/profile overrides are rejected without printing
+their values. Other selected compiler/SDK environment values are hash-recorded,
+not copied verbatim into receipts.
+Python build-package metadata follows the actual interpreter's `pyvenv.cfg`
+without enabling site hooks, including Python 3.12 under `-S`; an explicitly
+enabled system site is lower precedence than the virtual environment.
+
+Ordinary GPU CI retains its native/default-feature macOS build. Portable CI
+keeps its existing Linux feature set. Manual and release builds retain the
+macOS-14 universal2 and Linux manylinux2014 specifications. Archive inspection
+is shared, but engineering acceptance cannot relax final-release validation.
+
+Before installing or testing, each job uploads `unqualified-wheel-<role>...`
+containing the original wheel and its non-release build records for seven days.
+A failed upload stops subsequent tests. The normal successful-wheel artifacts
+remain behind every existing smoke test; unqualified artifacts do not match
+the publisher's `wheels-*` selection. An additional unqualified records
+artifact retains the installed-byte identity or rejection outcome. Installation
+uses `--no-compile`, followed by inspection of all original files, including
+the native extension, without importing SpiralTorch. No wheel is rebuilt to
+retain or verify it. When present, post-failure `runtime.json` separately binds
+the loaded native-library hash and observed adapter.
+
+When the build supervisor regains control, it also preserves raw `.whl`
+outputs after a nonzero exit, timeout or cancellation. Collection is limited
+to eight files and four GiB in aggregate; unsafe files, exceeded bounds and
+copy errors are recorded, not treated as successful retention. Multiple
+outputs remain a build failure, even when all their bytes were preserved.
+`outputs.json` describes this raw collection separately from `build.json`;
+no successful build receipt is issued for failed or ambiguous builds, and
+retention errors do not replace the original build exception.
+
+Tool installation is a separate step. POSIX compilation uses the existing
+owned-process supervisor with a 110-minute inner limit, leaving ten minutes
+within the 120-minute build step for preflight and retention. Hosted Windows
+compilation uses the declared 120-minute Actions step owner. Local Windows
+compilation is not supported by this CI-specific helper. First errors,
+timeouts and cancellations remain failures; receipt-write errors cannot hide
+an earlier exception. A separate ten-minute, failure/cancellation-only step
+also collects raw outputs into an exclusive `after-step/` directory before
+upload, including when Windows termination prevented the helper's `finally`.
+It never rebuilds, overwrites first-attempt records, or grants a successful
+build receipt. It can duplicate already-retained raw bytes; the same eight-file,
+four-GiB bound applies to this separate snapshot. No helper can guarantee
+retention after a whole-job cancellation deadline, runner loss,
+power loss or failed artifact transport. Missing evidence is not a pass.
+
+Download and verify the original bytes before expiry. These artifacts are not
+qualified release candidates and must never be uploaded to PyPI. They do not
+recover binaries missing from earlier failures or establish a numerical repair.
+To bind a later final admission, hash the actual `build.json` as
+`receipt_sha256`, retain its `source_commit`, `wheel_sha256`, `toolchain` and
+`features`, and apply the existing candidate policy below. A receipt alone does
+not authorize admission, execution or publication.
 
 ## Freeze the candidate before execution
 
