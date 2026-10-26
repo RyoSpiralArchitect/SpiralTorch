@@ -1,0 +1,148 @@
+# INERT TEMPLATE. Render only after separate human approval; never add to main.
+# On the dedicated diagnostic branch only, this replaces byte_study_replay.yml.
+name: Byte Study Replay Diagnosis
+run-name: Detached ordinary path - one fixed-wheel campaign
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness_commit:
+        description: "Exact inspected diagnostic commit; never publishes"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: detached-ordinary-20261026-once
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -e -o pipefail {0}
+
+jobs:
+  diagnose:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      INPUT_PLAINTEXT_SHA256: '__INPUT_PLAINTEXT_SHA256__'
+      INPUT_CIPHERTEXT_SHA256: '__INPUT_CIPHERTEXT_SHA256__'
+      RESULT_RECIPIENT: '__RESULT_RECIPIENT__'
+    steps:
+      - name: Create private evidence roots
+        run: |
+          umask 077
+          TRANSPORT_ROOT="$RUNNER_TEMP/detached-ordinary-20261026"
+          EVIDENCE_ROOT="$TRANSPORT_ROOT/evidence"
+          mkdir -m 700 "$TRANSPORT_ROOT"
+          mkdir -m 700 "$EVIDENCE_ROOT"
+          printf 'TRANSPORT_ROOT=%s\nEVIDENCE_ROOT=%s\n' "$TRANSPORT_ROOT" "$EVIDENCE_ROOT" >> "$GITHUB_ENV"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.10'
+      - name: Admit only the bound unique first attempt before accessing input secrets
+        working-directory: controller
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HARNESS: ${{ inputs.harness_commit }}
+        run: |
+          python -I -S -B .github/diagnostics/detached-ordinary-20261026/hosted_control.py admit \
+            --controller . --output "$EVIDENCE_ROOT/hosted-admission.json" \
+            > "$EVIDENCE_ROOT/admission.log" 2>&1
+      - name: Install pinned encryption and validate the public recipient
+        run: |
+          umask 077
+          curl --fail --silent --show-error --location --max-time 120 \
+            https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-darwin-arm64.tar.gz \
+            --output "$TRANSPORT_ROOT/age.tar.gz"
+          printf '%s  %s\n' e2020b073c44f692685a24d6abc378817eb81ffaaf49fd0531ef8565f767f2f5 \
+            "$TRANSPORT_ROOT/age.tar.gz" | shasum -a 256 --check
+          tar -xzf "$TRANSPORT_ROOT/age.tar.gz" -C "$TRANSPORT_ROOT"
+          test "$("$TRANSPORT_ROOT/age/age" --version)" = 'v1.3.2'
+          printf 'SpiralTorch detached ordinary result recipient preflight\n' | \
+            "$TRANSPORT_ROOT/age/age" --encrypt --recipient "$RESULT_RECIPIENT" \
+            --output "$TRANSPORT_ROOT/recipient-probe.age"
+      - name: Decrypt the fixed input and remove the input identity before execution
+        working-directory: controller
+        env:
+          INPUT_IDENTITY: ${{ secrets.ST_DETACHED_ORDINARY_20261026_INPUT_IDENTITY }}
+        run: |
+          umask 077
+          test -n "$INPUT_IDENTITY"
+          key="$TRANSPORT_ROOT/input-key.txt"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$INPUT_IDENTITY" > "$key"
+          unset INPUT_IDENTITY
+          {
+            input=.github/diagnostics/detached-ordinary-20261026/input.zip.age
+            printf '%s  %s\n' "$INPUT_CIPHERTEXT_SHA256" "$input" | shasum -a 256 --check
+            "$TRANSPORT_ROOT/age/age" --decrypt --identity "$key" \
+              --output "$TRANSPORT_ROOT/input.zip" "$input"
+            python -I -S -B .github/diagnostics/detached-ordinary-20261026/hosted_transport.py unpack-input \
+              --input "$TRANSPORT_ROOT/input.zip" --output "$TRANSPORT_ROOT/input" \
+              --sha256 "$INPUT_PLAINTEXT_SHA256"
+          } > "$EVIDENCE_ROOT/input-preflight.log" 2>&1
+      - name: Check the fixed ordinary protocol without native imports
+        run: |
+          python -I -S -B "$TRANSPORT_ROOT/input/test_detached_ordinary_probe.py" -v \
+            > "$EVIDENCE_ROOT/protocol-cpu-tests.log" 2>&1
+      - name: Install the exact wheel offline without compilation or dependencies
+        run: |
+          umask 077
+          {
+            python --version
+            python -I -B -m venv "$TRANSPORT_ROOT/input/artifact/venv"
+            wheels=("$TRANSPORT_ROOT/input/artifact/wheels/"*.whl)
+            test "${#wheels[@]}" -eq 1
+            "$TRANSPORT_ROOT/input/artifact/venv/bin/python" -I -B -m pip install \
+              --no-index --no-deps --no-cache-dir --no-compile "${wheels[0]}"
+            "$TRANSPORT_ROOT/input/artifact/venv/bin/python" -I -B -m pip freeze
+            python -I -S -B "$TRANSPORT_ROOT/input/detached_ordinary_probe.py"
+          } > "$EVIDENCE_ROOT/install-and-file-preflight.log" 2>&1
+      - name: Execute the single owned diagnostic within its original ten-minute deadline
+        timeout-minutes: 11
+        run: |
+          umask 077
+          set +e
+          python -I -S -B "$TRANSPORT_ROOT/input/detached_ordinary_probe.py" --execute \
+            > "$EVIDENCE_ROOT/diagnostic-launch.log" 2>&1
+          code=$?
+          printf '%s\n' "$code" > "$EVIDENCE_ROOT/diagnostic-exit.txt"
+          exit "$code"
+      - name: Collect and encrypt the first outcome including partial failures
+        if: ${{ always() && env.TRANSPORT_ROOT != '' }}
+        working-directory: controller
+        run: |
+          umask 077
+          python -I -S -B .github/diagnostics/detached-ordinary-20261026/hosted_control.py collect \
+            --input "$TRANSPORT_ROOT/input" --evidence "$EVIDENCE_ROOT" \
+            > "$TRANSPORT_ROOT/collection.log" 2>&1
+          test -x "$TRANSPORT_ROOT/age/age"
+          python -I -S -B .github/diagnostics/detached-ordinary-20261026/hosted_transport.py pack-result \
+            --input "$EVIDENCE_ROOT" --output "$TRANSPORT_ROOT/result.zip" \
+            > "$TRANSPORT_ROOT/packing.json"
+          mkdir -m 700 "$TRANSPORT_ROOT/public"
+          "$TRANSPORT_ROOT/age/age" --encrypt --recipient "$RESULT_RECIPIENT" \
+            --output "$TRANSPORT_ROOT/public/result.zip.age" "$TRANSPORT_ROOT/result.zip"
+          cd "$TRANSPORT_ROOT/public"
+          shasum -a 256 result.zip.age > SHA256SUMS
+      - name: Upload only ciphertext and its digest
+        if: ${{ always() && env.TRANSPORT_ROOT != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: detached-ordinary-encrypted-20261026-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/detached-ordinary-20261026/public/result.zip.age
+            ${{ runner.temp }}/detached-ordinary-20261026/public/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
