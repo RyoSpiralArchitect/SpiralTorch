@@ -1,17 +1,14 @@
 # 🌀🕯️ SpiralTorch 🕯️🌀
 
-**A small tensor. A strange geometry. A learning experiment you can inspect.**
-
-Welcome to SpiralTorch: a workshop for teaching models with geometry. 🌀
+**Come in. Leave a light on for the strange result.**
 
 SpiralTorch is a Rust-first research ML stack with Python and browser/WASM
 clients. Native tensors, autograd, learning modules, and geometric mechanisms
 share a Rust core; WGPU provides explicit GPU execution paths.
 NumPy, PyTorch, and Transformers are optional, not mandatory dependencies.
 
-You can begin with ordinary tensors and gradients, then explore **Z-space**:
-the project's vocabulary for geometric coordinates, learning controls, and
-telemetry. No geometry background is needed for the first example below.
+A tensor is enough to begin. Further in, the paths bend through **Z-space**: the project's
+vocabulary for geometric coordinates, learning controls, and telemetry. The rest of the workshop can wait. 🕯️
 
 [Manifesto](docs/spiraltorch_manifesto.md) · [Z-space](docs/zspace_intro.md) ·
 [Documentation](docs/README.md) · [Model zoo](models/README.md)
@@ -53,6 +50,8 @@ New resident, geometry, or learning APIs may require a source build; consult the
 assuming that an example is available in your installed wheel.
 
 ## What Can I Explore?
+
+Pick a thread. Follow it as far into the machinery as you like.
 
 | Path | What it offers | Boundary to know |
 | --- | --- | --- |
@@ -120,11 +119,13 @@ Both versions are host-tensor examples, not resident GPU graphs. Continue with t
 
 ## What Makes It SpiralTorch?
 
-Roundtables, desire, Topos resonators and BlackCat are invitations to explore.
-Follow their concrete APIs in the [geometry toolkit](docs/reference/geometry.md),
-[learning recipes](docs/reference/learning.md) and [kernel guide](docs/reference/kernels.md).
-The [documentation hub](docs/README.md) also leads to language, vision, browser
-and interoperability paths. Keep the strange names; bring measurable questions.
+Above, Here, Beneath. Gradients gather at roundtables; the workshop has names like desire,
+Topos resonators, and BlackCat. You do not need every name to begin. Follow one into
+the [geometry toolkit](docs/reference/geometry.md), [learning recipes](docs/reference/learning.md), or [kernel guide](docs/reference/kernels.md).
+Change something small. Look at what moved.
+
+The [documentation hub](docs/README.md) keeps language, vision, browser clients,
+and the records of experiments that did—and did not—work within reach.
 
 ## Build and Contribute
 
