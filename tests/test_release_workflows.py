@@ -73,6 +73,25 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertIn(f"path: ${{{{ runner.temp }}}}/byte-study-{kind}/", artifact)
             self.assertIn("retention-days: 1", artifact)
 
+    def test_gpu_failure_retains_original_wheel_without_rebuilding_or_dispatching(self) -> None:
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        gpu = ci.split("\n  wgpu-macos:\n", 1)[1].split("\n  wasm-build:\n", 1)[0]
+        artifact = next(step for step in gpu.split("\n      - ")
+                        if "name: synthetic-byte-study-original-wheel" in step)
+        self.assertIn("if: failure() && steps.byte_python.outcome == 'failure'\n", artifact)
+        self.assertIn("uses: actions/upload-artifact@v7\n", artifact)
+        self.assertIn("path: ${{ runner.temp }}/attention-wheel/*.whl\n", artifact)
+        self.assertIn("retention-days: 1\n", artifact)
+        self.assertIn("if-no-files-found: warn\n", artifact)
+        self.assertNotIn("run:", artifact)
+        self.assertNotIn("continue-on-error", artifact)
+        self.assertNotIn("overwrite:", artifact)
+        self.assertLess(gpu.index("name: Retain exact prepared-study replay failure diagnostics"),
+                        gpu.index("name: synthetic-byte-study-original-wheel"))
+        self.assertLess(gpu.index("name: synthetic-byte-study-original-wheel"),
+                        gpu.index("name: Observe one retained byte-study first-update boundary"))
+        self.assertEqual(gpu.count('maturin build --release --locked -m bindings/st-py/Cargo.toml'), 1)
+
     def test_license_metadata_is_checked_before_wheel_builds(self) -> None:
         command = "python -I -B scripts/security/generate_repo_manifest.py --check-only"
         official = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")

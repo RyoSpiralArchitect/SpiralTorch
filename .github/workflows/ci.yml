@@ -405,6 +405,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
+      - name: Retain original engineering wheel after Python GPU failure
+        if: failure() && steps.byte_python.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-byte-study-original-wheel
+          path: ${{ runner.temp }}/attention-wheel/*.whl
+          if-no-files-found: warn
+          retention-days: 1
+
       - name: Observe one retained byte-study first-update boundary
         id: byte_boundary
         if: failure() && steps.byte_python.outcome == 'failure' && steps.prepared_evidence.outcome == 'success'

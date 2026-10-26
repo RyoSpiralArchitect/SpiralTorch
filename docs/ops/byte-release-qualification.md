@@ -34,6 +34,26 @@ The next release may qualify independently under the rules below. This is a
 finite acceptance test for named artifacts/environments, not proof that a rare
 defect cannot exist, cross-GPU bitwise determinism, or LLM quality superiority.
 
+## Preserve engineering failures
+
+An ordinary CI failure remains a failure. The detached-study receipt keeps the
+exact request and both reports before optional runtime metadata is collected.
+Its legacy `differences` list remains bounded; `difference_summaries` additionally
+counts the whole comparison and samples `final_parameters` separately from
+other fields, so many weight differences cannot hide a later loss difference.
+Counts are mismatch events, not estimates of missing subtree sizes; malformed,
+ambiguous or over-depth JSON has unknown totals. No tolerance or alternate pass
+rule is introduced. Metadata errors are retained separately and do not erase raw
+bytes.
+
+On a Python GPU-step failure, CI also retains the already-built engineering
+wheel as `synthetic-byte-study-original-wheel` for one day, without rebuilding,
+resigning or launching another GPU operation. When present, `runtime.json`
+binds the installed native-library hash and observed runtime. Download and
+verify those original bytes before expiry; the artifact is not a qualified
+release candidate and must never be uploaded to PyPI. This does not recover
+binaries missing from earlier failures or establish a numerical repair.
+
 ## Freeze the candidate before execution
 
 Close only this release's prerequisites, including review of #2291's TLS and
