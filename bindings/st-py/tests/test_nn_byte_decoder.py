@@ -7,11 +7,14 @@ import math
 import os
 from pathlib import Path
 import struct
+import sys
 import unittest
 
 import spiraltorch as st
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "tools"))
+from byte_release_evidence import retain, encoded as evidence_json
 SPEC = importlib.util.spec_from_file_location("byte_example", ROOT / "bindings/st-py/examples/resident_byte_geometry_lm.py")
 example = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(example)
@@ -21,6 +24,15 @@ NAMES = (
     "ByteDecoderForward", "ByteDecoderGradients",
 )
 MODES = ("none", "headwise", "mixture", "query_mixture") + example.METRICS
+
+
+def qualification_plan():
+    plan = example.make_plan()
+    retain("decoder_input", lambda: {
+        "initial-checkpoint.json": plan.initial_checkpoint().to_json(),
+        "windows.json": evidence_json([list(b"abcde"), list(b"xyzxy")]),
+    })
+    return plan
 
 
 def batch():
@@ -158,7 +170,7 @@ class BytePortable(unittest.TestCase):
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class ByteGpu(unittest.TestCase):
     def test_clipped_sgd_uses_only_active_norm_and_retains_raw_gradients(self):
-        model = example.make_plan().compile_training_wgpu()
+        model = qualification_plan().compile_training_wgpu()
         _, derivative = gradients(model)
         raw = [values(t) for t in derivative.parameter_gradient_tensors()]
         before = [values(t) for t in model.parameter_tensors()]
@@ -168,13 +180,18 @@ class ByteGpu(unittest.TestCase):
         norm = math.sqrt(math.fsum(x * x for x in raw[active]))
         whole = math.sqrt(math.fsum(x * x for tensor in raw for x in tensor))
         limit = struct.unpack("<f", struct.pack("<f", 0.01))[0]
+        retain("sgd_before", lambda: {"gradients.json": evidence_json(raw), "parameters.json": evidence_json(before),
+                                       "controls.json": evidence_json(dict(rates=rates, max_norm=limit))})
         self.assertGreater(norm, limit)
         self.assertGreater(whole, norm)
         wrong_norm_effect = max(abs(rates[active] * x * limit * (1 / norm - 1 / whole))
                                 for x in raw[active])
         self.assertGreater(wrong_norm_effect, 3e-6)
-        self.assertEqual(model.sgd_with_rates_clipped(derivative, rates, max_norm=limit).read(), 1)
+        revision = model.sgd_with_rates_clipped(derivative, rates, max_norm=limit).read()
+        retain("sgd_clock", lambda: {"revision.json": evidence_json(revision)})
+        self.assertEqual(revision, 1)
         after = [values(t) for t in model.parameter_tensors()]
+        retain("sgd_after", lambda: {"parameters.json": evidence_json(after)})
         for index, (old, new) in enumerate(zip(before, after)):
             if index != active:
                 self.assertEqual(bits(old), bits(new))
@@ -184,12 +201,14 @@ class ByteGpu(unittest.TestCase):
                     expected = original - rates[index] * gradient * limit / norm
                     self.assertAlmostEqual(actual, expected, delta=3e-7 * max(1.0, abs(expected)))
         for original, retained in zip(raw, derivative.parameter_gradient_tensors()):
-            self.assertEqual(bits(original), bits(values(retained)))
+            observed = bits(values(retained))
+            retain("sgd_retained_gradient", lambda: {"expected.bin": bits(original), "observed.bin": observed})
+            self.assertEqual(bits(original), observed)
 
     def test_clipped_query_learning_resumes_from_one_identical_boundary(self):
         for adamw in (False, True):
             with self.subTest(adamw=adamw):
-                model = example.make_plan().compile_training_wgpu()
+                model = qualification_plan().compile_training_wgpu()
                 if adamw:
                     model.enable_adamw()
                 layout = model.parameter_layout()
@@ -214,16 +233,30 @@ class ByteGpu(unittest.TestCase):
                 capture = model.checkpoint_snapshot()
                 second_update, second_loss = advance(model)
                 saved = capture.read().to_json()
+                retain("query_saved", lambda: {"checkpoint.json": saved, "controls.json": evidence_json(dict(adamw=adamw))})
                 restored = st.nn.ByteDecoderCheckpoint.from_json(saved).restore_wgpu()
-                self.assertEqual(restored.checkpoint_snapshot().read().to_json(), saved)
+                boundary = restored.checkpoint_snapshot().read().to_json()
+                retain("query_restored", lambda: {"expected.json": saved, "observed.json": boundary})
+                self.assertEqual(boundary, saved)
                 resumed_update, resumed_loss = advance(restored)
-                self.assertEqual(first_update.read(), 1)
-                self.assertEqual(second_update.read(), 2)
-                self.assertEqual(resumed_update.read(), 2)
-                self.assertEqual(bits(values(second_loss)), bits(values(resumed_loss)))
+                first_clock = first_update.read()
+                retain("query_clock", lambda: {"revision.json": evidence_json(first_clock)})
+                self.assertEqual(first_clock, 1)
+                second_clock = second_update.read()
+                retain("query_clock", lambda: {"revision.json": evidence_json(second_clock)})
+                self.assertEqual(second_clock, 2)
+                resumed_clock = resumed_update.read()
+                retain("query_clock", lambda: {"revision.json": evidence_json(resumed_clock)})
+                self.assertEqual(resumed_clock, 2)
+                left_loss, right_loss = bits(values(second_loss)), bits(values(resumed_loss))
+                retain("query_losses", lambda: {"expected.bin": left_loss, "observed.bin": right_loss})
+                self.assertEqual(left_loss, right_loss)
                 expected = model.checkpoint_snapshot().read().to_json()
-                self.assertEqual(expected, restored.checkpoint_snapshot().read().to_json())
+                observed = restored.checkpoint_snapshot().read().to_json()
+                retain("query_checkpoint", lambda: {"expected.json": expected, "observed.json": observed})
+                self.assertEqual(expected, observed)
                 final = [values(t) for t in model.parameter_tensors()]
+                retain("query_parameters", lambda: {"initial.json": evidence_json(initial), "final.json": evidence_json(final)})
                 for i in frozen:
                     self.assertEqual(bits(initial[i]), bits(final[i]))
                 geometry = range(*layout["geometry"]["all"])
@@ -235,13 +268,20 @@ class ByteGpu(unittest.TestCase):
                 for freeze in (False, True):
                     a, left = advance(model, freeze)
                     b, right = advance(restored, freeze)
-                    self.assertEqual(a.read(), b.read())
-                    self.assertEqual(bits(values(left)), bits(values(right)))
-                    self.assertEqual(model.checkpoint_snapshot().read().to_json(),
-                                     restored.checkpoint_snapshot().read().to_json())
+                    left_clock, right_clock = a.read(), b.read()
+                    retain("query_continued_clock", lambda: {"expected.json": evidence_json(left_clock),
+                                                            "observed.json": evidence_json(right_clock)})
+                    self.assertEqual(left_clock, right_clock)
+                    left_bits, right_bits = bits(values(left)), bits(values(right))
+                    retain("query_continued_loss", lambda: {"expected.bin": left_bits, "observed.bin": right_bits})
+                    self.assertEqual(left_bits, right_bits)
+                    expected = model.checkpoint_snapshot().read().to_json()
+                    observed = restored.checkpoint_snapshot().read().to_json()
+                    retain("query_continued_checkpoint", lambda: {"expected.json": expected, "observed.json": observed})
+                    self.assertEqual(expected, observed)
 
     def test_clipped_adamw_moments_use_one_norm_across_active_tensors(self):
-        model = example.make_plan().compile_training_wgpu()
+        model = qualification_plan().compile_training_wgpu()
         model.enable_adamw()
         beta1, beta2, _ = model.adamw_config
         _, derivative = gradients(model)
@@ -253,10 +293,16 @@ class ByteGpu(unittest.TestCase):
         rates[active[0]], rates[active[1]] = 0.005, 0.01
         norm = math.sqrt(math.fsum(x * x for i in active for x in raw[i]))
         limit = struct.unpack("<f", struct.pack("<f", 0.01))[0]
+        retain("moments_before", lambda: {"gradients.json": evidence_json(raw),
+                                           "parameters.bin": b"".join(before),
+                                           "controls.json": evidence_json(dict(rates=rates, max_norm=limit))})
         self.assertGreater(norm, limit)
-        model.adamw_with_rates_clipped(derivative, rates, max_norm=limit,
-                                      weight_decays=[0.02] * len(rates)).read()
-        state = json.loads(model.checkpoint_snapshot().read().to_json())["optimizer"]
+        revision = model.adamw_with_rates_clipped(derivative, rates, max_norm=limit,
+                                                  weight_decays=[0.02] * len(rates)).read()
+        retain("moments_clock", lambda: {"revision.json": evidence_json(revision)})
+        checkpoint = model.checkpoint_snapshot().read().to_json()
+        retain("moments_after", lambda: {"checkpoint.json": checkpoint})
+        state = json.loads(checkpoint)["optimizer"]
         for i, (slot, tensor) in enumerate(zip(state["slots"], model.parameter_tensors())):
             if i not in active:
                 self.assertEqual(bits(values(tensor)), before[i])

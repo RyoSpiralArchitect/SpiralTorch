@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # Only independent study/fixture utilities, never the checkout's Python package.
 sys.path.insert(0, str(ROOT / "tools"))
 import byte_corpus_study as protocol
+from byte_release_evidence import retain
 from test_byte_corpus_study import fixture, frozen_fixture, metric_fixture
 from test_byte_corpus_calibration import fixture as calibrated_fixture
 from test_byte_corpus_fisher import fixture as fisher_fixture
@@ -39,6 +40,12 @@ NAMES = (
     "ByteCorpusModelArtifact", "ResidentByteInference",
     "ByteCorpusServingGate", "ResidentByteCandidate", "ResidentByteServing",
 )
+
+
+def retain_segment(label, segment):
+    # The segment/checkpoint already owns CPU bytes; no GPU snapshot is added.
+    retain(label, lambda: {"report.json": segment.report_json,
+                          "checkpoint.json": segment.checkpoint.to_json()})
 
 FRESH_INFERENCE = """
 import json
@@ -443,16 +450,23 @@ class StudyPortable(unittest.TestCase):
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class StudyGpu(unittest.TestCase):
     def test_clipped_contextual_mixtures_preserve_all_frozen_clocks(self):
+        source = two_head_source()
+        retain("contextual_source", lambda: {"request.json": source})
         fisher = st.nn.ByteCorpusBiasCalibration.from_json(
-            two_head_source(), [0, 1], fisher_rao_control=True).prepare_wgpu()
+            source, [0, 1], fisher_rao_control=True).prepare_wgpu()
         mixed = st.nn.ByteCorpusMixtureControls.from_json(fisher.request_json).prepare_wgpu()
         query = st.nn.ByteCorpusQueryMixtureControls.from_json(mixed.request_json).prepare()
         request = clipping_request(optimizer_request(protocol.decode_json(query.request_json)))
         request["rate"] = .001
+        retain("contextual_input", lambda: {"request.json": protocol.encoded(request)})
         study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
-        full, first = study.advance_wgpu(), study.advance_wgpu(1)
+        full = study.advance_wgpu()
+        retain_segment("contextual_full", full)
+        first = study.advance_wgpu(1)
+        retain_segment("contextual_partial", first)
         saved = first.checkpoint.to_json()
         resumed = study.advance_wgpu(resume=study.checkpoint_from_json(saved))
+        retain_segment("contextual_resumed", resumed)
         full_checkpoint, resumed_checkpoint = full.checkpoint.to_json(), resumed.checkpoint.to_json()
         assert_exact_resume(os.environ.get("SPIRALTORCH_RESUME_STUDY_DIAGNOSTICS"), protocol.encoded(request),
                             full_report=full.report_json, first_report=first.report_json,
@@ -473,15 +487,26 @@ class StudyGpu(unittest.TestCase):
     def test_clipped_learning_freeze_and_resume_are_one_rust_contract(self):
         for optimizer in ({"kind": "stateless_sgd.v1"}, optimizer_recipe()):
             v9 = optimizer_request(learning_design(), optimizer)
-            legacy = json.loads(st.nn.ByteCorpusStudy.from_json(protocol.encoded(v9)).run_wgpu())
+            retain("learning_legacy_input", lambda: {"request.json": protocol.encoded(v9)})
+            legacy_raw = st.nn.ByteCorpusStudy.from_json(protocol.encoded(v9)).run_wgpu()
+            retain("learning_legacy", lambda: {"report.json": legacy_raw})
+            legacy = json.loads(legacy_raw)
             disabled_request = clipping_request(v9, {"kind": "disabled.v1"})
-            disabled = json.loads(st.nn.ByteCorpusStudy.from_json(protocol.encoded(disabled_request)).run_wgpu())
+            retain("learning_disabled_input", lambda: {"request.json": protocol.encoded(disabled_request)})
+            disabled_raw = st.nn.ByteCorpusStudy.from_json(protocol.encoded(disabled_request)).run_wgpu()
+            retain("learning_disabled", lambda: {"report.json": disabled_raw})
+            disabled = json.loads(disabled_raw)
             self.assertEqual(legacy["cases"], disabled["cases"])
             request = clipping_request(v9)
+            retain("learning_input", lambda: {"request.json": protocol.encoded(request)})
             study = st.nn.ByteCorpusStudy.from_json(protocol.encoded(request))
-            full, partial = study.advance_wgpu(), study.advance_wgpu(1)
+            full = study.advance_wgpu()
+            retain_segment("learning_full", full)
+            partial = study.advance_wgpu(1)
+            retain_segment("learning_partial", partial)
             saved = partial.checkpoint.to_json()
             resumed = study.advance_wgpu(resume=study.checkpoint_from_json(saved))
+            retain_segment("learning_resumed", resumed)
             self.assertEqual(full.report_json, resumed.report_json)
             self.assertEqual(full.checkpoint.to_json(), resumed.checkpoint.to_json())
             self.assertEqual(partial.checkpoint.to_json(), saved)
@@ -506,14 +531,20 @@ class StudyGpu(unittest.TestCase):
         request = optimizer_request(protocol.decode_json(frozen_fixture()[0]))
         request["rate"] = .001
         raw = protocol.encoded(request)
+        retain("adamw_input", lambda: {"request.json": raw})
         study = st.nn.ByteCorpusStudy.from_json(raw)
         full = study.advance_wgpu()
+        retain_segment("adamw_full", full)
         partial = study.advance_wgpu(1)
+        retain_segment("adamw_partial", partial)
         loaded = study.checkpoint_from_json(partial.checkpoint.to_json())
         resumed = study.advance_wgpu(resume=loaded)
+        retain_segment("adamw_resumed", resumed)
         self.assertEqual(full.report_json, resumed.report_json)
         self.assertEqual(full.checkpoint.to_json(), resumed.checkpoint.to_json())
-        self.assertEqual(study.run_wgpu(), full.report_json)
+        ordinary = study.run_wgpu()
+        retain("adamw_ordinary", lambda: {"report.json": ordinary})
+        self.assertEqual(ordinary, full.report_json)
         for case, row in zip(request["cases"], json.loads(full.report_json)["cases"]):
             protocol.load_reference("byte_corpus_optimizer").validate_state(
                 case, row["optimizer_state"], json.loads(study.optimizer_recipe_json), 2,
@@ -528,11 +559,14 @@ class StudyGpu(unittest.TestCase):
 
     def test_detached_calls_share_a_recipe_not_mutable_models(self):
         request = fixture()[0]
+        retain("detached_input", lambda: {"request.json": request})
         study = st.nn.ByteCorpusStudy.from_json(request)
         expected = study.run_wgpu()
+        retain("detached_expected", lambda: {"report.json": expected})
         for round_index in range(4):
             with ThreadPoolExecutor(max_workers=2) as pool:
                 results = list(pool.map(lambda _: study.run_wgpu(), range(2)))
+            retain("detached_round", lambda: {f"report-{i}.json": raw for i, raw in enumerate(results)})
             identical = results == [expected, expected]
             if not identical:
                 directory = os.environ.get("SPIRALTORCH_DETACHED_STUDY_DIAGNOSTICS")
@@ -544,24 +578,33 @@ class StudyGpu(unittest.TestCase):
 
     def test_full_run_and_split_resume_are_identical(self):
         raw = frozen_fixture()[0]
+        retain("full_input", lambda: {"request.json": raw})
         study = st.nn.ByteCorpusStudy.from_json(raw)
         full = study.run_wgpu()
+        retain("full_ordinary", lambda: {"report.json": full})
         first = study.advance_wgpu(1)
+        retain_segment("full_partial", first)
         saved = first.checkpoint.to_json()
         same = st.nn.ByteCorpusStudy.from_json(raw)
         loaded = same.checkpoint_from_json(saved.encode())
         resumed = same.advance_wgpu(resume=loaded)
+        retain_segment("full_resumed", resumed)
         self.assertEqual(resumed.report_json, full)
         self.assertEqual(resumed.checkpoint.completed_updates, 2)
         self.assertEqual(first.checkpoint.to_json(), saved)
-        self.assertEqual(same.advance_wgpu(resume=resumed.checkpoint).report_json, resumed.report_json)
+        complete = same.advance_wgpu(resume=resumed.checkpoint)
+        retain_segment("full_complete_noop", complete)
+        self.assertEqual(complete.report_json, resumed.report_json)
         with self.assertRaises(ValueError):
             study.advance_wgpu(0, resume=first.checkpoint)
         self.assertEqual(first.checkpoint.to_json(), saved)
-        self.assertEqual(study.run_wgpu(), full)
+        repeated = study.run_wgpu()
+        retain("full_repeated", lambda: {"report.json": repeated})
+        self.assertEqual(repeated, full)
 
     def test_preparation_chain_uses_one_shared_runner(self):
         source = two_head_source()
+        retain("prepared_source", lambda: {"request.json": source})
         flat = st.nn.ByteCorpusBiasCalibration.from_json(source, [0, 1]).prepare_wgpu()
         fisher = st.nn.ByteCorpusBiasCalibration.from_json(
             source, [0, 1], fisher_rao_control=True).prepare_wgpu()
@@ -573,19 +616,27 @@ class StudyGpu(unittest.TestCase):
                 self.assertEqual(protocol.decode_json(prepared.request_json)["schema"],
                                  f"spiraltorch.byte_corpus.request.v{version}")
                 study = prepared.study()
+                retain("prepared_input", lambda: {"request.json": prepared.request_json})
                 first = study.advance_wgpu(1)
+                retain_segment("prepared_partial", first)
                 resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
+                retain_segment("prepared_resumed", resumed)
                 full_report = study.run_wgpu()
+                retain("prepared_full", lambda: {"report.json": full_report})
                 self.check_prepared_resume(version, prepared.request_json, full_report, first, resumed)
                 if version == 8:
                     self.check_fresh_case_inference(study, prepared.request_json, resumed.checkpoint)
         request = optimizer_request(protocol.decode_json(query.request_json))
         request["rate"] = .001
         raw = protocol.encoded(request)
+        retain("prepared_input", lambda: {"request.json": raw})
         study = st.nn.ByteCorpusStudy.from_json(raw)
         first = study.advance_wgpu(1)
+        retain_segment("prepared_partial", first)
         resumed = study.advance_wgpu(resume=study.checkpoint_from_json(first.checkpoint.to_json()))
+        retain_segment("prepared_resumed", resumed)
         full_report = study.run_wgpu()
+        retain("prepared_full", lambda: {"report.json": full_report})
         self.check_prepared_resume(9, raw, full_report, first, resumed)
         for case, row in zip(request["cases"], protocol.decode_json(resumed.report_json)["cases"]):
             protocol.load_reference("byte_corpus_optimizer").validate_state(

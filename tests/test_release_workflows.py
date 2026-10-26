@@ -107,18 +107,45 @@ class ReleaseWorkflowTests(unittest.TestCase):
         script = textwrap.dedent(contract.split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
         metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
         version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
-        for publish, tag, expected_code in (("true", "", 1), ("false", "", 0),
-                                            ("true", f"v{version}", 0)):
-            with self.subTest(publish=publish, tag=tag):
+        for publish, finalize, tag, expected_error in (
+            ("true", "false", "", "publish_pypi=true requires release_tag"),
+            ("false", "false", "", None),
+            ("false", "false", f"v{version}", None),
+            ("true", "false", f"v{version}", "publish_pypi=true requires finalize_release=true"),
+            ("false", "true", "", "finalize_release=true requires release_tag"),
+            ("true", "true", f"v{version}", None),
+        ):
+            with self.subTest(publish=publish, finalize=finalize, tag=tag):
                 env = dict(os.environ, EVENT_NAME="workflow_dispatch", REF_NAME="main",
                            INPUT_PUBLISH_PYPI=publish, INPUT_RELEASE_TAG=tag,
-                           INPUT_CHECKOUT_REF=tag)
+                           INPUT_CHECKOUT_REF=tag, INPUT_FINALIZE_RELEASE=finalize)
                 result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env,
                                         text=True, capture_output=True, timeout=10)
-                self.assertEqual(result.returncode, expected_code, result.stdout + result.stderr)
-                if expected_code:
-                    self.assertIn("publish_pypi=true requires release_tag", result.stderr)
+                self.assertEqual(result.returncode, 1 if expected_error else 0, result.stdout + result.stderr)
+                if expected_error:
+                    self.assertIn(expected_error, result.stderr)
         self.assertIn("INPUT_PUBLISH_PYPI: ${{ inputs.publish_pypi }}", contract)
+
+    def test_tag_build_retains_signed_payload_without_automatic_publication(self) -> None:
+        workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text()
+        option = workflow.split("      finalize_release:\n", 1)[1].split("      publish_pypi:\n", 1)[0]
+        self.assertIn("type: boolean", option)
+        self.assertIn("default: false", option)
+        gate = "if: github.event_name == 'workflow_dispatch' && inputs.finalize_release"
+        finalizer = next(step for step in workflow.split("\n      - ")
+                         if "name: Attach verified draft assets and publish last" in step)
+        self.assertIn(gate, finalizer)
+        self.assertIn("await finalize({", finalizer)
+        retention = next(step for step in workflow.split("\n      - ")
+                         if "name: Retain exact signed payload before publication" in step)
+        self.assertNotIn("if:", retention)
+        self.assertIn("actions/upload-artifact@v7", retention)
+        for job in ("pypi", "verify_pypi"):
+            header = workflow.split(f"\n  {job}:\n", 1)[1].split("    runs-on:", 1)[0]
+            self.assertIn(gate, header)
+        runbook = (ROOT / "docs/ops/byte-release-qualification.md").read_text()
+        self.assertIn("recover_github_release.yml", runbook)
+        self.assertIn("Do not use `finalize_release=true`", runbook)
 
     def test_direct_pypi_publish_waits_for_verified_github_release(self) -> None:
         workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")
@@ -128,6 +155,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                          {"wheels", "attach"})
         self.assertIn("github.event_name == 'workflow_dispatch'", publish)
         self.assertIn("inputs.publish_pypi == 'true'", publish)
+        self.assertIn("inputs.finalize_release", publish)
         self.assertNotIn("always()", publish)
         self.assertNotIn("continue-on-error", publish)
         attach = workflow.split("\n  attach:\n", 1)[1]

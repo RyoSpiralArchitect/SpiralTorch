@@ -202,6 +202,12 @@ test("recovery selects a retained artifact from a failed exact-tag build", async
   assert.equal((await recoveryArtifact(c)).id, 7);
 });
 
+test("finalization selects the unchanged artifact from a successful staged tag build", async () => {
+  const c = recoveryClient();
+  c.run.conclusion = "success";
+  assert.equal(await recoveryArtifact(c), c.artifact);
+});
+
 for (const field of ["path", "event", "head_branch", "head_sha", "status"]) {
   test("recovery rejects mismatched build identity: " + field, async () => {
     const c = recoveryClient();

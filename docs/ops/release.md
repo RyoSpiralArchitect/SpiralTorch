@@ -40,9 +40,12 @@ not a timed job or permission to publish an unfinished branch.
    together. A version bump is preparation, not evidence of publication.
 4. Review and merge that release PR after its checks pass. Verify the merged
    source and tag that exact commit as `v<package-version>`. The official wheel
-   workflow must install and test all three platform wheels, retain the signed
-   payload, and finish the verified GitHub Release before a PyPI upload.
-5. Run readiness with `--no-clipboard`, then the publish dry-run. Select an
+   workflow installs and tests all three platform wheels and retains the signed
+   payload, without automatically attaching or publishing a GitHub Release.
+5. Qualify those exact retained wheels under the bounded candidate policy.
+   After evidence review, finalize that same signed payload using
+   `recover_github_release.yml` and its original tag-push run ID, without a
+   rebuild. Run readiness with `--no-clipboard`, then the publish dry-run. Select an
    actual publish method explicitly only after the release assets and package
    metadata agree. Never read a clipboard token merely to inspect readiness.
 6. Verify the published wheel hashes and simple-index visibility. Record
@@ -57,7 +60,8 @@ generated size counts are not a release or performance gate.
 ## Release Wheel Workflows
 
 - Manual wheel artifact build: `.github/workflows/wheels.yml`
-- Official release build + attached assets: `.github/workflows/release_wheels.yml`
+- Official release build + retained signed payload: `.github/workflows/release_wheels.yml`
+- Finalize unchanged retained assets: `.github/workflows/recover_github_release.yml`
 - Publish existing signed GitHub Release wheels: `.github/workflows/publish_pypi_from_release.yml`
 - Release readiness summary: `scripts/release_status.py`
 - Safe PyPI token secret setup: `scripts/configure_pypi_token_secret.py`
@@ -65,12 +69,15 @@ generated size counts are not a release or performance gate.
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
-Both PyPI workflows call the same manifest-backed wheel validator before any
-token or trusted-publisher upload. The direct manual publish job also depends
-on successful signed-asset attachment and verified GitHub Release publication;
-it cannot race that job or publish to PyPI after its failure. Official release
-requests with `publish_pypi=true` and no `release_tag` fail before building,
-while a build-only preflight can still omit the tag. Official release builds
+Tag builds and ordinary manual builds stop after artifact retention; they do not
+publish a GitHub Release or PyPI package. The existing retained-payload finalizer
+is the normal route after qualification. Both PyPI paths use the same
+manifest-backed wheel validator before any token or trusted-publisher upload.
+The legacy direct build/publication path now requires explicit
+`finalize_release=true`, a matching `release_tag`, and `publish_pypi=true` for a
+PyPI upload. It still waits for verified GitHub Release publication. Do not use
+that rebuilding path for an admitted byte-release candidate. A build-only
+preflight can still omit the tag. Official release builds
 also execute all HF
 and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
@@ -116,8 +123,8 @@ Rust-owned byte/node/depth limits
 for serialized Python/WASM surfaces; typed Rust admission has no serialized
 budget. Browser object helpers are trusted-local convenience transports and are
 not release evidence for hostile-input safety.
-Automatic releases require the pushed tag to equal `v<package-version>`
-exactly. Manual recovery with a non-empty `release_tag` also requires
+Official tag builds require the pushed tag to equal `v<package-version>`
+exactly. Manual builds with a non-empty `release_tag` also require
 `checkout_ref` to name that same immutable tag, keeping wheel bytes,
 compliance manifests, signatures, and publication helpers on one source ref.
 Leave both inputs empty for a build-only branch preflight.
@@ -154,7 +161,9 @@ recovery cannot repair a run that never produced that payload.
 ### Immutable GitHub Releases
 
 Do not publish an empty release before the official wheel job finishes.
-The workflow creates a draft, attaches all signed assets, verifies their names,
+The build only retains its signed payload by default. After qualification and
+evidence review, the explicit retained-payload finalizer creates a draft,
+attaches all signed assets, verifies their names,
 sizes and SHA-256 digests, and only then publishes. An existing draft may be
 resumed only when its assets match exactly; published releases are never
 overwritten. Tag/source identity is checked again before publication.
@@ -168,7 +177,7 @@ PyPI; 0.4.27 delivers the same LayerNorm implementation with this sequencing fix
 If an upload or publish response is uncertain, inspect the existing release
 before retrying; a notification or failed watcher is not evidence of non-delivery.
 
-For an unpublished partial draft, do not rerun the build/signing job: a fresh
+For an unfinalized payload or unpublished partial draft, do not rerun the build/signing job: a fresh
 manifest timestamp or signature changes bytes and must be rejected. Instead,
 recover the `signed-release-payload-<tag>` artifact from the original completed
 tag-push run. Set `SOURCE_RUN_ID` to that verified run's numeric ID, then:
@@ -473,32 +482,23 @@ done
 unset TWINE_PASSWORD
 ```
 
-## Rebuild Or Recovery
+## Retained-Payload Finalization
 
-Signed GitHub Release recovery runs the fixed workflow from `main`, rebuilds
-wheels from the release tag, regenerates manifest/Sigstore bundles, and
-overwrites the assets on that tag's release.
-
-```bash
-gh workflow run release_wheels.yml \
-  --ref main \
-  -f release_tag="$TAG" \
-  -f checkout_ref="$TAG" \
-  -f publish_pypi=false
-```
-
-If you intentionally publish from a rebuild, choose the auth path explicitly.
-`publish_pypi=true` requires `release_tag`; after upload, CI verifies PyPI wheel
-digests against the GitHub Release `wheels.sha256` emitted by the attach job.
+Finalize or recover only the original signed payload after qualification and
+evidence review. This does not rebuild, resign or overwrite published assets.
+`SOURCE_RUN_ID` must identify the original completed tag-push build; it is not
+a new run or an invitation to repeat a failed candidate.
 
 ```bash
-gh workflow run release_wheels.yml \
-  --ref main \
-  -f release_tag="$TAG" \
-  -f checkout_ref="$TAG" \
-  -f publish_pypi=true \
-  -f pypi_publish_method=token
+gh workflow run recover_github_release.yml --ref main \
+  -f release_tag="$TAG" -f source_run_id="$SOURCE_RUN_ID"
 ```
+
+Missing or expired retained bytes require an explicit new-candidate decision,
+not the legacy combined build/publication option. A rebuild is not recovery
+and cannot inherit the original wheel's qualification. The existing
+publish-from-release dry-run and token/trusted methods above reuse the finalized
+wheel bytes without invoking a compiler.
 
 Re-run integrity verification for the recovered release:
 

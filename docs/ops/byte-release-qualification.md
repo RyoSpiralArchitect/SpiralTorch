@@ -5,6 +5,16 @@ rule, not the interpretation of historical evidence. Rust owns learning and
 restoration; Python only selects inputs, orchestrates calls and compares saved
 outputs. No numerical tolerance, kernel or diagnostic API is changed here.
 
+The maintainer approved a hosted-only budget amendment on 2026-10-26 after
+[main CI 40203512490](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40203512490)
+passed all ten jobs: its six required `StudyGpu` tests took approximately 59
+minutes, making three rounds inconsistent with the original 90-minute estimate.
+Hosted Metal now has four hours; local Metal remains at 90 minutes. This changes
+neither the test matrix nor the two-candidate limit, and does not reset the
+original decision or reinterpret old results. No candidate had been admitted
+before this amendment. Timings from that engineering wheel are planning
+evidence, not final-wheel qualification or a runtime guarantee.
+
 ## Two separate completion decisions
 
 Historical investigation is resolved only by an explanatory, same-condition
@@ -88,9 +98,10 @@ is incomplete evidence.
 
 - Maximum two candidates for this release decision: the initial candidate and
   one reviewed implementation repair. An unchanged retry is not a repair.
-- Per candidate, each environment has one 90-minute wall-clock budget covering
-  all three rounds, children and postludes, not 90 minutes per test or per round.
-  Thus additional GPU qualification is at most six environment-hours across
+- Per candidate, local Metal has one 90-minute wall-clock budget and hosted
+  Metal has one four-hour budget. Each covers all three rounds, children and
+  postludes, not a new budget per test or per round.
+  Thus additional GPU qualification is at most eleven environment-hours across
   both candidates. Ordinary source CI and wheel builds are recorded separately;
   they do not replace these rounds or reset their budgets.
 - Stop at the first unexpected numerical failure, process error, missing
@@ -129,5 +140,179 @@ The long-study recipe and portable checks are implemented in
 `bindings/st-py/tests/test_nn_byte_release_qualification.py`.
 Their real-GPU test requires both existing runtime opt-in and
 `SPIRALTORCH_RUN_BYTE_RELEASE_QUALIFICATION=1`; it is not added to ordinary CI.
-The artifact-bound two-environment supervisor and final candidate admission
-remain prerequisites. This document does not claim that qualification has run.
+The artifact-bound worker, fixed matrix, child verification, local attempt ledger
+and encrypted hosted handoff are implemented. Their actual end-to-end hosted
+execution, final build receipts and candidate admission remain unverified. This
+document does not claim that qualification has run.
+
+The read-only `tools/byte_release_artifacts.py` component inventories complete
+wheel bytes and checks the installed native extension, Python facade, shipped
+`spiral`/`examples` files and original metadata. Install the qualification
+environment with `pip --no-compile`: cached bytecode, extra package files,
+symbolic links and shadowed module origins are rejected. Installer-rewritten
+`RECORD` is excluded from original-metadata equality; it is not used to establish
+which bytes came from the wheel. This check does not select a GPU runtime.
+
+`tools/byte_release_schedule.py` supplies the sequential three-process ownership
+and decreasing-budget primitive. A zero exit requires independent evidence
+verification; failure, cancellation, timeout and incomplete evidence stop the
+sequence. It has no standalone execution CLI or publication authority. Candidate
+ledger admission, the frozen test worker and its child/evidence verification
+are integrated by `tools/run_byte_release_qualification.py`. It runs the frozen
+matrix in three fresh interpreters, checks complete parent/child wheel identity,
+rejects missing evidence despite zero exits, and verifies saved exact bytes.
+Existing numerical calls/assertions stay in their original tests; opt-in
+`byte_release_evidence` hooks retain already available host bytes. They add no
+GPU snapshot or diagnostic dispatch and do not evaluate factories in normal CI.
+Each retention label requires its exact payload filename set, not just an event
+count. Removing an expected/observed file from both disk and index cannot pass.
+Raw inputs/results and failure records are private by default. Offline tests
+exercise synthetic success, tampering, missing audits, failure and timeout;
+they are not evidence of GPU execution.
+
+## Preparing and running the frozen acceptance
+
+After reviewing/merging the release prerequisites, choose an unused version,
+merge its reviewed release PR and tag that exact source once. The tag-push
+`release_wheels.yml` run builds/tests all three final wheels, signs and retains
+`signed-release-payload-<tag>`, but does not attach or publish a GitHub Release
+or upload to PyPI. Record that original run and artifact IDs/digests; download
+and verify its exact-tag provenance before admitting those same wheel bytes.
+Do not use `finalize_release=true` or a second build for this candidate.
+Keep the complete build logs and a JSON receipt for each platform containing
+`source_commit`, `wheel_sha256`, `toolchain` (the actual compiler identity), and
+`features` (the resolved release feature list). The freeze tool hashes the whole
+receipt; it cannot establish the truth of operator-authored build records, review
+approval, unused PyPI versions or successful platform CI. Verify those separately.
+
+After the complete candidate gates and evidence review pass, use
+`recover_github_release.yml` with that original tag-push run ID to finalize the
+unchanged signed payload. Then use the separate publish-from-release dry-run
+and upload path. The legacy combined build/publication option is not an
+alternative to qualification; it would build different, unqualified bytes.
+
+Use one persistent private ledger outside the source tree for this decision.
+Initialize it once, then never choose a new ledger to reset the attempt budget:
+
+```sh
+python3 -I -B tools/prepare_byte_release_qualification.py init-ledger "$LEDGER"
+python3 -I -B tools/prepare_byte_release_qualification.py freeze \
+  --linux-wheel "$LINUX_WHEEL" --linux-build-receipt "$LINUX_RECEIPT" \
+  --macos-wheel "$MACOS_WHEEL" --macos-build-receipt "$MACOS_RECEIPT" \
+  --windows-wheel "$WINDOWS_WHEEL" --windows-build-receipt "$WINDOWS_RECEIPT" \
+  --output "$ADMISSION"
+```
+
+Retain the printed admission digest independently as `ADMISSION_SHA256`. Do not
+hand-edit the admission. Admission schema v2 freezes both environment budgets;
+the ambiguous old scalar-budget format is rejected, not silently upgraded.
+The canonical decision and candidate slots remain unchanged. Candidate 2 additionally requires `--candidate 2`, the
+previous `--prior-admission`, and the reviewed implementation `--repair-review`
+PR URL. Admission requires a retained terminal failure of candidate 1; it rejects
+unchanged retries, unfinished environments and third candidates. Review URLs
+record provenance, not proof that review was approved.
+
+Install the final macOS wheel into a fresh environment with `--no-compile`, no
+foreign ML packages, and a clean checkout of the frozen commit. `PYTHON` below
+is that environment's interpreter. Default invocation only checks CPU-side
+identity; it neither starts GPU tests nor consumes the environment claim:
+
+```sh
+"$PYTHON" -I -B tools/run_byte_release_qualification.py \
+  --admission "$ADMISSION" --admission-sha256 "$ADMISSION_SHA256" --wheel "$MACOS_WHEEL"
+"$PYTHON" -I -B tools/run_byte_release_qualification.py \
+  --admission "$ADMISSION" --admission-sha256 "$ADMISSION_SHA256" --wheel "$MACOS_WHEEL" \
+  --ledger "$LEDGER" --environment local-metal --execute
+```
+
+One exclusive environment claim is written before launching any round. A failed
+or interrupted claim is not reusable, even if its output folder was renamed or
+removed. Hosted execution is sequential, using the exact same admission and
+wheel, and is permitted only after all three local rounds verify. The ledger is
+an operator-owned filesystem record, not a distributed lock or authenticated
+remote attestation. Before hosted execution, the coordinator must transfer and
+verify the canonical admission/local-result evidence, ensure no other owner is
+running, and preserve/return the first hosted claim and outcome. Do not initialize
+an independent hosted ledger. Use the fixed handoff below, not an untracked
+manual invocation on a new runner.
+
+All receipts keep `release_ready=false`. Even six verified GPU rounds do not
+perform publication, close #2289, or substitute for the three wheel gates,
+security/license checks, review and same-byte upload verification above.
+
+## Hosted handoff and recovery
+
+`byte_release_handoff.py` checks the saved chain from local acceptance receipt
+through all three round seals to their original bytes. It does not run learning
+again or reinterpret a prior failure. Its bounded ZIP rejects missing/extra
+members, unsafe paths, links, changed bytes and oversized payloads. Input ZIPs
+must fit 96 MiB before age encryption; larger inputs stop preparation rather
+than silently dropping evidence. Keep all plaintext and identity files private.
+
+After three local rounds have qualified, pack the same ledger and macOS wheel:
+
+```sh
+python3 -I -S -B tools/byte_release_handoff.py pack-input \
+  --input "$LEDGER" --wheel "$MACOS_WHEEL" --output "$INPUT_ZIP" > "$PACKET_RECEIPT"
+```
+
+Use the pinned age 1.3.2 tool to generate separate input and result identities in
+a private directory. Check an encrypt/decrypt round trip and retain the result
+identity locally; never give it to GitHub. Encrypt `INPUT_ZIP` to the input
+identity's public recipient. Store only that input identity in the temporary
+repository secret `ST_BYTE_RELEASE_CANDIDATE_1_INPUT_IDENTITY` (or `_2_` for the
+reviewed repair). Do not reuse PyPI or provider credentials for transport.
+
+Create the dedicated controller branch
+`spiralreality/byte-release-candidate-1-20261025` (or candidate 2) directly from
+the frozen source commit. Add exactly one commit containing exactly one file:
+`.github/byte-release-input.zip.age`. No code/workflow edits belong on this
+branch, and it must not merge into main. Push it only after reviewing the frozen
+source and ciphertext digest. The controller is the frozen source plus its
+opaque packet; the workflow checks out the original source separately and never
+rebuilds its wheel.
+
+The dispatcher performs read-only checks unless explicitly executed:
+
+```sh
+python3 -I -S -B tools/byte_release_hosted.py dispatch \
+  --ledger "$LEDGER" --controller "$CONTROLLER_CHECKOUT" \
+  --packet-receipt "$PACKET_RECEIPT" --recipient "$RESULT_RECIPIENT"
+```
+
+Only after those checks pass, the reviewed coordinator adds `--execute` once.
+An exclusive canonical dispatch record is saved before the POST. A timeout or
+ambiguous response leaves that record consumed: observe, never resubmit. Bind
+the first run with the read-only `bind-run --candidate-directory` operation.
+It may be called again to observe delayed API visibility; it never submits work.
+
+The manual `byte_release_qualification.yml` workflow rejects run attempts other
+than 1, any prior/duplicate dispatch on that candidate branch, controller/source
+drift and wrong input digests before accessing the input secret. A shared
+non-cancelling concurrency group prevents overlapping hosted candidates. This
+is a single-coordinator policy, not protection against a repository administrator
+bypassing it. The native supervisor owns one four-hour hosted budget across all
+three rounds; the job's 270-minute outer limit preserves the existing 30-minute
+setup/sealing allowance, not extra GPU execution time. An exhausted job
+or unavailable result artifact is incomplete evidence, never a retry trigger.
+
+Only `result.zip.age` and its ciphertext checksum are uploaded. Download the
+artifact from the bound run using the authenticated GitHub account, verify its
+GitHub artifact identity/digest and ciphertext checksum, then decrypt locally
+with the retained result identity. Do not accept an archive sent through an
+unverified channel. Pin the resulting plaintext ZIP digest before import:
+
+```sh
+python3 -I -S -B tools/byte_release_hosted.py recover-result \
+  --candidate-directory "$CANDIDATE_DIRECTORY" --archive "$RETURN_ZIP" \
+  --sha256 "$RETURN_PLAINTEXT_SHA256"
+```
+
+Recovery checks the bound first run is terminal, retains the raw return intact,
+and rechecks the acceptance chain before writing a successful canonical receipt.
+A failed GitHub job cannot promote otherwise-green numerical output. Malformed
+or incomplete returns produce an explicitly coordinator-derived failure record;
+they do not claim whether GPU execution occurred. Existing outcomes are never
+overwritten. Retire the temporary input secret after the original run is
+terminal; preserve encrypted artifacts and the local result identity until
+recovery is complete. No command here publishes a package or closes #2289.

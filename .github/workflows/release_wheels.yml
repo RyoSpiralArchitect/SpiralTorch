@@ -7,13 +7,18 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to attach assets to on manual runs (leave empty to skip GitHub Release attach)"
+        description: "Exact tag for the retained signed payload (leave empty for an unsigned build-only preflight)"
         required: false
         default: ""
       checkout_ref:
-        description: "Source ref to build/sign on manual runs (for recovery, use the release tag)"
+        description: "Source ref to build/sign on manual runs (must equal release_tag when specified)"
         required: false
         default: ""
+      finalize_release:
+        description: "Legacy combined build/publication; leave false to qualify retained wheels before publishing"
+        required: false
+        type: boolean
+        default: false
       publish_pypi:
         description: "Publish wheels to PyPI (otherwise manual upload)"
         required: false
@@ -54,6 +59,7 @@ jobs:
           INPUT_CHECKOUT_REF: ${{ inputs.checkout_ref }}
           INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
           INPUT_PUBLISH_PYPI: ${{ inputs.publish_pypi }}
+          INPUT_FINALIZE_RELEASE: ${{ inputs.finalize_release }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -69,6 +75,14 @@ jobs:
               echo "publish_pypi=true requires release_tag before building wheels." >&2
               exit 1
             fi
+            if [ "$INPUT_PUBLISH_PYPI" = "true" ] && [ "$INPUT_FINALIZE_RELEASE" != "true" ]; then
+              echo "publish_pypi=true requires finalize_release=true; use retained-payload publication after qualification." >&2
+              exit 1
+            fi
+            if [ "$INPUT_FINALIZE_RELEASE" = "true" ] && [ -z "$release_tag" ]; then
+              echo "finalize_release=true requires release_tag before building wheels." >&2
+              exit 1
+            fi
             if [ -n "$INPUT_CHECKOUT_REF" ]; then
               source_ref="$INPUT_CHECKOUT_REF"
             fi
@@ -80,7 +94,7 @@ jobs:
           fi
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$release_tag" ] && [ "$source_ref" != "$release_tag" ]; then
-            echo "Manual release recovery must build and sign the exact release tag." >&2
+            echo "Manual tagged builds must build and sign the exact release tag." >&2
             echo "release_tag='$release_tag' source_ref='$source_ref'" >&2
             exit 1
           fi
@@ -311,7 +325,7 @@ jobs:
     needs:
       - wheels
       - attach
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.finalize_release && inputs.publish_pypi == 'true'
     runs-on: ubuntu-22.04
     environment:
       name: pypi
@@ -399,7 +413,7 @@ jobs:
     needs:
       - pypi
       - attach
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi == 'true' && inputs.release_tag != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.finalize_release && inputs.publish_pypi == 'true' && inputs.release_tag != ''
     runs-on: ubuntu-22.04
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -425,7 +439,7 @@ jobs:
             --timeout 240
 
   attach:
-    name: Attach wheels to GitHub Release
+    name: Prepare signed release payload
     needs: wheels
     if: github.event_name != 'workflow_dispatch' || inputs.release_tag != ''
     runs-on: ubuntu-22.04
@@ -538,6 +552,7 @@ jobs:
           path: dist/
           if-no-files-found: error
       - name: Attach verified draft assets and publish last
+        if: github.event_name == 'workflow_dispatch' && inputs.finalize_release
         uses: actions/github-script@v8
         with:
           script: |
