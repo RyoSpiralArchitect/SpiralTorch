@@ -12,7 +12,7 @@ making NumPy, PyTorch, Transformers, or provider SDKs mandatory dependencies.
 python -m pip install -U spiraltorch
 ```
 
-Package version: **Version 0.4.32**. Wheels target CPython 3.8+, Linux x86_64,
+Package version: **Version 0.4.33**. Wheels target CPython 3.8+, Linux x86_64,
 Windows x86_64, and macOS 14+ universal2. The default wheel includes WGPU with
 CPU fallback; a compatible GPU and the appropriate execution route are still
 required for GPU use.
@@ -61,6 +61,9 @@ or [direct Rust use](https://github.com/RyoSpiralArchitect/SpiralTorch#native-au
 | `nn`, `optim`, `SpiralSession` | Modules, training, optimization, and runtime planning |
 | `nn.ByteDecoderPlan`, `nn.ByteDecoderGeometryPlan` | Explicit resident byte-LM learning, geometry mixtures, and model checkpoints |
 | `nn.ByteCorpusStudy` | Shared Rust/WASM paired studies, geometry controls, and request-bound pause/resume |
+| `SafeTensorArchive`, `NdTensor` | Native bounded checkpoint-tensor loading without Python safetensors |
+| `NativeCausalLm`, `NativeCausalLmTrainer`, `NativeCausalLmGenerator` | Supported GPT-2 CPU inference, attached-geometry learning, and resumable generation |
+| `NativeGeometryRuntime`, `NativeGeometryAdamW` | Rust-owned geometry evaluation, gradients, and optimizer state |
 | `ecosystem` | Explicit tensor exchange with other ML libraries |
 | `ApiLLMZSpaceRuntime` | Connect hosted-model responses to Z-space runtime traces |
 | `runtime_import_preflight_report` | Check optional HF/Torch/PEFT dependencies before a larger run |
@@ -74,18 +77,29 @@ or [direct Rust use](https://github.com/RyoSpiralArchitect/SpiralTorch#native-au
 - [Paired byte-corpus studies](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/byte-corpus-studies.md): the shared experiment runner and geometry-control preparation, available from 0.4.31.
 - [DLPack interoperability](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/dlpack_interop.md): ownership and copy policies for tensor exchange.
 
-## Optional HF Integration
+## Native Language Models
 
-Newer source builds also expose `NativeCausalLm`, `NativeCausalLmTrainer` and
-`NativeCausalLmGenerator` for supported GPT-2 execution, geometry-only learning
-and generation without Torch. These are **not in the published 0.4.32 wheels**.
+The 0.4.33 source exposes `NativeCausalLm`, `NativeCausalLmTrainer` and
+`NativeCausalLmGenerator` for supported GPT-2 CPU execution, geometry-only
+learning, corpus evaluation and generation without Torch or NumPy. Base weights
+remain frozen. The importer is not an arbitrary HF architecture loader or PEFT
+executor, and this CPU path is separate from resident WGPU byte-LM training.
 See the [native/HF execution boundary](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-hf-boundary.md)
-for the native route and remaining foreign-model/PEFT dependencies.
+for supported configurations, native learning/generation recipes and remaining
+foreign-model dependencies. These newer APIs are not in the immutable 0.4.32
+wheels; check the installed version and publication history above.
 
-Portable affine/WaveGate adapters can also execute and learn directly through
-`NativeGeometryRuntime`, without Torch, Transformers or NumPy. See
+Supported affine, WaveGate, elliptic, Topos and fractional geometry recipes can
+also execute and learn directly through `NativeGeometryRuntime`, without Torch,
+Transformers or NumPy. See
 [native geometry training](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-geometry-runtime.md)
 for saved-state reuse, Rust-owned updates and the still-optional HF boundary.
+
+## Optional HF Integration
+
+Use the optional HF clients when execution should remain in Transformers/Torch.
+They are explicit interoperability paths, not hidden fallbacks for unsupported
+native models:
 
 ```bash
 python -m pip install 'spiraltorch[hf-runtime]'
