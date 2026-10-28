@@ -143,19 +143,6 @@ class LearningSmokeTests(unittest.TestCase):
                         mock.patch.object(module, "__all__", exports), self.assertRaises(AssertionError):
                     SMOKE.byte_corpus_portable()
 
-    def test_all_wheel_paths_execute_smoke_before_artifact_upload(self):
-        for workflow in ("wheels.yml", "release_wheels.yml"):
-            with self.subTest(workflow=workflow):
-                text = (ROOT / ".github/workflows" / workflow).read_text()
-                command = "python -I ../../tools/smoke_learning_stack.py"
-                self.assertIn(command, text)
-                self.assertLess(text.index(command), text.index("uses: actions/upload-artifact@"))
-        ci = (ROOT / ".github/workflows/ci.yml").read_text()
-        self.assertIn("python -I tools/smoke_learning_stack.py", ci)
-        self.assertIn("python -I tests/test_release_learning_smoke.py", ci)
-        self.assertIn("python -I -B bindings/st-py/tests/test_nn_byte_decoder.py -v", ci)
-        self.assertEqual(ci.count("python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v"), 2)
-
     def test_homogeneous_substitute_does_not_pass_headwise_smoke(self):
         constructor = st.nn.ByteDecoderGeometryPlan
 

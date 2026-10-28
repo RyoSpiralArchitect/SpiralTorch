@@ -12,9 +12,108 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WHEEL_JOBS = (("wheels.yml", "build-wheels"), ("release_wheels.yml", "wheels"))
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def _assert_learning_smoke_before_qualified_upload(self, workflow, job_name):
+        marker = f"\n  {job_name}:\n"
+        self.assertEqual(workflow.count(marker), 1)
+        job = re.split(r"\n  [a-zA-Z0-9_-]+:\n", workflow.split(marker, 1)[1], maxsplit=1)[0]
+        config, steps_text = job.split("\n    steps:\n", 1)
+        self.assertNotRegex(config, r"(?m)^    continue-on-error:")
+        steps = re.split(r"(?m)^      - ", steps_text)[1:]
+        command = "python -I ../../tools/smoke_learning_stack.py"
+        smoke_steps = [step for step in steps if command in [line.strip() for line in step.splitlines()]]
+        self.assertEqual(len(smoke_steps), 1, "one learning smoke step is required in the wheel job")
+        # Unqualified evidence precedes smoke by design; it is not a candidate upload.
+        uploads = [step for step in steps
+                   if re.search(r"(?m)^(?:uses: |        uses: )actions/upload-artifact@", step)
+                   and re.search(r"(?m)^          name: ['\"]?wheels?-", step)]
+        self.assertEqual(len(uploads), 1, "one qualified wheel upload is required in the wheel job")
+        smoke, upload = smoke_steps[0], uploads[0]
+        self.assertLess(steps.index(smoke), steps.index(upload))
+        self.assertIn("          path: target/wheels/*.whl\n", upload)
+        for step in (smoke, upload):
+            conditions = [value.strip() for value in re.findall(r"(?m)^(?:        )?if:(.*)$", step)]
+            self.assertIn(conditions, ([], ["success()"], ["${{ success() }}"]))
+            self.assertNotRegex(step, r"(?m)^(?:        )?continue-on-error:")
+        return "      - " + smoke, "      - " + upload
+
+    def test_all_wheel_paths_execute_smoke_before_artifact_upload(self):
+        for filename, job_name in WHEEL_JOBS:
+            with self.subTest(workflow=filename):
+                workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+                smoke, upload = self._assert_learning_smoke_before_qualified_upload(workflow, job_name)
+                self.assertLess(workflow.index("name: unqualified-wheel-"), workflow.index(smoke))
+                self.assertLess(workflow.index(smoke), workflow.index(upload))
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("python -I tools/smoke_learning_stack.py", ci)
+        self.assertIn("python -I tests/test_release_learning_smoke.py", ci)
+        self.assertIn("python -P tests/test_release_workflows.py", ci)
+        self.assertIn("python -I -B bindings/st-py/tests/test_nn_byte_decoder.py -v", ci)
+        self.assertEqual(ci.count("python -I -B bindings/st-py/tests/test_nn_byte_serving.py -v"), 2)
+
+    def test_learning_upload_contract_rejects_missing_reordered_or_duplicate_gates(self):
+        command = "python -I ../../tools/smoke_learning_stack.py"
+        for filename, job_name in WHEEL_JOBS:
+            workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+            smoke, upload = self._assert_learning_smoke_before_qualified_upload(workflow, job_name)
+            mutations = {
+                "early-upload": workflow.replace(upload, "", 1).replace(smoke, upload + smoke, 1),
+                "missing-upload": workflow.replace(upload, "", 1),
+                "duplicate-upload": workflow.replace(upload, upload + upload, 1),
+                "unqualified-only": workflow.replace(upload, upload.replace(
+                    "          name: ", "          name: unqualified-", 1), 1),
+                "missing-smoke": workflow.replace(command, "python -I unrelated.py", 1),
+                "commented-smoke": workflow.replace(command, "# " + command, 1),
+            }
+            for mutation, changed in mutations.items():
+                with self.subTest(workflow=filename, mutation=mutation), self.assertRaises(AssertionError):
+                    self._assert_learning_smoke_before_qualified_upload(changed, job_name)
+
+    def test_learning_upload_contract_rejects_failure_bypasses(self):
+        for filename, job_name in WHEEL_JOBS:
+            workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+            smoke, upload = self._assert_learning_smoke_before_qualified_upload(workflow, job_name)
+            for owner, step in (("smoke", smoke), ("upload", upload)):
+                first_line, rest = step.split("\n", 1)
+                for bypass in ("if: always()", "if: failure()", "if: false",
+                               "if:\n          always()", "continue-on-error: true"):
+                    changed = workflow.replace(step, first_line + "\n        " + bypass + "\n" + rest, 1)
+                    with self.subTest(workflow=filename, owner=owner, bypass=bypass), \
+                            self.assertRaises(AssertionError):
+                        self._assert_learning_smoke_before_qualified_upload(changed, job_name)
+                for bypass in ("if: always()", "continue-on-error: true"):
+                    replacement = ("      - " + bypass + "\n        "
+                                   + first_line.removeprefix("      - ") + "\n" + rest)
+                    changed = workflow.replace(step, replacement, 1)
+                    with self.subTest(workflow=filename, owner=owner, first_key=bypass), \
+                            self.assertRaises(AssertionError):
+                        self._assert_learning_smoke_before_qualified_upload(changed, job_name)
+            marker = f"\n  {job_name}:\n"
+            changed = workflow.replace(marker, marker + "    continue-on-error: true\n", 1)
+            with self.subTest(workflow=filename, owner="job"), self.assertRaises(AssertionError):
+                self._assert_learning_smoke_before_qualified_upload(changed, job_name)
+
+    def test_learning_upload_contract_accepts_explicit_success_conditions(self):
+        for filename, job_name in WHEEL_JOBS:
+            workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+            smoke, upload = self._assert_learning_smoke_before_qualified_upload(workflow, job_name)
+            for condition in ("success()", "${{ success() }}"):
+                changed = workflow
+                first_key = workflow
+                for step in (smoke, upload):
+                    first_line, rest = step.split("\n", 1)
+                    changed = changed.replace(step, first_line + "\n        if: " + condition + "\n" + rest, 1)
+                    replacement = ("      - if: " + condition + "\n        "
+                                   + first_line.removeprefix("      - ") + "\n" + rest)
+                    first_key = first_key.replace(step, replacement, 1)
+                with self.subTest(workflow=filename, condition=condition):
+                    self._assert_learning_smoke_before_qualified_upload(changed, job_name)
+                with self.subTest(workflow=filename, first_key=condition):
+                    self._assert_learning_smoke_before_qualified_upload(first_key, job_name)
+
     def test_retained_boundary_client_is_qualified_after_original_failure_handling(self) -> None:
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         gpu = ci.split("\n  wgpu-macos:\n", 1)[1].split("\n  wasm-build:\n", 1)[0]
