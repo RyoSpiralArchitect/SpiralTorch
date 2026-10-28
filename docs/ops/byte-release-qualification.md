@@ -18,9 +18,13 @@ evidence, not final-wheel qualification or a runtime guarantee.
 ## Two separate completion decisions
 
 Historical investigation is resolved only by an explanatory, same-condition
-failure-before/fix-after regression. Otherwise retain it as unresolved in
+failure-before/fix-after regression. Otherwise retain the cause as unresolved in
 [issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289).
-Do not close that issue as fixed merely because a candidate qualifies.
+The maintainer clarified on 2026-10-26 that the issue was intentionally closed
+to record the bounded investigation's stopping condition, not an explanation,
+repair or release qualification. This supersedes the earlier instruction to
+keep the issue open, not the historical evidence or any artifact gate. Do not
+relabel the discrepancy as fixed merely because a candidate qualifies.
 
 [PR #2294](https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2294)'s
 [first CI attempt](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40189776388)
@@ -33,6 +37,81 @@ historical binary searches, diagnostic API expansion and repeated reproductions.
 The next release may qualify independently under the rules below. This is a
 finite acceptance test for named artifacts/environments, not proof that a rare
 defect cannot exist, cross-GPU bitwise determinism, or LLM quality superiority.
+
+## Preserve engineering failures
+
+An ordinary CI failure remains a failure. The detached-study receipt keeps the
+exact request and both reports before optional runtime metadata is collected.
+Its legacy `differences` list remains bounded; `difference_summaries` additionally
+counts the whole comparison and samples `final_parameters` separately from
+other fields, so many weight differences cannot hide a later loss difference.
+Counts are mismatch events, not estimates of missing subtree sizes; malformed,
+ambiguous or over-depth JSON has unknown totals. No tolerance or alternate pass
+rule is introduced. Metadata errors are retained separately and do not erase raw
+bytes.
+
+The wheel-building jobs use `tools/wheel_build_provenance.py`: Rust 1.99.1 and
+maturin 1.15.0 are selected from one set of pins, and their observed versions
+must match before compilation. The record binds the clean source/tree, lock
+and manifests, actual command, explicit/default feature selection, target,
+runner image, active macOS SDK version, Cargo configuration digests, selected
+build-environment digests and installed Python build-tool versions. This is
+provenance, not a claim that every OS,
+linker, transitive build dependency or runner image is frozen bit-for-bit.
+Undeclared Rust flag/wrapper/profile overrides are rejected without printing
+their values. Other selected compiler/SDK environment values are hash-recorded,
+not copied verbatim into receipts.
+Python build-package metadata follows the actual interpreter's `pyvenv.cfg`
+without enabling site hooks, including Python 3.12 under `-S`; an explicitly
+enabled system site is lower precedence than the virtual environment.
+
+Ordinary GPU CI retains its native/default-feature macOS build. Portable CI
+keeps its existing Linux feature set. Manual and release builds retain the
+macOS-14 universal2 and Linux manylinux2014 specifications. Archive inspection
+is shared, but engineering acceptance cannot relax final-release validation.
+
+Before installing or testing, each job uploads `unqualified-wheel-<role>...`
+containing the original wheel and its non-release build records for seven days.
+A failed upload stops subsequent tests. The normal successful-wheel artifacts
+remain behind every existing smoke test; unqualified artifacts do not match
+the publisher's `wheels-*` selection. An additional unqualified records
+artifact retains the installed-byte identity or rejection outcome. Installation
+uses `--no-compile`, followed by inspection of all original files, including
+the native extension, without importing SpiralTorch. No wheel is rebuilt to
+retain or verify it. When present, post-failure `runtime.json` separately binds
+the loaded native-library hash and observed adapter.
+
+When the build supervisor regains control, it also preserves raw `.whl`
+outputs after a nonzero exit, timeout or cancellation. Collection is limited
+to eight files and four GiB in aggregate; unsafe files, exceeded bounds and
+copy errors are recorded, not treated as successful retention. Multiple
+outputs remain a build failure, even when all their bytes were preserved.
+`outputs.json` describes this raw collection separately from `build.json`;
+no successful build receipt is issued for failed or ambiguous builds, and
+retention errors do not replace the original build exception.
+
+Tool installation is a separate step. POSIX compilation uses the existing
+owned-process supervisor with a 110-minute inner limit, leaving ten minutes
+within the 120-minute build step for preflight and retention. Hosted Windows
+compilation uses the declared 120-minute Actions step owner. Local Windows
+compilation is not supported by this CI-specific helper. First errors,
+timeouts and cancellations remain failures; receipt-write errors cannot hide
+an earlier exception. A separate ten-minute, failure/cancellation-only step
+also collects raw outputs into an exclusive `after-step/` directory before
+upload, including when Windows termination prevented the helper's `finally`.
+It never rebuilds, overwrites first-attempt records, or grants a successful
+build receipt. It can duplicate already-retained raw bytes; the same eight-file,
+four-GiB bound applies to this separate snapshot. No helper can guarantee
+retention after a whole-job cancellation deadline, runner loss,
+power loss or failed artifact transport. Missing evidence is not a pass.
+
+Download and verify the original bytes before expiry. These artifacts are not
+qualified release candidates and must never be uploaded to PyPI. They do not
+recover binaries missing from earlier failures or establish a numerical repair.
+To bind a later final admission, hash the actual `build.json` as
+`receipt_sha256`, retain its `source_commit`, `wheel_sha256`, `toolchain` and
+`features`, and apply the existing candidate policy below. A receipt alone does
+not authorize admission, execution or publication.
 
 ## Freeze the candidate before execution
 
@@ -127,7 +206,8 @@ dependency-free smoke, existing security/license checks and publication dry-run
 must pass for the frozen candidate. Review the finite evidence and unresolved
 limitations before release. Upload only the tested wheels under the new version;
 verify PyPI digests, index visibility and clean installed-package origin/version.
-Keep the historical issue open and disclose the qualified scope in release notes.
+Disclose the unresolved historical cause and qualified scope in release notes.
+The investigation's administrative closure does not satisfy any release gate.
 
 Then return the main workstream to language learning/inference development.
 Reopen investigation for a new retained mismatch on the supported path, not
@@ -237,7 +317,7 @@ an independent hosted ledger. Use the fixed handoff below, not an untracked
 manual invocation on a new runner.
 
 All receipts keep `release_ready=false`. Even six verified GPU rounds do not
-perform publication, close #2289, or substitute for the three wheel gates,
+perform publication, resolve #2289's historical cause, or substitute for the three wheel gates,
 security/license checks, review and same-byte upload verification above.
 
 ## Hosted handoff and recovery
@@ -315,4 +395,5 @@ or incomplete returns produce an explicitly coordinator-derived failure record;
 they do not claim whether GPU execution occurred. Existing outcomes are never
 overwritten. Retire the temporary input secret after the original run is
 terminal; preserve encrypted artifacts and the local result identity until
-recovery is complete. No command here publishes a package or closes #2289.
+recovery is complete. No command here publishes a package or resolves #2289's
+historical cause.

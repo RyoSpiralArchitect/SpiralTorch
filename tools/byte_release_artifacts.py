@@ -26,8 +26,8 @@ def stream_digest(stream):
     return digest.hexdigest()
 
 
-def wheel_inventory(path):
-    """Freeze every original wheel file, including the facade and metadata."""
+def wheel_archive_inventory(path):
+    """Inspect original bytes without granting final-release eligibility."""
     path = Path(path)
     original_digest = sha256(path)
     files = {}
@@ -89,7 +89,8 @@ def wheel_inventory(path):
         target = fields[2]
         if target.startswith("macosx_") and target.endswith(("_x86_64", "_arm64", "_universal2")):
             platforms.add("macos")
-        elif target.startswith(("manylinux_", "manylinux2014_")) and target.endswith("_x86_64"):
+        elif (target == "linux_x86_64" or
+              target.startswith(("manylinux_", "manylinux2014_")) and target.endswith("_x86_64")):
             platforms.add("linux")
         elif target == "win_amd64":
             platforms.add("windows")
@@ -99,8 +100,6 @@ def wheel_inventory(path):
         raise ValueError("wheel mixes platform families")
     if native[0].endswith(".pyd") != (platforms == {"windows"}):
         raise ValueError("native extension does not match the wheel platform")
-    if platforms == {"macos"} and not any(tag.endswith("_universal2") for tag in tags):
-        raise ValueError("macOS release wheel must include universal2")
     filename_tags = path.name[:-4].split("-")[2:]
     if len(filename_tags) != 3 or set(tags) != {
             f"{python}-{abi}-{target}" for python in filename_tags[0].split(".")
@@ -111,6 +110,16 @@ def wheel_inventory(path):
     return {"filename": path.name, "sha256": original_digest, "bytes": path.stat().st_size,
             "version": version, "platform": platforms.pop(), "tags": sorted(tags),
             "native": dict(path=native[0], **files[native[0]]), "files": files}
+
+
+def wheel_inventory(path):
+    """Apply the unchanged final-release platform policy to inspected bytes."""
+    inventory = wheel_archive_inventory(path)
+    if inventory["platform"] == "macos" and not any(tag.endswith("_universal2") for tag in inventory["tags"]):
+        raise ValueError("macOS release wheel must include universal2")
+    if inventory["platform"] == "linux" and any(tag.endswith("-linux_x86_64") for tag in inventory["tags"]):
+        raise ValueError("Linux release wheel must include manylinux compatibility")
+    return inventory
 
 
 def verify_installed_files(inventory, root, package_origin, metadata_version, loaded_origins=()):

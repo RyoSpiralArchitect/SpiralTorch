@@ -18,6 +18,11 @@ Final-wheel qualification and availability are tracked in the
   qualified wheel bytes instead of rebuilding them.
   The separately recorded GPU resume discrepancy remains unresolved in
   [#2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289).
+- Record the actual pinned Rust/maturin build identities and preserve original
+  unqualified wheels before smoke tests, with separate installed-byte receipts.
+  Publication still requires the success-only final-wheel gates. This improves
+  evidence retention; it does not recover missing historical binaries or explain
+  the earlier numerical failures.
 
 ### Implementation History
 

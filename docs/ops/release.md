@@ -12,6 +12,9 @@ It supersedes the 2026-10-20 requirement that historical root-cause resolution
 must precede every version bump, tag or publication. The historical failures in
 [issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289) remain
 unresolved; subsequent passes are not a repair finding.
+The issue's intentional closure records the bounded investigation closeout,
+not an identified cause or release approval. Its 2026-10-26 maintainer
+clarification supersedes the older keep-open wording only.
 
 Publication remains blocked until the fixed final candidate meets that policy,
 all platform-wheel gates below, and the explicit artifact publication checks.
@@ -69,6 +72,14 @@ generated size counts are not a release or performance gate.
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
+All wheel jobs share the Rust 1.99.1 / maturin 1.15.0 pins and build-byte
+receipts in `tools/wheel_build_provenance.py`. Unqualified original wheels are
+retained before smoke execution, under a namespace excluded from publication.
+The separate successful-wheel and signed-payload gates remain mandatory.
+See [engineering evidence retention](byte-release-qualification.md#preserve-engineering-failures)
+for the role distinctions, installation checks and limits. Changing a build
+pin is not a historical numerical repair or permission to rerun a failed gate.
+
 Tag builds and ordinary manual builds stop after artifact retention; they do not
 publish a GitHub Release or PyPI package. The existing retained-payload finalizer
 is the normal route after qualification. Both PyPI paths use the same
@@ -83,7 +94,7 @@ and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
 They also execute the installed wheel through the Rust-owned runtime protocol
 catalog plus generation-evidence, token-periodicity, repetition-plan, and
-blinded semantic-review lifecycles before any artifact can be uploaded. The
+blinded semantic-review lifecycles before a successful wheel artifact is uploaded. The
 stochastic Schrodinger forward/replay/VJP lifecycle is covered by the same
 installed-wheel smoke, including complex-state forward and joint VJP replay.
 Legacy/versioned DLPack transfers, capsule single-use, explicit copies, and
@@ -91,7 +102,7 @@ copy-on-write mutation are also exercised using the installed native wheel.
 Protected autograd snapshots, a complete 600-step nonlinear learning fixture,
 atomic SGD failure/ownership checks, a 300-step multiclass logits-loss fixture,
 and a 400-step affine LayerNorm learning fixture run
-on every installed release wheel before upload. This is a mechanics gate,
+on every installed release wheel before successful-wheel upload. This is a mechanics gate,
 not a claim about LLM fine-tuning quality.
 `tools/smoke_learning_stack.py` additionally exercises the installed native
 Sequential forward capture, a 24-update shared-Topos learning loop and exact
@@ -215,16 +226,24 @@ DIST="/tmp/spiraltorch-${VERSION}-dist"
 
 ### 0.4.33 Preparation
 
-The next source version is 0.4.33. Release prerequisites #2291, #2295 and #2296
-have merged with exact-head review and passing source CI. This version change
-is preparation, not proof of a final wheel, a GPU qualification result or PyPI
-publication. Release-branch preparation may overlap post-merge main validation;
-it does not bypass the required checks before release merge, tag or execution.
+The next source version is 0.4.33. Release prerequisites #2291, #2295, #2296 and
+#2300 are integrated in main at `3bab598999eff8b6c67855684ab4f4b3f29eb8a1`.
+The first [integration CI](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40723544222)
+passed all ten jobs. #2300 adds build provenance and unqualified-wheel retention;
+that engineering success does not qualify final release wheels or recover
+historically missing binaries.
+
+The [original release-PR CI](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40252323265)
+at `a09ea19b04acb2092483956375b58898a192276e` remains a failed first attempt.
+The refreshed release source requires its own independent review and source
+CI/security/license gates; old reviews and later main passes do not replace
+those checks. This version change is preparation, not proof of a final wheel,
+a GPU qualification result or PyPI publication.
 
 Build and retain the actual Linux/macOS/Windows wheels from the reviewed tag,
 then follow the [bounded qualification policy](byte-release-qualification.md)
-before finalizing or uploading those same bytes. Keep #2289 unresolved; later
-passes and the TLS refresh do not identify or repair its historical cause.
+before finalizing or uploading those same bytes. Keep #2289's historical cause
+unresolved; later passes and the TLS refresh do not identify or repair it.
 
 ### Native Language Source Integration
 

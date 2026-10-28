@@ -29,7 +29,7 @@ from test_verify_byte_corpus_resume import fixture as resume_fixture
 from test_byte_corpus_optimizer import wrap as optimizer_request, recipe as optimizer_recipe
 from test_byte_corpus_gradient_clip import bind as clipping_request, learning_design
 from byte_study_diagnostics import (
-    assert_exact_resume, assert_exact_run_resume, exact_report_differences,
+    assert_exact_resume, assert_exact_run_resume, exact_report_difference_summary,
     retain_detached_failure, runtime_identity,
 )
 
@@ -571,8 +571,9 @@ class StudyGpu(unittest.TestCase):
             if not identical:
                 directory = os.environ.get("SPIRALTORCH_DETACHED_STUDY_DIAGNOSTICS")
                 if directory:
-                    retain_detached_failure(directory, request, expected, results, round_index)
-                differences = [exact_report_differences(expected, raw) for raw in results]
+                    retain_detached_failure(directory, request, expected, results, round_index,
+                                            runtime_context=lambda: runtime_identity(st))
+                differences = [exact_report_difference_summary(expected, raw) for raw in results]
                 self.fail(f"exact detached comparison round {round_index}: {json.dumps(differences)}")
         self.assertEqual(study.request_sha256, hashlib.sha256(request).hexdigest())
 
