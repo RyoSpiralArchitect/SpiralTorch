@@ -2,7 +2,9 @@
 
 import hashlib
 import importlib
+import itertools
 import json
+import math
 from pathlib import Path
 import platform
 import sys
@@ -44,50 +46,120 @@ def _runtime_payload(collect):
         return json.dumps({"status": "collection_failed", "error_type": type(error).__name__}).encode("utf-8")
 
 
-def exact_report_differences(expected, actual, *, limit=16):
-    """Describe differing paths without weakening the caller's byte equality."""
+def _difference_limit(limit):
     if type(limit) is not int or not 1 <= limit <= 64:
         raise ValueError("difference limit must be in [1,64]")
-    if expected == actual:
-        return []
-    try:
-        left, right = json.loads(expected), json.loads(actual)
-    except (ValueError, TypeError):
-        return [{"path": "$", "kind": "invalid_json"}]
-    differences = []
 
-    def compare(a, b, path):
-        if len(differences) >= limit:
-            return
+
+def _unique_object(items):
+    value = {}
+    for key, item in items:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
+def _reject_constant(_value):
+    raise ValueError("non-finite JSON value")
+
+
+def _finite_float(value):
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError("non-finite JSON value")
+    return value
+
+
+def _report_differences(expected, actual):
+    if expected == actual:
+        return
+    try:
+        left, right = (json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant,
+                                 parse_float=_finite_float)
+                       for raw in (expected, actual))
+    except RecursionError:
+        yield False, {"path": "$", "kind": "analysis_limit"}
+        return
+    except (ValueError, TypeError):
+        yield False, {"path": "$", "kind": "invalid_json"}
+        return
+
+    def compare(a, b, path, parts):
+        if len(parts) > 128:
+            raise RecursionError("difference traversal depth exceeded")
+        parameter = (len(parts) >= 3 and parts[0] == "cases" and type(parts[1]) is int
+                     and parts[2] == "final_parameters")
         if type(a) is not type(b):
-            differences.append({"path": path, "kind": "type", "expected": type(a).__name__,
-                                "actual": type(b).__name__})
+            yield parameter, {"path": path, "kind": "type", "expected": type(a).__name__,
+                              "actual": type(b).__name__}
         elif isinstance(a, dict):
             if a.keys() != b.keys():
-                differences.append({"path": path, "kind": "keys",
-                                    "missing": sorted(a.keys() - b.keys()),
-                                    "extra": sorted(b.keys() - a.keys())})
+                missing, extra = sorted(a.keys() - b.keys()), sorted(b.keys() - a.keys())
+                yield parameter, {"path": path, "kind": "keys", "missing": missing[:16],
+                                  "extra": extra[:16], "missing_count": len(missing),
+                                  "extra_count": len(extra)}
             for key in sorted(a.keys() & b.keys()):
-                compare(a[key], b[key], f"{path}.{key}")
-                if len(differences) >= limit:
-                    break
+                yield from compare(a[key], b[key], f"{path}.{key}", (*parts, key))
         elif isinstance(a, list):
             if len(a) != len(b):
-                differences.append({"path": path, "kind": "length", "expected": len(a), "actual": len(b)})
+                yield parameter, {"path": path, "kind": "length", "expected": len(a), "actual": len(b)}
             for index, (x, y) in enumerate(zip(a, b)):
-                compare(x, y, f"{path}[{index}]")
-                if len(differences) >= limit:
-                    break
-        elif a != b:
-            differences.append({"path": path, "kind": "value",
-                                "expected": a[:160] if isinstance(a, str) else a,
-                                "actual": b[:160] if isinstance(b, str) else b})
+                yield from compare(x, y, f"{path}[{index}]", (*parts, index))
+        elif a != b or (isinstance(a, float) and math.copysign(1., a) != math.copysign(1., b)):
+            yield parameter, {"path": path, "kind": "value",
+                              "expected": a[:160] if isinstance(a, str) else a,
+                              "actual": b[:160] if isinstance(b, str) else b}
 
-    compare(left, right, "$")
-    return differences or [{"path": "$", "kind": "serialization_only"}]
+    found = False
+    try:
+        for item in compare(left, right, "$", ()):
+            found = True
+            yield item
+    except RecursionError:
+        yield False, {"path": "$", "kind": "analysis_limit"}
+        return
+    if not found:
+        yield False, {"path": "$", "kind": "serialization_only"}
 
 
-def retain_detached_failure(directory, request, expected, actuals, round_index):
+def exact_report_differences(expected, actual, *, limit=16):
+    """Describe differing paths without weakening the caller's byte equality."""
+    _difference_limit(limit)
+    return [item for _, item in itertools.islice(_report_differences(expected, actual), limit)]
+
+
+def exact_report_difference_summary(expected, actual, *, limit=16):
+    """Count the whole comparison with separate bounded parameter/other samples.
+
+    Counts describe mismatch events: a missing subtree is one structural event,
+    not a claim about its absent leaves. Unparseable inputs have unknown totals.
+    This is post-failure analysis, never a replacement for exact raw equality.
+    """
+    _difference_limit(limit)
+    groups = {name: {"count": 0, "examples": [], "truncated": False}
+              for name in ("final_parameters", "other")}
+    incomplete = None
+    for parameter, item in _report_differences(expected, actual):
+        if item["kind"] in ("invalid_json", "analysis_limit"):
+            incomplete = item["kind"]
+        group = groups["final_parameters" if parameter else "other"]
+        group["count"] += 1
+        if len(group["examples"]) < limit:
+            group["examples"].append(item)
+        else:
+            group["truncated"] = True
+    count = sum(group["count"] for group in groups.values()) if incomplete is None else None
+    if incomplete is not None:
+        for group in groups.values():
+            group["count"] = None
+    return {"schema": "spiraltorch.synthetic_exact_difference_summary.v1",
+            "raw_equal": expected == actual, "complete": incomplete is None,
+            "incomplete_reason": incomplete,
+            "difference_count": count, "groups": groups}
+
+
+def retain_detached_failure(directory, request, expected, actuals, round_index, *, runtime_context=None):
     """Retain a single bounded synthetic comparison only at an explicit path."""
     if type(round_index) is not int or not 0 <= round_index < 4 or len(actuals) != 2:
         raise ValueError("expected one of four declared two-worker comparisons")
@@ -103,9 +175,16 @@ def retain_detached_failure(directory, request, expected, actuals, round_index):
         with (target / name).open("xb") as stream:
             stream.write(raw)
         ids[name] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    if runtime_context is not None:
+        # Persist numerical evidence before invoking fallible metadata collection.
+        raw = _runtime_payload(runtime_context)
+        with (target / "runtime.json").open("xb") as stream:
+            stream.write(raw)
+        ids["runtime.json"] = "sha256:" + hashlib.sha256(raw).hexdigest()
     report = {"schema": "spiraltorch.synthetic_detached_diagnostic.v1", "round": round_index,
               "comparison": "exact_json_bytes_no_tolerance", "files": ids,
-              "differences": [exact_report_differences(expected, raw) for raw in actuals]}
+              "differences": [exact_report_differences(expected, raw) for raw in actuals],
+              "difference_summaries": [exact_report_difference_summary(expected, raw) for raw in actuals]}
     with (target / "summary.json").open("x") as stream:
         json.dump(report, stream, indent=2, allow_nan=False)
         stream.write("\n")

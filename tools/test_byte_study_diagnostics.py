@@ -1,4 +1,5 @@
 """No GPU/model required for exact-comparison diagnostic regressions."""
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -12,6 +13,141 @@ API = runpy.run_path(str(Path(__file__).with_name("byte_study_diagnostics.py")))
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_detached_client_keeps_four_pairs_and_collects_only_after_failure(self):
+        source = Path(__file__).resolve().parents[1] / "bindings/st-py/tests/test_nn_byte_study.py"
+        tree = ast.parse(source.read_text())
+        owner = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "StudyGpu")
+        method = next(node for node in owner.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "test_detached_calls_share_a_recipe_not_mutable_models")
+        code = compile(ast.Module(body=[method], type_ignores=[]), str(source), "exec")
+        baseline, changed = '{"x":1}', '{"x":2}'
+        for fails, retain in ((False, True), (True, True), (True, False)):
+            with self.subTest(fails=fails, retain=retain), tempfile.TemporaryDirectory() as directory:
+                study = SimpleNamespace(request_sha256=hashlib.sha256(b"{}").hexdigest(),
+                                        run_wgpu=mock.Mock(side_effect=[baseline] * 7 +
+                                                          [changed if fails else baseline, baseline]))
+                parse = mock.Mock(return_value=study)
+                pool = mock.MagicMock()
+                pool.__enter__.return_value.map.side_effect = lambda run, items: [run(i) for i in items]
+                factory = mock.Mock(return_value=pool)
+                collect = mock.Mock(return_value={"native_library": {"sha256": "synthetic"}})
+                capture = mock.Mock(wraps=API["retain_detached_failure"])
+                namespace = dict(st=SimpleNamespace(nn=SimpleNamespace(ByteCorpusStudy=SimpleNamespace(from_json=parse))),
+                                 fixture=lambda: (b"{}",), retain=lambda *_: None,
+                                 ThreadPoolExecutor=factory, hashlib=hashlib, json=json,
+                                 os=SimpleNamespace(environ={"SPIRALTORCH_DETACHED_STUDY_DIAGNOSTICS": directory}
+                                                    if retain else {}),
+                                 retain_detached_failure=capture, runtime_identity=collect,
+                                 exact_report_difference_summary=API["exact_report_difference_summary"])
+                exec(code, namespace)
+                run = namespace[method.name]
+                if fails:
+                    with self.assertRaisesRegex(AssertionError, "exact detached comparison round 3"):
+                        run(self)
+                else:
+                    run(self)
+                parse.assert_called_once_with(b"{}")
+                self.assertEqual(study.run_wgpu.call_count, 9)
+                self.assertEqual(factory.call_args_list, [mock.call(max_workers=2)] * 4)
+                self.assertEqual(capture.call_count, int(fails and retain))
+                self.assertEqual(collect.call_count, int(fails and retain))
+                self.assertEqual((Path(directory) / "round-3" / "summary.json").exists(), fails and retain)
+
+    def test_summary_counts_late_metric_changes_without_unbounded_examples(self):
+        left = {"cases": [{"final_parameters": [[0.] * 100], "training": [{"ce": 5.5}],
+                           "validation": [{"ce": 5.4}]}]}
+        right = {"cases": [{"final_parameters": [[1e-7] * 100], "training": [{"ce": 5.4}],
+                            "validation": [{"ce": 5.3}]}]}
+        before, after = json.dumps(left), json.dumps(right)
+        summary = API["exact_report_difference_summary"](before, after, limit=3)
+        self.assertTrue(summary["complete"])
+        self.assertFalse(summary["raw_equal"])
+        self.assertEqual(summary["difference_count"], 102)
+        parameters, other = (summary["groups"][key] for key in ("final_parameters", "other"))
+        self.assertEqual(parameters["count"], 100)
+        self.assertEqual(len(parameters["examples"]), 3)
+        self.assertTrue(parameters["truncated"])
+        self.assertEqual(other["count"], 2)
+        self.assertFalse(other["truncated"])
+        self.assertEqual([item["path"] for item in other["examples"]],
+                         ["$.cases[0].training[0].ce", "$.cases[0].validation[0].ce"])
+        self.assertEqual(API["exact_report_differences"](before, after, limit=3), parameters["examples"])
+        self.assertEqual(API["exact_report_difference_summary"](before, before)["difference_count"], 0)
+
+    def test_summary_keeps_structural_and_serialization_failures_distinct(self):
+        for before, after, kind in (("{}", '{"x":1}', "keys"), ("[]", "[1]", "length"),
+                                    ("1", "1.0", "type"), ("0.0", "-0.0", "value"),
+                                    ('{"x":1}', '{ "x": 1 }', "serialization_only")):
+            with self.subTest(kind=kind):
+                summary = API["exact_report_difference_summary"](before, after)
+                self.assertFalse(summary["raw_equal"])
+                self.assertTrue(summary["complete"])
+                self.assertEqual(summary["difference_count"], 1)
+                self.assertEqual(summary["groups"]["other"]["examples"][0]["kind"], kind)
+        summary = API["exact_report_difference_summary"]('{"final_parameters":[0]}',
+                                                          '{"final_parameters":[1]}')
+        self.assertEqual(summary["groups"]["final_parameters"]["count"], 0)
+        self.assertEqual(summary["groups"]["other"]["count"], 1)
+        summary = API["exact_report_difference_summary"]("{}", json.dumps({str(i): 0 for i in range(100)}))
+        example = summary["groups"]["other"]["examples"][0]
+        self.assertEqual(example["extra_count"], 100)
+        self.assertEqual(len(example["extra"]), 16)
+
+    def test_summary_rejects_ambiguous_nonfinite_and_deep_json_without_inventing_totals(self):
+        for raw in ("broken", '{"x":0,"x":1}', "NaN", "Infinity", "1e400"):
+            with self.subTest(raw=raw[:32]):
+                summary = API["exact_report_difference_summary"]("{}", raw)
+                self.assertFalse(summary["complete"])
+                self.assertIsNone(summary["difference_count"])
+                self.assertIsNone(summary["groups"]["other"]["count"])
+                self.assertEqual(summary["groups"]["other"]["examples"][0]["kind"], "invalid_json")
+                json.dumps(summary, allow_nan=False)
+        summary = API["exact_report_difference_summary"]("[" * 200 + "0" + "]" * 200,
+                                                          "[" * 200 + "1" + "]" * 200)
+        self.assertFalse(summary["complete"])
+        self.assertEqual(summary["incomplete_reason"], "analysis_limit")
+        self.assertIsNone(summary["difference_count"])
+        for limit in (0, 65, True, 1.0):
+            with self.assertRaises(ValueError):
+                API["exact_report_difference_summary"]("[]", "[]", limit=limit)
+
+    def test_detached_metadata_is_collected_after_original_bytes_and_hash_bound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "round-3"
+
+            def collect():
+                self.assertEqual((target / "request.json").read_bytes(), b'{ "request": true }')
+                self.assertEqual((target / "expected.json").read_bytes(), b'{"x":1}')
+                self.assertEqual((target / "actual-0.json").read_bytes(), b'{"x":2}')
+                self.assertEqual((target / "actual-1.json").read_bytes(), b'{"x":1}')
+                return {"native_library": {"sha256": "synthetic"}}
+
+            context = mock.Mock(side_effect=collect)
+            result = API["retain_detached_failure"](directory, b'{ "request": true }', '{"x":1}',
+                                                     ['{"x":2}', '{"x":1}'], 3, runtime_context=context)
+            context.assert_called_once_with()
+            self.assertEqual(len(result["files"]), 5)
+            self.assertEqual(result["difference_summaries"][0]["difference_count"], 1)
+            self.assertTrue(result["difference_summaries"][1]["raw_equal"])
+            for name, digest in result["files"].items():
+                self.assertEqual(digest, "sha256:" + hashlib.sha256((target / name).read_bytes()).hexdigest())
+            with self.assertRaises(FileExistsError):
+                API["retain_detached_failure"](directory, b"{}", "{}", ["[]", "{}"], 3,
+                                                runtime_context=context)
+            context.assert_called_once_with()
+
+    def test_detached_metadata_failure_cannot_replace_numerical_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = API["retain_detached_failure"](
+                directory, b"{}", '{"x":1}', ['{"x":2}', '{"x":1}'], 0,
+                runtime_context=mock.Mock(side_effect=RuntimeError("private-secret")))
+            target = Path(directory) / "round-0"
+            self.assertEqual((target / "actual-0.json").read_bytes(), b'{"x":2}')
+            context = (target / "runtime.json").read_text()
+            self.assertNotIn("private-secret", context)
+            self.assertEqual(json.loads(context)["status"], "collection_failed")
+            self.assertEqual(result["difference_summaries"][0]["difference_count"], 1)
+
     def test_uninterrupted_replay_keeps_actual_reports_without_inventing_checkpoint(self):
         boundaries = mock.Mock(return_value=(b'{ "step": 1 }', '{"cursor":1}', '{"cursor":2}'))
         context = mock.Mock(return_value={"adapter": "synthetic"})
