@@ -18,9 +18,13 @@ evidence, not final-wheel qualification or a runtime guarantee.
 ## Two separate completion decisions
 
 Historical investigation is resolved only by an explanatory, same-condition
-failure-before/fix-after regression. Otherwise retain it as unresolved in
+failure-before/fix-after regression. Otherwise retain the cause as unresolved in
 [issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289).
-Do not close that issue as fixed merely because a candidate qualifies.
+The maintainer clarified on 2026-10-26 that the issue was intentionally closed
+to record the bounded investigation's stopping condition, not an explanation,
+repair or release qualification. This supersedes the earlier instruction to
+keep the issue open, not the historical evidence or any artifact gate. Do not
+relabel the discrepancy as fixed merely because a candidate qualifies.
 
 [PR #2294](https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2294)'s
 [first CI attempt](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40189776388)
@@ -202,7 +206,8 @@ dependency-free smoke, existing security/license checks and publication dry-run
 must pass for the frozen candidate. Review the finite evidence and unresolved
 limitations before release. Upload only the tested wheels under the new version;
 verify PyPI digests, index visibility and clean installed-package origin/version.
-Keep the historical issue open and disclose the qualified scope in release notes.
+Disclose the unresolved historical cause and qualified scope in release notes.
+The investigation's administrative closure does not satisfy any release gate.
 
 Then return the main workstream to language learning/inference development.
 Reopen investigation for a new retained mismatch on the supported path, not
@@ -312,7 +317,7 @@ an independent hosted ledger. Use the fixed handoff below, not an untracked
 manual invocation on a new runner.
 
 All receipts keep `release_ready=false`. Even six verified GPU rounds do not
-perform publication, close #2289, or substitute for the three wheel gates,
+perform publication, resolve #2289's historical cause, or substitute for the three wheel gates,
 security/license checks, review and same-byte upload verification above.
 
 ## Hosted handoff and recovery
@@ -390,4 +395,5 @@ or incomplete returns produce an explicitly coordinator-derived failure record;
 they do not claim whether GPU execution occurred. Existing outcomes are never
 overwritten. Retire the temporary input secret after the original run is
 terminal; preserve encrypted artifacts and the local result identity until
-recovery is complete. No command here publishes a package or closes #2289.
+recovery is complete. No command here publishes a package or resolves #2289's
+historical cause.

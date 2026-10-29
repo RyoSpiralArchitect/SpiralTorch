@@ -12,6 +12,9 @@ It supersedes the 2026-10-20 requirement that historical root-cause resolution
 must precede every version bump, tag or publication. The historical failures in
 [issue #2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289) remain
 unresolved; subsequent passes are not a repair finding.
+The issue's intentional closure records the bounded investigation closeout,
+not an identified cause or release approval. Its 2026-10-26 maintainer
+clarification supersedes the older keep-open wording only.
 
 Publication remains blocked until the fixed final candidate meets that policy,
 all platform-wheel gates below, and the explicit artifact publication checks.
@@ -214,12 +217,33 @@ final publication rechecks the known release ID.
 ## Common Variables
 
 ```bash
-VERSION=0.4.32
+VERSION=0.4.33
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 ```
 
 ## Readiness Snapshot
+
+### 0.4.33 Preparation
+
+The next source version is 0.4.33. Release prerequisites #2291, #2295, #2296 and
+#2300 are integrated in main at `3bab598999eff8b6c67855684ab4f4b3f29eb8a1`.
+The first [integration CI](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40723544222)
+passed all ten jobs. #2300 adds build provenance and unqualified-wheel retention;
+that engineering success does not qualify final release wheels or recover
+historically missing binaries.
+
+The [original release-PR CI](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/40252323265)
+at `a09ea19b04acb2092483956375b58898a192276e` remains a failed first attempt.
+The refreshed release source requires its own independent review and source
+CI/security/license gates; old reviews and later main passes do not replace
+those checks. This version change is preparation, not proof of a final wheel,
+a GPU qualification result or PyPI publication.
+
+Build and retain the actual Linux/macOS/Windows wheels from the reviewed tag,
+then follow the [bounded qualification policy](byte-release-qualification.md)
+before finalizing or uploading those same bytes. Keep #2289's historical cause
+unresolved; later passes and the TLS refresh do not identify or repair it.
 
 ### Native Language Source Integration
 
@@ -237,8 +261,8 @@ installed/tested Linux, macOS universal2 and Windows wheels, including actual
 CPython 3.8 on Linux. Release attachment and PyPI publication were disabled.
 These development artifacts do not qualify later source changes. Separately,
 that head's [GPU CI failed](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/39187825231/job/117853890234)
-the exact prepared-study SGD comparison; PR #2288 remains draft while this is
-investigated. A portable wheel check passing cannot override a numerical failure.
+the exact prepared-study SGD comparison. That first failure is retained; a
+portable wheel check passing cannot override a numerical failure.
 
 For the next release, qualify the actual three platform wheels under the
 [current candidate policy](byte-release-qualification.md). The separately
@@ -280,9 +304,11 @@ python scripts/release_status.py \
   --no-clipboard
 ```
 
-Expected pre-publish shape for `0.4.32` (historical, before its successful
-publication), after the official wheel build and verified GitHub Release:
-For a future release, choose a new unused version first; do not re-upload 0.4.32.
+Expected pre-publish shape for `0.4.33`, after the official wheel build, bounded
+final-wheel qualification and verified GitHub Release. This is an example, not
+an observation that those gates have already passed. The credential reminder
+below applies when authentication still needs configuration. Never re-upload
+the already-published 0.4.32 wheels as a new candidate.
 
 ```text
 local_versions ... consistent=yes
@@ -295,8 +321,8 @@ Current helpers also print concrete resume commands:
 
 ```text
 token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
-publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.32 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
-publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.32 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.33 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.33 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
 trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
 next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```

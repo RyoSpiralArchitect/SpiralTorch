@@ -1,6 +1,34 @@
 # SpiralTorch (Python) changelog
 
-## Unreleased
+## 0.4.33
+
+This section describes the source release contents, not a publication receipt.
+Final-wheel qualification and availability are tracked in the
+[release runbook](../../docs/ops/release.md) and
+[PyPI release history](https://pypi.org/project/spiraltorch/#history).
+
+- Include the native weight loader, supported frozen GPT-2 execution,
+  geometry-only language-loss learning, corpus evaluation and resumable
+  generation developed after 0.4.32. Rust owns computation; Python transports
+  inputs without mandatory Torch or NumPy. Arbitrary HF architectures,
+  full-model fine-tuning and native PEFT import remain outside this contract.
+- Integrate the reviewed TLS dependency refresh and finite, same-wheel release
+  qualification. Signed wheel preparation is separate from publication; no
+  tolerance change or implicit retry is permitted. Publication reuses the
+  qualified wheel bytes instead of rebuilding them.
+  The separately recorded GPU resume discrepancy remains unresolved in
+  [#2289](https://github.com/RyoSpiralArchitect/SpiralTorch/issues/2289).
+- Record the actual pinned Rust/maturin build identities and preserve original
+  unqualified wheels before smoke tests, with separate installed-byte receipts.
+  Publication still requires the success-only final-wheel gates. This improves
+  evidence retention; it does not recover missing historical binaries or explain
+  the earlier numerical failures.
+
+### Implementation History
+
+The entries below record additions since 0.4.32. Their earlier "source-only"
+and fixed-candidate labels describe the development-time boundary: those
+additions were not part of the immutable 0.4.32 wheels.
 
 - Avoid overflowing the shifted-logit subtraction in resident headwise/querywise
   mixture softmax. Opposite-sign extreme logits receive zero mass before the
@@ -210,8 +238,8 @@ AdamW and accumulation APIs above are not included in those immutable wheels.
 Published on 2026-10-14. The three platform wheels on
 [PyPI](https://pypi.org/project/spiraltorch/0.4.31/) were verified against the signed
 [release manifest](https://github.com/RyoSpiralArchitect/SpiralTorch/releases/tag/v0.4.31)
-and an isolated public-index installation. Source-only additions below
-`Unreleased` are not part of those immutable wheels.
+and an isolated public-index installation. Later source additions described
+above are not part of those immutable wheels.
 
 - Expose the shared Rust/WASM byte-corpus runner through eight `spiraltorch.nn`
   classes: bounded exact-byte study requests, immutable request-bound experiment
