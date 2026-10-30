@@ -3,6 +3,7 @@ use super::*;
 use crate::geometry_runtime::{AdamWStep, NativeGeometryAdamW};
 use crate::language_windows::{CausalDocumentWindow, CausalDocumentWindows, MAX_DOCUMENTS};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_trainer.v1";
 const MAX_CHECKPOINT_BYTES: usize = 128 * 1024 * 1024;
@@ -383,6 +384,28 @@ impl NativeCausalLmTrainer {
     }
 
     pub fn step(&mut self) -> CausalLmResult<Option<CausalLmTrainingStep>> {
+        self.advance(None)
+    }
+
+    /// Perform the same update, observing only the primary forward and the
+    /// final reduced gradient actually passed to AdamW. Nothing is checkpointed.
+    pub fn step_observed(&mut self) -> CausalLmResult<Option<CausalLmObservedTrainingStep>> {
+        let mut sites = BTreeMap::new();
+        Ok(self
+            .advance(Some(&mut sites))?
+            .map(|step| CausalLmObservedTrainingStep {
+                schema: "spiraltorch.native_lm.observed_training_step.v1",
+                base_model_identity: self.model.base_model_identity().to_owned(),
+                data_id: self.data_id().to_owned(),
+                step,
+                sites,
+            }))
+    }
+
+    fn advance(
+        &mut self,
+        sites: Option<&mut BTreeMap<String, CausalLmSiteObservation>>,
+    ) -> CausalLmResult<Option<CausalLmTrainingStep>> {
         if self.exhausted() {
             return Ok(None);
         }
@@ -393,19 +416,27 @@ impl NativeCausalLmTrainer {
             repetition: self.config.repetition,
         };
         let mut accumulator = self.model.geometry_accumulator_with_objective(objective)?;
+        let mut observation = sites.map(|output| (observation::ResidualSums::default(), output));
         for windows in self.plan().windows()[start..end].chunks(self.config.microbatch_windows) {
             let (ids, labels) = self.corpus.batch(windows);
-            accumulator.accumulate_loss_with_labels(
+            accumulator.accumulate_observing(
                 &self.model,
                 &ids,
                 [windows.len(), self.config.context_length as usize],
                 labels.as_deref(),
+                observation.as_mut().map(|(sums, _)| sums),
             )?;
         }
-        let (model, optimizer) = accumulator.step_adamw(
+        let (model, optimizer) = accumulator.step_adamw_inspecting(
             &self.model,
             &self.optimizer,
             AdamWStep::new(self.config.learning_rate, self.config.weight_decay)?,
+            |gradients| {
+                if let Some((sums, output)) = observation {
+                    *output = sums.finish(self.model.geometry_artifact().unwrap(), gradients)?;
+                }
+                Ok(())
+            },
         )?;
         let report = CausalLmTrainingStep {
             update: self.updates + 1,

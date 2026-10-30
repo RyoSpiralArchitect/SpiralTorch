@@ -2,11 +2,9 @@
 //! Checkpoint block boundaries; replay only one block's internal tape at a time.
 use super::*;
 use crate::geometry_artifact::GeometryAdapterTensorRole;
-use crate::geometry_runtime::NativeGeometryBatch;
+use crate::geometry_runtime::{NativeGeometryBatch, ParameterGradients as Parameters};
 use st_kernel_contracts::attention::attention_vjp_reference;
 use std::collections::BTreeMap;
-
-type Parameters = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
 
 mod accumulation;
 pub use accumulation::NativeCausalLmAccumulator;
@@ -212,12 +210,13 @@ impl NativeCausalLm {
         objective.validate()?;
         self.geometry_objective_input_count(window_shape, labels.is_some())?;
         let prepared = self.prepare_objective(windows, window_shape, labels, objective)?;
-        self.geometry_loss_gradients_prepared(prepared)
+        self.geometry_loss_gradients_prepared(prepared, None)
     }
 
     fn geometry_loss_gradients_prepared(
         &self,
         prepared: PreparedCausalWindow,
+        mut observations: Option<&mut observation::ResidualSums>,
     ) -> CausalLmResult<NativeCausalLmGradients> {
         let PreparedCausalWindow {
             input: ids,
@@ -238,7 +237,11 @@ impl NativeCausalLm {
             if index >= first_layer {
                 checkpoints.push(hidden.clone());
             }
-            hidden = self.run_block(index, hidden, shape, false)?.output;
+            let pass = match observations.as_deref_mut() {
+                Some(sums) => decoder::BlockPass::Observe(sums),
+                None => decoder::BlockPass::Forward,
+            };
+            hidden = self.run_block(index, hidden, shape, pass)?.output;
         }
         checkpoints.push(hidden.clone());
         let selected = match &selected_rows {
@@ -368,7 +371,12 @@ impl NativeCausalLm {
         for index in (first_layer..c.layers).rev() {
             let input = checkpoints.pop().unwrap();
             let cache = self
-                .run_block(index, input.clone(), shape, true)?
+                .run_block(
+                    index,
+                    input.clone(),
+                    shape,
+                    decoder::BlockPass::BackwardReplay,
+                )?
                 .cache
                 .unwrap();
             let block = &self.blocks[index];

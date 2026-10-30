@@ -4,7 +4,10 @@ use super::{
     PyNativeGeometryAdamW,
 };
 use pyo3::prelude::*;
-use st_nn::causal_lm::{CausalLmTrainingConfig, CausalLmTrainingStep, NativeCausalLmTrainer};
+use st_nn::causal_lm::{
+    CausalLmObservedTrainingStep, CausalLmTrainingConfig, CausalLmTrainingStep,
+    NativeCausalLmTrainer,
+};
 use st_nn::language_windows::MAX_DOCUMENTS;
 
 #[pyclass(name = "NativeCausalLmTrainer", module = "spiraltorch")]
@@ -15,6 +18,28 @@ pub struct PyNativeCausalLmTrainer {
 #[pyclass(name = "NativeCausalLmTrainingStep", module = "spiraltorch", frozen)]
 pub struct PyNativeCausalLmTrainingStep {
     inner: CausalLmTrainingStep,
+}
+
+#[pyclass(
+    name = "NativeCausalLmObservedTrainingStep",
+    module = "spiraltorch",
+    frozen
+)]
+pub struct PyNativeCausalLmObservedTrainingStep {
+    inner: CausalLmObservedTrainingStep,
+}
+
+#[pymethods]
+impl PyNativeCausalLmObservedTrainingStep {
+    #[getter]
+    fn step(&self) -> PyNativeCausalLmTrainingStep {
+        PyNativeCausalLmTrainingStep {
+            inner: self.inner.step.clone(),
+        }
+    }
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner).map_err(error)
+    }
 }
 
 #[pymethods]
@@ -164,6 +189,14 @@ impl PyNativeCausalLmTrainer {
             .map(|v| v.map(|inner| PyNativeCausalLmTrainingStep { inner }))
             .map_err(error)
     }
+    fn step_observed(
+        &mut self,
+        py: Python<'_>,
+    ) -> PyResult<Option<PyNativeCausalLmObservedTrainingStep>> {
+        py.detach(|| self.inner.step_observed())
+            .map(|v| v.map(|inner| PyNativeCausalLmObservedTrainingStep { inner }))
+            .map_err(error)
+    }
     #[getter]
     fn model(&self) -> PyNativeCausalLm {
         PyNativeCausalLm {
@@ -217,5 +250,6 @@ impl PyNativeCausalLmTrainer {
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLmTrainer>()?;
+    module.add_class::<PyNativeCausalLmObservedTrainingStep>()?;
     module.add_class::<PyNativeCausalLmTrainingStep>()
 }

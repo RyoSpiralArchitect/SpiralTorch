@@ -176,10 +176,21 @@ impl NativeCausalLmAccumulator {
         shape: [usize; 2],
         labels: Option<&[i64]>,
     ) -> CausalLmResult<f32> {
+        self.accumulate_observing(model, windows, shape, labels, None)
+    }
+
+    pub(in crate::causal_lm) fn accumulate_observing(
+        &mut self,
+        model: &NativeCausalLm,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        observations: Option<&mut observation::ResidualSums>,
+    ) -> CausalLmResult<f32> {
         self.objective_input_count(model, shape, labels.is_some())?;
         let prepared = model.prepare_objective(windows, shape, labels, self.objective)?;
         self.next_counts(shape, prepared.target_tokens)?;
-        let batch = model.geometry_loss_gradients_prepared(prepared)?;
+        let batch = model.geometry_loss_gradients_prepared(prepared, observations)?;
         self.add(&batch)?;
         Ok(batch.loss())
     }
@@ -329,12 +340,24 @@ impl NativeCausalLmAccumulator {
         optimizer: &NativeGeometryAdamW,
         step: AdamWStep,
     ) -> CausalLmResult<(NativeCausalLm, NativeGeometryAdamW)> {
+        self.step_adamw_inspecting(model, optimizer, step, |_| Ok(()))
+    }
+
+    pub(in crate::causal_lm) fn step_adamw_inspecting(
+        &self,
+        model: &NativeCausalLm,
+        optimizer: &NativeGeometryAdamW,
+        step: AdamWStep,
+        inspect: impl FnOnce(&Parameters) -> CausalLmResult<()>,
+    ) -> CausalLmResult<(NativeCausalLm, NativeGeometryAdamW)> {
         self.validate_model(model)?;
+        let parameters = self.parameter_gradients()?;
+        inspect(&parameters)?;
         model.with_geometry_adamw(
             &self.base_id,
             self.readout_accumulator,
             &self.geometry_id,
-            &self.parameter_gradients()?,
+            &parameters,
             optimizer,
             step,
         )

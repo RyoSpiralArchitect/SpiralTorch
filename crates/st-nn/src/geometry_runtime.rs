@@ -36,7 +36,7 @@ mod sequence_tests;
 mod topos;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-type ParameterGradients = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
+pub(crate) type ParameterGradients = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
 
 #[derive(Debug)]
 enum Pullback {

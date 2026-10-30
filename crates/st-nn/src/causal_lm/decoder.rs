@@ -4,6 +4,13 @@ use super::*;
 use crate::geometry_runtime::NativeGeometryBatch;
 use st_kernel_contracts::attention::{attention_reference, AttentionMask, AttentionSpec};
 
+pub(super) enum BlockPass<'a> {
+    Forward,
+    Observe(&'a mut observation::ResidualSums),
+    BackwardReplay,
+    Prefill,
+}
+
 pub(super) struct BlockCache {
     pub qkv: [Vec<f32>; 3],
     pub after_attention: Tensor,
@@ -117,7 +124,7 @@ impl NativeCausalLm {
         path: &str,
         input: Tensor,
         shape: [usize; 2],
-        capture: bool,
+        pass: &mut BlockPass<'_>,
     ) -> CausalLmResult<(Tensor, Option<NativeGeometryBatch>)> {
         if let Some(runtime) = &self.geometry {
             if runtime
@@ -128,7 +135,13 @@ impl NativeCausalLm {
                 .any(|p| p.path == path)
             {
                 let batch = runtime.forward_sequence(path, input.data(), shape)?;
-                return Ok((batch.output().clone(), capture.then_some(batch)));
+                if let BlockPass::Observe(sums) = pass {
+                    sums.record(path, &input, batch.output())?;
+                }
+                return Ok((
+                    batch.output().clone(),
+                    matches!(pass, BlockPass::BackwardReplay).then_some(batch),
+                ));
             }
         }
         Ok((input, None))
@@ -139,28 +152,10 @@ impl NativeCausalLm {
         index: usize,
         input: Tensor,
         shape: [usize; 2],
-        capture: bool,
+        mut pass: BlockPass<'_>,
     ) -> CausalLmResult<BlockOutput> {
-        self.run_block_capture(index, input, shape, capture, false)
-    }
-
-    pub(super) fn prefill_block(
-        &self,
-        index: usize,
-        input: Tensor,
-        steps: usize,
-    ) -> CausalLmResult<BlockOutput> {
-        self.run_block_capture(index, input, [1, steps], false, true)
-    }
-
-    fn run_block_capture(
-        &self,
-        index: usize,
-        input: Tensor,
-        shape: [usize; 2],
-        capture: bool,
-        inference: bool,
-    ) -> CausalLmResult<BlockOutput> {
+        let capture = matches!(pass, BlockPass::BackwardReplay);
+        let inference = matches!(pass, BlockPass::Prefill);
         let block = &self.blocks[index];
         let norm = block.first_norm.forward(&input, self.config.norm_epsilon)?;
         let qkv = self.split_heads::<3>(&block.qkv.forward(&norm)?, shape)?;
@@ -181,7 +176,7 @@ impl NativeCausalLm {
             history[0] = Some(attention.clone());
         }
         let (attention, attention_geometry) =
-            self.geometry_output(&format!("{path}.attn"), attention, shape, capture)?;
+            self.geometry_output(&format!("{path}.attn"), attention, shape, &mut pass)?;
         let after_attention = attention.add_with_backend(&input, TensorUtilBackend::Cpu)?;
         let norm = block
             .second_norm
@@ -193,12 +188,12 @@ impl NativeCausalLm {
             history[1] = Some(mlp.clone());
         }
         let (mlp, mlp_geometry) =
-            self.geometry_output(&format!("{path}.mlp"), mlp, shape, capture)?;
+            self.geometry_output(&format!("{path}.mlp"), mlp, shape, &mut pass)?;
         let output = after_attention.add_with_backend(&mlp, TensorUtilBackend::Cpu)?;
         if inference && self.geometry_needs_history(&path)? {
             history[2] = Some(output.clone());
         }
-        let (output, block_geometry) = self.geometry_output(&path, output, shape, capture)?;
+        let (output, block_geometry) = self.geometry_output(&path, output, shape, &mut pass)?;
         let inference_cache = inference.then(|| InferenceBlockCache {
             key: qkv[1].clone(),
             value: qkv[2].clone(),

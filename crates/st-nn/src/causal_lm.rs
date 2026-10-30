@@ -18,6 +18,7 @@ mod generation;
 mod gpt2;
 mod learning;
 mod objective;
+mod observation;
 mod repetition;
 mod training;
 pub use context::NativeCausalLmContext;
@@ -29,6 +30,7 @@ pub use generation::{
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
+pub use observation::{CausalLmObservedTrainingStep, CausalLmSiteObservation};
 pub use repetition::CausalLmRepetition;
 pub use training::{
     CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
@@ -370,7 +372,9 @@ impl NativeCausalLm {
     fn decode_hidden(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {
         let mut hidden = self.embed(ids, shape)?;
         for index in 0..self.blocks.len() {
-            hidden = self.run_block(index, hidden, shape, false)?.output;
+            hidden = self
+                .run_block(index, hidden, shape, decoder::BlockPass::Forward)?
+                .output;
         }
         Ok(hidden)
     }

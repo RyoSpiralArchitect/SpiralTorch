@@ -71,6 +71,33 @@ length when complete. `step.epoch` describes the update just performed.
 
 ## Resume And Ownership
 
+### Observe an update (source after 0.4.33)
+
+Use `trainer.step_observed()` **instead of** `trainer.step()` on an update you
+want to measure. It advances the same optimizer/cursor exactly once and returns
+`None` when exhausted. `observed.step` is the ordinary training report;
+`json.loads(observed.to_json())` adds model/data identity and a `sites` map.
+In Rust, `NativeCausalLmTrainer::step_observed` returns the typed
+`CausalLmObservedTrainingStep`. Neither path stores observations in checkpoints.
+
+Each site accumulates the actual pre-insertion activation `x` and the effective
+residual `y - x` on the **primary forward**, after strength and f32 output
+rounding. RMS uses every contextual activation element across all microbatches,
+including rows whose labels are ignored. Backward block replays and auxiliary
+loss pullbacks do not add samples. `relative_residual_rms` is
+`sqrt(sum((y-x)^2) / sum(x^2))`, or null for an all-zero input.
+
+`trainable_gradient_l2` and the signed `log_radius_gradient` use the same
+reduced f32 objective gradient handed to AdamW, **before** global clipping,
+moments or weight decay. This is not the mean of microbatch gradient norms.
+For a radius buffer, `pre_log_radius` is present and its gradient is null;
+both fields are null for non-radius recipes. A trainable radius with zero
+gradient reports zero, not null. Exact per-site radii and gradients are
+private learned-state diagnostics; choose a publication projection explicitly.
+Ordinary training does not accumulate these sums or create a report.
+
+### Restore a checkpoint
+
 `to_json()` includes geometry, optimizer, the complete fixed recipe and accepted
 update cursor. The base checkpoint and encoded documents are deliberately not
 duplicated. Keep them plus the checkpoint's separately retained `checkpoint_id`.

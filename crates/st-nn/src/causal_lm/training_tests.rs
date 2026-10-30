@@ -2,6 +2,9 @@ use super::*;
 use crate::geometry_runtime::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
 use sha2::{Digest, Sha256};
 
+#[path = "observation_tests.rs"]
+mod observation_tests;
+
 fn config() -> CausalLmTrainingConfig {
     CausalLmTrainingConfig {
         context_length: 4,

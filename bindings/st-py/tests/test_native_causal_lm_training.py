@@ -40,6 +40,33 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
         return st.NativeCausalLmTrainer(self.model, self.optimizer, docs, 4,
                                        labels=labels, **{**POLICY, **overrides})
 
+    def test_opt_in_site_observations_share_the_exact_training_trajectory(self):
+        plain, measured = self.trainer(), self.trainer()
+        self.assertIn("NativeCausalLmObservedTrainingStep", st.__all__)
+        for windows in (4, 1, 4, 1):
+            expected, observed = plain.step(), measured.step_observed()
+            self.assertIsInstance(observed, st.NativeCausalLmObservedTrainingStep)
+            self.assertEqual(observed.step.to_json(), expected.to_json())
+            payload = json.loads(observed.to_json())
+            self.assertEqual(payload["schema"], "spiraltorch.native_lm.observed_training_step.v1")
+            self.assertEqual(payload["step"], json.loads(expected.to_json()))
+            self.assertEqual(payload["data_id"], plain.data_id)
+            self.assertEqual(payload["base_model_identity"], self.base.base_model_identity)
+            self.assertEqual(set(payload["sites"]), {"transformer.h.0.mlp"})
+            site = payload["sites"]["transformer.h.0.mlp"]
+            self.assertEqual(site["elements"], windows * 3 * 4)
+            self.assertGreater(site["input_rms"], 0.)
+            self.assertGreater(site["relative_residual_rms"], 0.)
+            self.assertIsNone(site["pre_log_radius"])
+            self.assertIsNone(site["log_radius_gradient"])
+            self.assertEqual(measured.to_json(), plain.to_json())
+        self.assertIsNone(measured.step_observed())
+        bad = self.trainer(learning_rate=3.4e38, weight_decay=3.4e38)
+        before = bad.to_json()
+        with self.assertRaises(ValueError):
+            bad.step_observed()
+        self.assertEqual(bad.to_json(), before)
+
     def test_fixed_order_partial_groups_and_epoch_resume_match_manual_updates(self):
         trainer = self.trainer()
         data = st.HfGeometryDataset(DOCS, 4)
