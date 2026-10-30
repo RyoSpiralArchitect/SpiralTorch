@@ -22,7 +22,15 @@ on:
         type: string
         required: true
       input_ciphertext_sha256:
-        description: "Digest of the single committed age ciphertext"
+        description: "Digest of the separate pinned age ciphertext"
+        type: string
+        required: true
+      transport_amendment:
+        description: "Externally approved transport-only amendment JSON; never a credential"
+        type: string
+        required: true
+      transport_amendment_sha256:
+        description: "Canonical digest of the externally approved amendment"
         type: string
         required: true
       result_recipient:
@@ -53,6 +61,8 @@ jobs:
       INPUT_PLAINTEXT_SHA256: ${{ inputs.input_plaintext_sha256 }}
       INPUT_CIPHERTEXT_SHA256: ${{ inputs.input_ciphertext_sha256 }}
       RESULT_RECIPIENT: ${{ inputs.result_recipient }}
+      TRANSPORT_AMENDMENT: ${{ inputs.transport_amendment }}
+      TRANSPORT_AMENDMENT_SHA256: ${{ inputs.transport_amendment_sha256 }}
     steps:
       - name: Create private evidence roots
         run: |
@@ -85,37 +95,40 @@ jobs:
           printf 'SpiralTorch private release result recipient preflight\n' | \
             "$TRANSPORT_ROOT/age/age" --encrypt --recipient "$RESULT_RECIPIENT" \
             --output "$TRANSPORT_ROOT/recipient-probe.age"
-      - name: Reject repeated or unbound invocations before accessing input secrets
-        working-directory: controller
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python -I -S -B tools/byte_release_hosted.py admit-run \
-            --output "$EVIDENCE_ROOT/hosted-context.json" > "$EVIDENCE_ROOT/admission.log" 2>&1
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.source_commit }}
           path: source
           persist-credentials: false
-      - name: Decrypt the packet without exposing the input identity to execution
-        working-directory: source
+      - name: Reject repeated or unbound invocations before accessing input secrets
+        working-directory: controller
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -I -S -B tools/byte_release_hosted_v2.py admit-run --source ../source \
+            --output "$EVIDENCE_ROOT/hosted-context.json" > "$EVIDENCE_ROOT/admission.log" 2>&1
+      - name: Fetch and decrypt the pinned Actions ciphertext
+        working-directory: controller
         env:
           INPUT_IDENTITY: ${{ secrets[format('ST_BYTE_RELEASE_CANDIDATE_{0}_INPUT_IDENTITY', inputs.candidate)] }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           umask 077
           test -n "$INPUT_IDENTITY"
+          test -n "$GH_TOKEN"
           key="$TRANSPORT_ROOT/input-key.txt"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$INPUT_IDENTITY" > "$key"
           unset INPUT_IDENTITY
           {
+            python -I -S -B tools/byte_release_hosted_v2.py fetch-input \
+              --output "$EVIDENCE_ROOT/input.zip.age"
+            unset GH_TOKEN GITHUB_TOKEN
             "$TRANSPORT_ROOT/age/age" --decrypt --identity "$key" \
-              --output "$TRANSPORT_ROOT/input.zip" ../controller/.github/byte-release-input.zip.age
-            python -I -S -B tools/byte_release_handoff.py unpack-input \
-              --input "$TRANSPORT_ROOT/input.zip" --output "$TRANSPORT_ROOT/input" \
-              --sha256 "$INPUT_PLAINTEXT_SHA256" --admission-sha256 "$ADMISSION_SHA256"
-            python -I -S -B tools/byte_release_hosted.py verify-input \
-              --input "$TRANSPORT_ROOT/input" --candidate "$CANDIDATE" --admission-sha256 "$ADMISSION_SHA256"
+              --output "$TRANSPORT_ROOT/input.zip" "$EVIDENCE_ROOT/input.zip.age"
+            rm -f "$key"
+            python -I -S -B tools/byte_release_hosted_v2.py prepare-input --source ../source \
+              --input "$TRANSPORT_ROOT/input.zip" --output "$TRANSPORT_ROOT/input"
           } > "$EVIDENCE_ROOT/input-preflight.log" 2>&1
       - name: Install the same wheel offline without cached Python code
         run: |
@@ -148,7 +161,7 @@ jobs:
         run: |
           umask 077
           test -x "$TRANSPORT_ROOT/age/age"
-          python -I -S -B tools/byte_release_hosted.py pack-result \
+          python -I -S -B tools/byte_release_hosted_v2.py pack-result \
             --evidence "$EVIDENCE_ROOT" --input "$TRANSPORT_ROOT/input" --candidate "$CANDIDATE" \
             --output "$TRANSPORT_ROOT/result.zip" --admission-sha256 "$ADMISSION_SHA256" \
             > "$TRANSPORT_ROOT/packing.json"
