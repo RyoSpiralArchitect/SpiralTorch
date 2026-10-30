@@ -53,7 +53,8 @@ def download(pin, token, archive, output, opener=None):
         artifact = g._metadata(opener, artifact_url, token)
         a.verify_metadata(pin, run, artifact)
         redirect = None
-        with g._request(opener, binary_url, token, binary=True) as response:
+        # The Actions API negotiates JSON even though its redirect serves a ZIP.
+        with g._request(opener, binary_url, token) as response:
             g._response(response, binary_url, (200, 302))
             if response.status == 200:
                 g._copy_response(response, binary_url, archive, expected)

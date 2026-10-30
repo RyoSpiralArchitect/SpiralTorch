@@ -12,7 +12,7 @@ import owned_process
 a, g = download.a, download.g
 t, c = a.t, a.t.c
 ROOT = Path(__file__).resolve().parents[1]
-BRANCH = "spiralreality/byte-release-actions-probe-synthetic-20261030"
+BRANCH = "spiralreality/byte-release-actions-probe-media-20261030"
 PIN = ".github/byte-release-actions-pin.json"
 SCHEMA = "spiraltorch.byte_release.actions_probe.v1"
 FETCH_SECONDS = 300
@@ -136,7 +136,7 @@ jobs:
         run: |
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
-          test "$GITHUB_REF" = refs/heads/spiralreality/byte-release-actions-probe-synthetic-20261030
+          test "$GITHUB_REF" = refs/heads/spiralreality/byte-release-actions-probe-media-20261030
           test "$GITHUB_SHA" = "$EXPECTED_HEAD"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

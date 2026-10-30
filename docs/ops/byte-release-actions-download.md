@@ -31,6 +31,14 @@ artifacts, never plaintext or a key. Recovery requires the download operation's
 successful completion record and exact saved bytes, not merely matching files.
 The completed producer is never rerun by this probe.
 
+The archive API request uses `Accept: application/vnd.github+json`, as specified
+by the [artifact download API](https://docs.github.com/en/rest/actions/artifacts#download-an-artifact).
+Only the subsequent unauthenticated CDN request uses `application/octet-stream`.
+The original API header caused HTTP 415 in a retained local observation; the
+documented header returned 302. The failed first hosted probe remains failed,
+and the corrected protocol has a separately named CPU-only preflight, not a
+rerun or evidence of GPU qualification.
+
 Unit tests and a small live probe do not qualify a candidate. The actual input
 must still bind the frozen source/wheel, unchanged full local proof, reviewed
 controller and external amendment before the one hosted GPU qualification.

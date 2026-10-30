@@ -40,6 +40,28 @@ class Script:
 
 
 class ActionsDownloadOffline(Offline):
+    def test_artifact_api_negotiates_json_before_unauthenticated_binary_cdn(self):
+        raw = zip_bytes()
+        pin, run, artifact = records(raw)
+        script = Script(pin, run, artifact, raw)
+        original_open = script.open
+
+        def negotiated(request, timeout):
+            if request.full_url == script.binary_url and request.get_header("Accept") != "application/vnd.github+json":
+                return Response(b"", script.binary_url, 415)
+            return original_open(request, timeout)
+
+        with tempfile.TemporaryDirectory() as temporary, patch.object(script, "open", side_effect=negotiated):
+            root = Path(temporary).resolve()
+            self.assertEqual(d.download(pin, TOKEN, root / "input.zip", root / "input.age", script)["status"],
+                "verified_pinned_ciphertext")
+            self.assertEqual(len(script.calls), 6)
+            for request, _ in script.calls:
+                self.assertEqual(request.get_header("Accept"),
+                    "application/octet-stream" if request.full_url == CDN else "application/vnd.github+json")
+                if request.full_url == CDN:
+                    self.assertIsNone(request.get_header("Authorization"))
+
     def test_direct_or_one_cdn_hop_verifies_whole_archive_and_ciphertext(self):
         raw = zip_bytes()
         pin, run, artifact = records(raw)
