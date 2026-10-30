@@ -43,6 +43,7 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
     def test_opt_in_site_observations_share_the_exact_training_trajectory(self):
         plain, measured = self.trainer(), self.trainer()
         self.assertIn("NativeCausalLmObservedTrainingStep", st.__all__)
+        self.assertIn("NativeCausalLmObservedTrainingStep", st._rs.__all__)
         for windows in (4, 1, 4, 1):
             expected, observed = plain.step(), measured.step_observed()
             self.assertIsInstance(observed, st.NativeCausalLmObservedTrainingStep)
