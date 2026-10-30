@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.byte_release.transport_github_input.v1",
+  "candidate": 1,
+  "admission_sha256": "e0dff07f6582d81b085e6e2770233013c3c3f9147e190858465f6ea3a0f84361",
+  "source_commit": "e9294fc6648758da60d16ebea70feaf79a1cf994",
+  "plaintext": {
+    "bytes": 77,
+    "sha256": "a601aad00c65a01069aee4605f06d2cbb4f7c60bf6a17171aec1b050eccf97bf"
+  },
+  "ciphertext": {
+    "bytes": 277,
+    "sha256": "091a54b2d39eb09eb73e82a5e7cfaa84e7a913d3066ef791cbf222f65e39a98e"
+  },
+  "object": {
+    "repository": "RyoSpiralArchitect/SpiralTorch",
+    "repository_id": 1072681836,
+    "release_id": 428588436,
+    "asset_id": 690647780,
+    "asset_name": "input-f2e13fe836055dabe66d6c608273b2ad.age",
+    "release_tag": "v0.4.33"
+  },
+  "release_ready": false
+}
