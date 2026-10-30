@@ -1,0 +1,66 @@
+{
+  "schema": "spiraltorch.native_book.trajectory_plan.v1",
+  "prior_commit": "2d00dc52fb87fca0a66b387aa7f2a9e4ed12828c",
+  "native_source": "2dc57d8536e8ee5e3284cae000f7d44228ee5a8f",
+  "prior_private_results_sha256": "08ed61e5e7baea20c2cc2a97019428fb2313941164183d96c597ba4d689712ba",
+  "prior_public_results_sha256": "2654ade227263d6afa3af75628ce9d87f5e80dd32b6a88ce48eabc931acd5b99",
+  "seeds": [
+    101,
+    103,
+    107
+  ],
+  "arms": [
+    "affine",
+    "fixed4",
+    "learned4"
+  ],
+  "updates_per_case": 256,
+  "observed_updates": "all",
+  "bands": [
+    [
+      1,
+      1
+    ],
+    [
+      2,
+      8
+    ],
+    [
+      9,
+      32
+    ],
+    [
+      33,
+      128
+    ],
+    [
+      129,
+      256
+    ]
+  ],
+  "evaluation_updates": [
+    0,
+    1,
+    8,
+    32,
+    128,
+    256
+  ],
+  "evaluation": "Original six development chapters, 48 windows / 3024 targets at each sampled cursor. Never rescore the external book or reserve. The original endpoint is already known.",
+  "milestone_rule": "First sampled post-update cursor with learned4 NLL minus affine NLL > 0.001 for every seed; report all cursors, not an exact onset between them.",
+  "residual": "Pool actual pre-update sum of squared output-minus-input over sum of squared input within each band/site/seed, then average ratios across seeds. This is element-energy weighted within seed, not an average of per-token ratios.",
+  "radius": "Report only pooled signed/absolute pre-clip d(loss)/d(log_radius) and negative fraction, never exact individual radii or learned tensors. A fixed or absent radius has no trainable gradient.",
+  "acceptance": "Every ordinary nested step must match the original public-wheel step bytes; final checkpoint bytes and endpoint development chapter scores must match. Stop on first error, keep partial observations, no retry or tuning.",
+  "privacy": "Private raw per-site observations, optimizer and token data stay local. Export only the fixed scalar projections, identities and case statuses.",
+  "resources": {
+    "case_seconds": 2400,
+    "total_seconds": 14400,
+    "rayon_threads": 4,
+    "local_cpu_only": true
+  },
+  "limits": [
+    "post-hoc localization, not a fresh test of generalization",
+    "matched within-seed batches, not a fixed probe batch throughout training",
+    "correlation of residual magnitude, gradients and development NLL is not causal attribution"
+  ]
+}
