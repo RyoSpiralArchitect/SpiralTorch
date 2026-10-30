@@ -97,8 +97,18 @@ def github_prepare():
     return replace_once(text, "            unset INPUT_OBJECT_URL\n", "            unset GH_TOKEN GITHUB_TOKEN\n")
 
 
-def render(baseline, *, github_asset=False):
-    if type(github_asset) is not bool:
+def actions_prepare():
+    text = replace_once(github_prepare(), "Fetch and decrypt the pinned unpublished GitHub asset",
+                        "Fetch and decrypt the pinned Actions ciphertext")
+    # Keep both the first archive and member inside the encrypted evidence return.
+    old = '"$TRANSPORT_ROOT/input.zip.age"'
+    if text.count(old) != 2:
+        raise ValueError("Actions input retention envelope differs")
+    return text.replace(old, '"$EVIDENCE_ROOT/input.zip.age"')
+
+
+def render(baseline, *, github_asset=False, actions_artifact=False):
+    if type(github_asset) is not bool or type(actions_artifact) is not bool or (github_asset and actions_artifact):
         raise ValueError("workflow transport selector must be boolean")
     text = replace_once(baseline, "Digest of the single committed age ciphertext",
                         "Digest of the separate pinned age ciphertext")
@@ -121,5 +131,5 @@ def render(baseline, *, github_asset=False):
     text = replace_once(text, marker, SOURCE_CHECKOUT + marker)
     text = replace_step(text, "Reject repeated or unbound invocations before accessing input secrets", ADMIT)
     text = replace_step(text, "Decrypt the packet without exposing the input identity to execution",
-                        github_prepare() if github_asset else PREPARE)
+                        actions_prepare() if actions_artifact else github_prepare() if github_asset else PREPARE)
     return replace_step(text, "Encrypt the first outcome including incomplete evidence", PACK)

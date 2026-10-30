@@ -83,7 +83,12 @@ def dispatch(ledger, controller, source, amendment, expected, recipient, execute
     identifier, prior = runs(candidate)
     if prior.get("total_count") != 0 or prior.get("workflow_runs") != []:
         raise ValueError("candidate workflow already has a dispatch")
-    suffixes = ("INPUT_IDENTITY",) if descriptor["schema"] == t.GITHUB_DESCRIPTOR_SCHEMA else ("INPUT_IDENTITY", "INPUT_URL")
+    if descriptor["schema"] == t.ACTIONS_DESCRIPTOR_SCHEMA:
+        from byte_release_actions_input import verify_metadata
+        pin = descriptor["object"]
+        verify_metadata(pin, api(f"actions/runs/{pin['bridge']['run_id']}"),
+                        api(f"actions/artifacts/{pin['artifact']['id']}"))
+    suffixes = ("INPUT_IDENTITY",) if descriptor["schema"] in (t.GITHUB_DESCRIPTOR_SCHEMA, t.ACTIONS_DESCRIPTOR_SCHEMA) else ("INPUT_IDENTITY", "INPUT_URL")
     for suffix in suffixes:
         name = f"ST_BYTE_RELEASE_CANDIDATE_{candidate}_{suffix}"
         if api("actions/secrets/" + name).get("name") != name:
@@ -240,11 +245,13 @@ def download_ciphertext(url, descriptor, output, opener=None):
 def fetch_input(output, env=None):
     env = os.environ if env is None else env
     _amendment, descriptor, _expected = admitted_context(env)
-    if descriptor["schema"] == t.GITHUB_DESCRIPTOR_SCHEMA:
+    if descriptor["schema"] in (t.GITHUB_DESCRIPTOR_SCHEMA, t.ACTIONS_DESCRIPTOR_SCHEMA):
         if env.get("INPUT_OBJECT_URL") or not env.get("GH_TOKEN"):
             raise ValueError("GitHub input requires its read-only token and no direct URL")
     else:
         t.validate_url(env["INPUT_OBJECT_URL"], descriptor)
+    if descriptor["schema"] == t.ACTIONS_DESCRIPTOR_SCHEMA:
+        actions_archive_path(output, env)
     log = Path(output).with_name(Path(output).name + ".fetch.log")
     with log.open("xb") as stream:
         os.fchmod(stream.fileno(), 0o600)
@@ -256,6 +263,30 @@ def fetch_input(output, env=None):
     if handoff.regular(output, t.MAX_CIPHER) != descriptor["ciphertext"]:
         raise ValueError("fetched ciphertext differs")
     return dict(status="verified_ciphertext", release_ready=False)
+
+
+def actions_archive_path(output, env):
+    output = Path(output).absolute()
+    evidence = Path(env["EVIDENCE_ROOT"]).absolute()
+    if (output.parent != evidence or output.name != "input.zip.age"
+            or output.is_symlink() or any(parent.is_symlink() for parent in output.parents)):
+        raise ValueError("Actions first bytes must stay in the private evidence root")
+    return evidence / "actions-input.zip"
+
+
+def fetch_worker(output, env=None):
+    env = os.environ if env is None else env
+    _amendment, descriptor, _expected = admitted_context(env)
+    if descriptor["schema"] in (t.GITHUB_DESCRIPTOR_SCHEMA, t.ACTIONS_DESCRIPTOR_SCHEMA):
+        if env.get("INPUT_OBJECT_URL"):
+            raise ValueError("GitHub input cannot fall back to a direct URL")
+        if descriptor["schema"] == t.ACTIONS_DESCRIPTOR_SCHEMA:
+            from byte_release_actions_download import download
+            return download(descriptor["object"], env.get("GH_TOKEN"),
+                            actions_archive_path(output, env), output)
+        from byte_release_github_asset import download
+        return download(descriptor, env.get("GH_TOKEN"), output)
+    return download_ciphertext(env["INPUT_OBJECT_URL"], descriptor, output)
 
 
 def prepare_input(source, archive, output, env=None):
@@ -424,14 +455,7 @@ def main(argv=None):
     elif args.operation == "fetch-input":
         value = fetch_input(args.output)
     elif args.operation == "fetch-worker":
-        _amendment, descriptor, _expected = admitted_context(os.environ)
-        if descriptor["schema"] == t.GITHUB_DESCRIPTOR_SCHEMA:
-            from byte_release_github_asset import download
-            if os.environ.get("INPUT_OBJECT_URL"):
-                raise ValueError("GitHub input cannot fall back to a direct URL")
-            value = download(descriptor, os.environ.get("GH_TOKEN"), args.output)
-        else:
-            value = download_ciphertext(os.environ["INPUT_OBJECT_URL"], descriptor, args.output)
+        value = fetch_worker(args.output)
     elif args.operation == "prepare-input":
         value = prepare_input(args.source, args.input, args.output)
     elif args.operation == "pack-result":

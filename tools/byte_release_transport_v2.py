@@ -20,6 +20,7 @@ from byte_release_handoff import contract as c
 
 DESCRIPTOR_SCHEMA = "spiraltorch.byte_release.transport_input.v2"
 GITHUB_DESCRIPTOR_SCHEMA = "spiraltorch.byte_release.transport_github_input.v1"
+ACTIONS_DESCRIPTOR_SCHEMA = "spiraltorch.byte_release.transport_actions_input.v1"
 AMENDMENT_SCHEMA = "spiraltorch.byte_release.transport_amendment.v1"
 REPO = "RyoSpiralArchitect/SpiralTorch"
 WORKFLOW = "byte_release_qualification.yml"
@@ -36,10 +37,15 @@ RUNTIME_FILES = (
     "tools/byte_release_transport_workflow_v2.py",
 )
 GITHUB_RUNTIME_FILE = "tools/byte_release_github_asset.py"
+ACTIONS_RUNTIME_FILES = (GITHUB_RUNTIME_FILE, "tools/byte_release_actions_input.py",
+                         "tools/byte_release_actions_download.py")
 CHANGE_ALLOWLIST = frozenset((
     DESCRIPTOR, ".github/workflows/" + WORKFLOW,
     *RUNTIME_FILES,
     GITHUB_RUNTIME_FILE, "tools/test_byte_release_github_asset.py",
+    *ACTIONS_RUNTIME_FILES, "tools/test_byte_release_actions_input.py",
+    "tools/test_byte_release_actions_download.py", "tools/test_byte_release_actions_hosted.py",
+    "docs/ops/byte-release-actions-download.md",
     "tools/test_byte_release_transport_v2.py", "tools/test_byte_release_hosted_v2.py",
     "docs/ops/byte-release-transport-v2.md",
 ))
@@ -93,12 +99,18 @@ def validate_descriptor(value):
     exact_keys(value, ("schema", "candidate", "admission_sha256", "source_commit",
                        "plaintext", "ciphertext", "object", "release_ready"))
     branch(value["candidate"])
-    if (value["schema"] not in (DESCRIPTOR_SCHEMA, GITHUB_DESCRIPTOR_SCHEMA) or value["release_ready"] is not False
+    if (value["schema"] not in (DESCRIPTOR_SCHEMA, GITHUB_DESCRIPTOR_SCHEMA, ACTIONS_DESCRIPTOR_SCHEMA) or value["release_ready"] is not False
             or not c.is_hash(value["admission_sha256"])
             or not c.is_hash(value["source_commit"], 40)):
         raise ValueError("invalid input descriptor")
     identity(value["plaintext"], MAX_INPUT)
     identity(value["ciphertext"], MAX_CIPHER)
+    if value["schema"] == ACTIONS_DESCRIPTOR_SCHEMA:
+        from byte_release_actions_input import validate_pin
+        pin = validate_pin(value["object"])
+        if {key: pin["ciphertext"][key] for key in ("bytes", "sha256")} != value["ciphertext"]:
+            raise ValueError("Actions pin differs from the candidate ciphertext")
+        return value
     if value["schema"] == GITHUB_DESCRIPTOR_SCHEMA:
         from byte_release_github_asset import validate_locator
         validate_locator(value["object"])
@@ -309,7 +321,9 @@ def validate_controller(controller, source, amendment, descriptor, expected):
     if read_record(Path(controller) / DESCRIPTOR) != descriptor:
         raise ValueError("committed descriptor differs")
     original, changed = tree_entries(source), tree_entries(controller)
-    runtime = RUNTIME_FILES + ((GITHUB_RUNTIME_FILE,) if descriptor["schema"] == GITHUB_DESCRIPTOR_SCHEMA else ())
+    extra = ACTIONS_RUNTIME_FILES if descriptor["schema"] == ACTIONS_DESCRIPTOR_SCHEMA else (
+        (GITHUB_RUNTIME_FILE,) if descriptor["schema"] == GITHUB_DESCRIPTOR_SCHEMA else ())
+    runtime = RUNTIME_FILES + extra
     if any(not changed.get(name, "").startswith("100644 blob ") for name in runtime):
         raise ValueError("controller runtime modules must be tracked ordinary files")
     difference = {name for name in set(original) | set(changed) if original.get(name) != changed.get(name)}
@@ -321,6 +335,7 @@ def validate_controller(controller, source, amendment, descriptor, expected):
     workflow = ".github/workflows/" + WORKFLOW
     baseline = (Path(source) / workflow).read_text()
     if (Path(controller) / workflow).read_text() != render(
-            baseline, github_asset=descriptor["schema"] == GITHUB_DESCRIPTOR_SCHEMA):
+            baseline, github_asset=descriptor["schema"] == GITHUB_DESCRIPTOR_SCHEMA,
+            actions_artifact=descriptor["schema"] == ACTIONS_DESCRIPTOR_SCHEMA):
         raise ValueError("controller execution envelope differs")
     return amendment["controller_commit"]

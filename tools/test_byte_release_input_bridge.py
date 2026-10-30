@@ -168,6 +168,17 @@ class BridgeOffline(Offline):
         for forbidden in ("secrets[", "--decrypt", "pip install", "cargo", "INPUT_IDENTITY", "actions: write", "gpu"):
             self.assertNotIn(forbidden, text)
 
+    def test_failed_bridge_retains_partial_ciphertext_without_staging_it_as_valid(self):
+        spec, *_ = fixture()
+        text = b.render(spec)
+        name = "      - name: Retain failed first ciphertext without promoting it\n"
+        self.assertIn(name, text)
+        partial = text[text.index(name):text.index("      - name: Retain the first bridge outcome")]
+        self.assertIn("if: ${{ failure() }}", partial)
+        self.assertIn("name: bridge-partial-", partial)
+        self.assertIn("ciphertext/test-input.zip.age", partial)
+        self.assertIn("if-no-files-found: ignore", partial)
+
 
 if __name__ == "__main__":
     import unittest

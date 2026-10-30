@@ -192,6 +192,15 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+      - name: Retain failed first ciphertext without promoting it
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bridge-partial-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/input-bridge/ciphertext/__MEMBER__
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
       - name: Retain the first bridge outcome
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
