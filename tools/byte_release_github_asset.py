@@ -1,7 +1,8 @@
 """GET-only reader for one pinned, unpublished GitHub release asset.
 
 No creation, publication, token acquisition, permission escalation or retry is
-implemented here. The caller owns the shared deadline and read-only token scope.
+implemented here. The caller owns the shared deadline and token scope: read-only
+for a final GPU consumer, or the explicitly approved CPU-only bridge exception.
 """
 from pathlib import Path
 import re
@@ -148,7 +149,7 @@ def download(descriptor, token, output, opener=None):
         raise ValueError("GitHub reader requires the GitHub descriptor")
     if (type(token) is not str or not 0 < len(token) <= 4096
             or any(ord(char) < 33 or ord(char) > 126 for char in token)):
-        raise AssetAccessError("a read-only workflow token is required")
+        raise AssetAccessError("a scoped workflow token is required")
     output = Path(output)
     if output.exists() or output.is_symlink():
         raise FileExistsError("first transfer output already exists")
