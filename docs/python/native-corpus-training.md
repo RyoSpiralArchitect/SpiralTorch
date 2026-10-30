@@ -1,10 +1,17 @@
 # Native Document Training Without Torch
 
-Source-only after published 0.4.32. `NativeCausalLmTrainer` moves the ordered
+Available in [SpiralTorch 0.4.33](https://pypi.org/project/spiraltorch/0.4.33/).
+`NativeCausalLmTrainer` moves the ordered
 corpus/optimizer loop into Rust; Python supplies encoded documents and performs
 file I/O. It does not subclass HF Trainer or call Torch, Transformers, NumPy or
 Accelerate. Supported model architecture remains the frozen native GPT-2 decoder;
 this learns attached geometry, not base weights or arbitrary HF architectures.
+
+For a real pretrained-model comparison using this public wheel, see the
+[three-seed matched-start book study](../../benchmarks/results/2026-10-31-native-book-ablation/README.md).
+On the sampled excerpts from a different novel, learned-radius WaveGate improved
+over fixed radius and the frozen base, but ordinary affine had the lowest NLL.
+This is held-out prediction evidence, not a generation-quality or speed claim.
 
 ```python
 import spiraltorch as st

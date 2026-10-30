@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import HERE, PLAN, SPLITS, cases, digest, ordering, read, require, sha
 from study import summarize
+from worker import source_pins
 
 
 def checked_steps(rows, seed, arm, before, after):
@@ -170,6 +171,22 @@ def audit(root):
     for name, value in meta["files"].items():
         require(sha(root / "data" / name) == value, "encoded data changed")
     roster = read(run / "fitted.json")
+    expected_order = [f"{seed}-{arm}" for seed, arm in cases()]
+    require(
+        roster["order"] == expected_order
+        and set(roster["cases"]) == set(expected_order),
+        "undeclared fit roster",
+    )
+    require(
+        frozen["source_sha256"] == source_pins(), "executed protocol source changed"
+    )
+    for folder in [before, *(run / k for k in expected_order), run / "score"]:
+        runtime = read(folder / "runtime.json")
+        require(
+            runtime["foreign_loaded"] is False
+            and runtime["native"] == PLAN["native_sha256"],
+            "native runtime receipt differs",
+        )
     require(
         read(run / "status.json")
         == {"status": "complete", "completed_fit_cases": roster["order"]},
@@ -207,6 +224,10 @@ def audit(root):
     require(
         expected == read(run / "results.json"), "summary differs from complete scores"
     )
+    require(
+        expected == read(HERE / "results.json"),
+        "public summary differs from private results",
+    )
     return {
         "schema": "spiraltorch.native_book_ablation.audit.v1",
         "checkpoints_verified": len(counts),
@@ -215,7 +236,9 @@ def audit(root):
         "chapter_scores_verified": len(scores) * 30,
         "trainable_per_case": counts,
         "reserve_read_by_audit": False,
-        "results_sha256": sha(run / "results.json"),
+        "private_results_sha256": sha(run / "results.json"),
+        "public_results_sha256": sha(HERE / "results.json"),
+        "native_process_receipts_verified": 11,
         "trained_or_scored_by_audit": False,
     }
 

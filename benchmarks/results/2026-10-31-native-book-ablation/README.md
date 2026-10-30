@@ -5,6 +5,44 @@ owns the frozen decoder, teacher-forced loss, geometry gradients, clipped AdamW
 and evaluation. There is no Torch, NumPy or Transformers comparison runtime.
 The ordinary control learns a channel-affine adapter, not base model weights.
 
+## Observed results
+
+All nine fits completed once. Lower unsmoothed next-token NLL is better;
+trained rows are the mean of the three fixed data-order seeds, not the best seed.
+
+| Model | Persuasion (primary) | Pride and Prejudice development |
+| --- | ---: | ---: |
+| Frozen GPT-2 | 4.697724 | 4.417782 |
+| Frozen matched nonzero insertion | 4.697647 | 4.417608 |
+| Ordinary affine, trained | **4.633686** | **4.356520** |
+| WaveGate, fixed radius 4 | 4.670453 | 4.391462 |
+| WaveGate, learned radius from 4 | 4.664257 | 4.385500 |
+
+The primary learned-radius-minus-affine contrasts are **+0.030538, +0.030891,
++0.030285** NLL (mean **+0.030571**). Ordinary affine scores lower on the
+sampled windows in all 24 external chapters, in every seed. Learned radius
+scores lower than fixed radius in those same 24 chapters in every seed
+(mean paired NLL difference **-0.006196**). It also improves over frozen GPT-2
+by **0.033467** NLL on average. The secondary split has the same ranking.
+All four intended radii changed in each learned run; none changed when fixed.
+
+Thus learning geometry helped prediction on another book in this experiment,
+but an ordinary learned adapter helped more. The four equal initial site
+outputs and four equal train-probe logit vectors rule out a *different initial
+function* on those probes, not a difference in later residual magnitude,
+parameterization, or optimization. The three seeds reuse one finite external
+test sample. The 24 chapter directions per seed are not 72 independent trials.
+There is no claim of general geometric superiority or of better generated prose.
+
+[execution.json](execution.json) was committed before learning. [results.json](results.json)
+retains all paired values, change counts and state hashes. [audit.json](audit.json)
+records the file-only check of nine checkpoints, 2,304 linked updates and 330
+chapter scores (11 model states by 30 chapters). Seven offline tests cover the
+preparation and saved-state verification controls. The private original
+checkpoints, raw reports and both source texts were not added to this branch.
+
+## Frozen comparison
+
 The [protocol](plan.json) fixes three fresh data-order seeds and nine final-step
 fits. Every arm sees the same 512 disjoint 64-token training windows in each
 pair (256 updates and 32,256 shifted targets). Gates start at zero. Each radial
@@ -50,6 +88,7 @@ python3 -I -S -B study.py run --python "$VENV/bin/python" --wheel "$WHEEL" \
   --model "$MODEL" --data "$PRIVATE/data" --plan-pin "$PLAN_PIN" \
   --data-pin "$DATA_PIN" --preflight "$PRIVATE/before/preflight" \
   --preflight-pin "$PREFLIGHT_PIN" --output "$PRIVATE/run"
+python3 -I -S -B verify.py "$PRIVATE"
 ```
 
 The supervisor owns each worker process group, with a 40-minute per-worker and

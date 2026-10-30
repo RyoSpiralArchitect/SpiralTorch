@@ -1,0 +1,459 @@
+{
+  "all_scores_sha256": "d301e94769a4b6a4e95ad7463684ff8078a572932bed6540c2632e61b6c4c7aa",
+  "base_id": "sha256:0c552e7a3d7fae610edd7a22831f91e0fa718b212d38d15a07ff875e3979fb3c",
+  "case_evidence": {
+    "101-affine": {
+      "arm": "affine",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:4c0b501c661802267c18462d91d8a1ca8ac8b7e011a6c8e2be2ae9dd98b5b568",
+      "data_id": "sha256:4ecee40c57863b9ee8ca692732c9b9f5ec00fdd1fd0d7feef098ddeb2ced3290",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:567ab10d46af176d65f1c7a846adb23c2e49aa2e9aceb0b68fb19e08ffb8c168",
+      "order_sha256": "0accf672e6a8874017dcfa3c2cf22cecfbb6e3b7c71cecb135ea70c8552be1a0",
+      "radius_sites_changed": 0,
+      "seed": 101,
+      "steps_sha256": "e1e17f4d7b5c25753319229cad70cd8203e63b92716eebb0b239caac6a95917d",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "101-fixed4": {
+      "arm": "fixed4",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:6bf9279482520f50a360c1abb56e377cde19e675c95eefdb6272a0ba690d2e0d",
+      "data_id": "sha256:4ecee40c57863b9ee8ca692732c9b9f5ec00fdd1fd0d7feef098ddeb2ced3290",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:4c7e67a8fb5e2ea4d91bf22ab4fbd7121101da55a1a6b596cda57cf68ed48651",
+      "order_sha256": "0accf672e6a8874017dcfa3c2cf22cecfbb6e3b7c71cecb135ea70c8552be1a0",
+      "radius_sites_changed": 0,
+      "seed": 101,
+      "steps_sha256": "994e40c27a944940d5e29f0536651e13ca2bf8382c5e5325aeff811e4673a0a5",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "101-learned4": {
+      "arm": "learned4",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:dce14226c6acded31439493f7818810eb793d1db7df31cb4b17d69f65a5bbccb",
+      "data_id": "sha256:4ecee40c57863b9ee8ca692732c9b9f5ec00fdd1fd0d7feef098ddeb2ced3290",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:f6c6f3e9faab974968a5d5f7e1b92d10e471f004a6310a40bfd5c6db00a7df50",
+      "order_sha256": "0accf672e6a8874017dcfa3c2cf22cecfbb6e3b7c71cecb135ea70c8552be1a0",
+      "radius_sites_changed": 4,
+      "seed": 101,
+      "steps_sha256": "0194b86bc734dc25e691fe75ede1e81e1766f001b6675e95708ba85b4040159b",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "103-affine": {
+      "arm": "affine",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:d8edae938d08e8f867ff37e4240cad64c91480c612299bc632ed9db36dcdf4fe",
+      "data_id": "sha256:00c8ed5ff6976ecf6360ed8aaabb6d133f53c44e64f7016bb1a659f6f28241ba",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:6f2c41b751bb92b953e228899ad78970994f209bc9de9a84c02d46b6d0e9fe9b",
+      "order_sha256": "053835f298eeec8ef0e26e403d4e1db0c81e4fbd233ae09af92814eaa36c0df8",
+      "radius_sites_changed": 0,
+      "seed": 103,
+      "steps_sha256": "3a977ee7f2b0c8e302f7ed85706cbc519dcb9e174beac0549ad29b1e9e6e38eb",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "103-fixed4": {
+      "arm": "fixed4",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:66dc9265e725322f61c33f0a6bb6e79f2fb8bc47ae6942fc7b0467cb737add6b",
+      "data_id": "sha256:00c8ed5ff6976ecf6360ed8aaabb6d133f53c44e64f7016bb1a659f6f28241ba",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:da526342835246abf1f8e06fe10ede76dbbc672c24e89ef839eefa1d68c7fff6",
+      "order_sha256": "053835f298eeec8ef0e26e403d4e1db0c81e4fbd233ae09af92814eaa36c0df8",
+      "radius_sites_changed": 0,
+      "seed": 103,
+      "steps_sha256": "7b871d3742edb0119c44a1dae235ac99241c02558bd8312b700f818186cce586",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "103-learned4": {
+      "arm": "learned4",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:6e713dfa869b40c0bc4be90853b3ffd6e9fb02f9d3c76e0d581226e46114aaab",
+      "data_id": "sha256:00c8ed5ff6976ecf6360ed8aaabb6d133f53c44e64f7016bb1a659f6f28241ba",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:60a0d990229a2f13414f119a32619bdc6ea1610914be9f625e0a711162da0024",
+      "order_sha256": "053835f298eeec8ef0e26e403d4e1db0c81e4fbd233ae09af92814eaa36c0df8",
+      "radius_sites_changed": 4,
+      "seed": 103,
+      "steps_sha256": "baa0e7f56bf32e701ee731e83cdb44000b9a59c26b1b1f0eb0591ddcc3970214",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "107-affine": {
+      "arm": "affine",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:eaff74f6bf8382481dc9c1580f6b6f0b7a990527c9b3e04f4c9f83fdc4489c81",
+      "data_id": "sha256:eaa9399baba4425a20bf4a19e6383dd3669052aacfb8b9ce738a9661144bc5f0",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:60969ada14c140bc83fc14b1167ccbf40bc36a0e89b0d2726b20265e90ec3ce5",
+      "order_sha256": "0d9507bd242fa1b56b8176acdc46545ad70423bcedb7234a29f05f0b105e9697",
+      "radius_sites_changed": 0,
+      "seed": 107,
+      "steps_sha256": "1d2d59385e809075494ff4439b61d2b859201b1cf6d90451f3b7032089400595",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "107-fixed4": {
+      "arm": "fixed4",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:4ba6d3d4a1124cdf3b1360033bd50a29935e0d9de2f7aa4709e8930b4f900f91",
+      "data_id": "sha256:eaa9399baba4425a20bf4a19e6383dd3669052aacfb8b9ce738a9661144bc5f0",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:e13a2baabfe01a6221bd3b0776597eacd477ac98df9e79ecd9069505a9699c76",
+      "order_sha256": "0d9507bd242fa1b56b8176acdc46545ad70423bcedb7234a29f05f0b105e9697",
+      "radius_sites_changed": 0,
+      "seed": 107,
+      "steps_sha256": "0966b99cc9e88d08b6ffd0ce5d2b80e9b450c18d143a61abe0455a11bc5c2a61",
+      "target_tokens": 32256,
+      "updates": 256
+    },
+    "107-learned4": {
+      "arm": "learned4",
+      "channel_sites_changed": 4,
+      "checkpoint_id": "sha256:28e21e73035032dd7d94a98a351fa5898603396a0cf3abb418d4af06adbd97d4",
+      "data_id": "sha256:eaa9399baba4425a20bf4a19e6383dd3669052aacfb8b9ce738a9661144bc5f0",
+      "evaluation_scored": false,
+      "geometry_id": "sha256:3043d750a041d00d4ee23dcf802946fc19256a51c716b7f98459b9d379b8d5ff",
+      "order_sha256": "0d9507bd242fa1b56b8176acdc46545ad70423bcedb7234a29f05f0b105e9697",
+      "radius_sites_changed": 4,
+      "seed": 107,
+      "steps_sha256": "88f3e33633b62316131fdd2b9e6fd77fabbe59e9e2daf9f085d372d86da9789e",
+      "target_tokens": 32256,
+      "updates": 256
+    }
+  },
+  "case_order": [
+    "101-affine",
+    "101-fixed4",
+    "101-learned4",
+    "103-fixed4",
+    "103-learned4",
+    "103-affine",
+    "107-learned4",
+    "107-affine",
+    "107-fixed4"
+  ],
+  "data_manifest_sha256": "a5e7e355722191de528def65959f40bf6bb0f03847bb8bf5e6df3b2d403791c9",
+  "fitted_sha256": "ae5bdcd6f762c1d5c577bfad2c44af473709b6774b55b2a8c09475d1b3f281d0",
+  "no_automatic_promotion": true,
+  "package": "0.4.33",
+  "plan_sha256": "5a2aa2ef90c3f3e938012806bedb8d30b439884a421aadcb30a2e1923e41a8f6",
+  "preflight_sha256": "c252e6242df508d3c1b8c75b23147209be88a387f5a38a95018ceb52afc76a9c",
+  "schema": "spiraltorch.native_book_ablation.results.v1",
+  "seeds": [
+    101,
+    103,
+    107
+  ],
+  "splits": {
+    "development": {
+      "base_nll": 4.417781700690587,
+      "contrasts": {
+        "affine-base": {
+          "chapters_favoring_left_by_seed": [
+            6,
+            6,
+            6
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            -0.061143189668655396,
+            -0.06177443265914917,
+            -0.06086727976799011
+          ],
+          "mean": -0.06126163403193156
+        },
+        "affine-initial": {
+          "chapters_favoring_left_by_seed": [
+            6,
+            6,
+            6
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            -0.06096929311752319,
+            -0.06160053610801697,
+            -0.06069338321685791
+          ],
+          "mean": -0.061087737480799355
+        },
+        "fixed4-affine": {
+          "chapters_favoring_left_by_seed": [
+            0,
+            0,
+            0
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            0.034847488005956606,
+            0.03533920645713806,
+            0.03463946779569049
+          ],
+          "mean": 0.03494205408626172
+        },
+        "fixed4-base": {
+          "chapters_favoring_left_by_seed": [
+            6,
+            6,
+            6
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            -0.02629570166269879,
+            -0.02643522620201111,
+            -0.02622781197229962
+          ],
+          "mean": -0.02631957994566984
+        },
+        "fixed4-initial": {
+          "chapters_favoring_left_by_seed": [
+            6,
+            6,
+            6
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            -0.026121805111566587,
+            -0.026261329650878906,
+            -0.026053915421167417
+          ],
+          "mean": -0.026145683394537638
+        },
+        "learned4-affine": {
+          "chapters_favoring_left_by_seed": [
+            0,
+            0,
+            0
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            0.028957347075144746,
+            0.02926697333653827,
+            0.028716216484705903
+          ],
+          "mean": 0.028980178965462972
+        },
+        "learned4-base": {
+          "chapters_favoring_left_by_seed": [
+            6,
+            6,
+            6
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            -0.03218584259351065,
+            -0.0325074593226109,
+            -0.03215106328328421
+          ],
+          "mean": -0.03228145506646859
+        },
+        "learned4-fixed4": {
+          "chapters_favoring_left_by_seed": [
+            6,
+            6,
+            6
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            -0.00589014093081186,
+            -0.00607223312059979,
+            -0.00592325131098459
+          ],
+          "mean": -0.005961875120798747
+        },
+        "learned4-initial": {
+          "chapters_favoring_left_by_seed": [
+            6,
+            6,
+            6
+          ],
+          "chapters_total": 6,
+          "left_minus_right_by_seed": [
+            -0.03201194604237845,
+            -0.0323335627714787,
+            -0.03197716673215201
+          ],
+          "mean": -0.032107558515336386
+        }
+      },
+      "initial_nll": 4.417607804139455,
+      "nll_by_seed": {
+        "affine": [
+          4.356638511021932,
+          4.356007268031438,
+          4.356914420922597
+        ],
+        "fixed4": [
+          4.391485999027888,
+          4.391346474488576,
+          4.3915538887182874
+        ],
+        "learned4": [
+          4.385595858097076,
+          4.385274241367976,
+          4.385630637407303
+        ]
+      },
+      "targets": 3024
+    },
+    "external": {
+      "base_nll": 4.697724064191182,
+      "contrasts": {
+        "affine-base": {
+          "chapters_favoring_left_by_seed": [
+            24,
+            24,
+            24
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            -0.06388176480928998,
+            -0.06459764142831137,
+            -0.06363493700822165
+          ],
+          "mean": -0.06403811441527434
+        },
+        "affine-initial": {
+          "chapters_favoring_left_by_seed": [
+            24,
+            24,
+            24
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            -0.06380463143189719,
+            -0.06452050805091858,
+            -0.06355780363082886
+          ],
+          "mean": -0.06396098103788155
+        },
+        "fixed4-affine": {
+          "chapters_favoring_left_by_seed": [
+            0,
+            0,
+            0
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            0.03665397067864706,
+            0.03720271587371826,
+            0.03644535938898752
+          ],
+          "mean": 0.036767348647117615
+        },
+        "fixed4-base": {
+          "chapters_favoring_left_by_seed": [
+            24,
+            24,
+            24
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            -0.027227794130642913,
+            -0.027394925554593108,
+            -0.02718957761923413
+          ],
+          "mean": -0.027270765768156718
+        },
+        "fixed4-initial": {
+          "chapters_favoring_left_by_seed": [
+            24,
+            24,
+            24
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            -0.027150660753250122,
+            -0.027317792177200317,
+            -0.027112444241841338
+          ],
+          "mean": -0.027193632390763927
+        },
+        "learned4-affine": {
+          "chapters_favoring_left_by_seed": [
+            0,
+            0,
+            0
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            0.03053755064805319,
+            0.030891378720601104,
+            0.03028500576813986
+          ],
+          "mean": 0.03057131171226472
+        },
+        "learned4-base": {
+          "chapters_favoring_left_by_seed": [
+            24,
+            24,
+            24
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            -0.033344214161236785,
+            -0.033706262707710266,
+            -0.03334993124008179
+          ],
+          "mean": -0.03346680270300961
+        },
+        "learned4-fixed4": {
+          "chapters_favoring_left_by_seed": [
+            24,
+            24,
+            24
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            -0.006116420030593872,
+            -0.006311337153117158,
+            -0.006160353620847658
+          ],
+          "mean": -0.006196036934852896
+        },
+        "learned4-initial": {
+          "chapters_favoring_left_by_seed": [
+            24,
+            24,
+            24
+          ],
+          "chapters_total": 24,
+          "left_minus_right_by_seed": [
+            -0.033267080783843994,
+            -0.033629129330317475,
+            -0.033272797862688996
+          ],
+          "mean": -0.03338966932561682
+        }
+      },
+      "initial_nll": 4.697646930813789,
+      "nll_by_seed": {
+        "affine": [
+          4.633842299381892,
+          4.633126422762871,
+          4.6340891271829605
+        ],
+        "fixed4": [
+          4.670496270060539,
+          4.670329138636589,
+          4.670534486571948
+        ],
+        "learned4": [
+          4.664379850029945,
+          4.664017801483472,
+          4.6643741329511
+        ]
+      },
+      "targets": 12096
+    }
+  },
+  "training_targets_per_arm_seed": 32256,
+  "updates_per_arm_seed": 256
+}
