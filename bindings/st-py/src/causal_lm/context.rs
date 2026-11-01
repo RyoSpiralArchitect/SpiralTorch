@@ -69,6 +69,10 @@ impl PyNativeCausalLmContext {
         self.inner.geometry_artifact_id()
     }
     #[getter]
+    fn lora_artifact_id(&self) -> Option<&str> {
+        self.inner.lora_artifact_id()
+    }
+    #[getter]
     fn execution_backend(&self) -> &'static str {
         "rust_f32_cpu_prepacked_kv"
     }

@@ -42,6 +42,7 @@ fn generation_checkpoint_binds_readout_policy_and_keeps_default_bytes() {
             .unwrap();
             generator.step().unwrap();
             let payload = generator.to_json().unwrap();
+            assert!(!payload.contains("lora_artifact_id"));
             assert_eq!(
                 payload.contains("readout_accumulator"),
                 accumulator == CausalLmReadoutAccumulator::F64
@@ -214,6 +215,7 @@ fn config_budgets_owners_and_resealed_invalid_history_are_rejected() {
         ("schema", json!("future")),
         ("rng", json!("foreign")),
         ("base_model_identity", json!("wrong")),
+        ("lora_artifact_id", json!("sha256:foreign-adapter")),
         ("prompt_length", json!(0)),
         ("prompt_length", json!(3)),
         ("tokens", json!([1, 11])),
@@ -258,5 +260,70 @@ fn numerical_control_failure_preserves_token_and_random_position() {
     for _ in 0..2 {
         assert!(generator.step().is_err());
         assert_eq!(generator.to_json().unwrap(), before);
+    }
+}
+
+#[test]
+fn learned_lora_generation_checkpoint_binds_adapter_and_resumes_both_routes() {
+    let base = load();
+    let initial = base.with_lora(0, 2, 4.).unwrap();
+    let gradients = initial.lora_loss_gradients(&[1, 2, 3, 4], [1, 4]).unwrap();
+    let model = initial.step_lora_sgd(&gradients, 0.3).unwrap();
+    let next = model
+        .step_lora_sgd(
+            &model.lora_loss_gradients(&[4, 3, 2, 1], [1, 4]).unwrap(),
+            0.3,
+        )
+        .unwrap();
+    let restored_model = base.with_lora_json(&model.lora_to_json().unwrap()).unwrap();
+    for execution in [
+        CausalLmGenerationExecution::FullPrefix,
+        CausalLmGenerationExecution::KvCache { max_values: 1024 },
+    ] {
+        let mut generator = NativeCausalLmGenerator::new(
+            model.clone(),
+            vec![1, 2],
+            CausalLmGenerationConfig {
+                execution,
+                decoding: TokenDecodingConfig {
+                    selection: TokenSelection::Sample,
+                    top_k: Some(6),
+                    ..Default::default()
+                },
+                ..policy()
+            },
+        )
+        .unwrap();
+        generator.step().unwrap();
+        let payload = generator.to_json().unwrap();
+        let pinned = pin(payload.as_bytes());
+        let saved: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(saved["lora_artifact_id"], json!(model.lora_artifact_id()));
+        for wrong in [&base, &initial, &next] {
+            assert!(
+                NativeCausalLmGenerator::from_json(wrong.clone(), payload.as_bytes(), &pinned)
+                    .is_err()
+            );
+        }
+        let mut restored =
+            NativeCausalLmGenerator::from_json(restored_model.clone(), payload.as_bytes(), &pinned)
+                .unwrap();
+        assert_eq!(restored.to_json().unwrap(), payload);
+        while !generator.finished() {
+            assert_eq!(generator.step().unwrap(), restored.step().unwrap());
+            assert_eq!(generator.to_json().unwrap(), restored.to_json().unwrap());
+        }
+        let mut missing_owner = saved;
+        missing_owner
+            .as_object_mut()
+            .unwrap()
+            .remove("lora_artifact_id");
+        let missing_owner = serde_json::to_vec(&missing_owner).unwrap();
+        assert!(NativeCausalLmGenerator::from_json(
+            model.clone(),
+            &missing_owner,
+            &pin(&missing_owner)
+        )
+        .is_err());
     }
 }

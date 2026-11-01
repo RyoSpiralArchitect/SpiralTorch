@@ -7,7 +7,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use st_nn::causal_lm::{
     CausalLmLimits, CausalLmObjective, CausalLmReadoutAccumulator, NativeCausalLm,
-    NativeCausalLmGradients,
+    NativeCausalLmGradients, NativeCausalLmLoraGradients,
 };
 use std::collections::BTreeMap;
 
@@ -161,8 +161,102 @@ impl PyNativeCausalLmGradients {
     }
 }
 
+#[pyclass(name = "NativeCausalLmLoraGradients", module = "spiraltorch", frozen)]
+pub struct PyNativeCausalLmLoraGradients {
+    inner: NativeCausalLmLoraGradients,
+}
+
+#[pymethods]
+impl PyNativeCausalLmLoraGradients {
+    #[getter]
+    fn loss(&self) -> f32 {
+        self.inner.loss()
+    }
+    #[getter]
+    fn target_tokens(&self) -> usize {
+        self.inner.target_tokens()
+    }
+    #[getter]
+    fn window_shape(&self) -> Vec<usize> {
+        self.inner.window_shape().to_vec()
+    }
+    #[getter]
+    fn base_model_identity(&self) -> &str {
+        self.inner.base_model_identity()
+    }
+    #[getter]
+    fn lora_artifact_id(&self) -> &str {
+        self.inner.lora_artifact_id()
+    }
+    fn parameter_gradients(&self) -> BTreeMap<String, Vec<f32>> {
+        BTreeMap::from([
+            ("a".into(), self.inner.a().to_vec()),
+            ("b".into(), self.inner.b().to_vec()),
+        ])
+    }
+}
+
 #[pymethods]
 impl PyNativeCausalLm {
+    /// Attach one native GPT-2 attention output adapter; no foreign computation.
+    fn with_lora(
+        &self,
+        py: Python<'_>,
+        layer: &Bound<'_, PyAny>,
+        rank: &Bound<'_, PyAny>,
+        alpha: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        let layer = dimension(layer)?;
+        let rank = dimension(rank)?;
+        reject_bool(alpha)?;
+        let alpha = alpha.extract::<f32>()?;
+        py.detach(|| self.inner.with_lora(layer, rank, alpha))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+
+    #[getter]
+    fn lora_artifact_id(&self) -> Option<&str> {
+        self.inner.lora_artifact_id()
+    }
+
+    fn lora_to_json(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| self.inner.lora_to_json()).map_err(error)
+    }
+
+    fn with_lora_json(&self, py: Python<'_>, payload: &str) -> PyResult<Self> {
+        py.detach(|| self.inner.with_lora_json(payload))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+
+    fn lora_loss_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmLoraGradients> {
+        let shape = self::shape(shape)?;
+        let count = self.inner.lora_gradient_input_count(shape).map_err(error)?;
+        let windows = tokens(windows, count)?;
+        py.detach(|| self.inner.lora_loss_gradients(&windows, shape))
+            .map(|inner| PyNativeCausalLmLoraGradients { inner })
+            .map_err(error)
+    }
+
+    fn step_lora_sgd(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmLoraGradients,
+        learning_rate: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        reject_bool(learning_rate)?;
+        let learning_rate = learning_rate.extract::<f32>()?;
+        py.detach(|| self.inner.step_lora_sgd(&gradients.inner, learning_rate))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+
     #[pyo3(signature=(token_documents, context_length, *, microbatch_windows=None, labels=None))]
     fn evaluate_documents(
         &self,
@@ -425,6 +519,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLm>()?;
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;
+    module.add_class::<PyNativeCausalLmLoraGradients>()?;
     evaluation::register(module)?;
     training::register(module)?;
     generation::register(module)?;

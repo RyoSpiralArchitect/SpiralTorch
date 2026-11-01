@@ -12,6 +12,8 @@ mod evaluation;
 mod generation;
 #[path = "learning_tests.rs"]
 mod learning;
+#[path = "lora_tests.rs"]
+mod lora;
 
 fn config() -> serde_json::Value {
     json!({"model_type":"gpt2","vocab_size":11,"n_positions":8,"n_embd":4,"n_head":2,"n_layer":2})

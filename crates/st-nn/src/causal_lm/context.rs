@@ -1,4 +1,4 @@
-//! Owned single-sequence KV state. Frozen model/geometry travel with the cache.
+//! Owned single-sequence KV state. Frozen model and adapters travel with the cache.
 //! Updates are built separately and published only after successful execution.
 use super::*;
 use crate::geometry_runtime::GeometrySequenceDependency;
@@ -197,6 +197,9 @@ impl NativeCausalLmContext {
     pub fn geometry_artifact_id(&self) -> Option<&str> {
         self.model.geometry_artifact_id()
     }
+    pub fn lora_artifact_id(&self) -> Option<&str> {
+        self.model.lora_artifact_id()
+    }
     pub fn readout_accumulator(&self) -> CausalLmReadoutAccumulator {
         self.model.readout_accumulator()
     }
@@ -272,9 +275,10 @@ impl NativeCausalLmContext {
                 },
             )?;
             let attended = attention_reference(spec, &qkv[0], &key, &value, None, None)?;
-            let attention = block
-                .output
-                .forward(&model.merge_heads([attended.as_slice()], [1, 1])?)?;
+            let attention = model.project_attention_output(
+                index,
+                &model.merge_heads([attended.as_slice()], [1, 1])?,
+            )?;
             let path = format!("transformer.h.{index}");
             let (attention, attention_history) = model.incremental_geometry(
                 &format!("{path}.attn"),

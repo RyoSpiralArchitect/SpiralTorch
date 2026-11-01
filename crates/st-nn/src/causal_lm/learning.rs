@@ -70,7 +70,7 @@ impl NativeCausalLmGradients {
     }
 }
 
-fn frozen_pullback(
+pub(super) fn frozen_pullback(
     weight: &PackedB,
     cache: &OnceLock<Result<PackedB, String>>,
     upstream: &Tensor,
@@ -343,16 +343,54 @@ impl NativeCausalLm {
 
     fn parameter_pullback(
         &self,
-        mut checkpoints: Vec<Tensor>,
+        checkpoints: Vec<Tensor>,
         hidden_rows: usize,
         selected: Tensor,
         shape: [usize; 2],
         selected_rows: Option<&[usize]>,
         d_normalized: Tensor,
     ) -> CausalLmResult<Parameters> {
-        let runtime = self.geometry.as_ref().unwrap();
-        let c = &self.config;
         let (first_layer, first_site) = self.first_geometry_site()?;
+        let parameters = self.decoder_parameter_pullback(
+            checkpoints,
+            hidden_rows,
+            selected,
+            shape,
+            selected_rows,
+            d_normalized,
+            first_layer,
+            &first_site,
+            false,
+        )?;
+        if parameters.len()
+            != self
+                .geometry
+                .as_ref()
+                .unwrap()
+                .artifact()
+                .record()
+                .placements
+                .len()
+        {
+            return Err("not all native geometry placements received a loss gradient".into());
+        }
+        Ok(parameters)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn decoder_parameter_pullback(
+        &self,
+        mut checkpoints: Vec<Tensor>,
+        hidden_rows: usize,
+        selected: Tensor,
+        shape: [usize; 2],
+        selected_rows: Option<&[usize]>,
+        d_normalized: Tensor,
+        first_layer: usize,
+        first_site: &str,
+        lora: bool,
+    ) -> CausalLmResult<Parameters> {
+        let c = &self.config;
         let d_selected = selected.layer_norm_input_backward(
             &self.final_norm.gamma,
             &d_normalized,
@@ -378,7 +416,7 @@ impl NativeCausalLm {
                 cache.block_geometry,
                 gradient,
                 &mut parameters,
-                &first_site,
+                first_site,
             )?
             else {
                 break;
@@ -388,7 +426,7 @@ impl NativeCausalLm {
                 cache.mlp_geometry,
                 residual.clone(),
                 &mut parameters,
-                &first_site,
+                first_site,
             )?
             else {
                 break;
@@ -409,11 +447,23 @@ impl NativeCausalLm {
                 cache.attention_geometry,
                 residual.clone(),
                 &mut parameters,
-                &first_site,
+                first_site,
             )?
             else {
                 break;
             };
+            if lora && index == first_layer {
+                let adapter = self.lora.as_ref().ok_or("missing native LoRA adapter")?;
+                let (a, b) = adapter.vjp_parameters(&cache.attention_input, &attention)?;
+                parameters.insert(
+                    adapter.path(),
+                    BTreeMap::from([
+                        ("a".to_owned(), a.data().to_vec()),
+                        ("b".to_owned(), b.data().to_vec()),
+                    ]),
+                );
+                break;
+            }
             let d_merge = block.output.backward_input(&attention)?;
             let [d_heads] = self.split_heads::<1>(&d_merge, shape)?;
             let d_qkv = attention_vjp_reference(
@@ -440,9 +490,6 @@ impl NativeCausalLm {
                 c.norm_epsilon,
             )?;
             gradient = residual.add_with_backend(&d_input, TensorUtilBackend::Cpu)?;
-        }
-        if parameters.len() != runtime.artifact().record().placements.len() {
-            return Err("not all native geometry placements received a loss gradient".into());
         }
         Ok(parameters)
     }

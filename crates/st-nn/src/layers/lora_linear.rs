@@ -9,6 +9,7 @@ use crate::execution::{
 };
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
+use st_tensor::{MatmulBackend, PackedB, TensorUtilBackend};
 use std::collections::HashMap;
 
 fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
@@ -36,6 +37,121 @@ fn relabel_non_finite<T>(result: PureResult<T>, label: &'static str) -> PureResu
         }
         other => other,
     }
+}
+
+/// Shared low-rank branch, deliberately unscaled so callers retain the fused
+/// `base + scale * delta` addition order. Packed operands remain owned/cached by
+/// the caller; this helper never chooses a device or repacks a parameter.
+pub(crate) fn low_rank_forward(
+    input: &Tensor,
+    a: &PackedB,
+    b: &PackedB,
+    backend: MatmulBackend,
+) -> PureResult<Tensor> {
+    let hidden = relabel_non_finite(
+        input.matmul_prepacked_with_backend(a, backend),
+        "lora_linear_hidden",
+    )?;
+    relabel_non_finite(
+        hidden.matmul_prepacked_with_backend(b, backend),
+        "lora_linear_adapter_output",
+    )
+}
+
+/// Pull back only the trainable A/B parameters. No input cotangent is formed:
+/// callers stopping reverse propagation at this adapter must not overflow or
+/// reject an unused input gradient.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn low_rank_parameter_vjp(
+    input: &Tensor,
+    upstream: &Tensor,
+    a: &PackedB,
+    b_transpose: &PackedB,
+    scale: f32,
+    prepacked_backend: MatmulBackend,
+    matmul_backend: MatmulBackend,
+    util_backend: impl Fn(usize) -> TensorUtilBackend,
+) -> PureResult<(Tensor, Tensor)> {
+    let (_, grad_a, grad_b) = low_rank_pullback(
+        input,
+        upstream,
+        a,
+        b_transpose,
+        scale,
+        prepacked_backend,
+        matmul_backend,
+        util_backend,
+    )?;
+    Ok((grad_a, grad_b))
+}
+
+/// Pull back `scale * input * A * B`; loss reduction is already represented by
+/// `upstream`. Returns the input, A and B cotangents without mutating parameters.
+/// Explicit backend arguments preserve both module policy and native CPU routes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn low_rank_vjp(
+    input: &Tensor,
+    upstream: &Tensor,
+    a: &PackedB,
+    a_transpose: &PackedB,
+    b_transpose: &PackedB,
+    scale: f32,
+    prepacked_backend: MatmulBackend,
+    matmul_backend: MatmulBackend,
+    util_backend: impl Fn(usize) -> TensorUtilBackend,
+) -> PureResult<(Tensor, Tensor, Tensor)> {
+    let (grad_hidden, grad_a, grad_b) = low_rank_pullback(
+        input,
+        upstream,
+        a,
+        b_transpose,
+        scale,
+        prepacked_backend,
+        matmul_backend,
+        util_backend,
+    )?;
+    let grad_input = relabel_non_finite(
+        grad_hidden.matmul_prepacked_with_backend(a_transpose, prepacked_backend),
+        "lora_adapter_input_grad",
+    )?;
+    validate_finite_tensor("lora_adapter_input_grad", &grad_input)?;
+    Ok((grad_input, grad_a, grad_b))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn low_rank_pullback(
+    input: &Tensor,
+    upstream: &Tensor,
+    a: &PackedB,
+    b_transpose: &PackedB,
+    scale: f32,
+    prepacked_backend: MatmulBackend,
+    matmul_backend: MatmulBackend,
+    util_backend: impl Fn(usize) -> TensorUtilBackend,
+) -> PureResult<(Tensor, Tensor, Tensor)> {
+    let hidden = relabel_non_finite(
+        input.matmul_prepacked_with_backend(a, prepacked_backend),
+        "lora_linear_hidden",
+    )?;
+    let grad_b = relabel_non_finite(
+        hidden.matmul_lhs_transpose_scaled_with_backend(upstream, scale, matmul_backend),
+        "lora_b_grad",
+    )?;
+    let grad_hidden = relabel_non_finite(
+        upstream.matmul_prepacked_with_backend(b_transpose, prepacked_backend),
+        "lora_adapter_hidden_grad_unscaled",
+    )?;
+    let grad_hidden = relabel_non_finite(
+        grad_hidden.scale_with_backend(scale, util_backend(grad_hidden.data().len())),
+        "lora_adapter_hidden_grad",
+    )?;
+    let grad_a = relabel_non_finite(
+        input.matmul_lhs_transpose_scaled_with_backend(&grad_hidden, 1.0, matmul_backend),
+        "lora_a_grad",
+    )?;
+    validate_finite_tensor("lora_a_grad", &grad_a)?;
+    validate_finite_tensor("lora_b_grad", &grad_b)?;
+    Ok((grad_hidden, grad_a, grad_b))
 }
 
 /// Frozen-base linear layer with trainable low-rank LoRA adapter matrices.
@@ -205,16 +321,12 @@ impl Module for LoraLinear {
         )?;
 
         let adapter_a_pack = self.lora_a.ensure_matmul_pack()?;
-        let hidden = relabel_non_finite(
-            input
-                .matmul_prepacked_with_backend(&adapter_a_pack, current_prepacked_matmul_backend()),
-            "lora_linear_hidden",
-        )?;
         let adapter_b_pack = self.lora_b.ensure_matmul_pack()?;
-        let adapter = relabel_non_finite(
-            hidden
-                .matmul_prepacked_with_backend(&adapter_b_pack, current_prepacked_matmul_backend()),
-            "lora_linear_adapter_output",
+        let adapter = low_rank_forward(
+            input,
+            &adapter_a_pack,
+            &adapter_b_pack,
+            current_prepacked_matmul_backend(),
         )?;
         let backend = current_tensor_util_backend_for_values(output.data().len());
         relabel_non_finite(
@@ -247,47 +359,22 @@ impl Module for LoraLinear {
             return Tensor::zeros(rows, input_cols);
         }
 
-        // Loss reduction belongs to the incoming cotangent, not the adapter.
-        let scale = self.scale();
+        // Reuse the adapter-only pullback while preserving cached operands and
+        // the active module execution policy. Frozen base has no parameter VJP.
         let adapter_a_pack = self.lora_a.ensure_matmul_pack()?;
-        let hidden = relabel_non_finite(
-            input
-                .matmul_prepacked_with_backend(&adapter_a_pack, current_prepacked_matmul_backend()),
-            "lora_linear_hidden",
-        )?;
-        let grad_b = relabel_non_finite(
-            hidden.matmul_lhs_transpose_scaled_with_backend(
-                grad_output,
-                scale,
-                current_matmul_backend(),
-            ),
-            "lora_b_grad",
-        )?;
-
+        let adapter_a_transpose_pack = self.lora_a.ensure_matmul_transpose_pack()?;
         let adapter_b_transpose_pack = self.lora_b.ensure_matmul_transpose_pack()?;
-        let grad_adapter_hidden = relabel_non_finite(
-            grad_output.matmul_prepacked_with_backend(
-                &adapter_b_transpose_pack,
-                current_prepacked_matmul_backend(),
-            ),
-            "lora_adapter_hidden_grad_unscaled",
+        let (adapter_input, grad_a, grad_b) = low_rank_vjp(
+            input,
+            grad_output,
+            &adapter_a_pack,
+            &adapter_a_transpose_pack,
+            &adapter_b_transpose_pack,
+            self.scale(),
+            current_prepacked_matmul_backend(),
+            current_matmul_backend(),
+            current_tensor_util_backend_for_values,
         )?;
-        let grad_adapter_hidden = relabel_non_finite(
-            grad_adapter_hidden.scale_with_backend(
-                scale,
-                current_tensor_util_backend_for_values(grad_adapter_hidden.data().len()),
-            ),
-            "lora_adapter_hidden_grad",
-        )?;
-        let grad_a = relabel_non_finite(
-            input.matmul_lhs_transpose_scaled_with_backend(
-                &grad_adapter_hidden,
-                1.0,
-                current_matmul_backend(),
-            ),
-            "lora_a_grad",
-        )?;
-
         let base_transpose_pack = self.base_weight.ensure_matmul_transpose_pack()?;
         let mut grad_input = relabel_non_finite(
             grad_output.matmul_prepacked_with_backend(
@@ -295,14 +382,6 @@ impl Module for LoraLinear {
                 current_prepacked_matmul_backend(),
             ),
             "lora_base_input_grad",
-        )?;
-        let adapter_a_transpose_pack = self.lora_a.ensure_matmul_transpose_pack()?;
-        let adapter_input = relabel_non_finite(
-            grad_adapter_hidden.matmul_prepacked_with_backend(
-                &adapter_a_transpose_pack,
-                current_prepacked_matmul_backend(),
-            ),
-            "lora_adapter_input_grad",
         )?;
         let backend = current_tensor_util_backend_for_values(grad_input.data().len());
         relabel_non_finite(
@@ -382,6 +461,103 @@ mod tests {
             .zip(grad_output.data())
             .map(|(value, grad)| value * grad)
             .sum::<f32>()
+    }
+
+    #[test]
+    fn parameter_only_pullback_does_not_compute_overflowing_unused_input_gradient() {
+        use st_tensor::Tile;
+        let input = Tensor::zeros(1, 1).unwrap();
+        let a = PackedB::from_tensor(
+            &Tensor::from_vec(1, 1, vec![1e30]).unwrap(),
+            Tile::col_major(),
+        )
+        .unwrap();
+        let b = PackedB::from_tensor(
+            &Tensor::from_vec(1, 1, vec![1e20]).unwrap(),
+            Tile::col_major(),
+        )
+        .unwrap();
+        let upstream = Tensor::from_vec(1, 1, vec![1.]).unwrap();
+        let (da, db) = low_rank_parameter_vjp(
+            &input,
+            &upstream,
+            &a,
+            &b.transposed().unwrap(),
+            1.,
+            MatmulBackend::CpuSimd,
+            MatmulBackend::CpuSimd,
+            |_| TensorUtilBackend::Cpu,
+        )
+        .unwrap();
+        assert_eq!(da.data(), &[0.]);
+        assert_eq!(db.data(), &[0.]);
+        assert_non_finite_label(
+            low_rank_vjp(
+                &input,
+                &upstream,
+                &a,
+                &a.transposed().unwrap(),
+                &b.transposed().unwrap(),
+                1.,
+                MatmulBackend::CpuSimd,
+                MatmulBackend::CpuSimd,
+                |_| TensorUtilBackend::Cpu,
+            ),
+            "lora_adapter_input_grad",
+        );
+    }
+
+    #[test]
+    fn shared_low_rank_vjp_matches_rectangular_finite_differences() {
+        use st_tensor::Tile;
+        let input = Tensor::from_vec(2, 3, vec![0.7, -0.4, 0.1, -0.2, 0.9, 0.3]).unwrap();
+        let a = Tensor::from_vec(3, 2, vec![0.2, -0.3, 0.4, 0.1, -0.1, 0.5]).unwrap();
+        let b = Tensor::from_vec(2, 2, vec![0.5, -0.2, 0.3, 0.6]).unwrap();
+        let upstream = Tensor::from_vec(2, 2, vec![0.3, -0.5, 0.8, 0.2]).unwrap();
+        let scale = 1.7;
+        let pack = |value: &Tensor| PackedB::from_tensor(value, Tile::col_major()).unwrap();
+        let a_pack = pack(&a);
+        let b_pack = pack(&b);
+        let (dx, da, db) = low_rank_vjp(
+            &input,
+            &upstream,
+            &a_pack,
+            &a_pack.transposed().unwrap(),
+            &b_pack.transposed().unwrap(),
+            scale,
+            MatmulBackend::CpuSimd,
+            MatmulBackend::CpuSimd,
+            |_| TensorUtilBackend::Cpu,
+        )
+        .unwrap();
+        let objective = |x: &Tensor, a: &Tensor, b: &Tensor| {
+            low_rank_forward(x, &pack(a), &pack(b), MatmulBackend::CpuSimd)
+                .unwrap()
+                .data()
+                .iter()
+                .zip(upstream.data())
+                .map(|(value, gradient)| scale * value * gradient)
+                .sum::<f32>()
+        };
+        for (which, original, analytic) in [(0, &input, dx), (1, &a, da), (2, &b, db)] {
+            for index in 0..original.data().len() {
+                let mut plus = original.clone();
+                let mut minus = original.clone();
+                plus.data_mut()[index] += 1.0e-3;
+                minus.data_mut()[index] -= 1.0e-3;
+                let (high, low) = match which {
+                    0 => (objective(&plus, &a, &b), objective(&minus, &a, &b)),
+                    1 => (objective(&input, &plus, &b), objective(&input, &minus, &b)),
+                    _ => (objective(&input, &a, &plus), objective(&input, &a, &minus)),
+                };
+                let numeric = (high - low) / 2.0e-3;
+                assert!(
+                    (analytic.data()[index] - numeric).abs() < 1.0e-4,
+                    "low-rank gradient {which}[{index}]: analytic={} numeric={numeric}",
+                    analytic.data()[index]
+                );
+            }
+        }
     }
 
     #[test]

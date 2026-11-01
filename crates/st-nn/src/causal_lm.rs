@@ -17,6 +17,7 @@ mod evaluation;
 mod generation;
 mod gpt2;
 mod learning;
+mod lora;
 mod objective;
 mod repetition;
 mod training;
@@ -27,6 +28,7 @@ pub use generation::{
     NativeCausalLmGenerator,
 };
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
+pub use lora::NativeCausalLmLoraGradients;
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
 pub use repetition::CausalLmRepetition;
@@ -174,6 +176,7 @@ pub struct NativeCausalLm {
     head: PackedB,
     backward_head: TransposeCache,
     geometry: Option<Arc<NativeGeometryRuntime>>,
+    lora: Option<Arc<lora::NativeLoraAdapter>>,
     readout_accumulator: CausalLmReadoutAccumulator,
 }
 
@@ -239,6 +242,9 @@ impl NativeCausalLm {
     /// transformer.h.N.attn, transformer.h.N.mlp, or transformer.h.N.
     /// No placements are ignored and the frozen checkpoint identity must match.
     pub fn with_geometry(&self, artifact: GeometryAdapterArtifact) -> CausalLmResult<Self> {
+        if self.lora.is_some() {
+            return Err("joint native LoRA and geometry is not supported yet".into());
+        }
         if artifact.record().base_model_identity != self.base_id {
             return Err("geometry belongs to a different native base model".into());
         }
