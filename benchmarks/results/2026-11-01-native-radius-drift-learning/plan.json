@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.native_lm.radius_drift_learning_plan.v1",
+  "reference": "Fresh native GPT-2 geometry FT; not a retry or continuation of the prior observation replay. No base weights updated.",
+  "prior_book_commit": "2d00dc52fb87fca0a66b387aa7f2a9e4ed12828c",
+  "train_sha256": "36a659f2cec5f642d09bb02428b2ba09dd10152152b38dc9098e99f49c043abb",
+  "seeds": [109, 113, 127],
+  "arms": ["fixed", "free", "bounded"],
+  "initial_radius": 4.0,
+  "max_log_radius_drift": 0.02,
+  "updates": 256,
+  "observe_every": 32,
+  "training": "Same 512 disjoint 64-token Pride and Prejudice chapters 1-49 windows and unchanged four-site matched start, clipping and AdamW recipe as the prior study. Fresh data-order seeds. Rotate arm execution order. Fixed uses buffers; free and bounded start with identical trainable artifacts, optimizer moments and four extra trainable scalars. No width sweep.",
+  "books": {
+    "emma": {"id":158,"title":"Emma","source":"https://www.gutenberg.org/cache/epub/158/pg158.txt","sha256":"532b122b4e6a76cc556d6fdcd729b5892f5c4ce4a1b7060b9f832adfad8680dc","chapters":55,"role":"same author / fiction adaptation"},
+    "darwin": {"id":1228,"title":"On the Origin of Species (first edition)","source":"https://www.gutenberg.org/cache/epub/1228/pg1228.txt","sha256":"362142cb7c6f90850477520cfe2a62fe423ae92ea8eb6d9cd8b30ddb39de60b9","chapters":14,"role":"different author / scientific prose retention"}
+  },
+  "sampling": "Strip Gutenberg framing, contents, volume headings and Darwin index; collapse whitespace within chapters. Select 14 chapter midpoints from all chapters per book; 8 midpoints from disjoint full 64-token windows within each selected chapter. Score 7056 targets per book per model. Reject identical full windows across training or either sample.",
+  "scored": "Frozen base, common nonzero initial insertion and all nine final fits. Seal all final checkpoint IDs before any model scoring. Use no external/reserve data from the prior study and do not tune on the eight already inspected authored prompts. New to this study does not imply unseen by GPT-2 pretraining.",
+  "primary": "Per seed compute bounded-minus-free NLL separately on each book. The joint criterion requires free to beat fixed on Emma, bounded to retain at least half that gain relative to fixed, bounded to score strictly lower than free on Darwin, and the projection to actually engage at least once. Require all three seeds; report all signed contrasts and raw NLL even on failure. Also report changes from frozen base; beating free is not equivalent to no forgetting.",
+  "receipts": "Private per-step reports, paired post-update observations/checkpoints every 32 updates, cumulative scalar projection counts and final geometry/optimizer ownership. An anchored interval bounds log radius, not gate or bias; publish counts and maximum absolute displacement, never individual radii, model weights, text or raw tensors.",
+  "budgets": {"local_cpu_only":true,"rayon_threads":4,"per_worker_seconds":2400,"total_seconds":14400,"retries":0,"stop_on_first_error":true},
+  "limits": "Only one width and two finite chapter samples. Three order seeds share the evaluation samples. No general capability claim, timing race, generation quality score or promotion to default."
+}
