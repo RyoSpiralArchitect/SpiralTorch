@@ -1,0 +1,26 @@
+{
+  "schema": "spiraltorch.native_book.radius_interchange_plan.v1",
+  "prior_commit": "2d00dc52fb87fca0a66b387aa7f2a9e4ed12828c",
+  "prior_public_results_sha256": "2654ade227263d6afa3af75628ce9d87f5e80dd32b6a88ce48eabc931acd5b99",
+  "reference": "Published macOS 0.4.33 wheel, tokenizer and GPT-2 snapshot pinned by the prior plan; inference only, no training documents, published book scores, external or reserve text used as probe input.",
+  "seeds": [101, 103, 107],
+  "cases_per_seed": ["affine", "FF", "FL", "LF", "LL"],
+  "cells": "First letter is the recipient of the four scalar log radii, retaining every other tensor, recipe and trainability flag from fixed4 (F) or learned4 (L). Second letter gives the radius donor from the same data-order seed. FF and LL are untouched final checkpoints; same-source sham reconstruction must reproduce the exact original artifact ID. FL and LF are new inference artifacts, never trainer checkpoints.",
+  "primary": "For each seed, target-token-weighted NLL over all eight authored continuations. Report FL-FF and LL-LF, learned instead of fixed radii on each recipient; lower is better. Also report LF-FF, LL-FL, LL-FF and interaction (LL-LF)-(FL-FF). Show all seed and prompt results, including reversals. The prespecified concordance requires both radius substitutions to lower NLL strictly at every seed.",
+  "generation": {"max_new_tokens": 16, "seed": 0, "eos_token_ids": [50256], "execution": {"kind": "kv_cache", "max_values": 8388608}, "decoding": {"selection": "greedy", "distribution": {"kind": "softmax", "temperature": 1.0}}},
+  "generation_outcome": "Record first differing generated token (one-based; null if sequences identical including termination) for FL vs FF, LL vs LF, LL vs FF and LL vs affine. Differences after a changed token are not same-context logit changes. No fluency or quality rating, sampling sweep, output controller or speed claim.",
+  "evaluation_context": 64,
+  "prompts": [
+    {"id":"n1","group":"narrative","prefix":"The brass key lay on the windowsill.","continuation":" By morning, the salt had turned its handle green."},
+    {"id":"n2","group":"narrative","prefix":"When the letter reached Mara, it was already open.","continuation":" She folded the torn envelope without reading the last line."},
+    {"id":"n3","group":"narrative","prefix":"Across the empty dining room, a clock struck twice.","continuation":" Nobody looked up until the third bell failed to sound."},
+    {"id":"n4","group":"narrative","prefix":"The porter stopped at the door of the west wing.","continuation":" A thread of lamplight showed beneath the painted wood."},
+    {"id":"p1","group":"practical","prefix":"The sensor reports a different temperature every minute.","continuation":" First check its battery and compare it with a second sensor."},
+    {"id":"p2","group":"practical","prefix":"To sort the cards by date, start with the oldest.","continuation":" Place cards from the same day in a separate pile."},
+    {"id":"p3","group":"practical","prefix":"A pump moves water from the lower tank to the upper tank.","continuation":" When the upper tank is full, the switch stops the motor."},
+    {"id":"p4","group":"practical","prefix":"The map on the station wall has two scales.","continuation":" Use the smaller scale to estimate distances between towns."}
+  ],
+  "budget": {"one_local_cpu_attempt": true, "worker_seconds": 900, "rayon_threads": 4, "max_model_prompt_pairs": 128, "max_generated_tokens": 2048, "retries": 0},
+  "publication": "Publish authored conditions, per-prompt scores, divergence positions, state/content hashes and all prespecified contrasts. Keep generated text/IDs, raw steps and parameter values private. Stop on the first error or timeout; do not project an incomplete matrix.",
+  "limits": "Eight hand-authored probes are neither a random corpus nor a new held-out book. Matched weight substitutions test a direct effect within a finished model, not the training-time cause of improvement or general language quality. Three order seeds are not independent test sets."
+}
