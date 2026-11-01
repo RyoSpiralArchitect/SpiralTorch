@@ -267,11 +267,13 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             common = ["--model-dir", str(model_dir), "--data-json", str(data), "--save-every", "1"]
             fresh = ["--recipe-json", str(recipe), "--artifact", str(geometry), "--artifact-id", artifact.artifact_id]
             evaluation = ["--eval-data-json", str(heldout), "--eval-every", "1"]
+            observed = [*evaluation, "--observe-every", "2", "--save-every", "3"]
             runs = (("plain", []), ("scored", evaluation),
                     ("interval", [*evaluation, "--eval-every", "3"]),
                     ("default", ["--eval-data-json", str(heldout), "--save-every", "2"]),
                     ("zero", [*evaluation, "--stop-after", "0"]),
-                    ("part", [*evaluation, "--stop-after", "2"]))
+                    ("part", [*evaluation, "--stop-after", "2"]),
+                    ("observed", observed), ("before-first-observation", [*observed, "--stop-after", "1"]))
             for name, extra in runs:
                 with contextlib.redirect_stdout(io.StringIO()):
                     example.main([*common, *fresh, *extra, "--output", str(root / name)])
@@ -280,14 +282,34 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 example.main([*common, *evaluation, "--resume", str(root / "part/checkpoint-000002.json"),
                               "--checkpoint-id", pin, "--eval-every", "3", "--output", str(root / "resumed")])
+                early = json.loads((root / "before-first-observation/result.json").read_text())
+                example.main([*common, *observed, "--resume", str(root / "before-first-observation/checkpoint-000001.json"),
+                              "--checkpoint-id", early["checkpoints"][-1]["checkpoint_id"],
+                              "--output", str(root / "observed-resumed")])
             expected = (root / "plain/checkpoint-000004.json").read_bytes()
             if repetition is not None:
                 training = [json.loads(row) for row in (root / "plain/steps.jsonl").read_text().splitlines()]
                 self.assertEqual(len(training), 4)
                 self.assertTrue(all(row["repetition_positions"] > 0 and row["repetition_loss"] > 0.
                                     for row in training))
-            for name in ("scored", "interval", "default", "resumed"):
+            for name in ("scored", "interval", "default", "resumed", "observed", "observed-resumed"):
                 self.assertEqual((root / name / "checkpoint-000004.json").read_bytes(), expected)
+            plain_steps = (root / "plain/steps.jsonl").read_bytes()
+            self.assertEqual((root / "observed/steps.jsonl").read_bytes(), plain_steps)
+            self.assertEqual((root / "before-first-observation/steps.jsonl").read_bytes()
+                             + (root / "observed-resumed/steps.jsonl").read_bytes(), plain_steps)
+            self.assertFalse((root / "plain/observed-checkpoints.jsonl").exists())
+            self.assertEqual((root / "before-first-observation/observed-checkpoints.jsonl").read_bytes(), b"")
+            index = (root / "observed/observed-checkpoints.jsonl").read_bytes()
+            self.assertEqual((root / "observed-resumed/observed-checkpoints.jsonl").read_bytes(), index)
+            entries = [json.loads(line) for line in index.splitlines()]
+            self.assertEqual([e["updates"] for e in entries], [2, 4])
+            summary = json.loads((root / "observed/result.json").read_text())
+            self.assertEqual(summary["observations"]["count"], 2)
+            self.assertEqual([c["updates"] for c in summary["checkpoints"]], [0, 2, 3, 4])
+            for entry in entries:
+                for path in (entry["file"], entry["observation_file"]):
+                    self.assertEqual((root / "observed" / path).read_bytes(), (root / "observed-resumed" / path).read_bytes())
             for name, steps in (("scored", [0, 1, 2, 3, 4]), ("interval", [0, 3, 4]),
                                 ("default", [0, 2, 4]), ("resumed", [2, 3, 4]), ("zero", [0])):
                 rows = [json.loads(line) for line in (root / name / "evaluation.jsonl").read_text().splitlines()]

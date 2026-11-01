@@ -239,6 +239,9 @@ impl PyNativeCausalLmTrainer {
     fn plan_json(&self) -> PyResult<String> {
         self.inner.plan().to_json().map_err(error)
     }
+    fn checkpoint_with_id(&self, py: Python<'_>) -> PyResult<(String, String)> {
+        py.detach(|| self.inner.checkpoint_with_id()).map_err(error)
+    }
     fn to_json(&self, py: Python<'_>) -> PyResult<String> {
         py.detach(|| self.inner.to_json()).map_err(error)
     }

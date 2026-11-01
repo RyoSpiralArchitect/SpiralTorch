@@ -465,6 +465,7 @@ impl NativeCausalLmTrainer {
 
     pub fn to_json(&self) -> CausalLmResult<String> {
         let geometry = self.model.geometry_artifact().unwrap();
+        let (optimizer_json, optimizer_id) = self.optimizer.checkpoint_with_id()?;
         let checkpoint = Checkpoint {
             schema: SCHEMA.into(),
             base_model_identity: self.model.base_id.clone(),
@@ -475,8 +476,8 @@ impl NativeCausalLmTrainer {
             initial_optimizer_steps: self.initial_optimizer_steps.clone(),
             geometry_json: geometry.to_json().into(),
             geometry_id: geometry.artifact_id().into(),
-            optimizer_json: self.optimizer.to_json()?,
-            optimizer_id: self.optimizer.checkpoint_id()?,
+            optimizer_json,
+            optimizer_id,
             readout_accumulator: self.model.readout_accumulator,
         };
         let json = serde_json::to_string(&checkpoint)?;
@@ -487,7 +488,14 @@ impl NativeCausalLmTrainer {
     }
 
     pub fn checkpoint_id(&self) -> CausalLmResult<String> {
-        Ok(identity(self.to_json()?.as_bytes()))
+        Ok(self.checkpoint_with_id()?.1)
+    }
+
+    /// Serialize once and return the pin for exactly these checkpoint bytes.
+    pub fn checkpoint_with_id(&self) -> CausalLmResult<(String, String)> {
+        let json = self.to_json()?;
+        let id = identity(json.as_bytes());
+        Ok((json, id))
     }
 
     fn checkpoint(

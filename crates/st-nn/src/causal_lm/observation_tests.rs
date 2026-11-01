@@ -189,7 +189,9 @@ fn observation_matches_the_reduced_gradient_without_changing_an_update_or_replay
             serde_json::to_string(&expected).unwrap(),
             serde_json::to_string(&observation.step).unwrap()
         );
-        assert_eq!(plain.to_json().unwrap(), tapped.to_json().unwrap());
+        let (json, id) = tapped.checkpoint_with_id().unwrap();
+        assert_eq!(json, plain.to_json().unwrap());
+        assert_eq!(id, plain.checkpoint_id().unwrap());
     }
     let before = tapped.to_json().unwrap();
     assert!(tapped.step_observed().unwrap().is_none());

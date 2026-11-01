@@ -182,7 +182,13 @@ impl NativeGeometryAdamW {
     }
 
     pub fn checkpoint_id(&self) -> Result<String> {
-        Ok(identity(self.to_json()?.as_bytes()))
+        Ok(self.checkpoint_with_id()?.1)
+    }
+
+    pub(crate) fn checkpoint_with_id(&self) -> Result<(String, String)> {
+        let json = self.to_json()?;
+        let id = identity(json.as_bytes());
+        Ok((json, id))
     }
 
     /// Verify the pinned bytes before parsing, then bind names, shapes and clocks

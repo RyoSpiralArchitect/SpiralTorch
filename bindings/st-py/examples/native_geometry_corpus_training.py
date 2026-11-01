@@ -33,8 +33,10 @@ def read_documents(path):
 
 
 def save(directory, trainer):
-    payload = trainer.to_json()
-    identity = trainer.checkpoint_id
+    if hasattr(trainer, "checkpoint_with_id"):
+        payload, identity = trainer.checkpoint_with_id()
+    else:  # The unobserved example also works with the published 0.4.33 wheel.
+        payload, identity = trainer.to_json(), trainer.checkpoint_id
     if digest(payload.encode()) != identity:
         raise ValueError("checkpoint bytes and native identity disagree")
     path = directory / f"checkpoint-{trainer.completed_updates:06d}.json"
@@ -54,6 +56,7 @@ def main(argv=None):
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--checkpoint-id")
     parser.add_argument("--save-every", type=int, default=10)
+    parser.add_argument("--observe-every", type=int, help="save an observed checkpoint every N absolute updates (opt-in)")
     parser.add_argument("--stop-after", type=int, help="absolute completed-update boundary, not a changed recipe")
     parser.add_argument("--eval-data-json", type=Path, help="separate encoded holdout corpus; native NLL, no smoothing")
     parser.add_argument("--eval-every", type=int, help="evaluation interval; defaults to save-every, plus initial/final")
@@ -65,6 +68,13 @@ def main(argv=None):
         parser.error("fresh training needs recipe-json, artifact and artifact-id")
     if args.save_every < 1 or (args.stop_after is not None and args.stop_after < 0):
         parser.error("save-every must be positive and stop-after nonnegative")
+    if args.observe_every is not None:
+        if args.observe_every < 1:
+            parser.error("observe-every must be positive")
+        if not all(callable(getattr(st.NativeCausalLmTrainer, name, None))
+                   for name in ("step_observed", "checkpoint_with_id")):
+            parser.error("observe-every needs a matching SpiralTorch source build after 0.4.33")
+        from spiraltorch.native_corpus_runs import step_and_save_observation
     if args.eval_every is not None and (args.eval_every < 1 or args.eval_data_json is None):
         parser.error("eval-every must be positive and requires eval-data-json")
     if args.output.exists():
@@ -106,19 +116,31 @@ def main(argv=None):
     private_output(args.output)
     initial = save(args.output, trainer)
     saved = [initial]
+    observation_count = 0
     with ExitStack() as stack:
         log = stack.enter_context((args.output / "steps.jsonl").open("x", encoding="utf-8"))
         evaluation_log = (stack.enter_context((args.output / "evaluation.jsonl").open("x", encoding="utf-8"))
                           if evaluation_data else None)
+        observation_index = (stack.enter_context((args.output / "observed-checkpoints.jsonl").open("x", encoding="utf-8"))
+                             if args.observe_every is not None else None)
         if evaluation_log:
             evaluation_log.write(json.dumps(latest_evaluation, allow_nan=False) + "\n")
             evaluation_log.flush()
         while trainer.completed_updates < stop:
-            report = trainer.step()
-            log.write(report.to_json() + "\n")
+            observed = args.observe_every is not None and (trainer.completed_updates + 1) % args.observe_every == 0
+            if observed:
+                report, checkpoint = step_and_save_observation(trainer, args.output)
+                observation_index.write(json.dumps(checkpoint) + "\n")
+                observation_index.flush()
+                saved.append(checkpoint)
+                observation_count += 1
+            else:
+                report = trainer.step()
+            raw = report.to_json()
+            log.write(raw + "\n")
             log.flush()
-            print(report.to_json(), flush=True)
-            if trainer.completed_updates % args.save_every == 0 or trainer.completed_updates == stop:
+            print(raw, flush=True)
+            if not observed and (trainer.completed_updates % args.save_every == 0 or trainer.completed_updates == stop):
                 saved.append(save(args.output, trainer))
             if evaluation_log and (trainer.completed_updates % (args.eval_every or args.save_every) == 0
                                    or trainer.completed_updates == stop):
@@ -137,6 +159,9 @@ def main(argv=None):
                    "count": evaluation_count, "last": latest_evaluation,
                    "policy": "read-only native NLL; caller supplies the holdout; no automatic model selection"},
                "scope": "geometry-only frozen-GPT2 native CPU training; not full-model FT or quality evidence"}
+    if args.observe_every is not None:
+        summary["observations"] = {"every": args.observe_every, "count": observation_count,
+                                   "file": "observed-checkpoints.jsonl"}
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(summary, stream, indent=2, allow_nan=False)
         stream.write("\n")

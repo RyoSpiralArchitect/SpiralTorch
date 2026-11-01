@@ -147,6 +147,58 @@ On POSIX the new run directory uses mode `0700`, independent of a permissive
 process umask. This is local access restriction, not encryption or a Windows ACL
 guarantee; retain inputs and backups with equivalent care.
 
+### Keep an observed recovery point (source after 0.4.33)
+
+Add `--observe-every 32` to the command above to observe updates 32, 64, ...
+in the **original** run, even across resume. The initial/resumed cursor is not
+observed again. Each selected update is trained **once** and saves its full
+native post-update checkpoint, even between ordinary saves. Overlapping
+save/observe/stop boundaries write one checkpoint, not two. Budget disk space
+accordingly. Without the flag there is no observation file or change to training.
+
+The same operation is importable. For a private directory created by the caller:
+
+```python
+from spiraltorch.native_corpus_runs import step_and_save_observation, restore_observed_checkpoint
+
+# Use this INSTEAD of trainer.step() at a chosen update.
+step, entry = step_and_save_observation(trainer, private_run_dir)
+# Record entry["observation_id"] separately if independently pinned evidence is needed.
+restored = restore_observed_checkpoint(
+    private_run_dir, step.update, expected_observation_id=entry["observation_id"],
+    base=base, token_documents=token_documents,  # pass the original labels if used
+)
+```
+
+The client closes the checkpoint before publishing the observation receipt;
+the CLI then appends its pin to `observed-checkpoints.jsonl`. A complete index
+line identifies a pair even when `result.json` was never reached. Pick an
+explicit update and pin; never infer a recovery point from the largest
+checkpoint filename or a torn index line. The reader checks the receipt hash
+and Rust checks the original base, ordered data and checkpoint bytes. It does
+not load an optimizer recipe from the observation. A lone checkpoint or
+`.pending-*` file is not a completed pair. On failure stop and use a **new**
+directory for continuation, not a retry against those filenames.
+
+These local files need a private, single-writer directory and a filesystem
+supporting hard links. Receipts contain per-site measurements; keep them
+private along with the optimizer/geometry state. File pins identify bytes,
+not authors or past execution; the example does not guarantee recovery after
+power loss, and does not upload, prune or auto-select checkpoints.
+
+The [offline process-cut probe](../../bindings/st-py/tests/probe_observed_checkpoint_recovery.py)
+uses a deterministic two-block test model, not the book-study weights. Given
+an interpreter with the reference wheel and one with this source build, it
+compares all four ordinary step reports and checkpoints, cuts the observed
+process at update two, and restores into a third process. No GPU, network
+fetch or model-quality benchmark is involved:
+
+```sh
+python3 -I -B bindings/st-py/tests/probe_observed_checkpoint_recovery.py \
+  --reference-python "$REFERENCE_PYTHON" --candidate-python "$CANDIDATE_PYTHON" \
+  --output "$NEW_PRIVATE_DIR"
+```
+
 The optional HF Trainer remains an explicit interoperability path for its
 supported models and policies. Neither client silently falls back to the other.
 

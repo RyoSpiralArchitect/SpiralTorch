@@ -10,6 +10,7 @@ import runpy
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 class NoForeignML(importlib.abc.MetaPathFinder):
@@ -22,6 +23,7 @@ if __name__ == "__main__":
     sys.meta_path.insert(0, NoForeignML())
 
 import spiraltorch as st  # noqa: E402
+from spiraltorch import native_corpus_runs as runs  # noqa: E402
 
 fixtures = runpy.run_path(str(Path(__file__).with_name("test_native_causal_lm.py")))
 DOCS = [[1, 2, 3], [4, 5, 6, 7, 8, 9, 10, 0, 1], [2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 1, 2]]
@@ -92,6 +94,88 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
         self.assertIsNone(trainer.step())
         self.assertEqual(trainer.to_json(), saved)
         self.assertEqual((trainer.epoch, trainer.next_window), (2, 5))
+
+    def test_observed_checkpoint_restores_exact_next_steps_without_a_run_summary(self):
+        plain, tracked = self.trainer(), self.trainer()
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            self.assertEqual(tracked.step().to_json(), plain.step().to_json())
+            report, entry = runs.step_and_save_observation(tracked, directory)
+            self.assertEqual(report.to_json(), plain.step().to_json())
+            raw = (directory / entry["observation_file"]).read_bytes()
+            pin = "sha256:" + hashlib.sha256(raw).hexdigest()
+            self.assertEqual(pin, entry["observation_id"])
+            receipt = json.loads(raw)
+            self.assertEqual(receipt["observation"]["step"], json.loads(report.to_json()))
+            self.assertEqual(receipt["checkpoint"]["updates"], 2)
+            checkpoint = (directory / entry["file"]).read_bytes()
+            self.assertEqual((checkpoint.decode(), entry["checkpoint_id"]), plain.checkpoint_with_id())
+            self.assertEqual(entry["checkpoint_id"], "sha256:" + hashlib.sha256(checkpoint).hexdigest())
+            self.assertFalse((directory / "result.json").exists())
+            def restore(**kw):
+                return runs.restore_observed_checkpoint(directory, 2, **{
+                    "expected_observation_id": pin, "base": self.base, "token_documents": DOCS, **kw})
+            restored = restore()
+            while not plain.exhausted:
+                self.assertEqual(restored.step().to_json(), plain.step().to_json())
+                self.assertEqual(restored.checkpoint_with_id(), plain.checkpoint_with_id())
+            self.assertIsNone(runs.step_and_save_observation(restored, directory))
+            with self.assertRaisesRegex(ValueError, "pin"):
+                restore(expected_observation_id="wrong")
+            with self.assertRaises(ValueError):
+                restore(token_documents=[list(reversed(d)) for d in DOCS])
+            with self.assertRaisesRegex(ValueError, "positive"):
+                runs.restore_observed_checkpoint(directory, True, expected_observation_id=pin,
+                                                 base=self.base, token_documents=DOCS)
+            receipt["observation"]["data_id"] = "different"
+            mispaired = json.dumps(receipt).encode()
+            (directory / entry["observation_file"]).write_bytes(mispaired)
+            with self.assertRaisesRegex(ValueError, "do not agree"):
+                restore(expected_observation_id="sha256:" + hashlib.sha256(mispaired).hexdigest())
+            (directory / entry["observation_file"]).write_bytes(raw)
+            (directory / entry["file"]).write_bytes(checkpoint + b" ")
+            with self.assertRaisesRegex(ValueError, "pinned"):
+                restore()
+
+    def test_unsealed_observation_is_not_a_resume_point_or_overwritten(self):
+        trainer = self.trainer()
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            _, first = runs.step_and_save_observation(trainer, directory)
+            publish = runs._publish
+            def fail_on_receipt(path, raw):
+                if path.name.startswith("observation-"):
+                    raise OSError("simulated storage failure")
+                publish(path, raw)
+            with mock.patch.object(runs, "_publish", side_effect=fail_on_receipt), self.assertRaises(OSError):
+                runs.step_and_save_observation(trainer, directory)
+            self.assertEqual(trainer.completed_updates, 2)
+            self.assertTrue((directory / "checkpoint-000002.json").is_file())
+            self.assertFalse((directory / "observation-000002.json").exists())
+            with self.assertRaises(FileNotFoundError):
+                runs.restore_observed_checkpoint(directory, 2, expected_observation_id=first["observation_id"],
+                                                 base=self.base, token_documents=DOCS)
+            prior = runs.restore_observed_checkpoint(directory, 1, expected_observation_id=first["observation_id"],
+                                                     base=self.base, token_documents=DOCS)
+            with self.assertRaises(FileExistsError):
+                runs.step_and_save_observation(prior, directory)
+            self.assertEqual(prior.completed_updates, 1)
+            plain = self.trainer()
+            plain.step()
+            self.assertEqual(prior.step().to_json(), plain.step().to_json())
+            self.assertEqual(prior.to_json(), trainer.to_json())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permission bits")
+    def test_observed_saves_reject_nonprivate_outputs_before_training(self):
+        trainer = self.trainer()
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "shared"
+            directory.mkdir()
+            directory.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, "private"):
+                runs.step_and_save_observation(trainer, directory)
+            self.assertEqual(trainer.completed_updates, 0)
+            self.assertEqual(list(directory.iterdir()), [])
 
     def test_owned_inputs_snapshots_and_checkpoint_continuation(self):
         docs = [list(d) for d in DOCS]
@@ -229,10 +313,16 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
             fresh = ["--recipe-json", "recipe", "--artifact", "geometry", "--artifact-id", "pin"]
             for extra in ([], ["--resume", "checkpoint"], ["--resume", "checkpoint", "--checkpoint-id", "pin", *fresh],
                           [*fresh, "--save-every", "0"], [*fresh, "--stop-after", "-1"],
+                          [*fresh, "--observe-every", "0"], [*fresh, "--observe-every", "-1"],
                           [*fresh, "--output", str(path)]):
                 with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
                     example["main"]([*common, *extra])
                 self.assertEqual(error.exception.code, 2)
+                self.assertEqual(list(path.iterdir()), [])
+            with mock.patch.object(st, "NativeCausalLmTrainer", object), contextlib.redirect_stderr(io.StringIO()) as msg:
+                with self.assertRaises(SystemExit):
+                    example["main"]([*common, *fresh, "--observe-every", "1"])
+                self.assertIn("after 0.4.33", msg.getvalue())
                 self.assertEqual(list(path.iterdir()), [])
             bounded = path / "bounded.json"
             bounded.write_bytes(b"abc")
