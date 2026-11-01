@@ -91,11 +91,16 @@ def main(argv=None):
         recipe = json.loads(read(args.recipe_json, 65_536))
         required = {"context_length", "microbatch_windows", "accumulation_steps",
                     "epochs", "learning_rate", "weight_decay", "label_smoothing", "max_gradient_norm"}
-        if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - {"repetition"}:
+        if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - {"repetition", "max_log_radius_drift"}:
             raise ValueError("provide the complete explicit native training and clipping recipe")
         artifact = st.GeometryAdapterArtifact.from_json(read(args.artifact, 64 * 1024 * 1024).decode(),
                                                         args.artifact_id, base.base_model_identity)
-        optimizer = st.NativeGeometryAdamW(artifact, max_gradient_norm=recipe.pop("max_gradient_norm"))
+        options = {"max_gradient_norm": recipe.pop("max_gradient_norm")}
+        if "max_log_radius_drift" in recipe:
+            if not hasattr(st.NativeGeometryAdamW, "max_log_radius_drift"):
+                raise ValueError("max_log_radius_drift requires a matching source build after 0.4.33")
+            options["max_log_radius_drift"] = recipe.pop("max_log_radius_drift")
+        optimizer = st.NativeGeometryAdamW(artifact, **options)
         trainer = st.NativeCausalLmTrainer(base.with_geometry(artifact), optimizer, data["token_documents"],
                                           labels=data.get("labels"), **recipe)
     stop = trainer.total_updates if args.stop_after is None else args.stop_after

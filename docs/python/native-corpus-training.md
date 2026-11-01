@@ -129,6 +129,9 @@ for ordinary next-token supervision. Tokenization is external and explicit.
 It uses local `config.json` / `model.safetensors`, a pinned initial artifact and
 an explicit JSON recipe containing context/batch/accumulation/epoch/rate/decay/
 smoothing fields plus `max_gradient_norm` (a positive value or `null`).
+Source builds after 0.4.33 additionally accept optional `max_log_radius_drift`
+in the **fresh-run** recipe to enable [per-site projected AdamW](native-geometry-adamw.md#bound-wavegate-radius-drift-source-after-0433).
+On resume the optimizer restores that policy from its pinned bytes, not a new recipe.
 
 ```sh
 python -I bindings/st-py/examples/native_geometry_corpus_training.py \

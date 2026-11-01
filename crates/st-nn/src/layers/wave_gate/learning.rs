@@ -62,6 +62,10 @@ impl WaveGateKernel {
         &self.topos
     }
 
+    pub(crate) fn validate_log_radius(value: f32) -> PureResult<()> {
+        ProjectionRadius::new(value).map(|_| ())
+    }
+
     pub fn forward(
         &self,
         input: &[f32],

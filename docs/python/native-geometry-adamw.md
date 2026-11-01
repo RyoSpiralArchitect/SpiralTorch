@@ -129,6 +129,32 @@ normal-f32 domain; zero betas/rate/decay are permitted as documented by that
 kernel. Extreme finite candidates can reject conservatively. Python booleans
 are not accepted as numeric hyperparameters.
 
+## Bound WaveGate Radius Drift (source after 0.4.33)
+
+For a geometry-transfer comparison, construct an optimizer with
+`NativeGeometryAdamW(artifact, max_log_radius_drift=0.02)`. In Rust use
+`NativeGeometryAdamW::new_with_log_radius_drift`. Each trainable WaveGate
+log radius has its **own anchor at optimizer creation**. After the ordinary
+AdamW candidate (including clipping and weight decay), only this scalar value
+is projected to the representable points inside `[anchor - d, anchor + d]`.
+Thus the physical radius stays within a multiplicative factor of `exp(d)` in
+either direction of its initial value. A very narrow interval can hold a scalar
+stationary at f32 precision. The original geometry-domain checks still apply.
+
+Moments and slot clocks keep the true AdamW gradient history even at an edge;
+this is projected AdamW, not gradient masking or regularization in the loss.
+Gate, bias, buffers, absent placements and zero-rate semantics are unchanged.
+A nonpositive/nonfinite width or an artifact with no trainable WaveGate radius
+is rejected. `optimizer.log_radius_projection_count` counts individual scalar
+candidates actually changed, not optimizer calls; an unbounded optimizer returns
+`None`. A bound never proved active just because it was configured.
+
+Omitting the option preserves v1 checkpoint bytes. A bounded optimizer writes
+v2 with its width, original per-site anchors and projection counts. Restore
+uses the saved anchors rather than recentering them on the latest weights.
+An old reader fails closed on v2; neither the option nor v2 is in released
+0.4.33. The training recipe and the observation gradient itself are unaffected.
+
 ## Exact Pair Resume
 
 ```python

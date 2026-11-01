@@ -27,6 +27,50 @@ KINDS = ("affine", "wave", "fixed", "learned", "elliptic", "anchored", "causal",
 
 
 class NativeGeometryAdamWTests(unittest.TestCase):
+    def test_radius_bound_requires_a_positive_width_and_trainable_wave_radius(self):
+        for kind in ("affine", "fixed", "wave"):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "trainable WaveGate"):
+                st.NativeGeometryAdamW(artifact(kind), max_log_radius_drift=.02)
+        saved = artifact("learned")
+        for width in (0., -.1, float("nan"), float("inf"), True):
+            with self.subTest(width=width), self.assertRaises((ValueError, TypeError)):
+                st.NativeGeometryAdamW(saved, max_log_radius_drift=width)
+        default = st.NativeGeometryAdamW(saved)
+        self.assertIsNone(default.max_log_radius_drift)
+        self.assertIsNone(default.log_radius_projection_count)
+        self.assertNotIn("radius_drift", json.loads(default.to_json()))
+
+    def test_bounded_native_lm_observation_and_resume_retain_original_radius_anchor(self):
+        config, weights = lm["fixture"]()
+        base = st.NativeCausalLm.from_gpt2(config, weights)
+        record = json.loads(lm["artifact"](base, trainable=True).state_json())
+        p = record["placements"][0]
+        p["recipe"] = {"schema": "spiraltorch.wave_gate_adapter.v2", "features": 4, "strength": .5,
+                       "learnable_radius": True,
+                       "kernel": {"curvature": -1., "saturation": 1., "porosity": .05, "max_values": 1024}}
+        p["tensors"].append({"name": "log_radius", "shape": [], "values": [0.],
+                             "requires_grad": True, "role": "parameter"})
+        initial = st.GeometryAdapterArtifact.create_json(json.dumps(record))
+        optimizer = st.NativeGeometryAdamW(initial, max_gradient_norm=.1, max_log_radius_drift=.0001)
+        docs = [[1,2,3,4],[2,3,4,5]]
+        trainer = st.NativeCausalLmTrainer(base.with_geometry(initial), optimizer, docs, 4, learning_rate=.05,
+                                           weight_decay=.01, microbatch_windows=1, accumulation_steps=1, epochs=2)
+        observation = json.loads(trainer.step_observed().to_json())
+        self.assertNotEqual(observation["sites"][p["path"]]["log_radius_gradient"], 0.)
+        self.assertEqual(trainer.optimizer.log_radius_projection_count, 1)
+        state = json.loads(trainer.optimizer.to_json())
+        self.assertEqual(state["radius_drift"]["sites"][0]["initial_log_radius"], 0.)
+        self.assertEqual(state["schema"], "spiraltorch.native_geometry_adamw.v2")
+        restored = st.NativeCausalLmTrainer.from_json(base, docs, *trainer.checkpoint_with_id())
+        while not trainer.exhausted:
+            self.assertEqual(trainer.step().to_json(), restored.step_observed().step.to_json())
+            self.assertEqual(trainer.checkpoint_with_id(), restored.checkpoint_with_id())
+            current = json.loads(trainer.model.geometry_artifact().state_json())
+            radius = next(t for t in current["placements"][0]["tensors"] if t["name"] == "log_radius")
+            self.assertLessEqual(abs(radius["values"][0]), .0001)
+        self.assertGreater(trainer.optimizer.log_radius_projection_count, 1)
+        self.assertEqual(trainer.optimizer.revision, 4)
+
     def test_every_recipe_updates_and_resumes_exactly(self):
         x = array("f", [.2, -.3, .4, .5, .1, -.2])
         for kind in KINDS:
