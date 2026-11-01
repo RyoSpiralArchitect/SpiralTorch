@@ -100,6 +100,9 @@ class NativeCausalLm:
     @staticmethod
     def from_training_checkpoint(base: NativeCausalLm, payload: str, expected_id: str) -> NativeCausalLm: ...
     @staticmethod
+    def from_training_checkpoint_at(base: NativeCausalLm, payload: str, expected_id: str, *, update: int,
+                                    recorded_data_id: str, post_geometry_id: str) -> NativeCausalLm: ...
+    @staticmethod
     def from_gpt2(config_json: str, weights: SafeTensorArchive, *,
                   max_parameter_elements: int | None = None, max_activation_elements: int | None = None,
                   max_attention_pairs: int | None = None, max_logit_elements: int | None = None,

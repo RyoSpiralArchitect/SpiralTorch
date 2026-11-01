@@ -133,6 +133,28 @@ pub struct CausalLmTrainingResume {
 }
 
 impl CausalLmTrainingResume {
+    pub(super) fn into_model(self) -> NativeCausalLm {
+        self.model
+    }
+
+    pub(super) fn into_model_at(
+        self,
+        update: u64,
+        recorded_data_id: &str,
+        geometry_id: &str,
+    ) -> CausalLmResult<NativeCausalLm> {
+        if !crate::geometry_artifact::is_sha256_id(recorded_data_id)
+            || self.saved.updates != update
+            || self.saved.data_id != recorded_data_id
+            || self.saved.geometry_id != geometry_id
+        {
+            return Err(
+                "training checkpoint does not match the requested inference boundary".into(),
+            );
+        }
+        Ok(self.model)
+    }
+
     pub fn config(&self) -> CausalLmTrainingConfig {
         self.saved.config
     }

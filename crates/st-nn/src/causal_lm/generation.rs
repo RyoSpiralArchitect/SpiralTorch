@@ -130,10 +130,23 @@ impl NativeCausalLm {
         bytes: &[u8],
         expected_id: &str,
     ) -> CausalLmResult<Self> {
-        Ok(
-            NativeCausalLmTrainer::prepare_restore(base, bytes, expected_id)?
-                .model()
-                .clone(),
+        Ok(NativeCausalLmTrainer::prepare_restore(base, bytes, expected_id)?.into_model())
+    }
+
+    /// Select one recorded training boundary for inference. The corpus itself
+    /// is not supplied or checked; use trainer restore to verify documents.
+    pub fn from_training_checkpoint_at(
+        base: NativeCausalLm,
+        bytes: &[u8],
+        expected_id: &str,
+        update: u64,
+        recorded_data_id: &str,
+        post_geometry_id: &str,
+    ) -> CausalLmResult<Self> {
+        NativeCausalLmTrainer::prepare_restore(base, bytes, expected_id)?.into_model_at(
+            update,
+            recorded_data_id,
+            post_geometry_id,
         )
     }
 }

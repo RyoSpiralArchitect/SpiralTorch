@@ -112,6 +112,16 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
             self.assertEqual((checkpoint.decode(), entry["checkpoint_id"]), plain.checkpoint_with_id())
             self.assertEqual(entry["checkpoint_id"], "sha256:" + hashlib.sha256(checkpoint).hexdigest())
             self.assertFalse((directory / "result.json").exists())
+            inference = runs.load_observed_model(directory, 2, expected_observation_id=pin, base=self.base)
+            cfg = json.dumps({"max_new_tokens": 3, "execution": {"kind":"kv_cache","max_values":10000}})
+            a = st.NativeCausalLmGenerator(inference, [1,2], cfg)
+            b = st.NativeCausalLmGenerator(plain.model, [1,2], cfg)
+            while not a.finished:
+                self.assertEqual(a.step().to_json(), b.step().to_json())
+            self.assertEqual(a.to_json(), b.to_json())
+            with self.assertRaises((ValueError, TypeError)):
+                st.NativeCausalLm.from_training_checkpoint_at(self.base, checkpoint.decode(), entry["checkpoint_id"],
+                    update=True, recorded_data_id=plain.data_id, post_geometry_id=plain.model.geometry_artifact_id)
             def restore(**kw):
                 return runs.restore_observed_checkpoint(directory, 2, **{
                     "expected_observation_id": pin, "base": self.base, "token_documents": DOCS, **kw})
@@ -132,6 +142,9 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
             (directory / entry["observation_file"]).write_bytes(mispaired)
             with self.assertRaisesRegex(ValueError, "do not agree"):
                 restore(expected_observation_id="sha256:" + hashlib.sha256(mispaired).hexdigest())
+            with self.assertRaisesRegex(ValueError, "inference boundary"):
+                runs.load_observed_model(directory,2,expected_observation_id="sha256:" + hashlib.sha256(mispaired).hexdigest(),
+                                         base=self.base)
             (directory / entry["observation_file"]).write_bytes(raw)
             (directory / entry["file"]).write_bytes(checkpoint + b" ")
             with self.assertRaisesRegex(ValueError, "pinned"):

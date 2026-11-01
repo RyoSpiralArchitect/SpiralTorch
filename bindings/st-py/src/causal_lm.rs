@@ -199,6 +199,33 @@ impl PyNativeCausalLm {
     }
 
     #[staticmethod]
+    #[pyo3(signature = (base, payload, expected_id, *, update, recorded_data_id, post_geometry_id))]
+    fn from_training_checkpoint_at(
+        py: Python<'_>,
+        base: &Self,
+        payload: &str,
+        expected_id: &str,
+        update: &Bound<'_, PyAny>,
+        recorded_data_id: &str,
+        post_geometry_id: &str,
+    ) -> PyResult<Self> {
+        reject_bool(update)?;
+        let update = update.extract::<u64>()?;
+        py.detach(|| {
+            NativeCausalLm::from_training_checkpoint_at(
+                base.inner.clone(),
+                payload.as_bytes(),
+                expected_id,
+                update,
+                recorded_data_id,
+                post_geometry_id,
+            )
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
+    }
+
+    #[staticmethod]
     fn from_training_checkpoint(
         py: Python<'_>,
         base: &Self,

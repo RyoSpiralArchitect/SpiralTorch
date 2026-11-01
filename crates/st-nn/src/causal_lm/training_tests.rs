@@ -53,6 +53,53 @@ fn create_with_readout(
 }
 
 #[test]
+fn inference_boundary_binds_recorded_cursor_data_and_post_geometry_without_a_corpus() {
+    let mut trainer = create(config());
+    let step = trainer.step().unwrap().unwrap();
+    let (payload, pin) = trainer.checkpoint_with_id().unwrap();
+    let load_at = |u, data: &str, post: &str| {
+        NativeCausalLm::from_training_checkpoint_at(load(), payload.as_bytes(), &pin, u, data, post)
+    };
+    let model = load_at(
+        step.update,
+        trainer.data_id(),
+        &step.post_geometry_artifact_id,
+    )
+    .unwrap();
+    assert_eq!(
+        model.geometry_artifact().unwrap().to_json(),
+        trainer.model().geometry_artifact().unwrap().to_json()
+    );
+    assert!(load_at(
+        step.update + 1,
+        trainer.data_id(),
+        &step.post_geometry_artifact_id
+    )
+    .is_err());
+    let unrelated = format!("sha256:{}", "0".repeat(64));
+    assert!(load_at(step.update, &unrelated, &step.post_geometry_artifact_id).is_err());
+    assert!(load_at(
+        step.update,
+        trainer.data_id(),
+        &step.pre_geometry_artifact_id
+    )
+    .is_err());
+    let mut forged: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    forged["data_id"] = serde_json::json!("invalid");
+    let bytes = serde_json::to_vec(&forged).unwrap();
+    let id = format!("sha256:{:x}", Sha256::digest(&bytes));
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        &bytes,
+        &id,
+        step.update,
+        "invalid",
+        &step.post_geometry_artifact_id
+    )
+    .is_err());
+}
+
+#[test]
 fn training_resume_requires_same_readout_policy_and_preserves_default_bytes() {
     for accumulator in [
         CausalLmReadoutAccumulator::F32,

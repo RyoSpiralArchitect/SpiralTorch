@@ -189,6 +189,10 @@ private along with the optimizer/geometry state. File pins identify bytes,
 not authors or past execution; the example does not guarantee recovery after
 power loss, and does not upload, prune or auto-select checkpoints.
 
+For [inference from the same saved pair](native-generation.md#generate-from-a-specific-observed-update-source-after-0433),
+`load_observed_model` verifies the recorded boundary without requiring or
+validating training documents. That is intentionally distinct from a data-verified resume.
+
 The [offline process-cut probe](../../bindings/st-py/tests/probe_observed_checkpoint_recovery.py)
 uses a deterministic two-block test model, not the book-study weights. Given
 an interpreter with the reference wheel and one with this source build, it

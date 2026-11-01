@@ -198,7 +198,7 @@ pub struct GeometryAdapterArtifact {
     artifact_id: String,
 }
 
-fn identity(value: &str) -> bool {
+pub(crate) fn is_sha256_id(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|v| {
         v.len() == 64
             && v.bytes()
@@ -232,7 +232,9 @@ impl GeometryAdapterArtifact {
         if input.len() > GEOMETRY_ADAPTER_MAX_BYTES {
             return Err("geometry artifact exceeds byte budget".into());
         }
-        if !identity(expected_id) || format!("sha256:{:x}", Sha256::digest(input)) != expected_id {
+        if !is_sha256_id(expected_id)
+            || format!("sha256:{:x}", Sha256::digest(input)) != expected_id
+        {
             return Err("geometry artifact differs from the pinned identity".into());
         }
         Self::decode(input, expected_base_model_identity)
@@ -303,7 +305,9 @@ impl GeometryAdapterRecord {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.schema != GEOMETRY_ADAPTER_ARTIFACT_SCHEMA || !identity(&self.base_model_identity) {
+        if self.schema != GEOMETRY_ADAPTER_ARTIFACT_SCHEMA
+            || !is_sha256_id(&self.base_model_identity)
+        {
             return Err("invalid geometry artifact schema or base model identity".into());
         }
         if self.placements.is_empty() || self.placements.len() > 128 {
