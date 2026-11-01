@@ -100,6 +100,40 @@ fn inference_boundary_binds_recorded_cursor_data_and_post_geometry_without_a_cor
 }
 
 #[test]
+fn inference_cannot_substitute_another_cursor_even_when_the_weights_are_identical() {
+    let mut trainer = create(CausalLmTrainingConfig {
+        learning_rate: 0.,
+        ..config()
+    });
+    let first = trainer.step().unwrap().unwrap();
+    let second = trainer.step().unwrap().unwrap();
+    assert_eq!(
+        first.post_geometry_artifact_id,
+        second.post_geometry_artifact_id
+    );
+    assert_eq!(trainer.optimizer().revision(), 0);
+    let (bytes, pin) = trainer.checkpoint_with_id().unwrap();
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        bytes.as_bytes(),
+        &pin,
+        first.update,
+        trainer.data_id(),
+        &first.post_geometry_artifact_id
+    )
+    .is_err());
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        bytes.as_bytes(),
+        &pin,
+        second.update,
+        trainer.data_id(),
+        &second.post_geometry_artifact_id
+    )
+    .is_ok());
+}
+
+#[test]
 fn training_resume_requires_same_readout_policy_and_preserves_default_bytes() {
     for accumulator in [
         CausalLmReadoutAccumulator::F32,

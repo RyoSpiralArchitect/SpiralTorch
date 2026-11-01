@@ -6,11 +6,20 @@ bound of 0.02 in log radius permits a multiplicative change of about 2% from
 each site's initial radius of 4. It is not a per-step limit. No width search,
 best checkpoint, test-set selection or replacement seed is allowed.
 
+The [prior inference-only radius interchange](../2026-11-01-native-radius-interchange/README.md)
+found that substituting learned radii on eight authored prompts slightly
+increased NLL even though learned radius had improved the earlier book score.
+That observation motivated a retention control; its prompts and scores are
+not inputs to this study.
+
 All three arms train the four WaveGate MLP placements on the same 512
 Pride and Prejudice training windows as the original study, now with order
 seeds 109, 113 and 127. Each arm gets 256 AdamW updates and 32,256 shifted
 targets per seed. The free and bounded arms have identical initial geometry
 and trainable parameter counts. Fixed has four fewer trainable scalars.
+Its clipping norm also excludes gradients for those buffers. Thus fixed vs
+free is not solely a change of inference radii; bounded vs free is the
+matched-trainability comparison.
 
 Evaluate the frozen base, common insertion, and all nine terminal checkpoints
 on **two separate measures**: [Emma](https://www.gutenberg.org/ebooks/158)
