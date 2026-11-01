@@ -1,0 +1,13 @@
+{
+  "schema": "spiraltorch.native_book.radius_interchange_execution.v1",
+  "source": "a3e2ad4703f4a6b808288248761d8d4350c0c68e",
+  "plan_sha256": "685aeb95d389c9bc1bf11e1c526bdc64828e75e13a6651b8101202826130cbf9",
+  "encoded_sha256": "966d558b19c54be81e261d7fb9b11db6061b206345a7266d07b3d02e76effaa4",
+  "wheel_sha256": "1a6ba0054644ce380b0206cc1b8c62932a80e2b4cb989947a4459b7fd399357c",
+  "native_sha256": "062c544f009f6f414f9c6dc3dda8e6cbd50c7e36ce75abd4d032308f64d16484",
+  "tokenizers": "0.22.2",
+  "authored_target_tokens_per_model": 91,
+  "completed_model_prompt_pairs_before_declaration": 0,
+  "offline_control_tests": 4,
+  "native_synthetic_measurement_tests": 1
+}
