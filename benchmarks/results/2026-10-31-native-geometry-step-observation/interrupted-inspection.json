@@ -1,0 +1,208 @@
+{
+  "all_seed_development_milestone": {
+    "cursor": null,
+    "status": "not_evaluable"
+  },
+  "cases": {
+    "101-affine": {
+      "decoded_steps": 256,
+      "matched_checkpoint_id": "sha256:4c0b501c661802267c18462d91d8a1ca8ac8b7e011a6c8e2be2ae9dd98b5b568",
+      "observations_sha256": "055ae7fa92fc2964a63ac1821443b81688693242f89486ebe43f385550df3047",
+      "result_sha256": "5d5c91c5d0178d2aa6bcf1e12a9b28c4cab5c6dc66989faa84c651731f5e1958",
+      "score_cursors": [
+        0,
+        1,
+        8,
+        32,
+        128,
+        256
+      ],
+      "status": "complete"
+    },
+    "101-fixed4": {
+      "decoded_steps": 256,
+      "matched_checkpoint_id": "sha256:6bf9279482520f50a360c1abb56e377cde19e675c95eefdb6272a0ba690d2e0d",
+      "observations_sha256": "6dc88406f84c51fda549733106f82dfdb177ca8354d9bd8462c69b095d610483",
+      "result_sha256": "c6b7bb1470da061ec203d41bbd1d7ce2774af2cd682cd8397777dee078d1c8f8",
+      "score_cursors": [
+        0,
+        1,
+        8,
+        32,
+        128,
+        256
+      ],
+      "status": "complete"
+    },
+    "101-learned4": {
+      "decoded_steps": 256,
+      "matched_checkpoint_id": "sha256:dce14226c6acded31439493f7818810eb793d1db7df31cb4b17d69f65a5bbccb",
+      "observations_sha256": "b87f9ffbf4907ec59096a35e2c768a6b598859a0bc73d00c65d42ceca7a1a8c0",
+      "result_sha256": "ebf570c570327a89be90f9e87b7d9df7350d15b7b7889a96f58de269a5d5e4b6",
+      "score_cursors": [
+        0,
+        1,
+        8,
+        32,
+        128,
+        256
+      ],
+      "status": "complete"
+    },
+    "103-affine": {
+      "decoded_steps": 0,
+      "status": "unstarted"
+    },
+    "103-fixed4": {
+      "decoded_steps": 256,
+      "matched_checkpoint_id": "sha256:66dc9265e725322f61c33f0a6bb6e79f2fb8bc47ae6942fc7b0467cb737add6b",
+      "observations_sha256": "1e97c2f48c80469f1a65777556324a7320d277c7825fe5f9f42fd3966056b299",
+      "result_sha256": "03e25ca97c4ed5e87a80436838eace495f336bb901ded3809c70601a6345cbf3",
+      "score_cursors": [
+        0,
+        1,
+        8,
+        32,
+        128,
+        256
+      ],
+      "status": "complete"
+    },
+    "103-learned4": {
+      "decoded_steps": 83,
+      "observations_sha256": "9017eb1beda13b8817d3d753fd8bc0cba298972db9345fb069a4567b2c34cc9c",
+      "score_cursors": [
+        0,
+        1,
+        8,
+        32
+      ],
+      "status": "partial"
+    },
+    "107-affine": {
+      "decoded_steps": 0,
+      "status": "unstarted"
+    },
+    "107-fixed4": {
+      "decoded_steps": 0,
+      "status": "unstarted"
+    },
+    "107-learned4": {
+      "decoded_steps": 0,
+      "status": "unstarted"
+    }
+  },
+  "declaration_sha256": "2170a96e0311b8728481233daadfe0ebe4fa25e29cb94ec6b13fe7ef15b4d8f7",
+  "decoded_observations": 1107,
+  "development_learned4_minus_affine_complete_pairs_only": {
+    "101": {
+      "0": 0.0,
+      "1": 2.4457772573427405e-05,
+      "128": 0.01207822561264038,
+      "256": 0.028957347075144746,
+      "32": 0.001849005619684263,
+      "8": 0.0002583066622419139
+    }
+  },
+  "first_attempt_files": 49,
+  "first_attempt_inventory_sha256": "395a6eb83272c04af38486d38643d81c995cc28b5d13d2e3d142a99015b0fe53",
+  "observed_sites_per_step": 4,
+  "original_study_audit": {
+    "chapter_scores_verified": 330,
+    "checkpoints_verified": 9,
+    "native_process_receipts_verified": 11,
+    "private_results_sha256": "08ed61e5e7baea20c2cc2a97019428fb2313941164183d96c597ba4d689712ba",
+    "public_results_sha256": "2654ade227263d6afa3af75628ce9d87f5e80dd32b6a88ce48eabc931acd5b99",
+    "reserve_read_by_audit": false,
+    "schema": "spiraltorch.native_book_ablation.audit.v1",
+    "scored_variants": 11,
+    "trainable_per_case": {
+      "101-affine": 6144,
+      "101-fixed4": 6144,
+      "101-learned4": 6148,
+      "103-affine": 6144,
+      "103-fixed4": 6144,
+      "103-learned4": 6148,
+      "107-affine": 6144,
+      "107-fixed4": 6144,
+      "107-learned4": 6148
+    },
+    "trained_or_scored_by_audit": false,
+    "updates_verified": 2304
+  },
+  "original_training_batch_nll_post_hoc": {
+    "101": {
+      "129:256": {
+        "learned4-affine": 0.02027484029531479,
+        "learned4-fixed4": -0.0033323559910058975
+      },
+      "1:1": {
+        "learned4-affine": 0.0,
+        "learned4-fixed4": 0.0
+      },
+      "2:8": {
+        "learned4-affine": 0.0001237051827569502,
+        "learned4-fixed4": 0.0
+      },
+      "33:128": {
+        "learned4-affine": 0.00688330580790808,
+        "learned4-fixed4": -0.000552639365196228
+      },
+      "9:32": {
+        "learned4-affine": 0.0010209083557128906,
+        "learned4-fixed4": -1.710653305053711e-05
+      }
+    },
+    "103": {
+      "129:256": {
+        "learned4-affine": 0.020809633657336235,
+        "learned4-fixed4": -0.0035217292606830597
+      },
+      "1:1": {
+        "learned4-affine": 0.0,
+        "learned4-fixed4": 0.0
+      },
+      "2:8": {
+        "learned4-affine": 0.0001155308314730874,
+        "learned4-fixed4": -9.5367431640625e-07
+      },
+      "33:128": {
+        "learned4-affine": 0.006536722183227539,
+        "learned4-fixed4": -0.00053772578636746
+      },
+      "9:32": {
+        "learned4-affine": 0.0009831885496769388,
+        "learned4-fixed4": -1.950065294931136e-05
+      }
+    },
+    "107": {
+      "129:256": {
+        "learned4-affine": 0.02021084912121296,
+        "learned4-fixed4": -0.003378530964255333
+      },
+      "1:1": {
+        "learned4-affine": 0.0,
+        "learned4-fixed4": 0.0
+      },
+      "2:8": {
+        "learned4-affine": 0.0001223427908758623,
+        "learned4-fixed4": -2.0435878234081883e-07
+      },
+      "33:128": {
+        "learned4-affine": 0.0064396485686302185,
+        "learned4-fixed4": -0.0005294755101203918
+      },
+      "9:32": {
+        "learned4-affine": 0.0010937054951991598,
+        "learned4-fixed4": -1.9371509552001953e-05
+      }
+    }
+  },
+  "plan_sha256": "db9bccb39e0d3d7c7334082d8dd27f6f2e9abc62d6b29b76580cba98cf4a44c0",
+  "schema": "spiraltorch.native_book.interrupted_inspection.v1",
+  "status": "incomplete",
+  "supervisor_status_present": false,
+  "termination_cause": "not established",
+  "wheel_sha256": "a3d2164667e70305732f8f8af3f143237391ab1a3b1a469699019de12e18b8ca",
+  "worker_final_checkpoint_receipts": 4
+}

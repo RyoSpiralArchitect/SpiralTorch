@@ -24,13 +24,54 @@ gradients are null. Exact individual radius values, raw traces, checkpoints
 and tokens stay private. These are matched batches *within* each update, not
 identical batches *between* updates, and a correlation is not a mediation test.
 
-## Reproduce
+## First attempt: incomplete
+
+The first local CPU attempt ended without a supervisor status. The cause is
+unknown. The [inspection](interrupted-inspection.json) certifies what was
+retained, **not** a successful nine-case replay:
+
+| Cases | Retained evidence |
+| --- | --- |
+| 101-affine, 101-fixed4, 101-learned4, 103-fixed4 | 256 matched ordinary steps, six development scores and a worker receipt for the byte-identical final checkpoint in each case |
+| 103-learned4 | 83 contiguous decoded steps and scores at 0, 1, 8, 32; no completion receipt or intermediate checkpoint |
+| 103-affine and all three seed-107 arms | Never started |
+
+All 1,107 retained observation records matched the corresponding original step
+*values* and four-site schema. The worker wrote the observation before checking
+the ordinary step bytes. Decoded agreement in the interrupted prefix is not
+a byte-level completion receipt. The 49 original replay files have a private
+byte-count/hash inventory; no missing scores, updates or status were filled in.
+
+Only seed 101 has a complete learned4/affine development pair. The NLL
+differences (learned4 minus affine; positive favors affine) at updates
+0, 1, 8, 32, 128 and 256 were **0, +0.000024, +0.000258, +0.001849,
++0.012078 and +0.028957**. The first sampled crossing of +0.001 was at 32
+for this seed; the first **all-seed** crossing is **not evaluable**.
+No cross-seed residual or radius-gradient projection was produced.
+
+Separately, the original completed fits still verify: nine checkpoints and
+2,304 updates. A post-hoc comparison of their **training batches**, not the
+development chapters, shows a learned4-minus-affine mean NLL of +0.02021 to
++0.02081 across the three seeds in updates 129-256; learned4-minus-fixed4
+was -0.00352 to -0.00333. This uses paired windows and 126 targets per update.
+It neither fills the missing development curves nor identifies a causal mechanism.
+
+Check or reproduce the inspection without loading a model, resuming training,
+or touching the first attempt:
+
+```sh
+python3 -I -S -B -m unittest discover -s . -p 'test_*.py'
+python3 -I -S -B inspect_interrupted.py "$OUTPUT" "$ORIGINAL" "$DEV_WHEEL" | diff - interrupted-inspection.json
+```
+
+## Original protocol (not a retry)
 
 Use the original private reader-verifiable corpus/fit directory, local pinned
 GPT-2 files and a fresh isolated venv containing the development wheel built
 from the native source in the plan. Never publish that wheel as 0.4.33.
 The original released wheel alone does not expose the observer. Supply
-independently recorded SHA-256 pins and a new private output path:
+independently recorded SHA-256 pins and a new private output path. The commands
+below document the frozen protocol; do not restart the interrupted first attempt:
 
 ```sh
 python3 -I -S -B test_analysis.py -v
