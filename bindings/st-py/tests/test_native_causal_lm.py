@@ -19,7 +19,7 @@ if __name__ == "__main__":
 import spiraltorch as st  # noqa: E402
 
 
-def fixture(*, width=4, heads=2, positions=8):
+def fixture(*, width=4, heads=2, positions=8, raw_weights=False):
     config = {"model_type": "gpt2", "vocab_size": 11, "n_positions": positions,
               "n_embd": width, "n_head": heads, "n_layer": 2}
     header, payload = {}, bytearray()
@@ -45,7 +45,8 @@ def fixture(*, width=4, heads=2, positions=8):
     add("ln_f.weight", [width])
     add("ln_f.bias", [width])
     raw = json.dumps(header).encode()
-    return json.dumps(config), st.SafeTensorArchive.from_bytes(struct.pack("<Q", len(raw)) + raw + payload)
+    weights = struct.pack("<Q", len(raw)) + raw + payload
+    return json.dumps(config), bytes(weights) if raw_weights else st.SafeTensorArchive.from_bytes(weights)
 
 
 def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False):

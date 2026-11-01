@@ -16,8 +16,10 @@ mod context;
 mod documents;
 mod evaluation;
 mod generation;
+mod session;
 mod training;
 use accumulation::PyNativeCausalLmAccumulator;
+use session::PyNativeCausalLmAdaptationGradients;
 
 fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
@@ -198,6 +200,43 @@ impl PyNativeCausalLmLoraGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
+    /// Shared Rust-owned gradient operation, including composed adapter snapshots.
+    fn adaptation_loss_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let shape = self::shape(shape)?;
+        let count = self
+            .inner
+            .adaptation_gradient_input_count(shape)
+            .map_err(error)?;
+        let windows = tokens(windows, count)?;
+        py.detach(|| self.inner.adaptation_loss_gradients(&windows, shape))
+            .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+            .map_err(error)
+    }
+
+    #[pyo3(signature=(gradients, mode, learning_rate))]
+    fn step_adaptation_sgd(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmAdaptationGradients,
+        mode: &str,
+        learning_rate: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        let mode = session::mode(mode)?;
+        reject_bool(learning_rate)?;
+        let learning_rate = learning_rate.extract::<f32>()?;
+        py.detach(|| {
+            self.inner
+                .step_adaptation_sgd(&gradients.inner, mode, learning_rate)
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
+    }
+
     /// Attach one native GPT-2 attention output adapter; no foreign computation.
     fn with_lora(
         &self,
@@ -522,6 +561,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLmLoraGradients>()?;
     evaluation::register(module)?;
     training::register(module)?;
+    session::register(module)?;
     generation::register(module)?;
     context::register(module)?;
     Ok(())

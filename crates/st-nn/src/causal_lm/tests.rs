@@ -4,6 +4,8 @@ use safetensors::tensor::{serialize, Dtype, TensorView};
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[path = "adaptation_tests.rs"]
+mod adaptation;
 #[path = "context_tests.rs"]
 mod context;
 #[path = "evaluation_tests.rs"]
@@ -457,3 +459,6 @@ fn frozen_geometry_is_identity_bound_and_affects_downstream_logits() {
         .with_geometry(artifact(&model, "transformer.h.0", 0.1))
         .is_err());
 }
+
+#[path = "session_tests.rs"]
+mod session;
