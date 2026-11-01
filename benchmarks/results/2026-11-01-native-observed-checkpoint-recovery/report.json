@@ -1,0 +1,16 @@
+{
+  "schema": "spiraltorch.native_corpus.observed_process_probe.v1",
+  "status": "matched",
+  "reference_native_sha256": "062c544f009f6f414f9c6dc3dda8e6cbd50c7e36ce75abd4d032308f64d16484",
+  "candidate_native_sha256": "e15c67f441a9a993739cb1eac717d67fa239f327aaef425ae15f442d40cbe3d6",
+  "cut_exit": 43,
+  "resumed_cursor": 2,
+  "steps_sha256": "72aadba3a47777dbc1c7d00f2f781dfcdbdc8ff995046a252f3996a626fe0ab9",
+  "matched_checkpoint_sha256": [
+    "b3f6c0346467e62557eb6d425a857f17548399782723dbfc80673d9e01a7815a",
+    "54104072a8344d55f3bae17718122dee54df6916e2c76e6d29a432ad50151cfb",
+    "e11aba34bd471eb768daae4dd0e53833f71dc878a2990e05cfba4d3a84f554bc",
+    "ab19ce6e30fa47b62e4385ac333bc2787a923f412db5578d353f4921290c70f4"
+  ],
+  "observation_id": "sha256:dcace3e566d82e6aa7e9e463f219d38603e56c497f187ab2e8934fa434e0cbb9"
+}
