@@ -152,6 +152,11 @@ A generation checkpoint binds the base and geometry, not the history of a
 training receipt. Retain the same receipt pin across invocations if that
 lineage matters; identical weights alone cannot establish it.
 
+The [runtime qualification](../../benchmarks/results/2026-11-01-native-radius-drift-learning/runtime_checks.json)
+compares four greedy steps from one real bounded-GPT-2 intermediate snapshot,
+using both the observed pair and the bare training checkpoint. The matching
+steps test the handoff, not prose quality.
+
 ## Offline example
 
 [`native_geometry_generation.py`](../../bindings/st-py/examples/native_geometry_generation.py)

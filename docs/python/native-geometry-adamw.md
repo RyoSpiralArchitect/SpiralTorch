@@ -167,6 +167,10 @@ drift-capable build: clipping on/off and projection on/off over eight updates.
 The study wheel and this follow-up matched all 32 geometry and optimizer
 checkpoint pairs. This verifies the tested trajectories, not a speedup.
 
+See the [matched adaptation and retention study](../../benchmarks/results/2026-11-01-native-radius-drift-learning/README.md)
+for the separate model-quality comparison. Passing checkpoint tests alone is
+not a reason to turn this policy on by default.
+
 ## Exact Pair Resume
 
 ```python

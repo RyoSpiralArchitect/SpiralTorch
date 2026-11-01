@@ -1,0 +1,69 @@
+{
+  "schema": "spiraltorch.native_lm.radius_runtime_qualification.v1",
+  "scope": "Runtime compatibility, not the joint learning criterion. No wheel here is a new public release.",
+  "public_reference_wheel_sha256": "1a6ba0054644ce380b0206cc1b8c62932a80e2b4cb989947a4459b7fd399357c",
+  "study_optimizer_source": "c54eb1144cdc939f6eca3a595742f56754495e54",
+  "study_wheel_sha256": "660e67b131e5556beeedcf2dadb84df556d1b00bc945cc14d14599f0b68ef10c",
+  "unbounded_public_wheel_comparison": {
+    "matched_step_and_checkpoint_pairs": 4,
+    "resumed_cursor": 2,
+    "ordinary_steps_sha256": "72aadba3a47777dbc1c7d00f2f781dfcdbdc8ff995046a252f3996a626fe0ab9"
+  },
+  "hotpath_source": "d76c26b081a008ebfa9395ff2a848c152d028344",
+  "hotpath_wheel_sha256": "cc9039f55ebf82a4feab06424733c0aa517577aecbc4c0f96334da28442f55fa",
+  "hotpath_fixture": {
+    "updates_compared": 32,
+    "conditions": [
+      "bounded/unbounded",
+      "clip/no clip"
+    ],
+    "paired_geometry_and_optimizer_matrix_sha256": "113ccddd7070ddd8de0aac59826ca2d7a7824175573c730d5dbbdeb89edc4d35",
+    "timing_claim": false
+  },
+  "old_reader": {
+    "v1": "exact round trip",
+    "v2": "rejected unsupported policy"
+  },
+  "new_reader": {
+    "v1": "exact round trip",
+    "v2": "exact round trip"
+  },
+  "inference_source": "56008c56eed6b421c462925350f19fe650ecab1c",
+  "inference_wheel_sha256": "a853827414dfed29a7481c93caf8848bf6640bc6b551027e6cf5d61b741598ca",
+  "real_intermediate": {
+    "seed": 109,
+    "update": 64,
+    "data_verified_training_restores": [
+      "fixed",
+      "free",
+      "bounded"
+    ],
+    "new_training_steps": 0
+  },
+  "real_generation": {
+    "arm": "bounded",
+    "seed": 109,
+    "update": 64,
+    "training_documents_supplied": false,
+    "heldout_targets_scored": 0,
+    "prompt_ids": [
+      15496,
+      11
+    ],
+    "selection": "greedy softmax, native KV cache",
+    "generated_tokens": 4,
+    "packaged_cli_steps_and_checkpoint_matched": true,
+    "packaged_cli_raw_outputs_retained_privately": true,
+    "sources_compared": [
+      "inference wheel observed pair",
+      "inference wheel bare checkpoint",
+      "study wheel bare checkpoint"
+    ],
+    "geometry_id": "sha256:a3ba7fccb2ec42167d1960c8ac84c73d0167e3eb1543c3ea8f4d97379e614f9c",
+    "checkpoint_id": "sha256:d2a1323e025960e3006b9cd4758d42e736107cfb2673379b6455c835c7130d00",
+    "observation_id": "sha256:3a0b3a0821caf189b5e0349386bac99727bc4194ede08463f20cb7e26be3554d",
+    "steps_sha256": "1c18ce2322d6dfc5d770953c56b79d02bde53b05218b2ded4f22b5d995ed4963",
+    "generation_checkpoint_id": "sha256:04ae1ae9e221c078be16e9c55cd6c1777b0588344c575e424b0cee58d6b69466"
+  },
+  "wasm": "cargo check --offline --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features nn (Rust 1.97.0); compile only, not a browser training or inference run."
+}
