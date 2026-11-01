@@ -2,6 +2,38 @@ use super::*;
 use crate::geometry_runtime::tests::artifact;
 use serde_json::{json, Value};
 
+#[test]
+fn outward_candidates_land_on_the_last_representable_point_inside_each_edge() {
+    for initial in [-80., -0.2, -0.0, 1.3862944, 80.] {
+        let mut record = artifact(true, Some(true), 0.5).record().clone();
+        record.placements[0]
+            .tensors
+            .iter_mut()
+            .find(|p| p.name == "log_radius")
+            .unwrap()
+            .values[0] = initial;
+        let artifact = GeometryAdapterArtifact::create(record).unwrap();
+        for width in [f32::from_bits(1), f32::EPSILON, 0.02, 1., 32.] {
+            let mut policy = RadiusDrift::new(&artifact, width).unwrap();
+            for candidate in [-86., -1., -0.2, 0., 1., 5., 86.] {
+                let value = policy.project("site", candidate).unwrap();
+                let distance = |x| (f64::from(x) - f64::from(initial)).abs();
+                assert!(distance(value) <= f64::from(width));
+                if distance(candidate) <= f64::from(width) {
+                    assert_eq!(candidate.to_bits(), value.to_bits());
+                } else {
+                    let next = if candidate > initial {
+                        value.next_up()
+                    } else {
+                        value.next_down()
+                    };
+                    assert!(distance(next) > f64::from(width));
+                }
+            }
+        }
+    }
+}
+
 fn bound(a: &GeometryAdapterArtifact, width: f32) -> Result<NativeGeometryAdamW> {
     NativeGeometryAdamW::new_with_log_radius_drift(
         a,

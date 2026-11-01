@@ -147,13 +147,18 @@ Gate, bias, buffers, absent placements and zero-rate semantics are unchanged.
 A nonpositive/nonfinite width or an artifact with no trainable WaveGate radius
 is rejected. `optimizer.log_radius_projection_count` counts individual scalar
 candidates actually changed, not optimizer calls; an unbounded optimizer returns
-`None`. A bound never proved active just because it was configured.
+`None`. Configuring a bound does not establish that it was active.
 
 Omitting the option preserves v1 checkpoint bytes. A bounded optimizer writes
 v2 with its width, original per-site anchors and projection counts. Restore
 uses the saved anchors rather than recentering them on the latest weights.
 An old reader fails closed on v2; neither the option nor v2 is in released
 0.4.33. The training recipe and the observation gradient itself are unaffected.
+
+The [two-wheel reader probe](../../benchmarks/results/2026-11-01-native-radius-drift-learning/probe_readers.py)
+exercises the installed old and new readers on a tiny trained artifact. The
+old reader reproduced v1 exactly and rejected v2; the development reader
+reproduced both formats. This says nothing about which policy learns better.
 
 ## Exact Pair Resume
 
