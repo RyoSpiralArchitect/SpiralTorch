@@ -336,17 +336,19 @@ impl NativeGeometryRuntime {
             .revision
             .checked_add(1)
             .ok_or("native geometry AdamW revision exhausted")?;
-        let mut squared_norm = 0f64;
-        for (path, name) in &optimizer.keys {
-            if let Some(values) = gradients.get(path) {
-                for &value in &values[name] {
-                    squared_norm += f64::from(value) * f64::from(value);
-                }
-            }
-        }
         let factors = optimizer
             .clip
-            .map(|c| c.factors(squared_norm))
+            .map(|c| {
+                let mut squared_norm = 0f64;
+                for (path, name) in &optimizer.keys {
+                    if let Some(values) = gradients.get(path) {
+                        for &value in &values[name] {
+                            squared_norm += f64::from(value) * f64::from(value);
+                        }
+                    }
+                }
+                c.factors(squared_norm)
+            })
             .transpose()?;
         let factors = factors.as_ref().map_or(&[][..], |f| f.as_slice());
         let mut record = self.artifact.record().clone();
@@ -373,15 +375,16 @@ impl NativeGeometryRuntime {
                         slot.second[i],
                         clock,
                     )?;
-                    p.values[i] = match &mut next.radius_drift {
-                        Some(bound) if p.name == "log_radius" => {
-                            bound.project(&placement.path, candidate.value)?
-                        }
-                        _ => candidate.value,
-                    };
+                    p.values[i] = candidate.value;
                     slot.first[i] = candidate.first;
                     slot.second[i] = candidate.second;
                     slot.steps = candidate.steps;
+                }
+                if let Some(bound) = &mut next.radius_drift {
+                    if p.name == "log_radius" {
+                        // WaveRadius owns one scalar; gates and biases need no per-element branch.
+                        p.values[0] = bound.project(&placement.path, p.values[0])?;
+                    }
                 }
             }
         }

@@ -160,6 +160,13 @@ exercises the installed old and new readers on a tiny trained artifact. The
 old reader reproduced v1 exactly and rejected v2; the development reader
 reproduced both formats. This says nothing about which policy learns better.
 
+The update loop computes a global gradient norm only when clipping is enabled,
+and applies radius projection once per eligible scalar tensor, outside the
+element loop. With `--peer-python`, the same probe compares a second
+drift-capable build: clipping on/off and projection on/off over eight updates.
+The study wheel and this follow-up matched all 32 geometry and optimizer
+checkpoint pairs. This verifies the tested trajectories, not a speedup.
+
 ## Exact Pair Resume
 
 ```python

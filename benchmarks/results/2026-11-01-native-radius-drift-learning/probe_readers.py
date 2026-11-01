@@ -17,15 +17,57 @@ def sha(raw):
 
 
 def child(root, mode):
+    sys.path.insert(0, str(HERE.parent))
+    from protocol import guard_ml
+
+    guard_ml()
     import spiraltorch as st
 
-    if mode == "write":
+    if mode == "write" or mode.startswith("matrix-"):
         make = runpy.run_path(
             str(
                 HERE.parents[3] / "bindings/st-py/tests/test_native_geometry_runtime.py"
             )
         )["artifact"]
         start = make("learned")
+        if mode.startswith("matrix-"):
+            rows = {}
+            for drift in (None, 0.00001):
+                for clip in (None, 0.1):
+                    runtime = st.NativeGeometryRuntime(start)
+                    state = st.NativeGeometryAdamW(
+                        start, max_gradient_norm=clip, max_log_radius_drift=drift
+                    )
+                    values = []
+                    for scale in (1.0, 1.0, -2.0, -2.0, 0.25, 0.25, -0.1, 2.0):
+                        batch = runtime.forward(
+                            "site", [0.2, -0.3, 0.4, 0.5, 0.1, -0.2], 2
+                        )
+                        runtime, state = runtime.step_adamw(
+                            batch,
+                            [scale * v for v in (1.0, -0.3, 0.4, 0.7, -0.8, 0.3)],
+                            state,
+                            0.025,
+                            weight_decay=0.02,
+                        )
+                        geo = runtime.artifact()
+                        if geo.artifact_id != sha(
+                            geo.to_json().encode()
+                        ) or state.checkpoint_id != sha(state.to_json().encode()):
+                            raise ValueError("incorrect checkpoint identity")
+                        values.append(
+                            {
+                                "geometry": geo.artifact_id,
+                                "optimizer": state.checkpoint_id,
+                                "projected": state.log_radius_projection_count,
+                            }
+                        )
+                    if drift is not None and not state.log_radius_projection_count:
+                        raise ValueError("comparison never engaged the bound")
+                    rows[f"{drift}/{clip}"] = values
+            with (root / (mode + ".json")).open("x") as f:
+                print(json.dumps(rows, sort_keys=True), file=f)
+            return
         for name in ("v1", "v2"):
             runtime = st.NativeGeometryRuntime(start)
             options = {"max_log_radius_drift": 0.000001} if name == "v2" else {}
@@ -84,15 +126,26 @@ if __name__ == "__main__":
         p = argparse.ArgumentParser(description=__doc__)
         p.add_argument("--candidate-python", type=Path, required=True)
         p.add_argument("--reference-python", type=Path, required=True)
+        p.add_argument(
+            "--peer-python",
+            type=Path,
+            help="optional second drift-capable wheel for exact update parity",
+        )
         p.add_argument("--output", type=Path, required=True)
         a = p.parse_args()
         os.umask(0o077)
         a.output.mkdir(mode=0o700, exist_ok=False)
-        for mode, interpreter in (
+        stages = [
             ("write", a.candidate_python),
             ("old", a.reference_python),
             ("new", a.candidate_python),
-        ):
+        ]
+        if a.peer_python:
+            stages += [
+                ("matrix-candidate", a.candidate_python),
+                ("matrix-peer", a.peer_python),
+            ]
+        for mode, interpreter in stages:
             with (a.output / (mode + ".log")).open("xb") as log:
                 subprocess.run(
                     [interpreter, "-I", "-B", HERE, "--child", mode, a.output],
@@ -101,3 +154,9 @@ if __name__ == "__main__":
                     stderr=subprocess.STDOUT,
                     timeout=60,
                 )
+        if (
+            a.peer_python
+            and (a.output / "matrix-candidate.json").read_bytes()
+            != (a.output / "matrix-peer.json").read_bytes()
+        ):
+            raise ValueError("geometry/AdamW updates differ across builds")
