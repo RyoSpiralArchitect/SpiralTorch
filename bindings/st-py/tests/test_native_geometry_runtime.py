@@ -134,6 +134,40 @@ class NativeGeometryTests(unittest.TestCase):
                             with self.assertRaises(ValueError):
                                 batch.vjp_parameters_buffer(array("f", invalid))
 
+    def test_frozen_branch_does_not_evaluate_an_overflowing_gate_gradient(self):
+        seed = array("f", [2e38, 0., 0.])
+        for kind in ("wave", "topos", "affine", "learned", "fractional"):
+            with self.subTest(kind=kind):
+                state = json.loads(artifact(kind).state_json())
+                site = state["placements"][0]
+                site["recipe"]["strength"] = 1.
+                if kind == "topos":
+                    site["recipe"]["kernel"].update(coupling=0., iterations=1)
+                for t in site["tensors"]:
+                    if t["name"] in ("gate", "bias"):
+                        t["values"] = [0.] * 3
+                runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+                batch = runtime.forward_sequence("site", [2., 0., 0.], [1, 1])
+                with self.assertRaises(ValueError):
+                    batch.vjp(list(seed))
+                self.assertEqual(batch.vjp_input(list(seed)), list(seed))
+                self.assertEqual(batch.vjp_input_buffer(seed), seed.tobytes())
+
+    def test_elliptic_frozen_readout_does_not_reduce_unused_weight_products(self):
+        seed = array("f", [2e38, 0., 0.] * 16)
+        for kind in ("elliptic", "anchored", "causal", "gated"):
+            with self.subTest(kind=kind):
+                state = json.loads(artifact(kind).state_json())
+                p = state["placements"][0]
+                p["recipe"]["strength"] = 1.
+                weight = next(t for t in p["tensors"] if t["name"] == "readout.weight")
+                weight["values"] = [0.] * len(weight["values"])
+                runtime = st.NativeGeometryRuntime(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+                batch = runtime.forward_sequence("site", [0.] * len(seed), [16, 1])
+                with self.assertRaises(ValueError):
+                    batch.vjp(list(seed))
+                self.assertEqual(batch.vjp_input_buffer(seed), seed.tobytes())
+
     def test_unused_input_overflow_does_not_block_parameters_or_sgd(self):
         state = json.loads(artifact().state_json())
         gate = next(t for t in state["placements"][0]["tensors"] if t["name"] == "gate")

@@ -73,9 +73,7 @@ impl EllipticGatedCausalLearningBatch {
         &self,
         upstream: &[f32],
     ) -> Result<EllipticGatedCausalGradients, EllipticLearningError> {
-        if upstream.len() != self.features.len() || upstream.iter().any(|v| !v.is_finite()) {
-            return Err(EllipticLearningError::InvalidUpstream);
-        }
+        let orientations = self.vjp_orientations(upstream)?;
         let local = self.causal.local.features();
         let raw_mix = upstream
             .iter()
@@ -84,10 +82,19 @@ impl EllipticGatedCausalLearningBatch {
             .map(|((&u, &a), &b)| f64::from(u) * (f64::from(b) - f64::from(a)))
             .sum::<f64>()
             * (1.0 - self.mix * self.mix);
-        // Exact pointwise orientation VJP at initialization, without losing the
-        // nonzero gate derivative that lets the contextual path start learning.
-        let orientations = if self.mix == 0.0 {
-            self.causal.local.vjp(upstream)?
+        Ok(EllipticGatedCausalGradients {
+            orientations,
+            raw_mix: gradient_f32(raw_mix)?,
+        })
+    }
+
+    /// Retains all tied Q/K/V orientation paths, but no shared gate gradient.
+    pub fn vjp_orientations(&self, upstream: &[f32]) -> Result<Vec<f32>, EllipticLearningError> {
+        if upstream.len() != self.features.len() || upstream.iter().any(|v| !v.is_finite()) {
+            return Err(EllipticLearningError::InvalidUpstream);
+        }
+        if self.mix == 0.0 {
+            self.causal.local.vjp(upstream)
         } else {
             let scaled = upstream
                 .iter()
@@ -99,12 +106,8 @@ impl EllipticGatedCausalLearningBatch {
                 .zip(upstream)
                 .map(|(&g, &u)| gradient_f32(f64::from(g) + (1.0 - self.mix) * f64::from(u)))
                 .collect::<Result<Vec<_>, _>>()?;
-            self.causal.local.vjp(&combined)?
-        };
-        Ok(EllipticGatedCausalGradients {
-            orientations,
-            raw_mix: gradient_f32(raw_mix)?,
-        })
+            self.causal.local.vjp(&combined)
+        }
     }
 }
 

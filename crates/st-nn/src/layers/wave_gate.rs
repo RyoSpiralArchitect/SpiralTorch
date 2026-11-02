@@ -419,6 +419,29 @@ impl WaveGate {
         })
     }
 
+    fn scalar_affine_adjoint(
+        &self,
+        input: &Tensor,
+        grad_output: &Tensor,
+        gate_data: &[f32],
+    ) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
+        let bias = self.bias.value().data();
+        let mut pre_saturation = Tensor::zeros(rows, cols)?;
+        for r in 0..rows {
+            for c in 0..cols {
+                let i = r * cols + c;
+                pre_saturation.data_mut()[i] = input.data()[i] * gate_data[c] + bias[c];
+            }
+        }
+        let mut projected = pre_saturation.clone();
+        RewriteMonad::new(&self.topos)
+            .rewrite_tensor("wave_gate_backward_preprojected_rewrite", &mut projected)?;
+        let gradient =
+            poincare_projection_backward(&projected, grad_output, self.topos.curvature())?;
+        porous_saturation_backward(&pre_saturation, &gradient, &self.topos)
+    }
+
     fn pullback(
         &self,
         input: &Tensor,
@@ -478,6 +501,7 @@ impl WaveGate {
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor("wave_gate_backward_gate_rewrite", &mut gate)?;
         let gate_data = gate.data();
+        #[cfg(feature = "wgpu")]
         let bias_data = self.bias.value().data();
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
@@ -563,23 +587,7 @@ impl WaveGate {
             }
         }
 
-        let mut pre_saturation = Tensor::zeros(rows, cols)?;
-        {
-            let out_buf = pre_saturation.data_mut();
-            let input_buf = input.data();
-            for r in 0..rows {
-                let offset = r * cols;
-                for c in 0..cols {
-                    out_buf[offset + c] = input_buf[offset + c] * gate_data[c] + bias_data[c];
-                }
-            }
-        }
-        let mut preprojected = pre_saturation.clone();
-        monad.rewrite_tensor("wave_gate_backward_preprojected_rewrite", &mut preprojected)?;
-        let grad_saturated =
-            poincare_projection_backward(&preprojected, grad_output, self.topos.curvature())?;
-        let grad_affine =
-            porous_saturation_backward(&pre_saturation, &grad_saturated, &self.topos)?;
+        let grad_affine = self.scalar_affine_adjoint(input, grad_output, gate_data)?;
         let gradient_scale = parameter_gradient_scale.unwrap_or(1.0 / (rows as f32));
         let grad_gate_product = grad_affine.hadamard_with_backend(input, reduction_backend)?;
         let grad_gate = Tensor::from_vec(

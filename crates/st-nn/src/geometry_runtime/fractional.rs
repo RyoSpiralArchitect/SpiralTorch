@@ -172,6 +172,22 @@ impl FractionalRuntimeBatch {
         &self.output
     }
 
+    pub(super) fn vjp_input(&self, upstream: &Tensor) -> Result<Tensor> {
+        let direction = upstream.mul_row_with_backend(&self.gate, CPU)?;
+        let input = match &self.map {
+            Map::Plain(batch) => batch.vjp_input(direction.data())?,
+            Map::Gain(batch) => batch.vjp_input(direction.data())?,
+        };
+        let (rows, features) = self.input.shape();
+        let input = Tensor::from_vec(rows, features, input)?;
+        Ok(match &self.local_gate {
+            Some(local) => {
+                input.add_with_backend(&upstream.mul_row_with_backend(local, CPU)?, CPU)?
+            }
+            None => input,
+        })
+    }
+
     pub(super) fn vjp(
         &self,
         upstream: &Tensor,

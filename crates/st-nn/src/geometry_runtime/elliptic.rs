@@ -145,24 +145,23 @@ impl EllipticRuntimeBatch {
         &self.output
     }
 
-    pub(super) fn vjp(
+    fn coordinate_adjoint(
         &self,
         upstream: &Tensor,
-        need_input: bool,
-    ) -> Result<NativeGeometryPullback> {
-        let grad_readout = finite(upstream.matmul_lhs_transpose_scaled_with_backend(
-            &self.features,
-            1.0,
-            MATMUL,
-        )?)?;
+        need_mix: bool,
+    ) -> Result<(Tensor, Option<f32>)> {
         let grad_features = finite(upstream.matmul_with_backend(&self.readout_weight, MATMUL)?)?;
         let (orientations, raw_mix) = match &self.map {
             Map::Pointwise(batch) => (batch.vjp(grad_features.data())?, None),
+            Map::Anchored(batch) if !need_mix => {
+                (batch.vjp_orientations(grad_features.data())?, None)
+            }
             Map::Anchored(batch) => {
                 let gradient = batch.vjp(grad_features.data())?;
                 (gradient.orientations, Some(gradient.raw_mix))
             }
             Map::Causal(batch) => (batch.vjp(grad_features.data())?, None),
+            Map::Gated(batch) if !need_mix => (batch.vjp_orientations(grad_features.data())?, None),
             Map::Gated(batch) => {
                 let gradient = batch.vjp(grad_features.data())?;
                 (gradient.orientations, Some(gradient.raw_mix))
@@ -177,6 +176,25 @@ impl EllipticRuntimeBatch {
                 .flat_map(|row| row[1..].iter().copied())
                 .collect(),
         )?;
+        Ok((grad_coordinates, raw_mix))
+    }
+
+    pub(super) fn vjp_input(&self, upstream: &Tensor) -> Result<Tensor> {
+        let (coordinates, _) = self.coordinate_adjoint(upstream, false)?;
+        finite(coordinates.matmul_with_backend(&self.orientation_weight, MATMUL)?)
+    }
+
+    pub(super) fn vjp(
+        &self,
+        upstream: &Tensor,
+        need_input: bool,
+    ) -> Result<NativeGeometryPullback> {
+        let grad_readout = finite(upstream.matmul_lhs_transpose_scaled_with_backend(
+            &self.features,
+            1.0,
+            MATMUL,
+        )?)?;
+        let (grad_coordinates, raw_mix) = self.coordinate_adjoint(upstream, true)?;
         let grad_orientation = finite(grad_coordinates.matmul_lhs_transpose_scaled_with_backend(
             &self.input,
             1.0,

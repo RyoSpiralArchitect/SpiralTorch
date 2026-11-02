@@ -39,9 +39,10 @@ select from this same operation automatically. A partial gradient cannot be
 used for a group it did not compute. Geometry-only stops at the first geometry
 site without differentiating LoRA; LoRA-only still applies the geometry's input
 adjoint. For standalone geometry, `batch.vjp_input(upstream)` (or Python's
-`vjp_input_buffer`) returns that adjoint alone. Channel-affine and explicit-radius
-WaveGate omit the channel/radius reductions; other recipes may internally use
-their full pullback. This is a work-elision claim, not a throughput benchmark.
+`vjp_input_buffer`) returns that adjoint alone. Native affine, WaveGate,
+Topos, elliptic and fractional recipes skip the unrequested parameter reductions:
+an overflow confined to a discarded gate gradient does not invalidate a finite
+input result. This is not a throughput benchmark.
 
 ## Shared document session
 

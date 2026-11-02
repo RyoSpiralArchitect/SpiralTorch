@@ -259,7 +259,17 @@ impl WaveGateLearningBatch {
                 [&self.input, &self.gate, &self.bias, upstream],
             )
         } else {
-            self.vjp(upstream.data()).map(|g| g.grad_input)
+            self.kernel
+                .topos
+                .guard_tensor("wave_gate_backward_upstream", upstream)?;
+            let mut gate = self.gate.clone();
+            RewriteMonad::new(&self.kernel.topos)
+                .rewrite_tensor("wave_gate_backward_gate_rewrite", &mut gate)?;
+            let affine = self
+                .kernel
+                .layer(&self.gate, &self.bias)?
+                .scalar_affine_adjoint(&self.input, upstream, gate.data())?;
+            affine.mul_row_with_backend(gate.data(), TensorUtilBackend::Cpu)
         }
     }
 

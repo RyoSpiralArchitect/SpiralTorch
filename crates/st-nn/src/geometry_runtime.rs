@@ -538,20 +538,17 @@ impl NativeGeometryBatch {
         Ok(self.pullback(upstream, false)?.parameters)
     }
 
-    /// Adjoint of a frozen residual branch with respect to input only. Channel
-    /// affine and explicit-radius WaveGate skip the unused parameter reductions.
-    pub fn vjp_input(&self, upstream: &[f32]) -> Result<Tensor> {
-        if !matches!(
-            &self.pullback,
-            Pullback::Identity | Pullback::Affine(_) | Pullback::Wave(_) | Pullback::WaveRadius(_)
-        ) {
-            return Ok(self.vjp(upstream)?.input);
-        }
+    fn direction(&self, upstream: &[f32]) -> Result<Tensor> {
         let (rows, cols) = self.output.shape();
         if upstream.len() != self.output.data().len() || upstream.iter().any(|v| !v.is_finite()) {
             return Err("invalid native geometry upstream shape or values".into());
         }
-        let direction = Tensor::from_vec(rows, cols, upstream.to_vec())?;
+        Ok(Tensor::from_vec(rows, cols, upstream.to_vec())?)
+    }
+
+    /// Input adjoint of a frozen residual branch; no parameter reductions.
+    pub fn vjp_input(&self, upstream: &[f32]) -> Result<Tensor> {
+        let direction = self.direction(upstream)?;
         if matches!(&self.pullback, Pullback::Identity) {
             return Ok(direction);
         }
@@ -559,17 +556,16 @@ impl NativeGeometryBatch {
         let branch = match &self.pullback {
             Pullback::Affine(batch) => batch.vjp_input(&scaled)?,
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) => batch.vjp_input(&scaled)?,
-            _ => unreachable!(),
+            Pullback::Topos(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Fractional(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Elliptic(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Identity => unreachable!(),
         };
         Ok(direction.add_with_backend(&branch, TensorUtilBackend::Cpu)?)
     }
 
     fn pullback(&self, upstream: &[f32], need_input: bool) -> Result<NativeGeometryPullback> {
-        let (rows, features) = self.output.shape();
-        if upstream.len() != self.output.data().len() || upstream.iter().any(|v| !v.is_finite()) {
-            return Err("invalid native geometry upstream shape or values".into());
-        }
-        let direction = Tensor::from_vec(rows, features, upstream.to_vec())?;
+        let direction = self.direction(upstream)?;
         let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
         let mut gradient = match &self.pullback {
             Pullback::Identity => {
