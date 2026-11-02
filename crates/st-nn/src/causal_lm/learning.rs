@@ -159,6 +159,9 @@ impl NativeCausalLm {
         shape: [usize; 2],
         has_labels: bool,
     ) -> CausalLmResult<usize> {
+        if self.lora.is_some() {
+            return Err("use adaptation_loss_gradients for a composed model".into());
+        }
         let runtime = self
             .geometry
             .as_ref()
@@ -518,6 +521,9 @@ impl NativeCausalLm {
         parameters: &Parameters,
         learning_rate: f32,
     ) -> CausalLmResult<Self> {
+        if self.lora.is_some() {
+            return Err("use step_adaptation_sgd for a composed model".into());
+        }
         if base_id != self.base_id || accumulator != self.readout_accumulator {
             return Err(
                 "LM gradients belong to a different base model or readout accumulator".into(),
@@ -560,6 +566,9 @@ impl NativeCausalLm {
         optimizer: &crate::geometry_runtime::NativeGeometryAdamW,
         step: crate::geometry_runtime::AdamWStep,
     ) -> CausalLmResult<(Self, crate::geometry_runtime::NativeGeometryAdamW)> {
+        if self.lora.is_some() {
+            return Err("use step_adaptation_sgd for a composed model".into());
+        }
         if base_id != self.base_id || accumulator != self.readout_accumulator {
             return Err(
                 "LM gradients belong to a different base model or readout accumulator".into(),

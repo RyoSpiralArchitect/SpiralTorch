@@ -282,7 +282,7 @@ fn lora_admits_work_before_token_extraction_and_rejects_excess_budgets() {
 }
 
 #[test]
-fn lora_geometry_exclusion_preserves_existing_geometry_learning() {
+fn composed_models_require_joint_owner_api_and_preserve_geometry_learning() {
     let base = load();
     let mut record = artifact(&base, "transformer.h.0.attn", 0.2)
         .record()
@@ -296,11 +296,11 @@ fn lora_geometry_exclusion_preserves_existing_geometry_learning() {
         .geometry_loss_gradients(&[1, 2, 3], [1, 3])
         .unwrap();
     let lora = base.with_lora(0, 2, 2.).unwrap();
-    assert!(geometry.with_lora(0, 2, 2.).is_err());
+    assert!(geometry.with_lora(0, 2, 2.).is_ok());
     assert!(geometry
         .with_lora_json(&lora.lora_to_json().unwrap())
-        .is_err());
-    assert!(lora.with_geometry(artifact).is_err());
+        .is_ok());
+    assert!(lora.with_geometry(artifact).is_ok());
     assert!(lora.geometry_loss_gradients(&[1, 2, 3], [1, 3]).is_err());
     let after = geometry
         .geometry_loss_gradients(&[1, 2, 3], [1, 3])

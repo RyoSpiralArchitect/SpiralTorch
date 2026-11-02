@@ -11,6 +11,7 @@ use st_tensor::{
 };
 use std::sync::{Arc, OnceLock};
 
+mod adaptation;
 mod context;
 mod decoder;
 mod evaluation;
@@ -20,7 +21,9 @@ mod learning;
 mod lora;
 mod objective;
 mod repetition;
+mod session;
 mod training;
+pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use context::NativeCausalLmContext;
 pub use evaluation::{CausalLmEvaluation, CausalLmEvaluationConfig, MAX_EVALUATION_TOKENS};
 pub use generation::{
@@ -32,6 +35,10 @@ pub use lora::NativeCausalLmLoraGradients;
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
 pub use repetition::CausalLmRepetition;
+pub use session::{
+    CausalLmTrainingSessionConfig, CausalLmTrainingSessionResume, CausalLmTrainingSessionStep,
+    NativeCausalLmTrainingSession,
+};
 pub use training::{
     CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
 };
@@ -242,9 +249,6 @@ impl NativeCausalLm {
     /// transformer.h.N.attn, transformer.h.N.mlp, or transformer.h.N.
     /// No placements are ignored and the frozen checkpoint identity must match.
     pub fn with_geometry(&self, artifact: GeometryAdapterArtifact) -> CausalLmResult<Self> {
-        if self.lora.is_some() {
-            return Err("joint native LoRA and geometry is not supported yet".into());
-        }
         if artifact.record().base_model_identity != self.base_id {
             return Err("geometry belongs to a different native base model".into());
         }
@@ -268,6 +272,7 @@ impl NativeCausalLm {
         }
         let mut next = self.clone();
         next.geometry = Some(Arc::new(runtime));
+        next.validate_adaptation_placement()?;
         Ok(next)
     }
 

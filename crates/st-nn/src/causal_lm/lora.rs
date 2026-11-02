@@ -75,6 +75,10 @@ impl NativeLoraAdapter {
         })
     }
 
+    pub(super) fn layer(&self) -> usize {
+        self.record.layer
+    }
+
     pub(super) fn path(&self) -> String {
         format!("transformer.h.{}.attn.c_proj", self.record.layer)
     }
@@ -136,10 +140,13 @@ impl NativeCausalLmLoraGradients {
 
 impl NativeCausalLm {
     /// Initialize one attention output adapter. A is deterministic and B is zero.
-    /// This first native slice deliberately excludes simultaneous geometry.
+    /// An attached geometry must be the same layer's single attention output site.
     pub fn with_lora(&self, layer: usize, rank: usize, alpha: f32) -> CausalLmResult<Self> {
-        if self.geometry.is_some() || self.lora.is_some() {
-            return Err("native LoRA initialization requires an unadapted base model".into());
+        if self.lora.is_some() {
+            return Err(
+                "native LoRA initialization requires a model without an existing LoRA adapter"
+                    .into(),
+            );
         }
         if layer >= self.config.layers
             || rank == 0
@@ -174,6 +181,7 @@ impl NativeCausalLm {
         };
         let mut next = self.clone();
         next.lora = Some(Arc::new(NativeLoraAdapter::create(record, self)?));
+        next.validate_adaptation_placement()?;
         Ok(next)
     }
 
@@ -197,15 +205,13 @@ impl NativeCausalLm {
 
     /// Restore or replace an adapter, checking the frozen checkpoint identity.
     pub fn with_lora_json(&self, json: &str) -> CausalLmResult<Self> {
-        if self.geometry.is_some() {
-            return Err("joint native LoRA and geometry is not supported yet".into());
-        }
         if json.len() > MAX_LORA_JSON_BYTES {
             return Err("native LoRA artifact exceeds byte budget".into());
         }
         let record = serde_json::from_str(json)?;
         let mut next = self.clone();
         next.lora = Some(Arc::new(NativeLoraAdapter::create(record, self)?));
+        next.validate_adaptation_placement()?;
         Ok(next)
     }
 
@@ -254,6 +260,9 @@ impl NativeCausalLm {
         windows: &[usize],
         window_shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmLoraGradients> {
+        if self.geometry.is_some() {
+            return Err("use adaptation_loss_gradients for a composed model".into());
+        }
         self.lora_gradient_input_count(window_shape)?;
         let adapter = self.lora.as_ref().unwrap();
         let prepared =
@@ -319,6 +328,9 @@ impl NativeCausalLm {
         gradients: &NativeCausalLmLoraGradients,
         learning_rate: f32,
     ) -> CausalLmResult<Self> {
+        if self.geometry.is_some() {
+            return Err("use step_adaptation_sgd for a composed model".into());
+        }
         let adapter = self.lora.as_ref().ok_or("native LM has no LoRA adapter")?;
         if gradients.base_id != self.base_id
             || gradients.adapter_id != adapter.id
@@ -328,8 +340,18 @@ impl NativeCausalLm {
         {
             return Err("invalid LoRA SGD learning rate or gradient owner".into());
         }
+        self.with_lora_parameter_step(&gradients.a, &gradients.b, learning_rate)
+    }
+
+    pub(super) fn with_lora_parameter_step(
+        &self,
+        a: &[f32],
+        b: &[f32],
+        learning_rate: f32,
+    ) -> CausalLmResult<Self> {
+        let adapter = self.lora.as_ref().ok_or("native LM has no LoRA adapter")?;
         let mut record = adapter.record.clone();
-        for (values, gradient) in [(&mut record.a, &gradients.a), (&mut record.b, &gradients.b)] {
+        for (values, gradient) in [(&mut record.a, a), (&mut record.b, b)] {
             if values.len() != gradient.len() {
                 return Err("LoRA gradient shape differs".into());
             }
@@ -342,6 +364,7 @@ impl NativeCausalLm {
         }
         let mut next = self.clone();
         next.lora = Some(Arc::new(NativeLoraAdapter::create(record, self)?));
+        next.validate_adaptation_placement()?;
         Ok(next)
     }
 }

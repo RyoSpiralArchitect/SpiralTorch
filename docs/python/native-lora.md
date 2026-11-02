@@ -31,8 +31,10 @@ Updates return new immutable models, leaving the original base and adapter intac
 
 The objective is mean next-token cross entropy over all shifted targets of full
 windows. This initial API does not accept masked labels, label smoothing,
-repetition objectives, or geometry co-training. Existing geometry-only APIs keep
-their separate behavior; attempting to attach geometry and LoRA together fails.
+or repetition objectives. Existing single-group APIs keep their separate behavior.
+The source-tree [shared training session](native-training-session.md) additionally
+supports same-layer attention LoRA + geometry composition, selective group updates,
+and a Rust-owned cursor/checkpoint; use its unified gradients for composed models.
 
 ## Continuing learning
 
