@@ -40,13 +40,32 @@ retained failure rather than launch another study:
 python3.12 -I -S -B audit_interrupted.py --out "$PRIMARY" --old "$OLD" --data "$DATA" --model "$MODEL" --wheel "$WHEEL" | cmp - interrupted_run.json
 ```
 
-## Reproduce
+## Separate product check
+
+The [development-wheel check](masked_backward_validation.json) used the two
+previously completed **joint** GPT-2 snapshots at seed 131. From update 256,
+six native pullbacks (full, LoRA-only, and geometry-only for each snapshot)
+reproduced the recorded update-257 loss and adapter IDs. The selected gradients
+equalled their corresponding full gradients. No control fit or held-out score
+was added. This is compatibility evidence for the new CPU backend, **not**
+a result of the interrupted study.
+
+The installed wheel passed 116 Python tests without skips, including Rust CLI
+handoff and finite input adjoints with overflowing discarded parameter gradients.
+Rust's library suites passed 1,046 (`st-core`) and 1,071 (`st-nn`) tests.
+WASM was compile-checked only. Rust and Python can now use the same
+[no-overwrite checkpoint writer](../../../docs/python/native-training-session.md).
+No PyPI wheel or tag was changed.
+
+## Independent reproduction
 
 Use the parent study's retained training/evaluation inputs and exact scientific
 wheel (not the public release). Set `PRIMARY` to the completed joint run;
 `OLD`, `DATA`, `MODEL`, `PY` and `WHEEL` refer to its original saved inputs and
 isolated installed Python. The controller admits one attempt per physical primary
 run directory and plan hash; a failed worker is retained, not retried.
+The `run` command refuses the original stopped attempt. The following describes
+a separate reproduction, not work performed after that failure.
 
 ```sh
 python3.12 -I -S -B -m unittest discover -s . -p 'test_*.py'
@@ -55,7 +74,7 @@ python3.12 -I -S -B control_study.py run --out "$PRIMARY" --old "$OLD" --data "$
 python3.12 -I -S -B control_study.py audit --out "$PRIMARY" --old "$OLD" --data "$DATA" --model "$MODEL" --wheel "$WHEEL"
 ```
 
-The private audit checks every update's two geometry owners, initial and terminal
+For a complete reproduction the private audit checks every update's two geometry owners, initial and terminal
 parameter hashes, the original first loss and first LoRA update, both halves'
 ordered data identity, the checkpoint bytes, and all 12 terminal/anchor owners
 in every native section report. Each model scores 4,536 shifted targets per

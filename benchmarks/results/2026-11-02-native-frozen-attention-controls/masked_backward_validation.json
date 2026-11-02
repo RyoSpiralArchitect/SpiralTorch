@@ -1,0 +1,86 @@
+{
+  "archived_step_probe": {
+    "cases": {
+      "131-affine": {
+        "loss_f32_le_hex": "35528540",
+        "matched_full_and_selected_gradient_counts": {
+          "geometry": {
+            "transformer.h.8.attn": 1536
+          },
+          "lora": {
+            "transformer.h.8.attn.c_proj": 6144
+          }
+        },
+        "matched_historical_update": 257,
+        "post_geometry_id": "sha256:ead6bd8db74363983c60b862c6867023c53fdb85682ebffa7f5ead2f1268f754",
+        "post_lora_id": "sha256:2574daa565892396964b52776af981ad81543cce08aa89408a0fac00a47a4733",
+        "source_checkpoint": "sha256:6b35f69a0d7b443a9e8a50ed981060d10ba6c8aed00b486ba6432b717abf9255"
+      },
+      "131-wave": {
+        "loss_f32_le_hex": "38528540",
+        "matched_full_and_selected_gradient_counts": {
+          "geometry": {
+            "transformer.h.8.attn": 1537
+          },
+          "lora": {
+            "transformer.h.8.attn.c_proj": 6144
+          }
+        },
+        "matched_historical_update": 257,
+        "post_geometry_id": "sha256:ba10f33278479e55df5c66fabd1346991a31fa847a7261c5da4f8526d84b0a5a",
+        "post_lora_id": "sha256:e34e9913b379aeb07d21971dab838c38efe3336d9d5d3375272b92441f3fbd20",
+        "source_checkpoint": "sha256:139413807f4509f21d333e64c2675831ef4b572cfe195388a25caac40c9974c6"
+      }
+    },
+    "claim_sha256": "67d0d7cf0bb7f3028c87b65c6a3749a9339be6f4d34a8c62905869102465ebea",
+    "gradient_calls": 6,
+    "new_fits": 0,
+    "product_package": {
+      "all_original_files_match": true,
+      "native_sha256": "c56226af5ea3c976328eef4d9b1f8430e3450f18e49338d6be037b6ebb467796",
+      "package_files": 204,
+      "python_bytecode_absent": true,
+      "version": "0.4.33",
+      "wheel_sha256": "1942f61c2f3830a08a95519c63d2144097bfeb6f556dd974a8291a343e1fc0e2"
+    },
+    "schema": "spiraltorch.native_lm.masked_backward_product_probe.v1"
+  },
+  "claim_sha256": "67d0d7cf0bb7f3028c87b65c6a3749a9339be6f4d34a8c62905869102465ebea",
+  "installed_checks": {
+    "changed_members": [
+      "examples/native_training_session.py",
+      "spiraltorch-0.4.33.dist-info/RECORD",
+      "spiraltorch-0.4.33.dist-info/sboms/spiraltorch-py.cyclonedx.json",
+      "spiraltorch/__init__.pyi",
+      "spiraltorch/spiraltorch.abi3.so"
+    ],
+    "foreign_ml_installed": false,
+    "installed": {
+      "all_original_files_match": true,
+      "native_sha256": "c56226af5ea3c976328eef4d9b1f8430e3450f18e49338d6be037b6ebb467796",
+      "package_files": 204,
+      "python_bytecode_absent": true,
+      "version": "0.4.33",
+      "wheel_sha256": "1942f61c2f3830a08a95519c63d2144097bfeb6f556dd974a8291a343e1fc0e2"
+    },
+    "previous_wheel": "1da3903e3b7ac85d66ba5a700b6607c6db3cd283fcfe20420ac83b1c495c918d",
+    "same_member_roster": true
+  },
+  "installed_python_tests": 116,
+  "log_sha256": {
+    "installed-suite.log": "24b57da7f90ec27cdb760f8b0295b4567bb1a6d5a15185304b047252d9dc441b",
+    "rust-cli.log": "36c5f7eea091472c3c1be117ca8fa79d9f6ce5042b10b34c97df1404fbeef6c8",
+    "rust-with-declared-targets.log": "3b65768fdc023bcaee43e28a7a676b0e17f9d5199f8588fff5eba609dd6122ef",
+    "wasm-no-incremental.log": "35bd37d25d1c132fcfd192fde37bad007a59ef2f604c30c074cfdf7a4663d754",
+    "wheel-with-hip-build-support.log": "8548fe39a50255aa6758979d2aae8b24a917c636311dee207d808bc710bfb849"
+  },
+  "product_source": "5ef4d837bf89a9aada8e0cdc448fb9c7334ea2e3",
+  "result_sha256": "43867dec7d8ea8bcb0db948440ef8b0ab5846259fc4dbad193e21d3e331e3514",
+  "rust_library_tests": {
+    "st-core": 1046,
+    "st-nn": 1071
+  },
+  "schema": "spiraltorch.native_lm.masked_backward_product_check.v1",
+  "scope": "Native CPU compatibility, frozen adjoints and checkpoint persistence; not a completed new fit, throughput claim or release.",
+  "wasm32": "compile only, no incremental cache"
+}
