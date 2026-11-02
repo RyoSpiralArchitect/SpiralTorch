@@ -18,6 +18,7 @@ fn forward_observer_accepts_locally_owned_state_without_running_a_future() {
         let _future = study.execute(
             runtime,
             None,
+            None,
             study.total_updates(),
             false,
             None::<UpdateObserverFn>,

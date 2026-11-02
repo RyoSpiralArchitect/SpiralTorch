@@ -1,0 +1,17 @@
+{
+  "files": {
+    "crates/st-nn/Cargo.toml": "64f2d502ead84b309e59c86bf3d8943cf965c9ce8893e617ec30244a99692a0d",
+    "crates/st-nn/examples/resident_case24_diagnostic.rs": "6a06ea2570612d229d04bf9b4cdd4c10cef1eebd686189e2c9e00cefaa49bafd",
+    "crates/st-nn/src/resident.rs": "a552680c8f988ef1ba4d2bf0ed6db88fd1d5d6e42b3e3536d77011eae5598259",
+    "crates/st-nn/src/resident/byte_study.rs": "49e79ed4a1ff9e17d27970fd0ed5b48eb18d99f6f91a52355569b0724d5a25f9",
+    "crates/st-nn/src/resident/byte_study/case24_diagnostic.rs": "3aa0a2f6ea40c3651f5b6d1c2e0aa2b90134b27f9fa7c39c2e151dc01959852c",
+    "crates/st-nn/src/resident/byte_study/forward_diagnostic.rs": "ebdd1c79e690472a41a9ca613090cfcf5d1368f79ffe3baf23538dfce3349a71",
+    "crates/st-nn/src/resident/byte_study/observer_tests.rs": "c97624d9d6a9539a8133a18b6fdbcbdae5b5b2631f13d2613fa4ecaad7b2a331",
+    "tools/admit_case24_once.py": "13fdea1cdc5c0b41b730bee3576f7e87fc7570a0f419d9b4e3f30ef9a5f47ab0",
+    "tools/run_case24_once.py": "26d38c5a77fd35dc4ceca669293b4029a52cb5f8b49247fcda34ad63cab61dbb",
+    "tools/test_admit_case24_once.py": "be17b9e5aeff166588470344c610faf7c09e16de857e9c0c537878407f8abd24",
+    "tools/test_run_case24_once.py": "4a1cd963cb83bfe7ff04728905818a80f1c7be3dfb3eba88b363be6c33708ced"
+  },
+  "schema": "spiraltorch.case24_code_admission.v1",
+  "source_sha": "e08b8a527f64826a499ce129879a13fa0e6f3b33"
+}

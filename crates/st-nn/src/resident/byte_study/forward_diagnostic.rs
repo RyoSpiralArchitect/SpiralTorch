@@ -125,6 +125,7 @@ impl ByteCorpusStudy {
         let result = self
             .execute(
                 runtime,
+                None,
                 resume,
                 self.total_updates(),
                 false,

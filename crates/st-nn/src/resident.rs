@@ -50,7 +50,8 @@ pub use byte_study::{
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{
-    ByteCorpusBoundaryObservation, ByteCorpusForwardDiagnosticObservation, ByteCorpusGeneration,
+    ByteCorpusBoundaryObservation, ByteCorpusCase24Observation,
+    ByteCorpusForwardDiagnosticObservation, ByteCorpusGeneration,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{ResidentByteCandidate, ResidentByteServing};

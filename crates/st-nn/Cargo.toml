@@ -267,3 +267,7 @@ path = "../../examples/gnn_trainer_band_trace_demo.rs"
 name = "layernorm_wgpu_demo"
 path = "../../examples/layernorm_wgpu_demo.rs"
 required-features = ["wgpu"]
+
+[[example]]
+name = "resident_case24_diagnostic"
+required-features = ["wgpu"]

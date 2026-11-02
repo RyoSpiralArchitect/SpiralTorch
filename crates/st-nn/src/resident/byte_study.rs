@@ -37,6 +37,7 @@ const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
 mod artifact;
 mod boundary;
 mod calibration;
+mod case24_diagnostic;
 mod clipping;
 mod forward_diagnostic;
 #[cfg(any(feature = "wgpu", test))]
@@ -58,6 +59,8 @@ pub use artifact::{ResidentByteInference, ResidentByteInferenceForward};
 #[cfg(feature = "wgpu")]
 pub use boundary::ByteCorpusBoundaryObservation;
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
+#[cfg(feature = "wgpu")]
+pub use case24_diagnostic::ByteCorpusCase24Observation;
 #[cfg(feature = "wgpu")]
 pub use forward_diagnostic::ByteCorpusForwardDiagnosticObservation;
 #[cfg(feature = "wgpu")]
@@ -743,6 +746,7 @@ impl ByteCorpusStudy {
             .execute(
                 runtime,
                 None,
+                None,
                 self.total_updates(),
                 false,
                 None::<UpdateObserverFn>,
@@ -775,6 +779,7 @@ impl ByteCorpusStudy {
             .execute(
                 runtime,
                 None,
+                None,
                 self.total_updates(),
                 false,
                 Some(observer),
@@ -798,6 +803,7 @@ impl ByteCorpusStudy {
         let (report, checkpoint) = self
             .execute(
                 runtime,
+                None,
                 resume,
                 stop_after,
                 true,
@@ -815,6 +821,7 @@ impl ByteCorpusStudy {
     async fn execute<F, G>(
         &self,
         runtime: WgpuRuntime,
+        selected_case: Option<&str>,
         resume: Option<&ByteCorpusStudyCheckpoint>,
         stop_after: usize,
         capture: bool,
@@ -836,12 +843,17 @@ impl ByteCorpusStudy {
         let gradient_clip = r.gradient_clip_recipe().clip()?;
         // This only verifies the frozen initialization on the selected device.
         // Fitting is a separate preparation API; resume never changes gains.
-        calibration::verify_initial(r, &runtime).await?;
+        if selected_case.is_none() {
+            calibration::verify_initial(r, &runtime).await?;
+        }
         let start = resume.map_or(0, ByteCorpusStudyCheckpoint::completed_updates);
         let documents: Vec<_> = r.train_documents.iter().map(Vec::as_slice).collect();
         let mut reports = Vec::new();
         let mut saved_cases = Vec::new();
         for (index, case) in r.cases.iter().enumerate() {
+            if !case24_diagnostic::selected(selected_case, &case.name) {
+                continue;
+            }
             let mut model = match &restored {
                 Some(models) => models[index].restore_wgpu(runtime.clone())?,
                 None => plan(&r.config, case)?.compile_training_wgpu(runtime.clone())?,

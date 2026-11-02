@@ -1,0 +1,68 @@
+name: Case24 one-shot diagnostic 20261102
+on:
+  push:
+    branches: [spiralreality/case24-diagnostic-20261102-once]
+    paths: [.github/workflows/case24_once_20261102.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: case24-diagnostic-20261102-one-authorized-invocation
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    if: github.run_attempt == 1 && github.event.before == 'e08b8a527f64826a499ce129879a13fa0e6f3b33'
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      RUSTUP_TOOLCHAIN: '1.99.1'
+      SPIRALTORCH_STRICT_GPU: '1'
+      ADMISSION_SHA256: '1b22e18688e7ff494e6ee835637b7d92171ccb16613a2b8e736987b15f05131c'
+    steps:
+      - name: Record bounded job clock
+        run: |
+          echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/case24-evidence"
+          printf '%s\n' "${{ github.run_id }} ${{ github.run_attempt }} ${{ github.sha }}" > "$RUNNER_TEMP/case24-evidence/job-identity.txt"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Reject repeated or unexpected invocations before any GPU
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I -S -B tools/admit_case24_once.py "$RUNNER_TEMP/case24-evidence/admission.json"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12.10'
+      - name: Retrieve exact synthetic failure inputs
+        uses: actions/download-artifact@v5
+        with:
+          artifact-ids: '13085278754'
+          run-id: '41297797362'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/case24-inputs
+          merge-multiple: true
+      - name: Install exact source compiler (budget includes setup)
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Model-free supervisor checks
+        run: |
+          python3 -I -S -B tools/test_run_case24_once.py
+          python3 -I -S -B tools/test_admit_case24_once.py
+      - name: Build then execute the single selected-case pair once
+        run: |
+          python3 -I -S -B tools/run_case24_once.py \
+            --request "$RUNNER_TEMP/case24-inputs/request.json" \
+            --first-checkpoint "$RUNNER_TEMP/case24-inputs/first-checkpoint.json" \
+            --output "$RUNNER_TEMP/case24-evidence/execution" \
+            --job-start-epoch "$JOB_START_EPOCH"
+      - name: Retain first outcome including errors and timeout
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: case24-once-20261102-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/case24-evidence/
+            !${{ runner.temp }}/case24-evidence/execution/target/**
+          if-no-files-found: error
+          retention-days: 7
