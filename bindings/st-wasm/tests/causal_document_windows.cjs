@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const {createHash} = require('node:crypto');
-const {CausalDocumentWindows} = require(require('node:path').resolve(process.argv[2]));
+const {CausalDocumentWindows, alignCausalTargetsJson} = require(require('node:path').resolve(process.argv[2]));
 const fixture = JSON.parse(require('node:fs').readFileSync(require('node:path').resolve(
   __dirname, '../../../crates/st-nn/tests/fixtures/causal_document_windows.fixture.json'), 'utf8'));
 const plan = CausalDocumentWindows.createJson(JSON.stringify(fixture.recipe));
@@ -27,3 +27,14 @@ assert.equal(short.length, 0);
 console.log(JSON.stringify({schema:'spiraltorch.causal_windows_check.v1',plan_id:plan.planId,
   windows:plan.length, no_cross_document_packing:true, invalid_inputs_rejected:true}));
 short.free(); plan.free();
+
+const alignment = require('../../../crates/st-nn/tests/fixtures/causal_target_alignment.json');
+assert.equal([...alignment.text].length, alignment.input.source_length);
+assert.deepEqual(JSON.parse(alignCausalTargetsJson(JSON.stringify(alignment.input))), alignment.expected);
+for (const override of [{source_length:alignment.text.length}, {source_length:-1},
+  {target_spans:[[1,6]]}, {target_spans:[[0,2]]}, {token_offsets:[[0,1]]},
+  {source_length:true}, {target_spans:[[5.5,7]]}, {unexpected:true}]) {
+  assert.throws(() => alignCausalTargetsJson(JSON.stringify({...alignment.input,...override})));
+}
+assert.throws(() => alignCausalTargetsJson(' '.repeat(8*1024*1024+1)));
+console.log('Causal target alignment: exact multi-turn labels, source runs and rejection checks passed');

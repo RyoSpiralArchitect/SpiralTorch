@@ -140,6 +140,8 @@ impl PyNativeCausalLmTrainingSession {
     const MAX_CHECKPOINT_INTERVAL: u64 = NativeCausalLmTrainingSession::MAX_CHECKPOINT_INTERVAL;
     #[classattr]
     const MAX_DOCUMENTS: usize = MAX_DOCUMENTS;
+    #[classattr]
+    const MAX_TOKENS: usize = NativeCausalLmTrainingSession::MAX_TOKENS;
     #[new]
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature=(model, token_documents, context_length, *, learning_rate, mode="joint", epochs=None, batch_windows=None, labels=None, window_policy="disjoint"))]

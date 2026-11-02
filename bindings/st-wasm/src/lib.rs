@@ -17,6 +17,8 @@ mod generation_evidence;
 #[cfg(feature = "nn")]
 mod geometry_artifact;
 mod imaginary_time_schrodinger;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+mod language_supervision;
 mod periodicity;
 mod rank_adaptation;
 mod rank_plan;
@@ -114,6 +116,8 @@ pub use generation_evidence::*;
 #[cfg(feature = "nn")]
 pub use geometry_artifact::*;
 pub use imaginary_time_schrodinger::*;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+pub use language_supervision::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
 pub use periodicity::*;

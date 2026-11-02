@@ -15,6 +15,7 @@ from .byte_corpus_runs import (
 )
 from .geometry_adapters import GeometryAdapterStack as GeometryAdapterStack
 from .geometry_observation import GeometryObservation as GeometryObservation
+from .native_supervision import encode_supervised_document as encode_supervised_document
 from .hf_geometry_trainer import hf_geometry_trainer_class as hf_geometry_trainer_class
 
 from .hf_geometry_dataset import HfGeometryDataset as HfGeometryDataset
@@ -37,6 +38,19 @@ class ChannelAffineLearningBatch:
     def output_buffer(self) -> bytearray: ...
     def vjp(self, upstream: Sequence[float]) -> tuple[list[float], list[float], list[float]]: ...
     def vjp_buffer(self, upstream: Any) -> tuple[bytearray, bytearray, bytearray]: ...
+
+class CausalTargetAlignment:
+    MAX_SOURCE_UNITS: int
+    MAX_TOKENS: int
+    MAX_TARGET_SPANS: int
+    def __init__(self, source_length: int, token_ids: Sequence[int], token_offsets: Sequence[Sequence[int]],
+                 target_spans: Sequence[Sequence[int]]) -> None: ...
+    @property
+    def token_ids(self) -> list[int]: ...
+    @property
+    def labels(self) -> list[int]: ...
+    @property
+    def runs(self) -> list[list[int]]: ...
 
 class CausalDocumentWindows:
     MAX_DOCUMENTS: int
@@ -191,6 +205,7 @@ class NativeCausalLmTrainingSessionStep:
 
 class NativeCausalLmTrainingSession:
     MAX_DOCUMENTS: int
+    MAX_TOKENS: int
     MAX_CHECKPOINT_BYTES: int
     MAX_CHECKPOINT_INTERVAL: int
     def __init__(self, model: NativeCausalLm, token_documents: Sequence[Sequence[int]], context_length: int,

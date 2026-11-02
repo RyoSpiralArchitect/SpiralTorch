@@ -84,12 +84,17 @@ trained_model = resumed.model
 
 Keep the prompt and answer in **one tokenized document**. Supply one unshifted
 label per input ID; `-100` excludes a target from the mean cross-entropy, not
-from causal attention. The first label of each window is never scored. Align
-prompt boundaries with the encoding of the whole text, not the character count.
+from causal attention. The first label of each window is never scored. Given
+a local, lossless tokenizer with character offsets, let Rust align the targets:
 
 ```python
-docs = [prompt_ids + answer_ids]  # already aligned to the full-text encoding
-labels = [[-100] * len(prompt_ids) + answer_ids]
+from tokenizers import Tokenizer  # optional local text codec, not needed for pre-encoded IDs
+
+tokenizer = Tokenizer.from_file("model/tokenizer.json")
+prompt, answer = "Question: What is two plus two?\nAnswer:", " four."
+text = prompt + answer
+ids, row_labels = st.encode_supervised_document(tokenizer, text, [(len(prompt), len(text))])
+docs, labels = [ids], [row_labels]
 session = st.NativeCausalLmTrainingSession(
     model, docs, 32, mode="joint", learning_rate=0.01,
     labels=labels, window_policy="covering_targets",
@@ -118,6 +123,41 @@ for the same loss on flattened rows. In Rust use `new_with_policy` and
 Both CLI examples also accept a document JSON object with exactly
 `token_documents` and `labels`; the Python example accepts `--window-policy`
 for a fresh session. Legacy unlabeled input remains a bare JSON array.
+
+**Starting with text.** Pass any ordered, nonoverlapping list of half-open
+target spans (e.g. all assistant turns) in Python Unicode character positions.
+`encode_supervised_document` encodes the whole string once without adding special
+tokens. Use a deterministic tokenizer: configured padding, truncation and BPE
+dropout are rejected before encoding. Each contiguous group of context or
+target IDs must decode to the exact original substring. Tokens split across one Unicode character are fine;
+a token shared between prompt and answer is **not** relabeled or split. A gap,
+zero-width token, truncated input, a scored first token without a predecessor,
+or a lossy decode fails before learning. Choose a separator that makes the
+boundary unambiguous, then re-encode the whole example. If the model requires
+special IDs with no source offset, provide explicitly prepared IDs and labels.
+
+The Python training example can read
+`{"examples":[{"prompt":"Q: What is two plus two?\nA:","completion":" four."}]}`.
+Alternatively, each record may contain `text` and `target_spans`. Supply
+`--tokenizer-json FILE --tokenizer-sha256 HEX` alongside the usual options;
+only this text path needs the optional `tokenizers` package. It uses
+`covering_targets`, including on resume. Keep the tokenizer pin with the run:
+the session binds the resulting IDs and labels, not the source text, chat
+template or tokenizer file. Select a known tokenizer for the base model; a
+file hash identifies bytes, not vocabulary compatibility. Training and
+evaluation on encoded IDs never need this dependency.
+
+For a custom encoder, Rust's `st_nn::language_supervision::CausalTargetAlignment`
+and Python's `st.CausalTargetAlignment` take the source length, IDs, full
+monotone source offsets and target spans. They trust the client's offsets; only
+the text helper checks the decoded text. WASM (`nn` feature) exposes the same
+operation as `alignCausalTargetsJson`, with JSON fields `source_length`,
+`token_ids`, `token_offsets` and `target_spans`. Use one coordinate system:
+JavaScript's UTF-16 `text.length` is *not* the number of Python characters.
+The output includes ordinary numeric IDs, unshifted labels and runs ordered as
+`[token_start, token_end, source_start, source_end]`. The native per-document
+limits are 1,048,576 tokens/source units and 65,536 target spans; WASM's JSON input
+is also limited to 8 MiB. An alignment is not a checkpoint or a tokenizer identity.
 
 The corresponding Rust calls use the same serialized contract:
 
@@ -238,7 +278,7 @@ is no hidden retry or extra per-step file transfer.
 `bindings/st-py/examples/native_training_session.py` accepts a local GPT-2
 configuration, local safetensors archive, encoded token documents and an optional
 geometry artifact. Its checkpoint can be resumed with `--resume` and a separately
-retained `--expected-id`. It does not download a model or tokenize text.
+retained `--expected-id`. It does not download a model or tokenizer.
 
 Add `--checkpoint-every 16` to publish an initial anchor (or use the supplied
 resume pin), every absolute multiple of 16 and the final requested cursor.

@@ -537,6 +537,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     #[cfg(feature = "nn")]
     exports.extend_from_slice(&[
         "SafeTensorArchive",
+        "CausalTargetAlignment",
         "NativeCausalLm",
         "NativeCausalLmEvaluation",
         "NativeCausalLmEvaluationComparison",

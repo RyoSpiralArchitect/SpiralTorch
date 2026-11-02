@@ -9,6 +9,8 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Requires nn. Compile aligned source spans into unshifted causal labels (no tokenizer or GPU). */
+    export function alignCausalTargetsJson(input: string): string;
     /** Requires nn; GPU methods additionally require webgpu. Rust owns all study semantics. */
     export class ByteCorpusStudy {
         private constructor();

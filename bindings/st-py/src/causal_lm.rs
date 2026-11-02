@@ -18,6 +18,7 @@ mod evaluation;
 mod generation;
 mod session;
 mod session_input;
+mod supervision;
 mod training;
 use accumulation::PyNativeCausalLmAccumulator;
 use session::PyNativeCausalLmAdaptationGradients;
@@ -685,6 +686,7 @@ impl PyNativeCausalLm {
 }
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<supervision::PyCausalTargetAlignment>()?;
     module.add_class::<PyNativeCausalLm>()?;
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;

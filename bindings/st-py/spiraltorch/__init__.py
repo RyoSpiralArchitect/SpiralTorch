@@ -9565,6 +9565,10 @@ def __getattr__(name: str) -> _Any:
         value = getattr(import_module("spiraltorch.hf_geometry_dataset"), name)
         globals()[name] = value
         return value
+    if name == "encode_supervised_document" and _resolve_rs_attr("CausalTargetAlignment") is not None:
+        value = getattr(import_module("spiraltorch.native_supervision"), name)
+        globals()[name] = value
+        return value
     if name in {"ChannelAffineAdapter", "channel_affine_autograd"}:
         value = getattr(import_module("spiraltorch.channel_affine"), name)
         globals()[name] = value
@@ -9679,6 +9683,8 @@ _EXPORTED.update(
      "EllipticAnchoredResidualAdapter", "elliptic_anchored_autograd",
      "WaveGateAdapter", "wave_gate_autograd", "ChannelAffineAdapter", "channel_affine_autograd"]
 )
+if _resolve_rs_attr("CausalTargetAlignment") is not None:
+    _EXPORTED.update(("CausalTargetAlignment", "encode_supervised_document"))
 for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact",
               "NativeGeometryRuntime", "NativeGeometryBatch", "NativeGeometryAdamW", "SafeTensorArchive",
               "NdTensor", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmGradients",
