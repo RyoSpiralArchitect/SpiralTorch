@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import struct
 import subprocess
 import sys
 import tempfile
@@ -63,7 +64,8 @@ class NativeCausalLmSessionTests(unittest.TestCase):
         self.assertIsNone(plain.observation_json())
         self.assertEqual(initial.parameter_gradients(), plain.parameter_gradients())
         obs = json.loads(initial.observation_json())
-        self.assertEqual((obs["loss"], obs["target_tokens"], obs["window_shape"]), (plain.loss, 2, [1, 4]))
+        self.assertEqual(struct.pack("<f", obs["loss"]), struct.pack("<f", plain.loss))
+        self.assertEqual((obs["target_tokens"], obs["window_shape"]), (2, [1, 4]))
         self.assertEqual(obs["geometry_artifact_id"], model.geometry_artifact_id)
         s = obs["sites"][site["path"]]
         self.assertEqual((s["elements"], s["residual_rms"], s["pullback"]["correction_rms"]), (12, 0., 0.))
