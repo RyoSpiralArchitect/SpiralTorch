@@ -138,3 +138,40 @@ No wheel is rebuilt, no diagnostic runs during ordinary CI, and only encrypted
 results leave the job. The original CI invoked three prior study tests in the
 same interpreter; this fresh instrumented trio intentionally does not. Even
 on the same runner image, it cannot certify the original uninstrumented test.
+
+### Hosted result (original gate unchanged)
+
+[Dispatch 41470149544, attempt 1](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/41470149544)
+admitted the exact image, OS build and Python above. All three instrumented
+reports matched one another **and the original uninstrumented serial report
+byte for byte**. They also matched the original worker 1. Comparing against the
+original worker 0 recovered the same seven parameter differences and no others.
+Worker host-call overlap was 13.70 s; this is not proof of GPU-level overlap.
+There were no retries or rebuilds. The temporary input secret was retired;
+the authenticated result and its decryption identity remain private.
+
+| Source | Input adjoint | Token-table gradient | Weight before | Weight after update 1 | Final report |
+| --- | --- | --- | --- | --- | --- |
+| Hosted trio (all three) | `b5ab005d` | `b5ab005d` | `3bcd8de5` | `3bcd8e6e` | `3bcd8e6e` |
+| Local M4 trio (all three) | `b5ab005e` | `b5ab005e` | `3bcd8de5` | `3bcd8e6e` | `3bcd8e6e` |
+| Original hosted worker 0 | not observed | not observed | not observed | not observed | `3bcd8e6a` |
+
+**Conditional bound, not a historical measurement.** If the archived initial
+weight was used, the absent token in step 2 made no change, and the update
+and readback were correct, what step-1 gradient could produce the outlier
+word? For this unclipped single-input SGD coordinate, inverting the exact
+round-to-nearest-even output cell requires at least a **2.413%** change from
+the measured hosted gradient (270,429 representable f32 steps). This holds
+whether the product rounds before subtraction or only the final result rounds.
+The one-ULP cross-adapter gradient difference does not suffice. This bound
+does not tell us which premise held for the missing historical intermediate.
+
+[Compact hosted evidence](hosted_metal_trio.json) binds the encrypted artifact,
+environment, full-report hashes and both inverse intervals. To verify against
+the private originals without any model import or GPU execution:
+
+```sh
+set -o pipefail
+age -d -i "$CONTROLLER/result.identity" "$CONTROLLER/evidence.tgz.age" | cmp - "$CONTROLLER/evidence.tgz"
+python3.12 -I -S -B summarize_hosted_trio.py "$CONTROLLER" "$ORIGINAL_FAILURE_ZIP" "$PRIVATE_TRIO" | cmp - hosted_metal_trio.json
+```
