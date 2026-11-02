@@ -202,11 +202,19 @@ fn identity(bytes: &[u8]) -> String {
 impl NativeCausalLmTrainer {
     pub const MAX_TOKENS: usize = MAX_TRAINING_TOKENS;
 
+    fn require_geometry_only(model: &NativeCausalLm) -> CausalLmResult<()> {
+        if model.lora_artifact_id().is_some() {
+            return Err("geometry AdamW does not own LoRA weights; use a joint training session for composition".into());
+        }
+        Ok(())
+    }
+
     pub fn validate_owners(
         model: &NativeCausalLm,
         optimizer: &NativeGeometryAdamW,
         config: CausalLmTrainingConfig,
     ) -> CausalLmResult<()> {
+        Self::require_geometry_only(model)?;
         config.validate()?;
         if let Some(recipe) = config.repetition {
             recipe.admit_shape([1, config.context_length as usize], model.config.vocabulary)?;
@@ -536,6 +544,7 @@ impl NativeCausalLmTrainer {
         expected_id: &str,
     ) -> CausalLmResult<CausalLmTrainingResume> {
         let saved = Self::checkpoint(bytes, expected_id, &base)?;
+        Self::require_geometry_only(&base)?;
         let geometry = GeometryAdapterArtifact::from_json(
             saved.geometry_json.as_bytes(),
             &saved.geometry_id,

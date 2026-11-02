@@ -238,6 +238,13 @@ impl NativeCausalLm {
 
     /// Bound checkpoints before clients copy token IDs.
     pub fn lora_gradient_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        if self.geometry.is_some() {
+            return Err("use adaptation_loss_gradients for a composed model".into());
+        }
+        self.lora_pullback_input_count(shape)
+    }
+
+    pub(super) fn lora_pullback_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
         let adapter = self.lora.as_ref().ok_or("native LM has no LoRA adapter")?;
         let count = self.loss_input_count(shape)?;
         product(
@@ -260,9 +267,6 @@ impl NativeCausalLm {
         windows: &[usize],
         window_shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmLoraGradients> {
-        if self.geometry.is_some() {
-            return Err("use adaptation_loss_gradients for a composed model".into());
-        }
         self.lora_gradient_input_count(window_shape)?;
         let adapter = self.lora.as_ref().unwrap();
         let prepared =
