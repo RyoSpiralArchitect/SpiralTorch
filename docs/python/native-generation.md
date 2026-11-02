@@ -76,6 +76,9 @@ use this same core policy. Supply a `Float32Array`, a `Uint32Array` of recent ID
 and a greedy decoding config (e.g. `"{}"`). These adapters check the shape bounds
 before copying the typed arrays; neither requires a GPU or runs a language model.
 
+See the [matched synthetic CPU comparison](../../benchmarks/results/2026-11-03-native-exact-decoding/README.md)
+for per-policy timings and token, checkpoint and detailed-report parity against the previous wheel.
+
 ## Cached execution
 
 The example explicitly opts into Rust-owned K/V caching. Omitting `execution`
