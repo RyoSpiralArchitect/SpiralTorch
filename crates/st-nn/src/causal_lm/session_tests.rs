@@ -3,6 +3,8 @@ use sha2::{Digest, Sha256};
 
 #[path = "matched_session_tests.rs"]
 mod matched;
+#[path = "prefix_cache_tests.rs"]
+mod prefix_cache;
 
 fn session_config(mode: CausalLmAdaptationMode) -> CausalLmTrainingSessionConfig {
     CausalLmTrainingSessionConfig {

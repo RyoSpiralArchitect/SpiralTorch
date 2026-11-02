@@ -8,7 +8,11 @@ use crate::language_windows::{
 use sha2::{Digest, Sha256};
 
 mod matched;
+mod prefix_cache;
 pub use matched::CausalLmMatchedTrainingStep;
+pub use prefix_cache::{
+    CausalLmPrefixCacheAction, CausalLmPrefixCacheStats, NativeCausalLmTrainingPrefixCache,
+};
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v1";
 const BATCH_SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v2";

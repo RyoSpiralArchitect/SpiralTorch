@@ -131,6 +131,18 @@ impl NativeCausalLm {
         Ok(plan)
     }
 
+    pub(super) fn frozen_prefix_layers(&self) -> CausalLmResult<usize> {
+        let depth = if self.geometry.is_some() {
+            self.first_geometry_site()?.0
+        } else {
+            self.config.layers
+        };
+        Ok(self
+            .lora
+            .as_ref()
+            .map_or(depth, |adapter| depth.min(adapter.layer())))
+    }
+
     /// Admit a roster before consuming a foreign or streamed corpus.
     pub fn comparison_prefix_layers(models: &[&Self]) -> CausalLmResult<usize> {
         if !(2..=MAX_EVALUATION_VARIANTS).contains(&models.len()) {
@@ -144,12 +156,7 @@ impl NativeCausalLm {
             {
                 return Err("comparison requires the same frozen base and readout policy".into());
             }
-            if model.geometry.is_some() {
-                depth = depth.min(model.first_geometry_site()?.0);
-            }
-            if let Some(adapter) = &model.lora {
-                depth = depth.min(adapter.layer());
-            }
+            depth = depth.min(model.frozen_prefix_layers()?);
         }
         Ok(depth)
     }

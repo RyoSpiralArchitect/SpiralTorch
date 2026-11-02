@@ -481,6 +481,37 @@ verifier. On fixed-Wave weights a single threshold-crossing coordinate per
 document carried about 69-70% of the plain forward energy, but none of its
 measured input-adjoint correction energy.
 
+### Reuse frozen training prefixes
+
+Native CPU SGD can retain the hidden activation immediately *before* the
+earliest attached LoRA or geometry block. This is opt-in and separate from the
+autoregressive KV cache. For repeated epochs or different permutations of the
+same windows, share a caller-owned cache:
+
+```python
+cache = st.NativeCausalLmTrainingPrefixCache(base, max_values=3_000_000, max_entries=256)
+step = session.step(prefix_cache=cache)
+# Or, for a cohort with the same data and cursor:
+depth, reports = st.NativeCausalLmTrainingSession.step_matched(cohort, prefix_cache=cache)
+print(cache.stats())
+cache.clear()
+```
+
+The key includes the frozen depth, batch layout, and **all decoder input IDs**,
+including the prompt. Labels and the unused last input ID do not enter the
+prefix. Loss, selected rows, adapters and suffix gradients are recalculated
+for each update. Every owner's limits still apply on a hit. Changing the
+frozen base or readout policy is rejected; a different adapter depth does not
+reuse another depth's entry. No activations are exported or serialized, and a
+new cache after checkpoint restore starts cold.
+
+The value budget counts retained f32 elements (4 bytes each), not peak RSS.
+An additional entry cap bounds metadata. The cache retains the first batches
+that fit rather than evicting them during a sequential sweep. Oversized batches,
+a full cache, or an adapter in block zero still train normally. Only successful
+steps change the cache or its statistics. `skipped_block_calls` counts prefix
+block executions saved beyond within-step sharing, not a wall-time speedup.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)

@@ -1,4 +1,5 @@
 //! Thin bounded transport to the shared Rust adaptation/session contract.
+use super::prefix_cache::PyTrainingPrefixCache;
 use super::{
     checkpoint_error, dimension, documents::documents, error, limit, reject_bool, PyNativeCausalLm,
 };
@@ -277,11 +278,12 @@ impl PyNativeCausalLmTrainingSession {
     }
 
     #[staticmethod]
-    #[pyo3(signature=(sessions, *, observe_geometry=false))]
+    #[pyo3(signature=(sessions, *, observe_geometry=false, prefix_cache=None))]
     fn step_matched(
         py: Python<'_>,
         sessions: &Bound<'_, PyAny>,
         observe_geometry: bool,
+        prefix_cache: Option<&Bound<'_, PyTrainingPrefixCache>>,
     ) -> PyResult<Option<(usize, Vec<PyNativeCausalLmTrainingSessionStep>)>> {
         let n = sessions.len()?;
         if !(2..=Self::MAX_MATCHED_VARIANTS).contains(&n) {
@@ -302,12 +304,19 @@ impl PyNativeCausalLmTrainingSession {
             .map(|o| o.try_borrow_mut())
             .collect::<Result<Vec<_>, _>>()?;
         let mut native: Vec<_> = guards.iter_mut().map(|s| &mut s.inner).collect();
+        let mut cache = prefix_cache.map(|c| c.try_borrow_mut()).transpose()?;
+        let cache = cache.as_mut().map(|c| &mut c.inner);
         let result = py
-            .detach(move || {
-                NativeCausalLmTrainingSession::step_matched_with_observation(
+            .detach(move || match cache {
+                Some(c) => NativeCausalLmTrainingSession::step_matched_with_prefix_cache(
+                    &mut native,
+                    c,
+                    observe_geometry,
+                ),
+                None => NativeCausalLmTrainingSession::step_matched_with_observation(
                     &mut native,
                     observe_geometry,
-                )
+                ),
             })
             .map_err(error)?;
         Ok(result.map(|r| {
@@ -321,15 +330,21 @@ impl PyNativeCausalLmTrainingSession {
         }))
     }
 
-    #[pyo3(signature=(*, observe_geometry=false))]
+    #[pyo3(signature=(*, observe_geometry=false, prefix_cache=None))]
     fn step(
         &mut self,
         py: Python<'_>,
         observe_geometry: bool,
+        prefix_cache: Option<&mut PyTrainingPrefixCache>,
     ) -> PyResult<Option<PyNativeCausalLmTrainingSessionStep>> {
-        py.detach(|| self.inner.step_with_observation(observe_geometry))
-            .map(|value| value.map(|inner| PyNativeCausalLmTrainingSessionStep { inner }))
-            .map_err(error)
+        py.detach(|| match prefix_cache {
+            Some(c) => self
+                .inner
+                .step_with_prefix_cache(&mut c.inner, observe_geometry),
+            None => self.inner.step_with_observation(observe_geometry),
+        })
+        .map(|value| value.map(|inner| PyNativeCausalLmTrainingSessionStep { inner }))
+        .map_err(error)
     }
     #[getter]
     fn model(&self) -> PyNativeCausalLm {
@@ -424,6 +439,7 @@ impl PyNativeCausalLmTrainingSession {
 }
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<PyTrainingPrefixCache>()?;
     module.add_class::<PyNativeCausalLmAdaptationGradients>()?;
     module.add_class::<PyNativeCausalLmTrainingSession>()?;
     module.add_class::<PyNativeCausalLmTrainingSessionStep>()

@@ -46,8 +46,9 @@ pub use observation::{
 };
 pub use repetition::CausalLmRepetition;
 pub use session::{
-    CausalLmMatchedTrainingStep, CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig,
-    CausalLmTrainingSessionResume, CausalLmTrainingSessionStep, NativeCausalLmTrainingSession,
+    CausalLmMatchedTrainingStep, CausalLmPrefixCacheAction, CausalLmPrefixCacheStats,
+    CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig, CausalLmTrainingSessionResume,
+    CausalLmTrainingSessionStep, NativeCausalLmTrainingPrefixCache, NativeCausalLmTrainingSession,
 };
 pub use training::{
     CausalLmObservedCheckpointFiles, CausalLmTrainingConfig, CausalLmTrainingResume,

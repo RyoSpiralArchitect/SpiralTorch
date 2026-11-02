@@ -16,6 +16,7 @@ mod context;
 mod documents;
 mod evaluation;
 mod generation;
+mod prefix_cache;
 mod session;
 mod session_input;
 mod supervision;

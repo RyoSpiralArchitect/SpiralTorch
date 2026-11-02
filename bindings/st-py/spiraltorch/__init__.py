@@ -9689,7 +9689,7 @@ for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAd
               "NativeGeometryRuntime", "NativeGeometryBatch", "NativeGeometryAdamW", "SafeTensorArchive",
               "NdTensor", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",
               "NativeCausalLmLoraGradients", "NativeCausalLmAccumulator", "NativeCausalLmAdaptationGradients",
-              "NativeCausalLmTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
+              "NativeCausalLmTrainingPrefixCache", "NativeCausalLmTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
               "NativeCausalLmTrainingStep", "NativeCausalLmObservedTrainingStep", "NativeCausalLmGenerator",
               "NativeCausalLmGenerationStep", "NativeCausalLmContext"):
     if _resolve_rs_attr(_name) is not None:
