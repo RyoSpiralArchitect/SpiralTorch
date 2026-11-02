@@ -301,6 +301,10 @@ to 2 through 16, and document tokens multiplied by the number of variants must
 fit the evaluation token limit. Every variant's own activation, geometry and
 selected-logit limits still apply.
 
+The Python binding retains corresponding token and label row objects together
+before Rust admits the plan, then copies their values. Do not mutate individual
+rows while calling the evaluator; it does not deep-freeze foreign containers.
+
 For each active microbatch, embedding and all decoder layers **strictly before**
 the earliest geometry or LoRA intervention run once. Each remaining suffix is
 evaluated separately. There is no cache across windows, no training graph

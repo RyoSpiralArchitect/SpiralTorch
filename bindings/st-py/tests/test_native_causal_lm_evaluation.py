@@ -11,6 +11,7 @@ import runpy
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 
 
@@ -71,6 +72,58 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             st.NativeCausalLm.evaluate_variants([self.base, self.base], LazyCorpus(8_388_609), 4)
         with self.assertRaisesRegex(ValueError, "token count exceeds budget"):
             self.base.evaluate_documents(LazyCorpus(16_777_217), 4)
+
+    def test_both_row_owners_are_captured_before_native_admission(self):
+        seen = []
+        class Row:
+            def __len__(self): return 4
+            def __getitem__(self, index): raise AssertionError("copied a value before admission")
+        class Outer:
+            def __init__(self, name): self.name = name
+            def __len__(self): return 1
+            def __getitem__(self, index):
+                seen.append(self.name)
+                return Row()
+        limited = st.NativeCausalLm.from_gpt2(self.config, self.weights, max_activation_elements=20)
+        for models in (None, [self.base, limited]):
+            seen.clear()
+            with self.assertRaisesRegex(ValueError, "budget"):
+                if models is None:
+                    limited.evaluate_documents(Outer("tokens"), 4, labels=Outer("labels"))
+                else:
+                    st.NativeCausalLm.evaluate_variants(models, Outer("tokens"), 4, labels=Outer("labels"))
+            self.assertEqual(seen, ["tokens", "labels"])
+
+    def test_outer_replacement_cannot_mix_old_tokens_and_new_labels(self):
+        ready, swapped = threading.Event(), threading.Event()
+        class LastRow:
+            def __len__(self):
+                ready.set()
+                return 0
+        docs = [[1, 2, 3, 4], LastRow()]
+        targets = [[-100, 2, 3, 4], []]
+        original = self.base.evaluate_documents([docs[0], []], 4, labels=list(targets)).data_id
+        mixed = self.base.evaluate_documents([docs[0], []], 4, labels=[[-100, 8, 7, 6], []]).data_id
+        self.assertNotEqual(original, mixed)
+        class Labels:
+            def __len__(self): return 2
+            def __getitem__(self, index):
+                if index == 0 and ready.is_set() and not swapped.wait(5):
+                    raise AssertionError("reader and writer did not hand off")
+                return targets[index]
+        def replace():
+            if ready.wait(5):
+                docs[0], targets[0] = [5, 6, 7, 8], [-100, 8, 7, 6]
+                swapped.set()
+        thread = threading.Thread(target=replace)
+        thread.start()
+        try:
+            reports = st.NativeCausalLm.evaluate_variants([self.base, self.model], docs, 4, labels=Labels()).evaluations
+        finally:
+            thread.join(5)
+        self.assertTrue(swapped.is_set())
+        self.assertNotIn(mixed, [row.data_id for row in reports])
+        self.assertEqual([row.data_id for row in reports], [original, original])
 
     def setUp(self):
         self.config, self.weights = fixtures["fixture"]()
