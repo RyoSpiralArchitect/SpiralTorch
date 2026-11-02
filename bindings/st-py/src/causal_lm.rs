@@ -26,6 +26,22 @@ fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
 }
 
+fn checkpoint_error(e: Box<dyn std::error::Error + Send + Sync>) -> PyErr {
+    match e.downcast::<std::io::Error>() {
+        Ok(io) => match io.raw_os_error() {
+            // Preserve errno; on Windows the fourth argument carries the Win32 error.
+            #[cfg(windows)]
+            Some(code) => {
+                pyo3::exceptions::PyOSError::new_err((0, io.to_string(), None::<String>, code))
+            }
+            #[cfg(not(windows))]
+            Some(code) => pyo3::exceptions::PyOSError::new_err((code, io.to_string())),
+            None => PyErr::from(*io),
+        },
+        Err(other) => error(other),
+    }
+}
+
 fn shape(value: &Bound<'_, PyAny>) -> PyResult<[usize; 2]> {
     if value.len()? != 2 {
         return Err(error("native causal LM shape must be [batch, sequence]"));
@@ -404,19 +420,25 @@ impl PyNativeCausalLm {
     fn from_training_checkpoint_at(
         py: Python<'_>,
         base: &Self,
-        payload: &str,
-        expected_id: &str,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
         update: &Bound<'_, PyAny>,
         recorded_data_id: &str,
         post_geometry_id: &str,
     ) -> PyResult<Self> {
         reject_bool(update)?;
         let update = update.extract::<u64>()?;
+        let pin = session_input::pin(expected_id)?;
+        let payload = session_input::payload_with_limit(
+            payload,
+            st_nn::causal_lm::NativeCausalLmTrainer::MAX_PAYLOAD_BYTES,
+        )?;
+        let bytes = payload.as_bytes();
         py.detach(|| {
             NativeCausalLm::from_training_checkpoint_at(
                 base.inner.clone(),
-                payload.as_bytes(),
-                expected_id,
+                bytes,
+                &pin,
                 update,
                 recorded_data_id,
                 post_geometry_id,
@@ -430,18 +452,18 @@ impl PyNativeCausalLm {
     fn from_training_checkpoint(
         py: Python<'_>,
         base: &Self,
-        payload: &str,
-        expected_id: &str,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
     ) -> PyResult<Self> {
-        py.detach(|| {
-            NativeCausalLm::from_training_checkpoint(
-                base.inner.clone(),
-                payload.as_bytes(),
-                expected_id,
-            )
-        })
-        .map(|inner| Self { inner })
-        .map_err(error)
+        let pin = session_input::pin(expected_id)?;
+        let payload = session_input::payload_with_limit(
+            payload,
+            st_nn::causal_lm::NativeCausalLmTrainer::MAX_PAYLOAD_BYTES,
+        )?;
+        let bytes = payload.as_bytes();
+        py.detach(|| NativeCausalLm::from_training_checkpoint(base.inner.clone(), bytes, &pin))
+            .map(|inner| Self { inner })
+            .map_err(error)
     }
 
     #[staticmethod]

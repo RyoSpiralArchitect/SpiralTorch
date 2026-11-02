@@ -123,7 +123,9 @@ adapters or a cross-version compatibility promise.
 
 The existing `NativeCausalLmTrainer` continues to provide its geometry-only
 AdamW/accumulation/objective path. This SGD session does not replace its optimizer
-or duplicate the observation/receipt recovery work in PR #2301.
+or checkpoint schema. Both use the same no-overwrite segment commit; see
+[geometry AdamW and observed boundaries](native-corpus-training.md#keep-an-observed-recovery-point-source-after-0433)
+for persisting moments and the final update's site measurements together.
 
 ### Score or generate without the training documents
 

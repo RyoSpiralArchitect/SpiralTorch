@@ -1,5 +1,7 @@
 //! Thin bounded transport to the shared Rust adaptation/session contract.
-use super::{dimension, documents::documents, error, limit, reject_bool, PyNativeCausalLm};
+use super::{
+    checkpoint_error, dimension, documents::documents, error, limit, reject_bool, PyNativeCausalLm,
+};
 use pyo3::prelude::*;
 use st_nn::causal_lm::{
     CausalLmAdaptationMode, CausalLmTrainingSessionConfig, CausalLmTrainingSessionStep,
@@ -308,23 +310,6 @@ impl PyNativeCausalLmTrainingSession {
                 .collect(),
             pin,
         ))
-    }
-}
-
-fn checkpoint_error(e: Box<dyn std::error::Error + Send + Sync>) -> PyErr {
-    match e.downcast::<std::io::Error>() {
-        Ok(io) => match io.raw_os_error() {
-            // Construct OSError with its OS code, not only the formatted message.
-            // On Windows the fourth argument is the native Win32 error code.
-            #[cfg(windows)]
-            Some(code) => {
-                pyo3::exceptions::PyOSError::new_err((0, io.to_string(), None::<String>, code))
-            }
-            #[cfg(not(windows))]
-            Some(code) => pyo3::exceptions::PyOSError::new_err((code, io.to_string())),
-            None => PyErr::from(*io),
-        },
-        Err(other) => error(other),
     }
 }
 

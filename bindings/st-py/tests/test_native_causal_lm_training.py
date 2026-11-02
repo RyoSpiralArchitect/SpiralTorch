@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -155,15 +156,16 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             _, first = runs.step_and_save_observation(trainer, directory)
-            publish = runs._publish
-            def fail_on_receipt(path, raw):
-                if path.name.startswith("observation-"):
-                    raise OSError("simulated storage failure")
-                publish(path, raw)
-            with mock.patch.object(runs, "_publish", side_effect=fail_on_receipt), self.assertRaises(OSError):
+            # A process can die between checkpoint and receipt publication.
+            plain = self.trainer()
+            plain.step()
+            expected = plain.step().to_json()
+            orphan = directory / "checkpoint-000002.json"
+            orphan.write_bytes(plain.to_json().encode())
+            with self.assertRaises(FileExistsError):
                 runs.step_and_save_observation(trainer, directory)
-            self.assertEqual(trainer.completed_updates, 2)
-            self.assertTrue((directory / "checkpoint-000002.json").is_file())
+            self.assertEqual(trainer.completed_updates, 1)
+            self.assertEqual(orphan.read_bytes(), plain.to_json().encode())
             self.assertFalse((directory / "observation-000002.json").exists())
             with self.assertRaises(FileNotFoundError):
                 runs.restore_observed_checkpoint(directory, 2, expected_observation_id=first["observation_id"],
@@ -173,10 +175,100 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 runs.step_and_save_observation(prior, directory)
             self.assertEqual(prior.completed_updates, 1)
-            plain = self.trainer()
-            plain.step()
-            self.assertEqual(prior.step().to_json(), plain.step().to_json())
             self.assertEqual(prior.to_json(), trainer.to_json())
+            self.assertEqual(prior.step().to_json(), expected)
+            self.assertEqual(prior.to_json(), plain.to_json())
+
+    def test_segment_file_bytes_and_legacy_observation_are_interoperable(self):
+        expected, trainer = self.trainer(), self.trainer()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for stop in (0, trainer.MAX_CHECKPOINT_INTERVAL + 1, trainer.total_updates + 1):
+                with self.assertRaises(ValueError):
+                    trainer.advance_to_checkpoint_new(stop, root/"unused")
+            with self.assertRaises(TypeError):
+                trainer.advance_to_observed_checkpoint_new(True, root)
+            reports, pin = trainer.advance_to_checkpoint_new(2, root/"two")
+            self.assertEqual([r.to_json() for r in reports], [expected.step().to_json() for _ in range(2)])
+            state = (root/"two").read_bytes()
+            self.assertEqual((state.decode(), pin), expected.checkpoint_with_id())
+            base = self.base
+            restored = st.NativeCausalLmTrainer.from_json(base, DOCS, state, pin)
+            self.assertEqual(st.NativeCausalLm.from_training_checkpoint(base, state, pin).geometry_artifact_id,
+                             restored.model.geometry_artifact_id)
+            step = expected.step_observed()
+            filename = "checkpoint-000003.json"
+            cp, cid = expected.checkpoint_with_id()
+            (root/filename).write_bytes(cp.encode())
+            # Older clients wrote this receipt using Python's JSON float formatting.
+            record = {"schema": "spiraltorch.native_corpus.observed_checkpoint.v1",
+                      "checkpoint": {"file": filename, "checkpoint_id": cid, "updates": 3},
+                      "observation": json.loads(step.to_json())}
+            receipt = (json.dumps(record, separators=(",", ":"), allow_nan=False) + "\n").encode()
+            (root/"observation-000003.json").write_bytes(receipt)
+            restored = runs.restore_observed_checkpoint(root, 3,
+                expected_observation_id="sha256:" + hashlib.sha256(receipt).hexdigest(), base=base, token_documents=DOCS)
+            self.assertEqual(restored.optimizer.to_json(), expected.optimizer.to_json())
+            self.assertEqual(restored.step().to_json(), expected.step().to_json())
+
+    @unittest.skipUnless(sys.implementation.name == "cpython", "CPython allocation regression")
+    def test_tiny_recovery_inputs_do_not_allocate_the_checkpoint_budget(self):
+        import tracemalloc
+        example = runpy.run_path(str(Path(__file__).resolve().parents[1] / "examples/native_geometry_corpus_training.py"))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tiny"
+            data = b"x" * 2048
+            path.write_bytes(data)
+            for read in (example["read"], runs._read):
+                with self.subTest(read=read.__name__):
+                    was_tracing = tracemalloc.is_tracing()
+                    if not was_tracing:
+                        tracemalloc.start()
+                    try:
+                        tracemalloc.reset_peak()
+                        before = tracemalloc.get_traced_memory()[0]
+                        self.assertEqual(read(path, st.NativeCausalLmTrainer.MAX_CHECKPOINT_BYTES), data)
+                        self.assertLess(tracemalloc.get_traced_memory()[1] - before, 512 * 1024)
+                    finally:
+                        if not was_tracing:
+                            tracemalloc.stop()
+
+    @unittest.skipUnless(os.name == "posix", "requires a child-local file size limit")
+    def test_os_write_failure_keeps_adamw_moments_and_cursor_for_both_segment_kinds(self):
+        script = r"""
+import errno, resource, runpy, signal, sys
+from pathlib import Path
+source = runpy.run_path(sys.argv[1])
+case = source["NativeCausalLmTrainingTests"]()
+case.setUp()
+trainer = case.trainer()
+trainer.step()
+before = trainer.checkpoint_with_id()
+moments = trainer.optimizer.to_json()
+root = Path(sys.argv[2])
+pin = trainer.save_checkpoint_new(root/"one")
+assert pin == before[1]
+limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (32, limits[1]))
+try:
+    for advance, path in [(trainer.advance_to_checkpoint_new, root/"three"), (trainer.advance_to_observed_checkpoint_new, root)]:
+        try:
+            advance(3, path)
+        except OSError as e:
+            assert e.errno == errno.EFBIG, e
+        else:
+            raise AssertionError("oversize checkpoint was accepted")
+finally:
+    resource.setrlimit(resource.RLIMIT_FSIZE, limits)
+assert trainer.completed_updates == 1 and trainer.checkpoint_with_id() == before
+assert trainer.optimizer.to_json() == moments and (root/"one").read_bytes() == before[0].encode()
+assert list(root.iterdir()) == [root/"one"]
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            child = subprocess.run([sys.executable, "-I", "-B", "-c", script, __file__, tmp],
+                                   capture_output=True, text=True, timeout=60)
+            self.assertEqual(child.returncode, 0, child.stderr)
 
     @unittest.skipUnless(os.name == "posix", "POSIX permission bits")
     def test_observed_saves_reject_nonprivate_outputs_before_training(self):

@@ -185,7 +185,7 @@ impl NativeCausalLmTrainingSession {
     pub const MAX_TOKENS: usize = MAX_TRAINING_TOKENS;
     pub const MAX_PAYLOAD_BYTES: usize = MAX_CHECKPOINT_BYTES;
     /// Bound the number of per-update reports retained for one disk commit.
-    pub const MAX_CHECKPOINT_INTERVAL: u64 = 1024;
+    pub const MAX_CHECKPOINT_INTERVAL: u64 = checkpoint::MAX_INTERVAL;
 
     /// Admit lengths/work before bindings eagerly copy nested token arrays.
     pub fn document_plan(
@@ -420,9 +420,7 @@ impl NativeCausalLmTrainingSession {
     /// Stage the exact v1/v2 bytes and return their pin after no-clobber
     /// publication. Saving never advances the cursor or changes either adapter.
     pub fn save_checkpoint_new(&self, path: impl AsRef<std::path::Path>) -> CausalLmResult<String> {
-        let (payload, pin) = self.checkpoint_with_id()?;
-        st_core::runtime::atomic_create_new(path.as_ref(), payload.as_bytes())?;
-        Ok(pin)
+        checkpoint::save(path.as_ref(), self.checkpoint_with_id()?)
     }
 
     /// Run the ordinary SGD steps up to an absolute cursor on a private session
@@ -434,43 +432,14 @@ impl NativeCausalLmTrainingSession {
         stop_after: u64,
         path: impl AsRef<std::path::Path>,
     ) -> CausalLmResult<(Vec<CausalLmTrainingSessionStep>, String)> {
-        let count = stop_after
-            .checked_sub(self.updates)
-            .filter(|n| {
-                (1..=Self::MAX_CHECKPOINT_INTERVAL).contains(n)
-                    && stop_after <= self.total_updates()
-            })
-            .ok_or("checkpoint interval must advance 1..=1024 updates within the session")?;
-        let path = path.as_ref();
-        // Advisory only: publication still atomically rejects racing names.
-        match std::fs::symlink_metadata(path) {
-            Ok(_) => return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists).into()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(std::path::Path::new("."));
-        if !std::fs::metadata(parent)?.is_dir() {
-            return Err(std::io::Error::from(std::io::ErrorKind::NotADirectory).into());
-        }
-        self.advance_and_publish(count, |next| next.save_checkpoint_new(path))
-    }
-
-    fn advance_and_publish(
-        &mut self,
-        count: u64,
-        publish: impl FnOnce(&Self) -> CausalLmResult<String>,
-    ) -> CausalLmResult<(Vec<CausalLmTrainingSessionStep>, String)> {
-        let mut next = self.clone();
-        let mut reports = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            reports.push(next.step()?.ok_or("unexpected end of training segment")?);
-        }
-        let pin = publish(&next)?;
-        *self = next;
-        Ok((reports, pin))
+        let count = checkpoint::count(self.updates, self.total_updates(), stop_after)?;
+        checkpoint::advance_new(
+            self,
+            count,
+            path.as_ref(),
+            Self::step,
+            Self::checkpoint_with_id,
+        )
     }
 
     /// Verify a caller-pinned byte identity and recover the saved arithmetic
@@ -554,16 +523,16 @@ fn failed_publication_after_sgd_preserves_session_and_older_checkpoint() {
     let before = std::fs::read(&older).unwrap();
     for late in [false, true] {
         let path = dir.path().join("next.json");
-        let failure = s
-            .advance_and_publish(2, |candidate| {
-                assert_eq!(candidate.completed_updates(), 2);
-                assert_ne!(candidate.checkpoint_id()?, pin);
-                if late {
-                    candidate.save_checkpoint_new(&path)?;
-                }
-                Err(std::io::Error::from(std::io::ErrorKind::StorageFull).into())
-            })
-            .unwrap_err();
+        let failure = checkpoint::transaction::<_, ()>(&mut s, |candidate| {
+            checkpoint::steps(candidate, 2, NativeCausalLmTrainingSession::step)?;
+            assert_eq!(candidate.completed_updates(), 2);
+            assert_ne!(candidate.checkpoint_id()?, pin);
+            if late {
+                candidate.save_checkpoint_new(&path)?;
+            }
+            Err(std::io::Error::from(std::io::ErrorKind::StorageFull).into())
+        })
+        .unwrap_err();
         assert_eq!(
             failure.downcast_ref::<std::io::Error>().unwrap().kind(),
             std::io::ErrorKind::StorageFull

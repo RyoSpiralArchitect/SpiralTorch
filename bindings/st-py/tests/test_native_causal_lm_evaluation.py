@@ -1,6 +1,7 @@
 """Whole-corpus native scoring; foreign ML imports forbidden, including during FT."""
 import ast
 import contextlib
+import hashlib
 import importlib
 import importlib.abc
 import io
@@ -66,7 +67,8 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             def __init__(self, first): self.first = first
             def __len__(self): return 2
             def __getitem__(self, index):
-                if index: raise AssertionError("fetched a row after budget exhaustion")
+                if index:
+                    raise AssertionError("fetched a row after budget exhaustion")
                 return range(self.first)
         with self.assertRaisesRegex(ValueError, "token count exceeds budget"):
             st.NativeCausalLm.evaluate_variants([self.base, self.base], LazyCorpus(8_388_609), 4)
@@ -416,6 +418,13 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             entries = [json.loads(line) for line in index.splitlines()]
             self.assertEqual([e["updates"] for e in entries], [2, 4])
             summary = json.loads((root / "observed/result.json").read_text())
+            for name in ("plain", "zero", "observed", "before-first-observation", "observed-resumed"):
+                run = root / name
+                saved = json.loads((run / "result.json").read_bytes())
+                indexed = [json.loads(line) for line in (run / saved["checkpoint_index"]).read_bytes().splitlines()]
+                self.assertEqual(indexed, saved["checkpoints"])
+                self.assertTrue(all(hashlib.sha256((run / e["file"]).read_bytes()).hexdigest() == e["checkpoint_id"][7:]
+                                    for e in indexed))
             self.assertEqual(summary["observations"]["count"], 2)
             self.assertEqual([c["updates"] for c in summary["checkpoints"]], [0, 2, 3, 4])
             for entry in entries:

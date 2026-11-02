@@ -4,6 +4,8 @@ use crate::geometry_runtime::{AdamWStep, NativeGeometryAdamW};
 use crate::language_windows::{CausalDocumentWindow, CausalDocumentWindows, MAX_DOCUMENTS};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+mod checkpoint_files;
+pub use checkpoint_files::CausalLmObservedCheckpointFiles;
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_trainer.v1";
 const MAX_CHECKPOINT_BYTES: usize = 128 * 1024 * 1024;
@@ -128,7 +130,8 @@ pub struct CausalLmTrainingStep {
 #[derive(Clone, Debug)]
 pub struct NativeCausalLmTrainer {
     model: NativeCausalLm,
-    optimizer: NativeGeometryAdamW,
+    // Segment snapshots share the old moments. Updates replace the entire owner.
+    optimizer: Arc<NativeGeometryAdamW>,
     corpus: Arc<Corpus>,
     config: CausalLmTrainingConfig,
     updates: u64,
@@ -334,7 +337,7 @@ impl NativeCausalLmTrainer {
             initial_optimizer_revision: optimizer.revision(),
             initial_optimizer_steps: optimizer.state().slots.iter().map(|s| s.steps).collect(),
             model,
-            optimizer,
+            optimizer: Arc::new(optimizer),
             corpus,
             config,
             updates: 0,
@@ -497,7 +500,7 @@ impl NativeCausalLmTrainer {
             post_geometry_artifact_id: model.geometry_artifact_id().unwrap().into(),
         };
         self.model = model;
-        self.optimizer = optimizer;
+        self.optimizer = Arc::new(optimizer);
         self.updates += 1;
         Ok(Some(report))
     }

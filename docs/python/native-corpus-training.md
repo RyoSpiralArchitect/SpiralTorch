@@ -144,11 +144,38 @@ Resume uses `--resume "$CHECKPOINT" --checkpoint-id "$PIN"` instead of the
 recipe/artifact arguments. `--stop-after` is an absolute accepted-update boundary;
 it does not shorten or rewrite the sealed run recipe. Always use a new output
 directory. Checkpoints are saved at complete optimizer boundaries, not during
-pending accumulation. The example stops on I/O failure; it is not a durable
-transactional store or a guarantee against power loss during file writes.
+pending accumulation. With current source builds, Rust publishes the unchanged
+v1 checkpoint (geometry, both AdamW moments, clocks, cursor and corpus ID)
+without replacing existing files. The example syncs each pin to
+`checkpoints.jsonl` before starting more updates. Plain runs also work with
+the older 0.4.33 API; its Python file-writing shim cannot roll back live steps.
 On POSIX the new run directory uses mode `0700`, independent of a permissive
 process umask. This is local access restriction, not encryption or a Windows ACL
 guarantee; retain inputs and backups with equivalent care.
+
+**Bounded commits (source API).** In Rust or Python, use `save_checkpoint_new(path)`
+to save without advancing. To train to an absolute cursor and save its state:
+
+```python
+reports, pin = trainer.advance_to_checkpoint_new(8, run_dir / "checkpoint-000008.json")
+restored = st.NativeCausalLmTrainer.from_json(
+    base, documents, (run_dir / "checkpoint-000008.json").read_bytes(), pin, labels=labels,
+)
+```
+
+A segment contains 1 to `MAX_CHECKPOINT_INTERVAL` (1,024) ordinary optimizer
+updates, not microbatches. On numerical or native publication failure the
+live trainer keeps its starting state, including moments and slot clocks.
+A late filesystem error can leave a complete file; do not automatically use
+or overwrite it. A zero learning rate advances the **data cursor**, not the
+AdamW clocks. Inference can open pinned checkpoint bytes without documents;
+that does not verify the original corpus or prove past training.
+
+The CLI keeps the requested evaluation, save and observation boundaries.
+An evaluation-only cut, or the prefix of a gap larger than 1,024, can advance
+the live trainer without a checkpoint. `steps.jsonl` is not a resume index.
+If writing an index fails after publication, the CLI stops. Use a previously
+known complete pin, preferably retained separately, and a new output directory.
 
 ### Keep an observed recovery point (source after 0.4.33)
 
@@ -173,8 +200,15 @@ restored = restore_observed_checkpoint(
 )
 ```
 
-The client closes the checkpoint before publishing the observation receipt;
-the CLI then appends its pin to `observed-checkpoints.jsonl`. A complete index
+For a multi-update segment use
+`reports, entry = trainer.advance_to_observed_checkpoint_new(stop_after, private_run_dir)`.
+Only the last update collects site statistics; its backward is not repeated.
+Rust publishes the checkpoint first, then the observation receipt. Only after
+both publications succeed does it advance the live trainer. Pre-existing v1
+pairs remain readable using their original pins; new receipts are pinned by
+their own bytes, not by re-encoding an old receipt with a different JSON writer.
+After a successful observed boundary,
+the CLI appends its pin to `observed-checkpoints.jsonl`. A complete index
 line identifies a pair even when `result.json` was never reached. Pick an
 explicit update and pin; never infer a recovery point from the largest
 checkpoint filename or a torn index line. The reader checks the receipt hash

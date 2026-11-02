@@ -44,7 +44,13 @@ fn text_bytes<'py>(s: &Bound<'py, PyString>, limit: usize) -> PyResult<Bound<'py
 }
 
 pub(super) fn payload<'py>(v: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyBytes>> {
-    let limit = NativeCausalLmTrainingSession::MAX_PAYLOAD_BYTES;
+    payload_with_limit(v, NativeCausalLmTrainingSession::MAX_PAYLOAD_BYTES)
+}
+
+pub(super) fn payload_with_limit<'py>(
+    v: &Bound<'py, PyAny>,
+    limit: usize,
+) -> PyResult<Bound<'py, PyBytes>> {
     if let Ok(b) = v.cast::<PyBytes>() {
         if b.as_bytes().len() > limit {
             return Err(error("session checkpoint exceeds byte budget"));

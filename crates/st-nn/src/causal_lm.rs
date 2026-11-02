@@ -12,6 +12,7 @@ use st_tensor::{
 use std::sync::{Arc, OnceLock};
 
 mod adaptation;
+mod checkpoint;
 mod context;
 mod decoder;
 mod evaluation;
@@ -45,7 +46,8 @@ pub use session::{
     NativeCausalLmTrainingSession,
 };
 pub use training::{
-    CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
+    CausalLmObservedCheckpointFiles, CausalLmTrainingConfig, CausalLmTrainingResume,
+    CausalLmTrainingStep, NativeCausalLmTrainer,
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

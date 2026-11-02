@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import stat
-import tempfile
 
 __all__ = [
     "step_and_save_observation",
@@ -43,68 +42,32 @@ def _paths(directory, update):
     )
 
 
-def _publish(path, raw):
-    # Only a fully closed file can acquire the final name; never replace even
-    # an orphan left by an earlier interrupted attempt.
-    fd, pending = tempfile.mkstemp(dir=path.parent, prefix=".pending-")
-    try:
-        with os.fdopen(fd, "wb") as tmp:
-            tmp.write(raw)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        os.link(pending, path)
-    finally:
-        os.unlink(pending)
-
-
 def _read(path, limit):
     if not stat.S_ISREG(path.lstat().st_mode):
         raise ValueError("expected a regular file, not a link")
-    with path.open("rb") as stream:
-        raw = stream.read(limit + 1)
-    if len(raw) > limit:
-        raise ValueError("file exceeds the native recovery budget")
-    return raw
+    flags = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with open(path, "rb", opener=lambda p, f: os.open(p, f | flags)) as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= limit:
+            raise ValueError("expected a regular file within the native recovery budget")
+        raw = stream.read(info.st_size)
+        if len(raw) != info.st_size or stream.read(1):
+            raise ValueError("file size changed during native recovery")
+        return raw
 
 
 def step_and_save_observation(trainer, directory):
     """Perform ONE observed step, save its post-update state, then publish its receipt.
 
     Returns (ordinary native step, file/ID metadata), or None when exhausted.
-    Both files are private. After an I/O error the in-memory step may already
-    have advanced: stop, do not retry, and select a previously completed pair.
+    Both files are private. Rust commits the live state only after publishing
+    both. After an I/O error stop and select a previously completed pair.
     A checkpoint alone is NOT a completed pair.
     """
     if trainer.exhausted:
         return None
-    cursor = trainer.completed_updates + 1
-    checkpoint, receipt = _paths(directory, cursor)
-    if any(os.path.lexists(p) for p in (checkpoint, receipt)):
-        raise FileExistsError("observed update output already exists")
-    observed = trainer.step_observed()
-    report = observed.step
-    if report.update != cursor or trainer.completed_updates != cursor:
-        raise ValueError("observed update does not own the selected trainer cursor")
-    payload, checkpoint_id = trainer.checkpoint_with_id()
-    state = payload.encode()
-    if len(state) > _CHECKPOINT_LIMIT or _pin(state) != checkpoint_id:
-        raise ValueError("invalid native checkpoint bytes or identity")
-    saved = {"file": checkpoint.name, "checkpoint_id": checkpoint_id, "updates": cursor}
-    record = {
-        "schema": _SCHEMA,
-        "checkpoint": saved,
-        "observation": json.loads(observed.to_json()),
-    }
-    raw = (json.dumps(record, separators=(",", ":"), allow_nan=False) + "\n").encode()
-    if len(raw) > _RECEIPT_LIMIT:
-        raise ValueError("observation exceeds receipt budget")
-    _publish(checkpoint, state)
-    _publish(receipt, raw)
-    return report, {
-        **saved,
-        "observation_file": receipt.name,
-        "observation_id": _pin(raw),
-    }
+    reports, entry = trainer.advance_to_observed_checkpoint_new(trainer.completed_updates + 1, directory)
+    return reports[0], entry
 
 
 def _observed_pair(directory, update, expected_observation_id, base):
@@ -142,7 +105,7 @@ def _observed_pair(directory, update, expected_observation_id, base):
         or not all(isinstance(v, str) for v in (cid, data_id, post_id))
     ):
         raise ValueError("observation receipt does not identify this update and base")
-    return _read(checkpoint, _CHECKPOINT_LIMIT).decode(), cid, data_id, post_id
+    return _read(checkpoint, _CHECKPOINT_LIMIT), cid, data_id, post_id
 
 
 def load_observed_model(directory, update, *, expected_observation_id, base):
