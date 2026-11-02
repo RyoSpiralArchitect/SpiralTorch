@@ -36,8 +36,8 @@ fn inputs(
 
 #[wasm_bindgen(js_name = greedyTokenIdF32)]
 pub fn greedy_token_id(
-    logits: &JsValue,
-    history: &JsValue,
+    #[wasm_bindgen(unchecked_param_type = "Float32Array")] logits: &JsValue,
+    #[wasm_bindgen(unchecked_param_type = "Uint32Array")] history: &JsValue,
     config_json: &str,
 ) -> Result<u32, JsValue> {
     let (logits, history, cfg) = inputs(logits, history, config_json)?;
@@ -48,8 +48,8 @@ pub fn greedy_token_id(
 
 #[wasm_bindgen(js_name = greedyTokenDecisionJsonF32)]
 pub fn greedy_token_decision_json(
-    logits: &JsValue,
-    history: &JsValue,
+    #[wasm_bindgen(unchecked_param_type = "Float32Array")] logits: &JsValue,
+    #[wasm_bindgen(unchecked_param_type = "Uint32Array")] history: &JsValue,
     config_json: &str,
 ) -> Result<String, JsValue> {
     let (logits, history, cfg) = inputs(logits, history, config_json)?;

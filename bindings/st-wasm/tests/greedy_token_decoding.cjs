@@ -1,6 +1,10 @@
 const assert = require('node:assert/strict');
-const {greedyTokenIdF32: id, greedyTokenDecisionJsonF32: report} =
-  require(require('node:path').resolve(process.argv[2]));
+const artifact = require('node:path').resolve(process.argv[2]);
+const {greedyTokenIdF32: id, greedyTokenDecisionJsonF32: report} = require(artifact);
+const declarations = require('node:fs').readFileSync(artifact.replace(/\.js$/, '.d.ts'), 'utf8');
+for (const [name, result] of [['greedyTokenIdF32','number'], ['greedyTokenDecisionJsonF32','string']]) {
+  assert.ok(declarations.includes(`function ${name}(logits: Float32Array, history: Uint32Array, config_json: string): ${result};`));
+}
 const empty = new Uint32Array();
 function check(scores, history, config, expected) {
   const logits = Float32Array.from(scores), ids = Uint32Array.from(history), cfg = JSON.stringify(config);
@@ -26,4 +30,4 @@ for (const fn of [id, report]) {
   ]) assert.throws(() => fn(x,h,JSON.stringify(c)));
   assert.throws(() => fn(new Float32Array(2),empty,' '.repeat(65_537)));
 }
-console.log(JSON.stringify({plain_and_controlled_id_report_parity:true, invalid_inputs_rejected:true, gpu:false}));
+console.log(JSON.stringify({plain_and_controlled_id_report_parity:true, invalid_inputs_rejected:true, typed_declarations:true, gpu:false}));
