@@ -40,6 +40,154 @@ fn id(json: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(json.as_bytes()))
 }
 
+#[test]
+fn covering_masked_schedule_preserves_documents_tails_and_resume() {
+    let base = load();
+    let cfg = session_config(CausalLmAdaptationMode::Joint);
+    let mut manual = adapted(&base, cfg.mode);
+    let docs = vec![
+        vec![1, 2, 3, 4, 5, 6, 7, 8],
+        vec![9, 0],
+        vec![4, 3, 2],
+        vec![3, 4, 5, 6],
+    ];
+    let labels = vec![
+        vec![-100, -100, -100, -100, -100, -100, -100, 8],
+        vec![-100, 3],
+        vec![-100, -100, 2],
+        vec![1, -100, -100, -100],
+    ];
+    let mut s = NativeCausalLmTrainingSession::new_with_policy(
+        manual.clone(),
+        docs.clone(),
+        Some(labels.clone()),
+        cfg,
+        2,
+        CausalLmSessionWindowPolicy::CoveringTargets,
+    )
+    .unwrap();
+    assert_eq!(
+        (
+            s.plan().windows().len(),
+            s.updates_per_epoch(),
+            s.total_updates()
+        ),
+        (6, 2, 4)
+    );
+    for i in 0..4 {
+        let (start, end, ids, targets, shape): (_, _, &[usize], &[i64], _) = if i % 2 == 0 {
+            (2, 4, &[7, 8, 9, 0], &[-100, 8, -100, 3], [2, 2])
+        } else {
+            (4, 5, &[4, 3, 2], &[-100, -100, 2], [1, 3])
+        };
+        assert_eq!(s.next_window(), start);
+        let g = manual
+            .adaptation_loss_gradients_with_labels(ids, shape, Some(targets), Some(cfg.mode))
+            .unwrap();
+        manual = manual
+            .step_adaptation_sgd(&g, cfg.mode, cfg.learning_rate)
+            .unwrap();
+        let step = s.step().unwrap().unwrap();
+        assert_eq!(
+            (
+                step.epoch,
+                step.window_start,
+                step.window_end,
+                step.target_tokens
+            ),
+            (i / 2, start, end, if i % 2 == 0 { 2 } else { 1 })
+        );
+        assert_eq!(step.loss, g.loss());
+        assert_eq!(s.model().lora_artifact_id(), manual.lora_artifact_id());
+        assert_eq!(
+            s.model().geometry_artifact_id(),
+            manual.geometry_artifact_id()
+        );
+        let (raw, pin) = s.checkpoint_with_id().unwrap();
+        let prepare = || {
+            NativeCausalLmTrainingSession::prepare_restore(base.clone(), raw.as_bytes(), &pin)
+                .unwrap()
+        };
+        assert!(prepare().resume(docs.clone()).is_err());
+        let mut wrong = labels.clone();
+        wrong[3][0] = 2; // Never scored but part of the pinned corpus.
+        assert!(prepare()
+            .resume_with_labels(docs.clone(), Some(wrong))
+            .is_err());
+        s = prepare()
+            .resume_with_labels(docs.clone(), Some(labels.clone()))
+            .unwrap();
+        assert_eq!(s.checkpoint_id().unwrap(), pin);
+    }
+    assert_eq!(s.next_window(), 6);
+    assert!(s.step().unwrap().is_none());
+}
+
+#[test]
+fn supervised_sessions_enforce_sparse_and_context_budgets_and_schema() {
+    use CausalLmSessionWindowPolicy::{CoveringTargets, Disjoint};
+    let base = load();
+    let cfg = session_config(CausalLmAdaptationMode::Joint);
+    let mut model = adapted(&base, cfg.mode);
+    model.limits.max_logit_elements = model.config.vocabulary;
+    let docs = vec![vec![1, 2, 3, 4, 5]];
+    let build = |labels, policy| {
+        NativeCausalLmTrainingSession::new_with_policy(
+            model.clone(),
+            docs.clone(),
+            labels,
+            cfg,
+            1,
+            policy,
+        )
+    };
+    assert!(build(None, Disjoint).is_err());
+    assert!(build(Some(vec![vec![0, 1, 2, -100, -100]]), Disjoint).is_err());
+    assert!(build(Some(vec![vec![0, -100, -100, -100, 1]]), Disjoint).is_err());
+    let mut s = build(Some(vec![vec![0, -100, -100, -100, 1]]), CoveringTargets).unwrap();
+    assert_eq!(s.step().unwrap().unwrap().target_tokens, 1);
+    for invalid in [
+        vec![],
+        vec![vec![0, 1]],
+        vec![vec![0, -100, -100, 1, -2]],
+        vec![vec![11, -100, -100, 1, 0]],
+    ] {
+        assert!(build(Some(invalid), Disjoint).is_err());
+    }
+    let (raw, _) = s.checkpoint_with_id().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        value["data_policy"],
+        json!({"window_policy":"covering_targets","has_labels":true})
+    );
+    for policy in [
+        json!(null),
+        json!({}),
+        json!({"window_policy":"disjoint","has_labels":false}),
+        json!({"window_policy":"unknown","has_labels":true}),
+    ] {
+        let mut altered = value.clone();
+        altered["data_policy"] = policy;
+        let text = altered.to_string();
+        assert!(NativeCausalLmTrainingSession::prepare_restore(
+            base.clone(),
+            text.as_bytes(),
+            &id(&text)
+        )
+        .is_err());
+    }
+    model.limits.max_attention_pairs = 1;
+    assert!(NativeCausalLmTrainingSession::new_with_policy(
+        model,
+        docs,
+        Some(vec![vec![0, -100, -100, 1, -100]]),
+        cfg,
+        1,
+        CoveringTargets
+    )
+    .is_err());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn file_checkpoint_publishes_exact_v1_and_v2_bytes_without_overwrite() {

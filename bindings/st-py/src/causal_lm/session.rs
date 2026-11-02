@@ -4,8 +4,8 @@ use super::{
 };
 use pyo3::prelude::*;
 use st_nn::causal_lm::{
-    CausalLmAdaptationMode, CausalLmTrainingSessionConfig, CausalLmTrainingSessionStep,
-    NativeCausalLmAdaptationGradients, NativeCausalLmTrainingSession,
+    CausalLmAdaptationMode, CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig,
+    CausalLmTrainingSessionStep, NativeCausalLmAdaptationGradients, NativeCausalLmTrainingSession,
 };
 use st_nn::language_windows::MAX_DOCUMENTS;
 use std::collections::BTreeMap;
@@ -142,7 +142,7 @@ impl PyNativeCausalLmTrainingSession {
     const MAX_DOCUMENTS: usize = MAX_DOCUMENTS;
     #[new]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature=(model, token_documents, context_length, *, learning_rate, mode="joint", epochs=None, batch_windows=None))]
+    #[pyo3(signature=(model, token_documents, context_length, *, learning_rate, mode="joint", epochs=None, batch_windows=None, labels=None, window_policy="disjoint"))]
     fn new(
         py: Python<'_>,
         model: &PyNativeCausalLm,
@@ -152,6 +152,8 @@ impl PyNativeCausalLmTrainingSession {
         mode: &str,
         epochs: Option<&Bound<'_, PyAny>>,
         batch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+        window_policy: &str,
     ) -> PyResult<Self> {
         reject_bool(learning_rate)?;
         let config = CausalLmTrainingSessionConfig {
@@ -161,19 +163,26 @@ impl PyNativeCausalLmTrainingSession {
             epochs: u32::try_from(limit(epochs, 1)?).map_err(error)?,
         };
         let batch = limit(batch_windows, 1)?;
+        let policy = match window_policy {
+            "disjoint" => CausalLmSessionWindowPolicy::Disjoint,
+            "covering_targets" => CausalLmSessionWindowPolicy::CoveringTargets,
+            _ => return Err(error("window_policy must be disjoint or covering_targets")),
+        };
         NativeCausalLmTrainingSession::validate_policy(&model.inner, config, batch)
             .map_err(error)?;
-        let (docs, _) = documents(
+        let (docs, labels) = documents(
             token_documents,
-            None,
+            labels,
             NativeCausalLmTrainingSession::MAX_TOKENS,
-            |lengths, _| {
+            |lengths, has_labels| {
                 py.detach(|| {
-                    NativeCausalLmTrainingSession::document_plan_batched(
+                    NativeCausalLmTrainingSession::document_plan_with_policy(
                         &model.inner,
                         config,
                         lengths,
                         batch,
+                        policy,
+                        has_labels,
                     )
                     .map(|_| ())
                 })
@@ -181,18 +190,27 @@ impl PyNativeCausalLmTrainingSession {
             },
         )?;
         py.detach(|| {
-            NativeCausalLmTrainingSession::new_batched(model.inner.clone(), docs, config, batch)
+            NativeCausalLmTrainingSession::new_with_policy(
+                model.inner.clone(),
+                docs,
+                labels,
+                config,
+                batch,
+                policy,
+            )
         })
         .map(|inner| Self { inner })
         .map_err(error)
     }
     #[staticmethod]
+    #[pyo3(signature=(base, token_documents, payload, expected_id, *, labels=None))]
     fn from_json(
         py: Python<'_>,
         base: &PyNativeCausalLm,
         token_documents: &Bound<'_, PyAny>,
         payload: &Bound<'_, PyAny>,
         expected_id: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let expected_id = super::session_input::pin(expected_id)?;
         let payload = super::session_input::payload(payload)?;
@@ -206,24 +224,29 @@ impl PyNativeCausalLmTrainingSession {
                 )
             })
             .map_err(error)?;
-        let (docs, _) = documents(
+        if resume.has_labels() != labels.is_some() {
+            return Err(error("session checkpoint label presence differs"));
+        }
+        let (docs, labels) = documents(
             token_documents,
-            None,
+            labels,
             NativeCausalLmTrainingSession::MAX_TOKENS,
-            |lengths, _| {
+            |lengths, has_labels| {
                 py.detach(|| {
-                    NativeCausalLmTrainingSession::document_plan_batched(
+                    NativeCausalLmTrainingSession::document_plan_with_policy(
                         resume.model(),
                         resume.config(),
                         lengths,
                         resume.batch_windows(),
+                        resume.window_policy(),
+                        has_labels,
                     )
                     .map(|_| ())
                 })
                 .map_err(error)
             },
         )?;
-        py.detach(|| resume.resume(docs))
+        py.detach(|| resume.resume_with_labels(docs, labels))
             .map(|inner| Self { inner })
             .map_err(error)
     }
@@ -253,6 +276,17 @@ impl PyNativeCausalLmTrainingSession {
     #[getter]
     fn batch_windows(&self) -> usize {
         self.inner.batch_windows()
+    }
+    #[getter]
+    fn has_labels(&self) -> bool {
+        self.inner.has_labels()
+    }
+    #[getter]
+    fn window_policy(&self) -> &'static str {
+        match self.inner.window_policy() {
+            CausalLmSessionWindowPolicy::Disjoint => "disjoint",
+            CausalLmSessionWindowPolicy::CoveringTargets => "covering_targets",
+        }
     }
     #[getter]
     fn total_updates(&self) -> u64 {

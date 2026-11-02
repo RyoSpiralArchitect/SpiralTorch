@@ -30,30 +30,42 @@ fn model(layer: usize, policy: CausalLmReadoutAccumulator) -> NativeCausalLm {
         .unwrap()
 }
 
-fn objective(model: &NativeCausalLm, ids: &[usize], shape: [usize; 2]) -> f64 {
-    let p = model
-        .prepare_objective(ids, shape, None, CausalLmObjective::default())
-        .unwrap();
-    let logits = model.logits(&p.input, p.shape, false).unwrap();
-    logits
-        .data()
-        .chunks_exact(model.config.vocabulary)
-        .zip(&p.labels)
-        .map(|(row, &label)| {
+// Independent oracle: one forward per prefix, no shared shift, gather or loss.
+fn objective(model: &NativeCausalLm, ids: &[usize], width: usize, labels: Option<&[i64]>) -> f64 {
+    let mut sum = 0.;
+    let mut count = 0;
+    for (i, window) in ids.chunks_exact(width).enumerate() {
+        for t in 1..width {
+            let label = labels.map_or(window[t] as i64, |v| v[i * width + t]);
+            if label == -100 {
+                continue;
+            }
+            let logits = model.logits(&window[..t], [1, t], true).unwrap();
+            let row = logits.data();
             let m = f64::from(row.iter().copied().fold(f32::NEG_INFINITY, f32::max));
-            m - f64::from(row[label as usize])
+            sum += m - f64::from(row[label as usize])
                 + row
                     .iter()
                     .map(|&v| (f64::from(v) - m).exp())
                     .sum::<f64>()
-                    .ln()
-        })
-        .sum::<f64>()
-        / p.target_tokens as f64
+                    .ln();
+            count += 1;
+        }
+    }
+    sum / f64::from(count)
 }
 
 #[test]
 fn composed_gradients_match_finite_differences_in_both_groups() {
+    check_composed_gradients(None);
+}
+
+#[test]
+fn masked_composed_gradients_match_independent_prefix_differences() {
+    check_composed_gradients(Some(&[3, -100, 7, -100, -100, 2, -100, 8]));
+}
+
+fn check_composed_gradients(labels: Option<&[i64]>) {
     let ids = [1, 2, 3, 4, 5, 6, 7, 8];
     for policy in [
         CausalLmReadoutAccumulator::F32,
@@ -61,12 +73,22 @@ fn composed_gradients_match_finite_differences_in_both_groups() {
     ] {
         for layer in 0..2 {
             let model = model(layer, policy);
-            let gradients = model.adaptation_loss_gradients(&ids, [2, 4]).unwrap();
+            let gradients = model
+                .adaptation_loss_gradients_with_labels(&ids, [2, 4], labels, None)
+                .unwrap();
             assert_eq!(gradients.parameters().len(), 2);
-            assert_eq!(gradients.target_tokens(), 6);
+            assert_eq!(
+                gradients.target_tokens(),
+                if labels.is_some() { 3 } else { 6 }
+            );
+            assert!(
+                (f64::from(gradients.loss()) - objective(&model, &ids, 4, labels)).abs() < 1e-6
+            );
             assert_eq!(
                 gradients.loss(),
-                model.next_token_loss(&ids, [2, 4]).unwrap()
+                model
+                    .next_token_loss_with_objective(&ids, [2, 4], labels, Default::default())
+                    .unwrap()
             );
             for (path, parameters) in gradients.parameters() {
                 for (name, values) in parameters {
@@ -94,8 +116,8 @@ fn composed_gradients_match_finite_differences_in_both_groups() {
                                     .unwrap()
                             }
                         };
-                        let actual = (objective(&perturb(1.), &ids, [2, 4])
-                            - objective(&perturb(-1.), &ids, [2, 4]))
+                        let actual = (objective(&perturb(1.), &ids, 4, labels)
+                            - objective(&perturb(-1.), &ids, 4, labels))
                             / (2. * eps as f64);
                         assert!(
                             (actual - f64::from(expected)).abs() < 1e-4,

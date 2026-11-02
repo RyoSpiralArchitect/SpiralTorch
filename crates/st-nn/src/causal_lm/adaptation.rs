@@ -51,6 +51,10 @@ impl NativeCausalLmAdaptationGradients {
     pub fn parameters(&self) -> &BTreeMap<String, BTreeMap<String, Vec<f32>>> {
         &self.parameters
     }
+
+    pub(super) fn into_parameters(self) -> BTreeMap<String, BTreeMap<String, Vec<f32>>> {
+        self.parameters
+    }
 }
 
 impl NativeCausalLm {
@@ -96,11 +100,19 @@ impl NativeCausalLm {
     }
 
     pub fn adaptation_gradient_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        self.adaptation_labeled_input_count(shape, false)
+    }
+
+    pub fn adaptation_labeled_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         self.validate_adaptation_placement()?;
         if self.lora.is_some() {
-            self.lora_pullback_input_count(shape)
+            self.lora_pullback_input_count(shape, has_labels)
         } else {
-            self.geometry_gradient_input_count(shape)
+            self.geometry_objective_input_count(shape, has_labels)
         }
     }
 
@@ -111,7 +123,7 @@ impl NativeCausalLm {
         windows: &[usize],
         shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        self.adaptation_gradients(windows, shape, None)
+        self.adaptation_loss_gradients_with_labels(windows, shape, None, None)
     }
 
     /// Differentiate only the selected group(s), without removing unselected
@@ -122,38 +134,35 @@ impl NativeCausalLm {
         shape: [usize; 2],
         mode: CausalLmAdaptationMode,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        self.validate_adaptation_mode(mode)?;
-        self.adaptation_gradients(windows, shape, Some(mode))
+        self.adaptation_loss_gradients_with_labels(windows, shape, None, Some(mode))
     }
 
-    fn adaptation_gradients(
+    /// Mean CE of the selected shifted labels. Ignored positions remain in
+    /// causal attention; only the readout and its reverse seed are selected.
+    pub fn adaptation_loss_gradients_with_labels(
         &self,
         windows: &[usize],
         shape: [usize; 2],
+        labels: Option<&[i64]>,
         mode: Option<CausalLmAdaptationMode>,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        self.adaptation_gradient_input_count(shape)?;
+        if let Some(mode) = mode {
+            self.validate_adaptation_mode(mode)?;
+        }
+        self.adaptation_labeled_input_count(shape, labels.is_some())?;
         let (loss, target_tokens, parameters) = match (&self.lora, &self.geometry) {
             (None, Some(_)) => {
-                let grads = self.geometry_loss_gradients(windows, shape)?;
+                let grads = self.geometry_loss_gradients_with_objective(
+                    windows,
+                    shape,
+                    labels,
+                    CausalLmObjective::default(),
+                )?;
                 (grads.loss(), grads.target_tokens(), grads.into_parameters())
             }
-            (Some(adapter), None) => {
-                let grads = self.lora_loss_gradients(windows, shape)?;
-                let (loss, targets) = (grads.loss(), grads.target_tokens());
-                let (a, b) = grads.into_parameters();
-                (
-                    loss,
-                    targets,
-                    BTreeMap::from([(
-                        adapter.path(),
-                        BTreeMap::from([("a".into(), a), ("b".into(), b)]),
-                    )]),
-                )
-            }
-            (Some(adapter), Some(_)) => {
+            (Some(adapter), geometry) => {
                 let prepared =
-                    self.prepare_objective(windows, shape, None, CausalLmObjective::default())?;
+                    self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
                 let mut hidden = self.embed(&prepared.input, prepared.shape)?;
                 let mut checkpoints = Vec::with_capacity(self.config.layers - adapter.layer() + 1);
                 for index in 0..self.config.layers {
@@ -165,7 +174,14 @@ impl NativeCausalLm {
                         .output;
                 }
                 checkpoints.push(hidden.clone());
-                let normalized = self.final_norm.forward(&hidden, self.config.norm_epsilon)?;
+                let hidden_rows = hidden.shape().0;
+                let selected = match &prepared.selected_rows {
+                    Some(rows) => hidden.gather_rows(rows)?,
+                    None => hidden,
+                };
+                let normalized = self
+                    .final_norm
+                    .forward(&selected, self.config.norm_epsilon)?;
                 let logits = self.project_readout(&normalized)?;
                 let config = prepared.objective.kernel_config();
                 let loss = logits
@@ -181,7 +197,12 @@ impl NativeCausalLm {
                     self.readout_accumulator,
                 )?;
                 let site = format!("transformer.h.{}.attn", adapter.layer());
-                let target = match mode.unwrap_or(CausalLmAdaptationMode::Joint) {
+                let default_mode = if geometry.is_some() {
+                    CausalLmAdaptationMode::Joint
+                } else {
+                    CausalLmAdaptationMode::Lora
+                };
+                let target = match mode.unwrap_or(default_mode) {
                     CausalLmAdaptationMode::Lora => learning::DecoderTarget::Lora,
                     CausalLmAdaptationMode::Geometry => {
                         learning::DecoderTarget::GeometryFrom(&site)
@@ -190,10 +211,10 @@ impl NativeCausalLm {
                 };
                 let parameters = self.decoder_parameter_pullback(
                     checkpoints,
-                    hidden.shape().0,
-                    hidden,
+                    hidden_rows,
+                    selected,
                     prepared.shape,
-                    None,
+                    prepared.selected_rows.as_deref(),
                     d_normalized,
                     adapter.layer(),
                     target,

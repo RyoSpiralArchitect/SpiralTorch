@@ -47,6 +47,71 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_mask_excludes_targets_but_not_their_prompt(self):
+        base, both = owners()
+        labels = [-100, -100, 7, -100]
+        lora = base.with_lora(0, 2, 4.)
+        for model, compute in ((both, both.adaptation_loss_gradients), (lora, lora.lora_loss_gradients)):
+            gradient = compute(WINDOW, [1, 4], labels=labels)
+            self.assertEqual(gradient.target_tokens, 1)
+            self.assertEqual(gradient.loss, model.next_token_loss(WINDOW, [1, 4], labels=labels))
+            self.assertNotEqual(gradient.loss, compute([8, *WINDOW[1:]], [1, 4], labels=labels).loss)
+            future = compute([1, 2, 6, 8], [1, 4], labels=labels)
+            self.assertEqual(gradient.loss, future.loss)
+            self.assertEqual(compute(WINDOW, [1, 4]).loss, compute(WINDOW, [1, 4], labels=WINDOW).loss)
+            for bad in ([-100]*4, [-100, -100, 11, 1], [True, 1, 2, 3], [1, 2]):
+                with self.assertRaises((TypeError, ValueError)):
+                    compute(WINDOW, [1, 4], labels=bad)
+        native = lora.lora_loss_gradients(WINDOW, [1, 4], labels=labels)
+        shared = lora.adaptation_loss_gradients(WINDOW, [1, 4], labels=labels)
+        self.assertEqual(lora.step_lora_sgd(native, .2).lora_artifact_id,
+                         lora.step_adaptation_sgd(shared, "lora", .2).lora_artifact_id)
+
+    def test_explicit_labels_match_implicit_updates_under_each_window_policy(self):
+        for readout in ("f32", "f64"):
+            base, model = owners(readout)
+            for policy in ("disjoint", "covering_targets"):
+                for mode in ("geometry", "lora", "joint"):
+                    kw = dict(learning_rate=.2, mode=mode, epochs=2, batch_windows=2, window_policy=policy)
+                    bare = st.NativeCausalLmTrainingSession(model, DOCS, 4, **kw)
+                    labeled = st.NativeCausalLmTrainingSession(model, DOCS, 4, labels=DOCS, **kw)
+                    self.assertEqual((bare.has_labels, labeled.has_labels, labeled.window_policy), (False, True, policy))
+                    self.assertNotEqual(bare.data_id, labeled.data_id)
+                    self.assertEqual(finish(bare), finish(labeled))
+                    for s, labels in ((bare, None), (labeled, DOCS)):
+                        payload, pin = s.checkpoint_with_id()
+                        restored = st.NativeCausalLmTrainingSession.from_json(base, DOCS, payload, pin, labels=labels)
+                        self.assertEqual(restored.checkpoint_with_id(), (payload, pin))
+                        inference = st.NativeCausalLm.from_session_checkpoint_at(
+                            base, payload, pin, update=s.completed_updates, recorded_data_id=s.data_id,
+                            post_lora_id=s.model.lora_artifact_id, post_geometry_id=s.model.geometry_artifact_id)
+                        self.assertEqual(inference.lora_artifact_id, s.model.lora_artifact_id)
+
+    def test_sparse_shape_admission_and_restore_before_foreign_values(self):
+        class Unread:
+            def __len__(self):
+                return 4
+
+            def __getitem__(self, key):
+                raise AssertionError("inadmissible row was read")
+
+        config, weights = fixtures["fixture"]()
+        base = st.NativeCausalLm.from_gpt2(config, weights, max_logit_elements=11)
+        model = base.with_lora(0, 2, 4.)
+        kw = dict(learning_rate=.2, mode="lora", window_policy="covering_targets")
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmTrainingSession(model, [Unread()], 4, **kw)
+        for bad in (([True, 1, 2, 3],), ([-100, -100, 1, 2],)):
+            with self.assertRaises((TypeError, ValueError)):
+                st.NativeCausalLmTrainingSession(model, [WINDOW], 4, labels=bad, **kw)
+        s = st.NativeCausalLmTrainingSession(model, [WINDOW], 4, labels=[[-100, -100, -100, 4]], **kw)
+        payload, pin = s.checkpoint_with_id()
+        with self.assertRaisesRegex(ValueError, "label presence"):
+            st.NativeCausalLmTrainingSession.from_json(base, Unread(), payload, pin)
+        tight = st.NativeCausalLm.from_gpt2(config, weights, max_training_checkpoint_elements=1).with_lora(0, 2, 4.)
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmTrainingSession(tight, [Unread()], 4, labels=[Unread()], **kw)
+
     def test_committed_reports_resume_and_do_not_clobber_a_boundary(self):
         base, model = owners()
         s = session(model)
@@ -140,6 +205,29 @@ assert old.read_bytes() == before and list(root.iterdir()) == [old]
             self.assertEqual((root/"end").read_bytes(), (root/"reference").read_bytes())
             self.assertEqual(json.loads(run(*resume, "--updates", "0", "--checkpoint-every", "1",
                                            "--output", str(root/"noop")).stdout)["checkpoint_id"], saved["checkpoint_id"])
+
+    def test_supervised_cli_binds_mask_and_reopens_short_document(self):
+        example = Path(__file__).parents[1] / "examples" / "native_training_session.py"
+        config, weights = fixtures["fixture"](raw_weights=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/"config").write_text(config)
+            (root/"weights").write_bytes(weights)
+            (root/"docs").write_text(json.dumps({"token_documents": [WINDOW], "labels": [[-100, -100, -100, 8]]}))
+            cmd = [sys.executable, "-I", "-B", str(example), "--config", str(root/"config"), "--weights",
+                   str(root/"weights"), "--documents", str(root/"docs")]
+            def run(*args, check=True):
+                return subprocess.run([*cmd, *args], check=check, capture_output=True, text=True, timeout=60)
+            result = json.loads(run("--mode", "lora", "--context", "7", "--window-policy", "covering_targets",
+                                    "--output", str(root/"first")).stdout)
+            self.assertEqual([s["target_tokens"] for s in result["reports"]], [1])
+            resume = ["--resume", str(root/"first"), "--expected-id", result["checkpoint_id"],
+                      "--updates", "0", "--output", str(root/"second")]
+            refused = run(*resume, "--window-policy", "disjoint", check=False)
+            self.assertIn("resumed sessions own their window policy", refused.stderr)
+            self.assertFalse((root/"second").exists())
+            self.assertEqual(json.loads(run(*resume).stdout)["checkpoint_id"], result["checkpoint_id"])
+            self.assertEqual((root/"second").read_bytes(), (root/"first").read_bytes())
 
     def test_progress_sync_error_stops_before_another_segment(self):
         import errno
@@ -478,18 +566,23 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
     @unittest.skipUnless(os.environ.get("ST_NATIVE_SESSION_EXAMPLE"),
                          "set ST_NATIVE_SESSION_EXAMPLE to the built Rust native_training_session example")
     def test_python_rust_python_checkpoint_handoff(self):
-        for readout, batch_windows in (("f32", 1), ("f64", 1), ("f32", 2), ("f64", 2)):
+        cases = [(r, b, None) for r in ("f32", "f64") for b in (1, 2)]
+        cases.append(("f32", 2, "covering_targets"))
+        for readout, batch_windows, policy in cases:
             base, model = owners(readout)
             docs = DOCS if batch_windows == 1 else DOCS + [WINDOW]
+            labels = [[-100] * (len(doc) - 1) + doc[-1:] for doc in docs] if policy else None
             trainer = st.NativeCausalLmTrainingSession(model, docs, 4, learning_rate=.2,
-                                                      epochs=2, batch_windows=batch_windows)
+                                                      epochs=2, batch_windows=batch_windows,
+                                                      labels=labels, window_policy=policy or "disjoint")
             trainer.step()
             config, weights = fixtures["fixture"](raw_weights=True)
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / "config.json").write_text(config)
                 (root / "weights.safetensors").write_bytes(weights)
-                (root / "docs.json").write_text(json.dumps(docs))
+                data = docs if labels is None else {"token_documents": docs, "labels": labels}
+                (root / "docs.json").write_text(json.dumps(data))
                 (root / "input.json").write_text(trainer.to_json())
                 command = [os.environ["ST_NATIVE_SESSION_EXAMPLE"], str(root / "config.json"),
                            str(root / "weights.safetensors"), str(root / "docs.json"),
@@ -506,7 +599,7 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
                 self.assertEqual(checkpoint, trainer.to_json())
                 self.assertEqual(receipt["checkpoint_id"], trainer.checkpoint_id)
                 resumed = st.NativeCausalLmTrainingSession.from_json(
-                    base.with_readout_accumulator("f32"), docs, checkpoint, receipt["checkpoint_id"])
+                    base.with_readout_accumulator("f32"), docs, checkpoint, receipt["checkpoint_id"], labels=labels)
                 remaining = finish(trainer)
                 self.assertEqual(finish(resumed), remaining)
                 self.assertEqual(resumed.to_json(), trainer.to_json())
@@ -530,7 +623,7 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
         with self.assertRaises(ValueError):
             st.NativeCausalLmTrainingSession(base, DOCS, 4, learning_rate=.2)
         for kw in ({"mode":"unknown"}, {"epochs": True}, {"learning_rate": True}):
-            options={"learning_rate":.2}; options.update(kw)
+            options = {"learning_rate": .2, **kw}
             with self.assertRaises((ValueError,TypeError)):
                 st.NativeCausalLmTrainingSession(model, DOCS, 4, **options)
         class Poison:

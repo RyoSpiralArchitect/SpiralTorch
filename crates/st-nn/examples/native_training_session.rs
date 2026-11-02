@@ -1,6 +1,7 @@
 //! Resume one native SGD update using only local artifacts (no Python or Torch).
 //! Usage: native_training_session CONFIG WEIGHTS DOCUMENTS CHECKPOINT PIN OUTPUT [STOP_AFTER]
-//! DOCUMENTS is a JSON array of token-ID arrays; OUTPUT is the next checkpoint.
+//! DOCUMENTS is a JSON array of token-ID arrays or an object with token_documents
+//! and unshifted labels. OUTPUT is the next checkpoint.
 //! Stdout contains the checkpoint identity and the optional update report.
 use st_nn::causal_lm::{CausalLmResult, NativeCausalLm, NativeCausalLmTrainingSession};
 use st_nn::weights::{SafeTensorArchive, WeightLoadLimits};
@@ -45,9 +46,19 @@ fn main() -> CausalLmResult<()> {
     )?;
     drop(archive);
     let resume = NativeCausalLmTrainingSession::prepare_restore(base, &checkpoint, &args[4])?;
-    let documents: Vec<Vec<usize>> =
-        serde_json::from_slice(&read_limited(&args[2], 256 * 1024 * 1024)?)?;
-    let mut session = resume.resume(documents)?;
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Labeled {
+        token_documents: Vec<Vec<usize>>,
+        labels: Vec<Vec<i64>>,
+    }
+    let bytes = read_limited(&args[2], 256 * 1024 * 1024)?;
+    let mut session = if resume.has_labels() {
+        let data: Labeled = serde_json::from_slice(&bytes)?;
+        resume.resume_with_labels(data.token_documents, Some(data.labels))?
+    } else {
+        resume.resume(serde_json::from_slice(&bytes)?)?
+    };
     if let Some(stop) = args.get(6) {
         let (steps, pin) = session.advance_to_checkpoint_new(stop.parse()?, &args[5])?;
         #[derive(serde::Serialize)]

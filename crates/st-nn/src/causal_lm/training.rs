@@ -63,6 +63,43 @@ pub(super) struct Corpus {
 }
 
 impl Corpus {
+    pub(super) fn validate_labels(
+        documents: &[Vec<usize>],
+        labels: &[Vec<i64>],
+        vocabulary: usize,
+    ) -> CausalLmResult<()> {
+        if labels.len() != documents.len()
+            || labels
+                .iter()
+                .zip(documents)
+                .any(|(a, b)| a.len() != b.len())
+            || labels
+                .iter()
+                .flatten()
+                .any(|&v| v != -100 && (v < 0 || v as u64 >= vocabulary as u64))
+        {
+            return Err("invalid training document labels".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn active_targets(&self, windows: &[CausalDocumentWindow]) -> usize {
+        windows
+            .iter()
+            .map(|w| {
+                self.labels
+                    .as_ref()
+                    .map_or(w.length as usize - 1, |labels| {
+                        labels[w.document as usize]
+                            [w.start as usize + 1..(w.start + w.length) as usize]
+                            .iter()
+                            .filter(|&&v| v != -100)
+                            .count()
+                    })
+            })
+            .sum()
+    }
+
     /// Shared identity and batching storage for admitted native training corpora.
     pub(super) fn new(
         documents: Vec<Vec<usize>>,
@@ -313,15 +350,7 @@ impl NativeCausalLmTrainer {
             return Err("invalid training document token ID".into());
         }
         if let Some(labels) = &labels {
-            if labels.len() != documents.len()
-                || labels.iter().zip(&lengths).any(|(row, &n)| row.len() != n)
-                || labels
-                    .iter()
-                    .flatten()
-                    .any(|&v| v != -100 && (v < 0 || v as u64 >= model.config.vocabulary as u64))
-            {
-                return Err("invalid training document labels".into());
-            }
+            Corpus::validate_labels(&documents, labels, model.config.vocabulary)?;
             if config.repetition.is_some_and(|r| r.config().strength > 0.)
                 && labels
                     .iter()
@@ -349,22 +378,7 @@ impl NativeCausalLmTrainer {
             .windows()
             .chunks(config.microbatch_windows)
         {
-            let active = windows
-                .iter()
-                .map(|w| {
-                    result
-                        .corpus
-                        .labels
-                        .as_ref()
-                        .map_or(w.length as usize - 1, |labels| {
-                            labels[w.document as usize]
-                                [w.start as usize + 1..(w.start + w.length) as usize]
-                                .iter()
-                                .filter(|&&v| v != -100)
-                                .count()
-                        })
-                })
-                .sum();
+            let active = result.corpus.active_targets(windows);
             if active == 0 {
                 return Err("training microbatch has no selected targets".into());
             }

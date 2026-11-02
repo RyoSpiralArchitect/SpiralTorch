@@ -1,9 +1,10 @@
 //! Read-only corpus NLL. Rust owns coverage, batching and target-weighted reduction.
 use super::*;
-use crate::language_windows::{CausalDocumentWindow, CausalDocumentWindows, MAX_DOCUMENTS};
+use crate::language_windows::{
+    equal_width_groups as groups, unique_group_shapes as unique_shapes, CausalDocumentWindows,
+    MAX_DOCUMENTS,
+};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
-use std::ops::Range;
 
 pub const MAX_EVALUATION_TOKENS: usize = 16_777_216;
 pub const MAX_EVALUATION_VARIANTS: usize = 16;
@@ -57,39 +58,6 @@ pub struct CausalLmEvaluationComparison {
     pub schema: &'static str,
     pub shared_prefix_layers: usize,
     pub evaluations: Vec<CausalLmEvaluation>,
-}
-
-fn groups(
-    windows: &[CausalDocumentWindow],
-    maximum: usize,
-) -> impl Iterator<Item = Range<usize>> + '_ {
-    let mut start = 0;
-    std::iter::from_fn(move || {
-        let width = windows.get(start)?.length;
-        let count = windows[start..]
-            .iter()
-            .take(maximum)
-            .take_while(|w| w.length == width)
-            .count();
-        let range = start..start + count;
-        start += count;
-        Some(range)
-    })
-}
-
-fn unique_shapes(
-    windows: &[CausalDocumentWindow],
-    maximum: usize,
-) -> impl Iterator<Item = [usize; 2]> + '_ {
-    let mut seen = HashSet::new();
-    let mut previous = None;
-    groups(windows, maximum).filter_map(move |g| {
-        let shape = [g.len(), windows[g.start].length as usize];
-        if previous.replace(shape) == Some(shape) {
-            return None;
-        }
-        seen.insert(shape).then_some(shape)
-    })
 }
 
 impl NativeCausalLm {

@@ -2,14 +2,32 @@
 //! The decoder owns derivatives; this module owns only data order and continuation.
 use super::training::{Corpus, MAX_TRAINING_TOKENS};
 use super::*;
-use crate::language_windows::{CausalDocumentWindows, MAX_DOCUMENTS};
+use crate::language_windows::{
+    equal_width_groups, unique_group_shapes, CausalDocumentWindows, MAX_DOCUMENTS, MAX_WINDOWS,
+};
 use sha2::{Digest, Sha256};
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v1";
 const BATCH_SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v2";
+const DATA_SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v3";
 const MAX_CHECKPOINT_BYTES: usize = 128 * 1024 * 1024;
 
-/// Fixed-order, full document windows. Batching is opt-in via `new_batched`;
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CausalLmSessionWindowPolicy {
+    #[default]
+    Disjoint,
+    CoveringTargets,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct DataPolicy {
+    window_policy: CausalLmSessionWindowPolicy,
+    has_labels: bool,
+}
+
+/// Fixed-order document windows. Batching is opt-in via `new_batched`;
 /// there is no hidden scheduler, shuffling, gradient accumulation or momentum.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +74,10 @@ pub struct NativeCausalLmTrainingSession {
     config: CausalLmTrainingSessionConfig,
     batch_windows: usize,
     updates: u64,
+    data_policy: DataPolicy,
+    // v1/v2 keep their implicit fixed-width schedule. v3 stores live ranges
+    // only, derived from the pinned corpus rather than trusted from a checkpoint.
+    live_ranges: Option<Arc<[(u32, u32)]>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +99,18 @@ struct Checkpoint {
         skip_serializing_if = "Option::is_none"
     )]
     batch_windows: Option<u32>,
+    #[serde(
+        default,
+        deserialize_with = "declared_data",
+        skip_serializing_if = "Option::is_none"
+    )]
+    data_policy: Option<DataPolicy>,
+}
+
+fn declared_data<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> Result<Option<DataPolicy>, D::Error> {
+    DataPolicy::deserialize(input).map(Some)
 }
 
 // Missing means v1. Explicit null must not silently downgrade a malformed v2 policy.
@@ -94,25 +128,35 @@ impl CausalLmTrainingSessionResume {
     fn validate_recorded_boundary(&self) -> CausalLmResult<()> {
         let context = self.saved.config.context_length as usize;
         let epochs = u64::from(self.saved.config.epochs);
-        let max_windows =
-            crate::language_windows::MAX_WINDOWS.min((MAX_TRAINING_TOKENS / context) as u64);
+        let covering = self.window_policy() == CausalLmSessionWindowPolicy::CoveringTargets;
+        let max_batches = if covering {
+            // Ragged windows can require singleton batches even with a large row cap.
+            MAX_WINDOWS.min(MAX_TRAINING_TOKENS as u64)
+        } else {
+            MAX_WINDOWS
+                .min((MAX_TRAINING_TOKENS / context) as u64)
+                .div_ceil(self.batch_windows() as u64)
+        };
         if !crate::geometry_artifact::is_sha256_id(&self.saved.data_id)
             || context - 1 > self.model.config.positions
-            || max_windows == 0
-            || self.saved.updates > max_windows.div_ceil(self.batch_windows() as u64) * epochs
+            || max_batches == 0
+            || self.saved.updates > max_batches * epochs
         {
             return Err("invalid recorded training session boundary".into());
         }
         // Without the corpus we can only prove a minimum shape. More than one
         // update per epoch requires a full batch, even if the final batch was short.
-        let min_rows = if self.saved.updates > epochs {
+        let min_rows = if !covering && self.saved.updates > epochs {
             self.batch_windows()
         } else {
             1
         };
         if let Some(runtime) = &self.model.geometry {
             for p in &runtime.artifact().record().placements {
-                runtime.sequence_dimensions(&p.path, [min_rows, context - 1])?;
+                runtime.sequence_dimensions(
+                    &p.path,
+                    [min_rows, if covering { 1 } else { context - 1 }],
+                )?;
             }
         }
         Ok(())
@@ -127,16 +171,36 @@ impl CausalLmTrainingSessionResume {
     pub fn batch_windows(&self) -> usize {
         self.saved.batch_windows.unwrap_or(1) as usize
     }
+    pub fn window_policy(&self) -> CausalLmSessionWindowPolicy {
+        self.saved.data_policy.unwrap_or_default().window_policy
+    }
+    pub fn has_labels(&self) -> bool {
+        self.saved.data_policy.unwrap_or_default().has_labels
+    }
     pub fn resume(
         self,
         documents: Vec<Vec<usize>>,
     ) -> CausalLmResult<NativeCausalLmTrainingSession> {
+        self.resume_with_labels(documents, None)
+    }
+
+    pub fn resume_with_labels(
+        self,
+        documents: Vec<Vec<usize>>,
+        labels: Option<Vec<Vec<i64>>>,
+    ) -> CausalLmResult<NativeCausalLmTrainingSession> {
+        if labels.is_some() != self.has_labels() {
+            return Err("session checkpoint label presence differs".into());
+        }
         let batch_windows = self.batch_windows();
-        let mut restored = NativeCausalLmTrainingSession::new_batched(
+        let policy = self.window_policy();
+        let mut restored = NativeCausalLmTrainingSession::new_with_policy(
             self.model,
             documents,
+            labels,
             self.saved.config,
             batch_windows,
+            policy,
         )?;
         if restored.data_id() != self.saved.data_id {
             return Err("training session document content or plan changed".into());
@@ -215,7 +279,28 @@ impl NativeCausalLmTrainingSession {
         lengths: &[usize],
         batch_windows: usize,
     ) -> CausalLmResult<CausalDocumentWindows> {
+        Self::document_plan_with_policy(
+            model,
+            config,
+            lengths,
+            batch_windows,
+            CausalLmSessionWindowPolicy::Disjoint,
+            false,
+        )
+    }
+
+    pub fn document_plan_with_policy(
+        model: &NativeCausalLm,
+        config: CausalLmTrainingSessionConfig,
+        lengths: &[usize],
+        batch_windows: usize,
+        window_policy: CausalLmSessionWindowPolicy,
+        has_labels: bool,
+    ) -> CausalLmResult<CausalDocumentWindows> {
         Self::validate_policy(model, config, batch_windows)?;
+        if config.context_length as usize - 1 > model.config.positions {
+            return Err("training context exceeds model positions".into());
+        }
         if lengths.len() > MAX_DOCUMENTS {
             return Err("document count exceeds budget".into());
         }
@@ -228,19 +313,37 @@ impl NativeCausalLmTrainingSession {
             return Err("no full document windows".into());
         }
         // Each length fits u32 because the aggregate is already bounded.
-        let plan = CausalDocumentWindows::from_lengths(
-            lengths.iter().map(|&n| n as u32).collect(),
-            config.context_length,
-        )?;
+        let lengths = lengths.iter().map(|&n| n as u32).collect();
+        let plan = match window_policy {
+            CausalLmSessionWindowPolicy::Disjoint => {
+                CausalDocumentWindows::from_lengths(lengths, config.context_length)?
+            }
+            CausalLmSessionWindowPolicy::CoveringTargets => {
+                CausalDocumentWindows::covering_targets(lengths, config.context_length)?
+            }
+        };
         if plan.windows().is_empty() {
-            return Err("no full document windows".into());
+            return Err(match window_policy {
+                CausalLmSessionWindowPolicy::Disjoint => "no full document windows",
+                CausalLmSessionWindowPolicy::CoveringTargets => "no within-document targets",
+            }
+            .into());
+        }
+        if window_policy == CausalLmSessionWindowPolicy::CoveringTargets {
+            for shape in unique_group_shapes(plan.windows(), batch_windows) {
+                model.adaptation_labeled_input_count(shape, has_labels)?;
+            }
+            return Ok(plan);
         }
         let windows = plan.windows().len();
         let rows = batch_windows.min(windows);
-        model.adaptation_gradient_input_count([rows, config.context_length as usize])?;
+        model.adaptation_labeled_input_count([rows, config.context_length as usize], has_labels)?;
         let tail = windows % batch_windows;
         if tail != 0 && tail != rows {
-            model.adaptation_gradient_input_count([tail, config.context_length as usize])?;
+            model.adaptation_labeled_input_count(
+                [tail, config.context_length as usize],
+                has_labels,
+            )?;
         }
         Ok(plan)
     }
@@ -261,11 +364,41 @@ impl NativeCausalLmTrainingSession {
         config: CausalLmTrainingSessionConfig,
         batch_windows: usize,
     ) -> CausalLmResult<Self> {
+        Self::new_with_policy(
+            model,
+            documents,
+            None,
+            config,
+            batch_windows,
+            CausalLmSessionWindowPolicy::Disjoint,
+        )
+    }
+
+    /// Labels are unshifted per document; -100 masks the target, not its context.
+    pub fn new_with_policy(
+        model: NativeCausalLm,
+        documents: Vec<Vec<usize>>,
+        labels: Option<Vec<Vec<i64>>>,
+        config: CausalLmTrainingSessionConfig,
+        batch_windows: usize,
+        window_policy: CausalLmSessionWindowPolicy,
+    ) -> CausalLmResult<Self> {
         if documents.len() > MAX_DOCUMENTS {
             return Err("document count exceeds budget".into());
         }
         let lengths: Vec<_> = documents.iter().map(Vec::len).collect();
-        let plan = Self::document_plan_batched(&model, config, &lengths, batch_windows)?;
+        let data_policy = DataPolicy {
+            window_policy,
+            has_labels: labels.is_some(),
+        };
+        let plan = Self::document_plan_with_policy(
+            &model,
+            config,
+            &lengths,
+            batch_windows,
+            window_policy,
+            data_policy.has_labels,
+        )?;
         if documents
             .iter()
             .flatten()
@@ -273,13 +406,35 @@ impl NativeCausalLmTrainingSession {
         {
             return Err("invalid training document token ID".into());
         }
-        let corpus = Arc::new(Corpus::new(documents, None, plan)?);
+        if let Some(labels) = &labels {
+            Corpus::validate_labels(&documents, labels, model.config.vocabulary)?;
+        }
+        let corpus = Arc::new(Corpus::new(documents, labels, plan)?);
+        let live_ranges = if data_policy == DataPolicy::default() {
+            None
+        } else {
+            let windows = corpus.plan.windows();
+            let mut live = Vec::new();
+            for range in equal_width_groups(windows, batch_windows) {
+                let active = corpus.active_targets(&windows[range.clone()]);
+                if active > 0 {
+                    model.logit_count(active)?;
+                    live.push((range.start as u32, range.end as u32));
+                }
+            }
+            if live.is_empty() {
+                return Err("no supervised targets in training windows".into());
+            }
+            Some(Arc::from(live))
+        };
         Ok(Self {
             model,
             corpus,
             config,
             batch_windows,
             updates: 0,
+            data_policy,
+            live_ranges,
         })
     }
     pub fn model(&self) -> &NativeCausalLm {
@@ -291,6 +446,15 @@ impl NativeCausalLmTrainingSession {
     pub fn batch_windows(&self) -> usize {
         self.batch_windows
     }
+    pub fn window_policy(&self) -> CausalLmSessionWindowPolicy {
+        self.data_policy.window_policy
+    }
+    pub fn has_labels(&self) -> bool {
+        self.data_policy.has_labels
+    }
+    fn declared_data_policy(&self) -> Option<DataPolicy> {
+        (self.data_policy != DataPolicy::default()).then_some(self.data_policy)
+    }
     pub fn config_json(&self) -> CausalLmResult<String> {
         #[derive(Serialize)]
         struct Policy {
@@ -298,10 +462,13 @@ impl NativeCausalLmTrainingSession {
             config: CausalLmTrainingSessionConfig,
             #[serde(skip_serializing_if = "Option::is_none")]
             batch_windows: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            data_policy: Option<DataPolicy>,
         }
         Ok(serde_json::to_string(&Policy {
             config: self.config,
             batch_windows: self.declared_batch(),
+            data_policy: self.declared_data_policy(),
         })?)
     }
     fn declared_batch(&self) -> Option<u32> {
@@ -317,7 +484,10 @@ impl NativeCausalLmTrainingSession {
         self.updates
     }
     pub fn updates_per_epoch(&self) -> u64 {
-        self.plan().windows().len().div_ceil(self.batch_windows) as u64
+        self.live_ranges.as_ref().map_or_else(
+            || self.plan().windows().len().div_ceil(self.batch_windows),
+            |ranges| ranges.len(),
+        ) as u64
     }
     pub fn total_updates(&self) -> u64 {
         self.updates_per_epoch() * u64::from(self.config.epochs)
@@ -332,7 +502,17 @@ impl NativeCausalLmTrainingSession {
         if self.exhausted() {
             self.plan().windows().len()
         } else {
-            (self.updates % self.updates_per_epoch()) as usize * self.batch_windows
+            self.next_range().start
+        }
+    }
+    fn next_range(&self) -> std::ops::Range<usize> {
+        let index = (self.updates % self.updates_per_epoch()) as usize;
+        if let Some(ranges) = &self.live_ranges {
+            let (start, end) = ranges[index];
+            start as usize..end as usize
+        } else {
+            let start = index * self.batch_windows;
+            start..(start + self.batch_windows).min(self.plan().windows().len())
         }
     }
 
@@ -342,13 +522,14 @@ impl NativeCausalLmTrainingSession {
         if self.exhausted() {
             return Ok(None);
         }
-        let start = self.next_window();
-        let end = (start + self.batch_windows).min(self.plan().windows().len());
-        let (ids, _) = self.corpus.batch(&self.plan().windows()[start..end]);
-        let gradients = self.model.adaptation_loss_gradients_for(
+        let std::ops::Range { start, end } = self.next_range();
+        let windows = &self.plan().windows()[start..end];
+        let (ids, labels) = self.corpus.batch(windows);
+        let gradients = self.model.adaptation_loss_gradients_with_labels(
             &ids,
-            [end - start, self.config.context_length as usize],
-            self.config.mode,
+            [end - start, windows[0].length as usize],
+            labels.as_deref(),
+            Some(self.config.mode),
         )?;
         let model = self.model.step_adaptation_sgd(
             &gradients,
@@ -375,7 +556,9 @@ impl NativeCausalLmTrainingSession {
 
     pub fn to_json(&self) -> CausalLmResult<String> {
         let checkpoint = Checkpoint {
-            schema: if self.batch_windows == 1 {
+            schema: if self.declared_data_policy().is_some() {
+                DATA_SCHEMA
+            } else if self.batch_windows == 1 {
                 SCHEMA
             } else {
                 BATCH_SCHEMA
@@ -399,6 +582,7 @@ impl NativeCausalLmTrainingSession {
                 .transpose()?,
             lora_id: self.model.lora_artifact_id().map(str::to_owned),
             batch_windows: self.declared_batch(),
+            data_policy: self.declared_data_policy(),
         };
         let json = serde_json::to_string(&checkpoint)?;
         if json.len() > MAX_CHECKPOINT_BYTES {
@@ -417,7 +601,7 @@ impl NativeCausalLmTrainingSession {
         Ok((json, id))
     }
 
-    /// Stage the exact v1/v2 bytes and return their pin after no-clobber
+    /// Stage the exact checkpoint bytes and return their pin after no-clobber
     /// publication. Saving never advances the cursor or changes either adapter.
     pub fn save_checkpoint_new(&self, path: impl AsRef<std::path::Path>) -> CausalLmResult<String> {
         checkpoint::save(path.as_ref(), self.checkpoint_with_id()?)
@@ -457,10 +641,16 @@ impl NativeCausalLmTrainingSession {
             return Err("training session checkpoint differs from pinned identity".into());
         }
         let saved: Checkpoint = serde_json::from_slice(bytes)?;
-        let valid_policy = match (saved.schema.as_str(), saved.batch_windows) {
-            (SCHEMA, None) => true,
-            (BATCH_SCHEMA, Some(n)) => {
-                (2..=crate::language_windows::MAX_WINDOWS).contains(&u64::from(n))
+        let valid_batch = |n: u32| (2..=MAX_WINDOWS).contains(&u64::from(n));
+        let valid_policy = match (
+            saved.schema.as_str(),
+            saved.batch_windows,
+            saved.data_policy,
+        ) {
+            (SCHEMA, None, None) => true,
+            (BATCH_SCHEMA, Some(n), None) => valid_batch(n),
+            (DATA_SCHEMA, n, Some(policy)) => {
+                policy != DataPolicy::default() && n.map_or(true, valid_batch)
             }
             _ => false,
         };

@@ -26,7 +26,7 @@ after changing either group. The older single-group gradient methods remain
 available for single-group models. Use the adaptation methods for composition.
 
 By default the low-level call still returns gradients for **every** attached
-group. To train LoRA through an unchanged geometry, use the optional mask:
+group. To train LoRA through an unchanged geometry, select the update mode:
 
 ```python
 g = model.adaptation_loss_gradients(window_ids, [1, len(window_ids)], mode="lora")
@@ -56,9 +56,9 @@ a scheduler. SGD is stateless: there are no hidden momentum buffers.
 
 Batching is opt-in and changes the learning trajectory: two serial SGD updates
 are not one update over two windows. The default retains v1 checkpoint bytes;
-batched sessions use v2, seal their batch size, and resume from the same
+unlabeled disjoint batched sessions use v2, seal their batch size, and resume from the same
 epoch-local batch boundary. `window_start` and `window_end` report the actual
-half-open window range; `target_tokens` includes all shifted targets in it.
+half-open window range; `target_tokens` counts the scored shifted targets in it.
 
 Given an existing native base model and compatible geometry artifact:
 
@@ -79,6 +79,45 @@ while (report := resumed.step()) is not None:
     print(report.update, report.loss, report.mode)
 trained_model = resumed.model
 ```
+
+### Train on answers, not prompts
+
+Keep the prompt and answer in **one tokenized document**. Supply one unshifted
+label per input ID; `-100` excludes a target from the mean cross-entropy, not
+from causal attention. The first label of each window is never scored. Align
+prompt boundaries with the encoding of the whole text, not the character count.
+
+```python
+docs = [prompt_ids + answer_ids]  # already aligned to the full-text encoding
+labels = [[-100] * len(prompt_ids) + answer_ids]
+session = st.NativeCausalLmTrainingSession(
+    model, docs, 32, mode="joint", learning_rate=0.01,
+    labels=labels, window_policy="covering_targets",
+)
+steps, pin = session.advance_to_checkpoint_new(1, new_checkpoint_path)
+resumed = st.NativeCausalLmTrainingSession.from_json(
+    base, docs, new_checkpoint_path.read_bytes(), pin, labels=labels,
+)
+```
+
+`covering_targets` retains short documents and tails, sharing exactly one
+context ID across adjacent windows; it does **not** carry the whole previous
+prompt across a window boundary. It batches adjacent equal widths only, without
+padding, reordering or crossing documents within a row. An all-ignored batch
+does not issue an optimizer update; an entirely unsupervised plan is rejected.
+With no option the existing disjoint full-window policy is unchanged.
+
+The mask and window policy are independent: explicit labels or covering windows
+use v3. Its data ID binds all IDs, labels (even ignored/dropped positions) and
+the window plan; no documents or labels are embedded. Resuming requires the
+original label presence and content. Explicit labels equal to the IDs give the
+same updates as implicit labels under the same plan, but a different data ID.
+Use `labels=` on `adaptation_loss_gradients` or standalone `lora_loss_gradients`
+for the same loss on flattened rows. In Rust use `new_with_policy` and
+`prepare_restore(...)?.resume_with_labels(...)`.
+Both CLI examples also accept a document JSON object with exactly
+`token_documents` and `labels`; the Python example accepts `--window-policy`
+for a fresh session. Legacy unlabeled input remains a bare JSON array.
 
 The corresponding Rust calls use the same serialized contract:
 
@@ -163,7 +202,7 @@ being opened. No training document path is used by generation.
 ## Local-file example and verification boundary
 
 Rust and Python expose `session.save_checkpoint_new(path)`. It stages the exact
-v1/v2 payload in the destination directory, syncs it, publishes it **without
+session payload in the destination directory, syncs it, publishes it **without
 overwriting an existing name**, and returns the same pin as `checkpoint_with_id`.
 Keep that pin separately. Use an existing directory under your control; on
 Unix the filesystem must support hard links and directory sync. A write error
@@ -177,7 +216,7 @@ For long LoRA, geometry or joint SGD runs, Rust and Python also expose
 `advance_to_checkpoint_new(stop_after, path)`. The cursor is absolute: choose
 between 1 and `MAX_CHECKPOINT_INTERVAL` (1,024) remaining updates per call.
 It performs the same ordinary steps on a private session snapshot, publishes
-one unchanged v1/v2 checkpoint at the **new** path, then advances the live
+one checkpoint in the session's own format at the **new** path, then advances the live
 session. It returns the ordered step reports and the pin for the written bytes:
 
 ```python
@@ -241,4 +280,4 @@ continuous-versus-restored training, f32/f64 policy and fresh-process generation
 with optional ML imports forbidden. These establish mechanics, not language
 quality or speed. This slice is CPU, one LoRA projection and one same-layer
 attention geometry; no GPU residency, full-model updates, arbitrary placement
-composition, joint AdamW, masked labels or repetition objective is promised.
+composition, joint AdamW, label smoothing or repetition objective is promised by this session.

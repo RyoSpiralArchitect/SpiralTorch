@@ -136,9 +136,6 @@ impl NativeCausalLmLoraGradients {
     pub fn b(&self) -> &[f32] {
         &self.b
     }
-    pub(super) fn into_parameters(self) -> (Vec<f32>, Vec<f32>) {
-        (self.a, self.b)
-    }
 }
 
 impl NativeCausalLm {
@@ -241,15 +238,27 @@ impl NativeCausalLm {
 
     /// Bound checkpoints before clients copy token IDs.
     pub fn lora_gradient_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        self.lora_labeled_input_count(shape, false)
+    }
+
+    pub fn lora_labeled_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         if self.geometry.is_some() {
             return Err("use adaptation_loss_gradients for a composed model".into());
         }
-        self.lora_pullback_input_count(shape)
+        self.lora_pullback_input_count(shape, has_labels)
     }
 
-    pub(super) fn lora_pullback_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+    pub(super) fn lora_pullback_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         let adapter = self.lora.as_ref().ok_or("native LM has no LoRA adapter")?;
-        let count = self.loss_input_count(shape)?;
+        let count = self.loss_objective_input_count(shape, has_labels)?;
         product(
             &[
                 self.config.layers - adapter.record.layer + 1,
@@ -263,69 +272,43 @@ impl NativeCausalLm {
         Ok(count)
     }
 
-    /// Mean next-token CE through the existing native decoder. No auxiliary
-    /// repetition objective, masked labels or geometry co-training in this slice.
+    /// Mean next-token CE through the existing native decoder.
     pub fn lora_loss_gradients(
         &self,
         windows: &[usize],
         window_shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmLoraGradients> {
-        self.lora_gradient_input_count(window_shape)?;
+        self.lora_loss_gradients_with_labels(windows, window_shape, None)
+    }
+
+    pub fn lora_loss_gradients_with_labels(
+        &self,
+        windows: &[usize],
+        window_shape: [usize; 2],
+        labels: Option<&[i64]>,
+    ) -> CausalLmResult<NativeCausalLmLoraGradients> {
+        self.lora_labeled_input_count(window_shape, labels.is_some())?;
         let adapter = self.lora.as_ref().unwrap();
-        let prepared =
-            self.prepare_objective(windows, window_shape, None, CausalLmObjective::default())?;
-        let shape = prepared.shape;
-        let mut hidden = self.embed(&prepared.input, shape)?;
-        let mut checkpoints = Vec::with_capacity(self.config.layers - adapter.record.layer + 1);
-        for index in 0..self.config.layers {
-            if index >= adapter.record.layer {
-                checkpoints.push(hidden.clone());
-            }
-            hidden = self
-                .run_block(index, hidden, shape, decoder::BlockPass::Forward)?
-                .output;
-        }
-        checkpoints.push(hidden.clone());
-        let normalized = self.final_norm.forward(&hidden, self.config.norm_epsilon)?;
-        let logits = self.project_readout(&normalized)?;
-        let config = prepared.objective.kernel_config();
-        let loss = logits
-            .cross_entropy_with_logits(&prepared.labels, config)?
-            .data()[0];
-        let seed = Tensor::from_vec(1, 1, vec![1.])?;
-        let d_logits =
-            logits.cross_entropy_with_logits_backward(&prepared.labels, config, &seed)?;
-        let d_normalized = super::learning::frozen_pullback(
-            &self.head,
-            &self.backward_head,
-            &d_logits,
-            self.readout_accumulator,
+        let grads = self.adaptation_loss_gradients_with_labels(
+            windows,
+            window_shape,
+            labels,
+            Some(CausalLmAdaptationMode::Lora),
         )?;
-        let parameters = self.decoder_parameter_pullback(
-            checkpoints,
-            hidden.shape().0,
-            hidden,
-            shape,
-            None,
-            d_normalized,
-            adapter.record.layer,
-            super::learning::DecoderTarget::Lora,
-        )?;
-        let values = parameters
-            .get(&adapter.path())
+        let (loss, target_tokens) = (grads.loss(), grads.target_tokens());
+        let mut values = grads
+            .into_parameters()
+            .remove(&adapter.path())
             .ok_or("missing LoRA loss gradient")?;
-        if !loss.is_finite() || values.values().flatten().any(|v| !v.is_finite()) {
-            return Err("nonfinite native LoRA loss or gradients".into());
-        }
         Ok(NativeCausalLmLoraGradients {
             base_id: self.base_id.clone(),
             adapter_id: adapter.id.clone(),
             readout_accumulator: self.readout_accumulator,
             loss,
-            target_tokens: prepared.target_tokens,
+            target_tokens,
             shape: window_shape,
-            a: values["a"].clone(),
-            b: values["b"].clone(),
+            a: values.remove("a").ok_or("missing LoRA A gradient")?,
+            b: values.remove("b").ok_or("missing LoRA B gradient")?,
         })
     }
 

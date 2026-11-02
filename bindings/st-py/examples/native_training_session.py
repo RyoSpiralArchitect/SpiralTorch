@@ -73,7 +73,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--weights", type=Path, required=True)
-    parser.add_argument("--documents", type=Path, required=True, help="JSON array of encoded documents")
+    parser.add_argument("--documents", type=Path, required=True,
+                        help="JSON array of token ID arrays, or an object with token_documents and unshifted labels")
     parser.add_argument("--geometry", type=Path, help="Native geometry artifact JSON, required for joint/geometry")
     parser.add_argument("--mode", choices=("lora", "geometry", "joint"), default="joint")
     parser.add_argument("--layer", type=int, default=0)
@@ -82,6 +83,8 @@ def main() -> None:
     parser.add_argument("--context", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-windows", type=int, help="independent fixed-width windows in one native SGD update")
+    parser.add_argument("--window-policy", choices=("disjoint", "covering_targets"),
+                        help="default: disjoint full windows; covering_targets keeps short documents and tails")
     parser.add_argument("--learning-rate", type=float, default=.01)
     parser.add_argument("--readout", choices=("f32", "f64"), default="f32")
     parser.add_argument("--updates", type=int, default=1)
@@ -95,6 +98,8 @@ def main() -> None:
         parser.error("--updates must be nonnegative")
     if args.resume and args.batch_windows is not None:
         parser.error("resumed sessions own their batch size")
+    if args.resume and args.window_policy is not None:
+        parser.error("resumed sessions own their window policy")
     if bool(args.resume) != bool(args.expected_id):
         parser.error("resume needs both --resume and the separately retained --expected-id")
     if os.path.lexists(args.output):
@@ -112,9 +117,16 @@ def main() -> None:
     weights = st.SafeTensorArchive(args.weights)
     base = st.NativeCausalLm.from_gpt2(read_limited(args.config, 1_048_576).decode(), weights)
     documents = json.loads(read_limited(args.documents, 256 * 1024 * 1024))
+    labels = None
+    if isinstance(documents, dict):
+        if set(documents) != {"token_documents", "labels"} or not isinstance(documents["labels"], list):
+            parser.error("labeled documents need token_documents and a labels array")
+        documents, labels = documents["token_documents"], documents["labels"]
+    if not isinstance(documents, list):
+        parser.error("token documents must be a JSON array")
     if payload is not None:
         session = st.NativeCausalLmTrainingSession.from_json(
-            base, documents, payload, args.expected_id)
+            base, documents, payload, args.expected_id, labels=labels)
         del payload
     else:
         model = base.with_readout_accumulator(args.readout)
@@ -126,7 +138,8 @@ def main() -> None:
             model = model.with_geometry(st.GeometryAdapterArtifact.create_json(read_limited(args.geometry, 64 * 1024 * 1024).decode()))
         session = st.NativeCausalLmTrainingSession(
             model, documents, args.context, learning_rate=args.learning_rate,
-            mode=args.mode, epochs=args.epochs, batch_windows=args.batch_windows)
+            mode=args.mode, epochs=args.epochs, batch_windows=args.batch_windows,
+            labels=labels, window_policy=args.window_policy or "disjoint")
     if args.checkpoint_every is not None:
         print(json.dumps(checkpointed(session, args.output, args.updates, args.checkpoint_every, args.expected_id),
                          indent=2, allow_nan=False))

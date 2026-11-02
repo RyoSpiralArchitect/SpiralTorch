@@ -254,13 +254,14 @@ impl PyNativeCausalLm {
     }
     /// With no mode, expose all attached gradients. Otherwise retain the full
     /// forward function but return only the Rust-selected parameter groups.
-    #[pyo3(signature=(windows, shape, *, mode=None))]
+    #[pyo3(signature=(windows, shape, *, mode=None, labels=None))]
     fn adaptation_loss_gradients(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
         mode: Option<&str>,
+        labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
         let mode = mode.map(session::mode).transpose()?;
         if let Some(mode) = mode {
@@ -269,14 +270,17 @@ impl PyNativeCausalLm {
         let shape = self::shape(shape)?;
         let count = self
             .inner
-            .adaptation_gradient_input_count(shape)
+            .adaptation_labeled_input_count(shape, labels.is_some())
             .map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| match mode {
-            Some(mode) => self
-                .inner
-                .adaptation_loss_gradients_for(&windows, shape, mode),
-            None => self.inner.adaptation_loss_gradients(&windows, shape),
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner.adaptation_loss_gradients_with_labels(
+                &windows,
+                shape,
+                labels.as_deref(),
+                mode,
+            )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
@@ -333,18 +337,27 @@ impl PyNativeCausalLm {
             .map_err(error)
     }
 
+    #[pyo3(signature=(windows, shape, *, labels=None))]
     fn lora_loss_gradients(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmLoraGradients> {
         let shape = self::shape(shape)?;
-        let count = self.inner.lora_gradient_input_count(shape).map_err(error)?;
+        let count = self
+            .inner
+            .lora_labeled_input_count(shape, labels.is_some())
+            .map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.lora_loss_gradients(&windows, shape))
-            .map(|inner| PyNativeCausalLmLoraGradients { inner })
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner
+                .lora_loss_gradients_with_labels(&windows, shape, labels.as_deref())
+        })
+        .map(|inner| PyNativeCausalLmLoraGradients { inner })
+        .map_err(error)
     }
 
     fn step_lora_sgd(
