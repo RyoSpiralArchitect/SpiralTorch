@@ -27,6 +27,48 @@ def read_limited(path: Path, limit: int) -> bytes:
     return payload
 
 
+def boundary(session, pin):
+    model = session.model
+    return {"checkpoint_id": pin, "recorded_data_id": session.data_id,
+            "post_lora_id": model.lora_artifact_id, "post_geometry_id": model.geometry_artifact_id,
+            "completed_updates": session.completed_updates, "total_updates": session.total_updates,
+            "batch_windows": session.batch_windows, "readout_accumulator": model.readout_accumulator}
+
+
+def checkpointed(session, output, updates, every, resume_pin):
+    index = output.with_name(output.name + ".progress.jsonl")
+    stop = min(session.completed_updates + updates, session.total_updates)
+
+    def intermediate(cursor):
+        return output.with_name(f"{output.name}.u{cursor:09d}.json")
+
+    with open(index, "x", encoding="utf-8", opener=lambda p, flags: os.open(p, flags, 0o600)) as stream:
+        def publish(path, pin, reports):
+            item = {**boundary(session, pin), "checkpoint_file": path.name if path else None,
+                    "source": "new_checkpoint" if path else "pinned_resume_input",
+                    "reports": [json.loads(r.to_json()) for r in reports]}
+            stream.write(json.dumps(item, allow_nan=False, separators=(",", ":")) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        start = session.completed_updates
+        if start == stop:
+            pin = session.save_checkpoint_new(output)
+            publish(output, pin, ())
+        else:
+            if resume_pin is None:
+                anchor = intermediate(start)
+                publish(anchor, session.save_checkpoint_new(anchor), ())
+            else:
+                publish(None, resume_pin, ())
+            while session.completed_updates < stop:
+                end = min(stop, (session.completed_updates // every + 1) * every)
+                target = output if end == stop else intermediate(end)
+                reports, pin = session.advance_to_checkpoint_new(end, target)
+                publish(target, pin, reports)
+    return {**boundary(session, pin), "progress_file": index.name, "reports_count": stop - start}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
@@ -43,6 +85,8 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=.01)
     parser.add_argument("--readout", choices=("f32", "f64"), default="f32")
     parser.add_argument("--updates", type=int, default=1)
+    parser.add_argument("--checkpoint-every", type=int, metavar="N",
+                        help="commit at absolute N-update boundaries and at the final step; write OUTPUT.progress.jsonl")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--expected-id")
     parser.add_argument("--output", type=Path, required=True)
@@ -53,8 +97,13 @@ def main() -> None:
         parser.error("resumed sessions own their batch size")
     if bool(args.resume) != bool(args.expected_id):
         parser.error("resume needs both --resume and the separately retained --expected-id")
-    if args.output.exists():
+    if os.path.lexists(args.output):
         parser.error("output must be a new checkpoint file")
+    if args.checkpoint_every is not None:
+        if not 1 <= args.checkpoint_every <= st.NativeCausalLmTrainingSession.MAX_CHECKPOINT_INTERVAL:
+            parser.error("checkpoint-every must be in the native checkpoint interval range")
+        if os.path.lexists(args.output.with_name(args.output.name + ".progress.jsonl")):
+            parser.error("checkpoint progress file must be new")
     payload = None
     if args.resume:
         payload = read_limited(args.resume, st.NativeCausalLmTrainingSession.MAX_CHECKPOINT_BYTES)
@@ -78,6 +127,10 @@ def main() -> None:
         session = st.NativeCausalLmTrainingSession(
             model, documents, args.context, learning_rate=args.learning_rate,
             mode=args.mode, epochs=args.epochs, batch_windows=args.batch_windows)
+    if args.checkpoint_every is not None:
+        print(json.dumps(checkpointed(session, args.output, args.updates, args.checkpoint_every, args.expected_id),
+                         indent=2, allow_nan=False))
+        return
     reports = []
     for _ in range(args.updates):
         report = session.step()
@@ -85,15 +138,7 @@ def main() -> None:
             break
         reports.append(json.loads(report.to_json()))
     pin = session.save_checkpoint_new(args.output)
-    print(json.dumps({"checkpoint_id": pin,
-                      "recorded_data_id": session.data_id,
-                      "post_lora_id": session.model.lora_artifact_id,
-                      "post_geometry_id": session.model.geometry_artifact_id,
-                      "completed_updates": session.completed_updates,
-                      "total_updates": session.total_updates,
-                      "batch_windows": session.batch_windows,
-                      "readout_accumulator": session.model.readout_accumulator,
-                      "reports": reports}, indent=2))
+    print(json.dumps({**boundary(session, pin), "reports": reports}, indent=2))
 
 
 if __name__ == "__main__":

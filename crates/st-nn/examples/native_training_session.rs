@@ -1,5 +1,5 @@
 //! Resume one native SGD update using only local artifacts (no Python or Torch).
-//! Usage: native_training_session CONFIG WEIGHTS DOCUMENTS CHECKPOINT PIN OUTPUT
+//! Usage: native_training_session CONFIG WEIGHTS DOCUMENTS CHECKPOINT PIN OUTPUT [STOP_AFTER]
 //! DOCUMENTS is a JSON array of token-ID arrays; OUTPUT is the next checkpoint.
 //! Stdout contains the checkpoint identity and the optional update report.
 use st_nn::causal_lm::{CausalLmResult, NativeCausalLm, NativeCausalLmTrainingSession};
@@ -21,9 +21,9 @@ fn read_limited(path: &str, limit: usize) -> CausalLmResult<Vec<u8>> {
 
 fn main() -> CausalLmResult<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 6 {
+    if !(6..=7).contains(&args.len()) {
         return Err(
-            "usage: native_training_session CONFIG WEIGHTS DOCUMENTS CHECKPOINT PIN OUTPUT".into(),
+            "usage: native_training_session CONFIG WEIGHTS DOCUMENTS CHECKPOINT PIN OUTPUT [STOP_AFTER]".into(),
         );
     }
     if Path::new(&args[5]).exists() {
@@ -48,11 +48,32 @@ fn main() -> CausalLmResult<()> {
     let documents: Vec<Vec<usize>> =
         serde_json::from_slice(&read_limited(&args[2], 256 * 1024 * 1024)?)?;
     let mut session = resume.resume(documents)?;
-    let step = session.step()?;
-    let pin = session.save_checkpoint_new(&args[5])?;
-    println!(
-        "{}",
-        serde_json::json!({"checkpoint_id": pin, "step": step})
-    );
+    if let Some(stop) = args.get(6) {
+        let (steps, pin) = session.advance_to_checkpoint_new(stop.parse()?, &args[5])?;
+        #[derive(serde::Serialize)]
+        struct Segment {
+            checkpoint_id: String,
+            steps: Vec<st_nn::causal_lm::CausalLmTrainingSessionStep>,
+        }
+        println!(
+            "{}",
+            serde_json::to_string(&Segment {
+                checkpoint_id: pin,
+                steps
+            })?
+        );
+    } else {
+        let (step, pin) = if session.exhausted() {
+            (None, session.save_checkpoint_new(&args[5])?)
+        } else {
+            let (mut steps, pin) =
+                session.advance_to_checkpoint_new(session.completed_updates() + 1, &args[5])?;
+            (steps.pop(), pin)
+        };
+        println!(
+            "{}",
+            serde_json::json!({"checkpoint_id": pin, "step": step})
+        );
+    }
     Ok(())
 }

@@ -171,15 +171,57 @@ complete file: compare its bytes to the intended pin rather than retrying or
 deleting it. Hard process termination can leave a temporary file, not a new
 guarantee about unsaved updates. A step log is not a resumable checkpoint.
 
+For long LoRA, geometry or joint SGD runs, Rust and Python also expose
+`advance_to_checkpoint_new(stop_after, path)`. The cursor is absolute: choose
+between 1 and `MAX_CHECKPOINT_INTERVAL` (1,024) remaining updates per call.
+It performs the same ordinary steps on a private session snapshot, publishes
+one unchanged v1/v2 checkpoint at the **new** path, then advances the live
+session. It returns the ordered step reports and the pin for the written bytes:
+
+```python
+from pathlib import Path
+
+reports, pin = session.advance_to_checkpoint_new(16, "u16.json")
+# Record the pin independently before starting the next segment.
+resumed = st.NativeCausalLmTrainingSession.from_json(
+    base, token_documents, Path("u16.json").read_bytes(), pin,
+)
+```
+
+An invalid cursor, failed gradient or failed native publication leaves the
+live cursor and adaptation weights unchanged. A late filesystem error may
+leave a complete orphan at the new name; do not overwrite or automatically
+adopt it. The previous independently pinned checkpoint remains usable. There
+is no hidden retry or extra per-step file transfer.
+
 `bindings/st-py/examples/native_training_session.py` accepts a local GPT-2
 configuration, local safetensors archive, encoded token documents and an optional
 geometry artifact. Its checkpoint can be resumed with `--resume` and a separately
 retained `--expected-id`. It does not download a model or tokenize text.
 
+Add `--checkpoint-every 16` to publish an initial anchor (or use the supplied
+resume pin), every absolute multiple of 16 and the final requested cursor.
+Intermediate files are named `OUTPUT.u000000016.json`; the final checkpoint
+is `OUTPUT`. The new, private `OUTPUT.progress.jsonl` is flushed and synced
+after each saved boundary and before the next segment. Each complete line
+contains its checkpoint pin, cursor, adapter IDs and that segment's ordinary
+reports. The final stdout summary points to the journal rather than keeping
+every past report in memory. Without this flag, the original single-output
+CLI behavior is unchanged. No checkpoint is pruned.
+
+After interruption, use a **known complete** boundary record and its pin with
+`--resume FILE --expected-id PIN --output NEW_FILE`. Do not infer state from
+a partial journal line, the largest filename or an unindexed checkpoint. If
+writing the journal fails *after* a checkpoint was published, the example
+stops without starting another segment. Keep pins separately if the directory
+itself is not trusted.
+
 The Rust `native_training_session` example accepts six positional paths/values:
 `CONFIG WEIGHTS DOCUMENTS CHECKPOINT EXPECTED_ID OUTPUT`. It restores one checkpoint,
 performs one update, writes a new checkpoint file, and prints the update and
 new ID as JSON. Neither example silently overwrites an existing checkpoint.
+An optional seventh argument, `STOP_AFTER`, commits a bounded segment to that
+absolute update and prints its ordered `steps`.
 To exercise the Python → Rust → Python handoff explicitly after building the
 local extension:
 

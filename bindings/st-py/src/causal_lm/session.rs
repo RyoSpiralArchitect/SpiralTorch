@@ -135,6 +135,8 @@ impl PyNativeCausalLmTrainingSession {
     #[classattr]
     const MAX_CHECKPOINT_BYTES: usize = NativeCausalLmTrainingSession::MAX_PAYLOAD_BYTES;
     #[classattr]
+    const MAX_CHECKPOINT_INTERVAL: u64 = NativeCausalLmTrainingSession::MAX_CHECKPOINT_INTERVAL;
+    #[classattr]
     const MAX_DOCUMENTS: usize = MAX_DOCUMENTS;
     #[new]
     #[allow(clippy::too_many_arguments)]
@@ -285,10 +287,44 @@ impl PyNativeCausalLmTrainingSession {
 
     fn save_checkpoint_new(&self, py: Python<'_>, path: std::path::PathBuf) -> PyResult<String> {
         py.detach(|| self.inner.save_checkpoint_new(&path))
-            .map_err(|e| match e.downcast::<std::io::Error>() {
-                Ok(io) => PyErr::from(*io),
-                Err(other) => error(other),
-            })
+            .map_err(checkpoint_error)
+    }
+
+    fn advance_to_checkpoint_new(
+        &mut self,
+        py: Python<'_>,
+        stop_after: &Bound<'_, PyAny>,
+        path: std::path::PathBuf,
+    ) -> PyResult<(Vec<PyNativeCausalLmTrainingSessionStep>, String)> {
+        reject_bool(stop_after)?;
+        let stop_after = stop_after.extract::<u64>()?;
+        let (reports, pin) = py
+            .detach(|| self.inner.advance_to_checkpoint_new(stop_after, path))
+            .map_err(checkpoint_error)?;
+        Ok((
+            reports
+                .into_iter()
+                .map(|inner| PyNativeCausalLmTrainingSessionStep { inner })
+                .collect(),
+            pin,
+        ))
+    }
+}
+
+fn checkpoint_error(e: Box<dyn std::error::Error + Send + Sync>) -> PyErr {
+    match e.downcast::<std::io::Error>() {
+        Ok(io) => match io.raw_os_error() {
+            // Construct OSError with its OS code, not only the formatted message.
+            // On Windows the fourth argument is the native Win32 error code.
+            #[cfg(windows)]
+            Some(code) => {
+                pyo3::exceptions::PyOSError::new_err((0, io.to_string(), None::<String>, code))
+            }
+            #[cfg(not(windows))]
+            Some(code) => pyo3::exceptions::PyOSError::new_err((code, io.to_string())),
+            None => PyErr::from(*io),
+        },
+        Err(other) => error(other),
     }
 }
 

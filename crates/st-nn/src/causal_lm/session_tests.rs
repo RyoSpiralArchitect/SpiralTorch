@@ -76,6 +76,94 @@ fn file_checkpoint_publishes_exact_v1_and_v2_bytes_without_overwrite() {
 }
 
 #[test]
+fn checkpointed_segments_match_each_report_and_resume_across_epoch_tails() {
+    let base = load();
+    let both = adapted(&base, CausalLmAdaptationMode::Joint);
+    let dir = tempfile::tempdir().unwrap();
+    for mode in [
+        CausalLmAdaptationMode::Joint,
+        CausalLmAdaptationMode::Lora,
+        CausalLmAdaptationMode::Geometry,
+    ] {
+        for batch in [1, 2] {
+            let mut s = NativeCausalLmTrainingSession::new_batched(
+                both.clone(),
+                documents(),
+                session_config(mode),
+                batch,
+            )
+            .unwrap();
+            let mut reference = s.clone();
+            let start = dir.path().join(format!("{mode:?}-{batch}-first"));
+            let finish = dir.path().join(format!("{mode:?}-{batch}-last"));
+            let stop = s.total_updates() - 1;
+            let (steps, pin) = s.advance_to_checkpoint_new(stop, &start).unwrap();
+            for step in steps {
+                assert_eq!(
+                    serde_json::to_string(&step).unwrap(),
+                    serde_json::to_string(&reference.step().unwrap().unwrap()).unwrap()
+                );
+            }
+            let (raw, expected) = reference.checkpoint_with_id().unwrap();
+            assert_eq!(s.completed_updates(), stop);
+            assert_eq!(pin, expected);
+            assert_eq!(std::fs::read(&start).unwrap(), raw.as_bytes());
+            let mut resumed = NativeCausalLmTrainingSession::from_json(
+                base.clone(),
+                documents(),
+                raw.as_bytes(),
+                &pin,
+            )
+            .unwrap();
+            let (tail, final_pin) = resumed
+                .advance_to_checkpoint_new(resumed.total_updates(), &finish)
+                .unwrap();
+            assert_eq!(tail.len(), 1);
+            assert_eq!(
+                serde_json::to_string(&tail[0]).unwrap(),
+                serde_json::to_string(&reference.step().unwrap().unwrap()).unwrap()
+            );
+            assert_eq!(final_pin, reference.checkpoint_id().unwrap());
+            assert!(resumed.exhausted());
+            assert!(resumed
+                .advance_to_checkpoint_new(stop, dir.path().join("no-work"))
+                .is_err());
+        }
+    }
+}
+
+#[test]
+fn segment_rejects_invalid_limits_or_used_path_without_advancing() {
+    let mode = CausalLmAdaptationMode::Lora;
+    let mut cfg = session_config(mode);
+    cfg.epochs = 2000;
+    let mut s =
+        NativeCausalLmTrainingSession::new(adapted(&load(), mode), documents(), cfg).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("snapshot");
+    let before = s.checkpoint_id().unwrap();
+    for stop in [
+        0,
+        NativeCausalLmTrainingSession::MAX_CHECKPOINT_INTERVAL + 1,
+        u64::MAX,
+    ] {
+        assert!(s.advance_to_checkpoint_new(stop, &path).is_err());
+        assert!(!path.exists());
+    }
+    assert!(s
+        .advance_to_checkpoint_new(1, dir.path().join("missing/next"))
+        .is_err());
+    std::fs::write(&path, b"retained").unwrap();
+    let e = s.advance_to_checkpoint_new(1, &path).unwrap_err();
+    assert_eq!(
+        e.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::AlreadyExists
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"retained");
+    assert_eq!(s.checkpoint_id().unwrap(), before);
+}
+
+#[test]
 fn session_inference_binds_both_owners_cursor_and_recorded_corpus_without_resuming() {
     let base = load();
     for mode in [
@@ -637,6 +725,10 @@ fn session_admission_bounds_and_step_failure_are_atomic() {
         NativeCausalLmTrainingSession::new(dangerous, documents(), session_config(mode)).unwrap();
     let before = session.to_json().unwrap();
     assert!(session.step().is_err());
+    let dir = tempfile::tempdir().unwrap();
+    let failed = dir.path().join("failed-gradient");
+    assert!(session.advance_to_checkpoint_new(1, &failed).is_err());
+    assert!(!failed.exists());
     assert_eq!(session.to_json().unwrap(), before);
     assert_eq!(session.completed_updates(), 0);
 }

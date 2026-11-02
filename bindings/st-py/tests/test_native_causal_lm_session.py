@@ -47,6 +47,116 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_committed_reports_resume_and_do_not_clobber_a_boundary(self):
+        base, model = owners()
+        s = session(model)
+        baseline = session(model)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "segment.json"
+            for invalid in (0, s.total_updates + 1, s.MAX_CHECKPOINT_INTERVAL + 1):
+                with self.assertRaises(ValueError):
+                    s.advance_to_checkpoint_new(invalid, path)
+            with self.assertRaises(TypeError):
+                s.advance_to_checkpoint_new(True, path)
+            self.assertFalse(path.exists())
+            reports, pin = s.advance_to_checkpoint_new(2, path)
+            self.assertEqual([r.to_json() for r in reports], [baseline.step().to_json() for _ in range(2)])
+            old = path.read_bytes()
+            self.assertEqual((old.decode(), pin), baseline.checkpoint_with_id())
+            with self.assertRaises(FileExistsError):
+                s.advance_to_checkpoint_new(3, path)
+            self.assertEqual(s.completed_updates, 2)
+            self.assertEqual(s.checkpoint_id, pin)
+            self.assertEqual(path.read_bytes(), old)
+            restored = st.NativeCausalLmTrainingSession.from_json(base, DOCS, old, pin)
+            self.assertEqual(finish(restored), finish(baseline))
+
+    @unittest.skipUnless(os.name == "posix", "requires a child-local file size limit")
+    def test_real_short_write_during_segment_keeps_cursor_and_previous_bytes(self):
+        script = r"""
+import errno, os, resource, runpy, signal, sys
+from pathlib import Path
+source = runpy.run_path(sys.argv[1])
+_, model = source["owners"]()
+s = source["session"](model)
+root = Path(sys.argv[2])
+old, target = root / "previous", root / "next"
+pin = s.save_checkpoint_new(old)
+before = old.read_bytes()
+limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (32, limits[1]))
+try:
+    s.advance_to_checkpoint_new(2, target)
+except OSError as exc:
+    assert exc.errno == errno.EFBIG, exc
+else:
+    raise AssertionError("32-byte cap did not reject the checkpoint")
+finally:
+    resource.setrlimit(resource.RLIMIT_FSIZE, limits)
+assert s.completed_updates == 0 and s.checkpoint_id == pin
+assert old.read_bytes() == before and list(root.iterdir()) == [old]
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            child = subprocess.run([sys.executable, "-I", "-B", "-c", script, __file__, tmp],
+                                   capture_output=True, text=True, timeout=60)
+            self.assertEqual(child.returncode, 0, child.stderr)
+
+    def test_periodic_cli_stops_at_collision_and_resumes_last_indexed_checkpoint(self):
+        example = Path(__file__).parents[1] / "examples" / "native_training_session.py"
+        config, weights = fixtures["fixture"](raw_weights=True)
+        _, both = owners()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/"config.json").write_text(config)
+            (root/"model.safetensors").write_bytes(weights)
+            (root/"geometry.json").write_text(both.geometry_artifact().to_json())
+            (root/"docs.json").write_text("[[1,2,3,4],[4,3,2,1],[5,6,7,8]]")
+            command = [sys.executable, "-I", "-B", str(example), "--config", str(root/"config.json"),
+                       "--weights", str(root/"model.safetensors"), "--documents", str(root/"docs.json")]
+            fresh = ["--geometry", str(root/"geometry.json"), "--epochs", "3", "--context", "4",
+                     "--batch-windows", "2", "--mode", "joint", "--learning-rate", ".2"]
+            def run(*args, check=True):
+                return subprocess.run([*command, *args], check=check, capture_output=True, text=True, timeout=60)
+            def index(name):
+                return [json.loads(line) for line in (root/(name+".progress.jsonl")).read_bytes().splitlines()]
+            reference = json.loads(run(*fresh, "--updates", "5", "--output", str(root/"reference")).stdout)
+            collision = root/"part.u000000004.json"
+            collision.write_bytes(b"older evidence")
+            aborted = run(*fresh, "--updates", "5", "--checkpoint-every", "2", "--output", str(root/"part"), check=False)
+            self.assertNotEqual(aborted.returncode, 0)
+            self.assertFalse((root/"part").exists())
+            self.assertEqual(collision.read_bytes(), b"older evidence")
+            prefix = index("part")
+            self.assertEqual([p["completed_updates"] for p in prefix], [0, 2])
+            saved = prefix[-1]
+            resume = ["--resume", str(root/saved["checkpoint_file"]), "--expected-id", saved["checkpoint_id"]]
+            final = json.loads(run(*resume, "--updates", "3", "--checkpoint-every", "3", "--output", str(root/"end")).stdout)
+            tail = index("end")
+            self.assertEqual([p["completed_updates"] for p in tail], [2, 3, 5])
+            self.assertEqual((tail[0]["source"], tail[0]["checkpoint_file"]), ("pinned_resume_input", None))
+            self.assertEqual([r for p in prefix + tail for r in p["reports"]], reference["reports"])
+            self.assertEqual((final["checkpoint_id"], final["reports_count"]), (reference["checkpoint_id"], 3))
+            self.assertEqual((root/"end").read_bytes(), (root/"reference").read_bytes())
+            self.assertEqual(json.loads(run(*resume, "--updates", "0", "--checkpoint-every", "1",
+                                           "--output", str(root/"noop")).stdout)["checkpoint_id"], saved["checkpoint_id"])
+
+    def test_progress_sync_error_stops_before_another_segment(self):
+        import errno
+        example = Path(__file__).parents[1] / "examples" / "native_training_session.py"
+        run = runpy.run_path(str(example))["checkpointed"]
+        _, model = owners()
+        s = session(model)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "end"
+            failure = OSError(errno.ENOSPC, "injected journal sync failure")
+            with patch("os.fsync", side_effect=[None, failure]), self.assertRaises(OSError) as caught:
+                run(s, out, 4, 2, None)
+            self.assertEqual(caught.exception.errno, errno.ENOSPC)
+            self.assertEqual(s.completed_updates, 2)  # Rust saved this file before the journal failed.
+            self.assertEqual((Path(tmp) / "end.u000000002.json").read_bytes(), s.to_json().encode())
+            self.assertFalse(out.exists())
+
     def test_checkpoint_file_uses_native_bytes_and_refuses_existing_names(self):
         base, model = owners()
         with tempfile.TemporaryDirectory() as tmp:
@@ -397,8 +507,16 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
                 self.assertEqual(receipt["checkpoint_id"], trainer.checkpoint_id)
                 resumed = st.NativeCausalLmTrainingSession.from_json(
                     base.with_readout_accumulator("f32"), docs, checkpoint, receipt["checkpoint_id"])
-                self.assertEqual(finish(resumed), finish(trainer))
+                remaining = finish(trainer)
+                self.assertEqual(finish(resumed), remaining)
                 self.assertEqual(resumed.to_json(), trainer.to_json())
+                segment_out = root / "segment.json"
+                multi = subprocess.run([*command[:-1], str(segment_out), str(trainer.total_updates)],
+                                       capture_output=True, text=True, check=True, timeout=60)
+                full = json.loads(multi.stdout)
+                self.assertEqual(full["steps"], [json.loads(expected.to_json()), *map(json.loads, remaining)])
+                self.assertEqual(full["checkpoint_id"], trainer.checkpoint_id)
+                self.assertEqual(segment_out.read_bytes(), trainer.to_json().encode())
 
     def test_admission_and_restore_fail_without_mutation(self):
         base, model = owners()

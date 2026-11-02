@@ -81,7 +81,7 @@ fn archive(weights: &BTreeMap<String, (Vec<usize>, Vec<f32>)>) -> SafeTensorArch
     .unwrap()
 }
 
-fn load() -> NativeCausalLm {
+pub(super) fn load() -> NativeCausalLm {
     NativeCausalLm::from_gpt2_json(
         &serde_json::to_vec(&config()).unwrap(),
         &archive(&parameters()),
