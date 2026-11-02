@@ -44,11 +44,14 @@ def text_documents(data, tokenizer):
                 if length > st.CausalTargetAlignment.MAX_SOURCE_UNITS:
                     raise ValueError("text exceeds causal alignment budget")
                 text, spans = prompt + answer, [(len(prompt), length)]
+                ids, target = st.encode_supervised_document(tokenizer, text, spans)
+            elif isinstance(item, dict) and set(item) == {"prompt", "completion", "terminator"}:
+                example = st.encode_supervised_completion(tokenizer, item["prompt"], item["completion"], terminator=item["terminator"])
+                ids, target = example.training_document()
             elif isinstance(item, dict) and set(item) == {"text", "target_spans"}:
-                text, spans = item["text"], item["target_spans"]
+                ids, target = st.encode_supervised_document(tokenizer, item["text"], item["target_spans"])
             else:
                 raise ValueError("expected prompt/completion or text/target_spans")
-            ids, target = st.encode_supervised_document(tokenizer, text, spans)
             if len(ids) > remaining:
                 raise ValueError("encoded token count exceeds training budget")
         except (ValueError, TypeError, OverflowError) as exc:

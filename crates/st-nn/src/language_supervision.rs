@@ -2,6 +2,9 @@
 //! No tokenizer, padding, special-token insertion or model vocabulary is assumed.
 use serde::Serialize;
 
+mod completion;
+pub use completion::CausalCompletion;
+
 /// Inputs use one consistent source coordinate system and half-open intervals.
 /// Runs are [token_start, token_end, source_start, source_end]. A strict text
 /// client can decode each run and compare it with that exact source slice.

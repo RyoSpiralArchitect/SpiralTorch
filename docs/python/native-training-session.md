@@ -200,6 +200,50 @@ session state on failure. The format is versioned independently of the older
 geometry/AdamW trainer checkpoint. It is not an import path for arbitrary PEFT
 adapters or a cross-version compatibility promise.
 
+### One completion, three uses
+
+In a development wheel with `CausalCompletion`, the prompt, answer and optional
+literal terminator have distinct roles. Train on answer + terminator, measure
+answer content only, and generate from the independently encoded prompt alone:
+
+```python
+import spiraltorch as st
+
+fit = st.encode_supervised_completion(tokenizer, "Question: 2+2?\nAnswer:", " four", terminator="\n")
+ids, labels = fit.training_document()
+session = st.NativeCausalLmTrainingSession(model, [ids], 64, labels=[labels], mode="joint",
+                                          window_policy="covering_targets", learning_rate=0.01)
+session.step()  # model already has trainable geometry and LoRA
+
+held = st.encode_supervised_completion(tokenizer, "Question: 3+3?\nAnswer:", " six", terminator="\n")
+content, targets = held.evaluation_document()
+score = session.model.evaluate_documents([content], 64, labels=[targets])
+gen = st.NativeCausalLmGenerator(session.model, held.prompt_ids, '{"max_new_tokens":8}')
+generated_ids = gen.advance_ids(8)
+```
+
+No separator, BOS, EOS or stop rule is inferred. Choose a generation budget and
+stop policy independently of the reference answer. Without a reference at serving
+time, encode only the incoming prompt and give those IDs to the same generator.
+The text helper checks full-source offsets, lossless decoding and exact prefix-ID
+agreement for separately encoded prompt and prompt + answer. A merge across
+either boundary is rejected, not truncated. For multi-turn or arbitrary spans
+keep using `encode_supervised_document`.
+
+Already have IDs? `st.CausalCompletion(prompt_ids, prompt_answer_ids, training_ids)`
+is tokenizer-free. The three sequences include the prompt; the second ends at
+the answer, the third may add a terminator. This proves the prefix relationship,
+not the provenance of those IDs or their vocabulary compatibility. The local
+training CLI opts into the text checks with `{"prompt":"...", "completion":"...", "terminator":"\n"}`;
+the older two-field training-only format is unchanged.
+
+Rust exposes `st_nn::language_supervision::CausalCompletion::from_tokenizations`
+and `from_alignment`. WASM with the `nn` feature exposes `prepareCausalCompletionJson`
+with the same three ID fields and optional `source: {length, offsets, answer_span}`.
+Its compact response contains `training_ids`, `training_labels`, `prompt_end`
+and `answer_end`: slice IDs before `prompt_end` for generation, and both arrays
+before `answer_end` for evaluation. These are token indices, not string offsets.
+
 ### Train matched variants without repeating the frozen prefix
 
 To separate the effect of *applying* geometry from the effect of *learning* it,

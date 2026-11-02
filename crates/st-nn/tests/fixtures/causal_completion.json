@@ -1,0 +1,16 @@
+{
+  "text": "Q\u732b: \u7b54.\n",
+  "input": {
+    "prompt_ids": [1,2,3,4],
+    "prompt_answer_ids": [1,2,3,4,5,6,7,8],
+    "training_ids": [1,2,3,4,5,6,7,8,9],
+    "source": {"length":7,"offsets":[[0,1],[1,2],[1,2],[2,3],[3,4],[4,5],[4,5],[5,6],[6,7]],"answer_span":[3,6]}
+  },
+  "expected": {
+    "schema":"spiraltorch.causal_completion.v1",
+    "training_ids":[1,2,3,4,5,6,7,8,9],
+    "training_labels":[-100,-100,-100,-100,5,6,7,8,9],
+    "prompt_end":4,
+    "answer_end":8
+  }
+}

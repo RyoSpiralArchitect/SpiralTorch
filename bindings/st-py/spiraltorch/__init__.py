@@ -9565,7 +9565,8 @@ def __getattr__(name: str) -> _Any:
         value = getattr(import_module("spiraltorch.hf_geometry_dataset"), name)
         globals()[name] = value
         return value
-    if name == "encode_supervised_document" and _resolve_rs_attr("CausalTargetAlignment") is not None:
+    if ((name == "encode_supervised_document" and _resolve_rs_attr("CausalTargetAlignment") is not None) or
+            (name == "encode_supervised_completion" and _resolve_rs_attr("CausalCompletion") is not None)):
         value = getattr(import_module("spiraltorch.native_supervision"), name)
         globals()[name] = value
         return value
@@ -9685,6 +9686,8 @@ _EXPORTED.update(
 )
 if _resolve_rs_attr("CausalTargetAlignment") is not None:
     _EXPORTED.update(("CausalTargetAlignment", "encode_supervised_document"))
+if _resolve_rs_attr("CausalCompletion") is not None:
+    _EXPORTED.update(("CausalCompletion", "encode_supervised_completion"))
 for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact",
               "NativeGeometryRuntime", "NativeGeometryBatch", "NativeGeometryAdamW", "SafeTensorArchive",
               "NdTensor", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",

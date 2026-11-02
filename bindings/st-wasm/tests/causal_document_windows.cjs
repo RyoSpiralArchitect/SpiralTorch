@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const {createHash} = require('node:crypto');
-const {CausalDocumentWindows, alignCausalTargetsJson} = require(require('node:path').resolve(process.argv[2]));
+const {CausalDocumentWindows, alignCausalTargetsJson, prepareCausalCompletionJson} = require(require('node:path').resolve(process.argv[2]));
 const fixture = JSON.parse(require('node:fs').readFileSync(require('node:path').resolve(
   __dirname, '../../../crates/st-nn/tests/fixtures/causal_document_windows.fixture.json'), 'utf8'));
 const plan = CausalDocumentWindows.createJson(JSON.stringify(fixture.recipe));
@@ -38,3 +38,18 @@ for (const override of [{source_length:alignment.text.length}, {source_length:-1
 }
 assert.throws(() => alignCausalTargetsJson(' '.repeat(8*1024*1024+1)));
 console.log('Causal target alignment: exact multi-turn labels, source runs and rejection checks passed');
+const example = require('../../../crates/st-nn/tests/fixtures/causal_completion.json');
+const {source, ...onlyIds} = example.input;
+for (const input of [example.input, onlyIds]) {
+  const view = JSON.parse(prepareCausalCompletionJson(JSON.stringify(input)));
+  assert.deepEqual(view, example.expected);
+  assert.deepEqual(view.training_ids.slice(0, view.prompt_end), example.input.prompt_ids);
+  assert.deepEqual(view.training_ids.slice(0, view.answer_end), example.input.prompt_answer_ids);
+}
+for (const changes of [{source:null}, {source:{...source,answer_span:[2,6]}}, {source:{...source,answer_span:[3,5]}},
+                       {prompt_ids:[]}, {prompt_ids:[1,2,3,8]}, {prompt_answer_ids:[1,2]}, {training_ids:[true,4]},
+                       {prompt_ids:[2**32]}, {extra:true}]) {
+  assert.throws(() => prepareCausalCompletionJson(JSON.stringify({...example.input,...changes})));
+}
+assert.throws(() => prepareCausalCompletionJson(' '.repeat(8*1024*1024+1)));
+console.log('Causal completion: shared ID views and optional source alignment passed');

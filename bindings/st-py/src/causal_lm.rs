@@ -744,6 +744,7 @@ impl PyNativeCausalLm {
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<supervision::PyCausalTargetAlignment>()?;
+    module.add_class::<supervision::PyCausalCompletion>()?;
     module.add_class::<PyNativeCausalLm>()?;
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;

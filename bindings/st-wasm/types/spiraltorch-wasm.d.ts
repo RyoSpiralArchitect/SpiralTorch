@@ -15,6 +15,8 @@ declare module "spiraltorch-wasm" {
     export function greedyTokenDecisionJsonF32(logits: Float32Array, history: Uint32Array, configJson: string): string;
     /** Requires nn. Compile aligned source spans into unshifted causal labels (no tokenizer or GPU). */
     export function alignCausalTargetsJson(input: string): string;
+    /** Requires nn. Bind independently encoded prompt, content and training IDs; optional source offsets. */
+    export function prepareCausalCompletionJson(input: string): string;
     /** Requires nn; GPU methods additionally require webgpu. Rust owns all study semantics. */
     export class ByteCorpusStudy {
         private constructor();
