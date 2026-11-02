@@ -1,0 +1,14 @@
+{
+  "schema": "spiraltorch.native_lm.affine_transfer_freeze.v1",
+  "plan_sha256": "270d7ffe4b51cc5bf843a1cb20675f785160afea3c936e6ae4ffec4aee73756f",
+  "data_manifest_sha256": "0631478d0d1c621c859af1bb7c2ee224430a1b66f65c2366c6428f0979f2013e",
+  "evaluation_windows_sha256": "183235687b2ba32fc0461b603773be4146b22d1bba1e06709b3b30c247fee64d",
+  "sections": {"austen":[5,13,21,30,38,46],"shelley":[3,7,11,15,19,23],"faraday":[1,2,3,4,5,6]},
+  "archived_terminal_states_checked": 9,
+  "new_updates_before_freeze": 0,
+  "held_out_forward_passes_before_freeze": 0,
+  "held_out_targets_per_state_and_book": 4536,
+  "release_wheel_for_old_cohort_only": true,
+  "development_wheel_source": "c54eb1144cdc939f6eca3a595742f56754495e54",
+  "all_scoring_on_single_development_wheel": true
+}

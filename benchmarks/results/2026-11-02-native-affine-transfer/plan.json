@@ -1,0 +1,19 @@
+{
+  "schema": "spiraltorch.native_lm.affine_transfer_plan.v1",
+  "cohorts": {"release": [101,103,107], "development": [109,113,127]},
+  "prior_source": "42254ee49f32377b23a413f137361a24251ce787",
+  "development_wheel_sha256": "660e67b131e5556beeedcf2dadb84df556d1b00bc945cc14d14599f0b68ef10c",
+  "development_native_sha256": "3c0e46e56ff063ec58ac75d23dbd0ae05e29f86994fbade2d5f7ace9c945bdaf",
+  "train_sha256": "36a659f2cec5f642d09bb02428b2ba09dd10152152b38dc9098e99f49c043abb",
+  "new_fits": "Only affine at 109, 113, 127. Use the unchanged development wheel, exact original channel-affine insertion, ordered windows, trainer recipe and AdamW clip. Observe/save every 32nd update as in the archived free arms. No retraining or selecting among terminal models.",
+  "controls": "Same frozen GPT-2, four MLP sites 8-11, nonzero output-matched start, 512 disjoint 64-token Pride and Prejudice windows, 256 updates/32256 targets per case. Affine has 6144 trainable parameters, free adds four trainable log radii. Not matched FLOPs or full-model fine-tuning.",
+  "books": {
+    "austen": {"id":161,"title":"Sense and Sensibility","chapters":50,"sha256":"7bcd77c45cb32fb8d9f89402561270cc6a911c0a4e20667176d5be779fc3974a"},
+    "shelley": {"id":84,"title":"Frankenstein","chapters":24,"sha256":"2b97b7f8aad508649481d8dd4f6b54f9b965ddb3ba634e9151c815f537b49e42"},
+    "faraday": {"id":14474,"title":"The Chemical History of a Candle","chapters":6,"sha256":"ee17c709443e87dd8d36e2f8d7065e54344bc5182e0dc856c08f058fbd9b013f"}
+  },
+  "sample": "Six midpoint chapters or all six main lectures; twelve midpoint disjoint 64-token windows per section, without crossing boundaries. Exclude front/back matter, volume markers and the supplementary platinum lecture. Collapse whitespace; use the same pinned GPT-2 tokenizer without special tokens. Reject duplicate complete windows against training and across the sample. No previously scored book, prompt set or reserve used.",
+  "measure": "One pinned Rust f32 CPU scoring engine for all 15 states: frozen base, initial affine, initial free, 12 terminal fits. Initial scored NLL must agree exactly per section or stop; all fit identities must be sealed before any scoring. Mean next-token NLL weighted by valid targets, 4536 per book per state. Negative free-minus-affine favors free. Report every paired contrast, changes from base and from matched initial, and per-cohort averages for each book separately; no pooling across books.",
+  "primary": "Same-author transfer: free strictly beats affine on Austen in every seed, otherwise not established. Report transfer to Shelley and Faraday separately. No new-to-pretraining claim, independent-book uncertainty, generation-quality conclusion or default change.",
+  "limits": {"new_training_updates":768,"workers_at_once":1,"rayon_threads":4,"per_worker_seconds":2400,"total_seconds":14400,"retries":0,"stop_on_first_failure":true}
+}
