@@ -6,6 +6,8 @@ import math
 import os
 from pathlib import Path
 import sys
+import time
+from datetime import datetime, timezone
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -21,7 +23,21 @@ from joint_protocol import (
     weighted,
 )
 from joint_worker import load_base, paths, wheels
-from common import FORBIDDEN
+from common import FORBIDDEN, digest
+from freeze_binding import bind_inputs, bind_run, match_rows
+import owned_process
+
+INTERCHANGE_SHA256 = "fa1eb9f2fb0d0eaa47f597dfe50d83dddb4ecb6d1dcec4e6f826ef5fe7fa7741"
+
+
+def returned(names, owners, expected, rows):
+    match_rows(expected, rows, len(names))
+    projection = []
+    for n, row in zip(names, rows, strict=True):
+        pair = [row.get("lora_artifact_id"), row.get("geometry_artifact_id")]
+        require(pair == owners[n], "returned crossover owner pair differs: " + n)
+        projection.append([*pair, row["nll"]])
+    return digest({"input": expected, "rows": projection})
 
 
 def contrasts(v):
@@ -42,6 +58,12 @@ def run(a):
         == read(a.out / "status.json")["results_sha256"],
         "requires the completed primary fit and a new output",
     )
+    binding = bind_inputs(a)
+    require(
+        binding == read(HERE / "input_binding.json"),
+        "wrong independent section binding",
+    )
+    bind_run(a, binding)
     result = read(a.out / "results.json")
     decl = read(a.out / "declaration.json")
     require(
@@ -93,28 +115,40 @@ def run(a):
                 owners[name] = [model.lora_artifact_id, model.geometry_artifact_id]
                 models.append(model)
     groups = read(a.data / "windows.json")
-    chapters, means, components = {}, {}, {}
+    chapters, means, components, projections = {}, {}, {}, {}
+    scores = a.attempt / "native-scores"
+    scores.mkdir(mode=0o700)
     for book in BOOKS:
         chapter = chapters[book] = {}
         for k, docs in groups[book].items():
             ev = st.NativeCausalLm.evaluate_variants(
                 models, docs, 64, microbatch_windows=2
             )
-            score = ev.evaluations
+            raw = json.loads(ev.to_json())
+            score = raw["evaluations"]
+            stem = f"{book}-{k}"
+            projections[stem] = returned(
+                names, owners, binding["sections"][stem], score
+            )
             require(
                 ev.shared_prefix_layers == 8
                 and len(score) == 12
-                and len({x.data_id for x in score}) == 1
                 and all(
-                    x.target_tokens == 756
-                    and x.window_count == 12
-                    and x.skipped_windows == x.ignored_targets == 0
-                    and math.isfinite(x.nll)
+                    x["target_tokens"] == 756
+                    and x["window_count"] == 12
+                    and x["microbatches"] == 6
+                    and x["skipped_windows"] == x["ignored_targets"] == 0
+                    and x["readout_accumulator"] == "f32"
+                    and x["base_model_identity"] == base.base_model_identity
+                    and math.isfinite(x["nll"])
                     for x in score
                 ),
                 "crossed evaluation coverage",
             )
-            values = chapter[k] = {n: x.nll for n, x in zip(names, score, strict=True)}
+            values = chapter[k] = {
+                n: x["nll"] for n, x in zip(names, score, strict=True)
+            }
+            save(scores / (stem + ".json"), raw)
             for s in SEEDS:
                 for label, arm in (("AA", "affine"), ("WW", "wave")):
                     require(
@@ -148,6 +182,9 @@ def run(a):
         "plan_sha256": sha(HERE / "interchange_plan.json"),
         "wheel_sha256": result["wheel_sha256"],
         "owners_lora_then_geometry": owners,
+        "returned_order": names,
+        "returned_score_projection_sha256": projections,
+        "input_binding_sha256": sha(HERE / "input_binding.json"),
         "section_nll": chapters,
         "book_nll": means,
         "contrasts": components,
@@ -163,5 +200,88 @@ if __name__ == "__main__":
     paths(parser)
     parser.add_argument("--result-pin", required=True)
     parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument("--worker-claim", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    save(args.receipt, run(args))
+    args.attempt = args.receipt.with_name(args.receipt.name + ".attempt")
+    claim = args.attempt / "claim.json"
+    require(
+        sha(HERE / "interchange_plan.json") == INTERCHANGE_SHA256,
+        "not the predeclared crossover plan",
+    )
+    limits = read(HERE / "interchange_plan.json")["limits"]
+    if args.worker_claim:
+        require(
+            sha(claim) == args.worker_claim
+            and read(claim)["primary_result_sha256"] == args.result_pin
+            and read(claim)["worker_sha256"] == sha(Path(__file__))
+            and read(claim)["plan_sha256"] == INTERCHANGE_SHA256
+            and read(claim)["limits"] == limits
+            and os.environ["RAYON_NUM_THREADS"] == str(limits["rayon_threads"])
+            and os.environ["OMP_NUM_THREADS"]
+            == os.environ["VECLIB_MAXIMUM_THREADS"]
+            == "1",
+            "unbound crossover worker",
+        )
+        save(args.attempt / "worker-start.json", {"claim_sha256": args.worker_claim})
+        save(args.receipt, run(args))
+    else:
+        args.attempt.mkdir(mode=0o700, exist_ok=False)
+        start = time.monotonic()
+        try:
+            require(not args.receipt.exists(), "refuse existing result")
+            save(
+                claim,
+                {
+                    "primary_result_sha256": args.result_pin,
+                    "worker_sha256": sha(Path(__file__)),
+                    "plan_sha256": sha(HERE / "interchange_plan.json"),
+                    "limits": limits,
+                    "started_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            os.environ.update(
+                RAYON_NUM_THREADS=str(limits["rayon_threads"]),
+                OMP_NUM_THREADS="1",
+                VECLIB_MAXIMUM_THREADS="1",
+                HF_HUB_OFFLINE="1",
+                TRANSFORMERS_OFFLINE="1",
+            )
+            with (
+                (args.attempt / "stdout").open("xb") as out,
+                (args.attempt / "stderr").open("xb") as err,
+            ):
+                child = owned_process.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        str(Path(__file__).resolve()),
+                        *sys.argv[1:],
+                        "--worker-claim",
+                        sha(claim),
+                    ],
+                    timeout=limits["per_worker_seconds"],
+                    stdout=out,
+                    stderr=err,
+                )
+            require(child.returncode == 0, "first crossover worker failed")
+            save(
+                args.attempt / "status.json",
+                {
+                    "status": "complete",
+                    "claim_sha256": sha(claim),
+                    "result_sha256": sha(args.receipt),
+                    "elapsed_seconds": time.monotonic() - start,
+                    "attempts": 1,
+                },
+            )
+        except BaseException as error:
+            save(
+                args.attempt / "first-error.json",
+                {
+                    "type": type(error).__name__,
+                    "message": str(error),
+                    "elapsed_seconds": time.monotonic() - start,
+                },
+            )
+            raise

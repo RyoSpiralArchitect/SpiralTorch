@@ -20,7 +20,8 @@ from joint_protocol import (
     sha,
     weighted,
 )
-from joint_interchange import contrasts
+from joint_interchange import contrasts, returned
+from freeze_binding import FREEZE_SHA256, frozen, match_rows
 
 
 def wire(v):
@@ -83,6 +84,19 @@ def check(r, public):
         "primary result digest",
     )
     roster = public["scored_receipt"]
+    f = frozen()
+    binding = read(HERE / "input_binding.json")
+    require(
+        binding["execution_sha256"] == FREEZE_SHA256
+        and binding["windows_sha256"] == f["held_out_windows_sha256"]
+        and r["wheel_sha256"]
+        == roster["package"]["wheel_sha256"]
+        == f["development_wheel_sha256"]
+        and r["native_sha256"]
+        == roster["package"]["native_sha256"]
+        == f["native_sha256"],
+        "not the frozen study engine/data",
+    )
     keys = {
         f"{b}-{k}"
         for b, v in read(HERE / "execution.json")["sections"].items()
@@ -111,6 +125,7 @@ def check(r, public):
         for k, values in chapters.items():
             key = f"{book}-{k}"
             common = public["groups"][key]["common"]
+            match_rows(binding["sections"][key], [common], 1)
             require(
                 (
                     common["target_tokens"],
@@ -176,6 +191,14 @@ def check(r, public):
 
 
 def check_cross(primary, x):
+    binding = read(HERE / "input_binding.json")
+    order = [f"{s}-{l}{g}" for s in SEEDS for l in ("A", "W") for g in ("A", "W")]
+    require(
+        x["returned_order"] == order
+        and x["input_binding_sha256"] == sha(HERE / "input_binding.json")
+        and set(x["returned_score_projection_sha256"]) == set(binding["sections"]),
+        "crossed projection roster",
+    )
     require(
         x["primary_result_sha256"] == seal(primary)
         and x["plan_sha256"] == sha(HERE / "interchange_plan.json"),
@@ -194,6 +217,23 @@ def check_cross(primary, x):
                 )
     for b in BOOKS:
         raw = x["section_nll"][b]
+        for k, values in raw.items():
+            key = f"{b}-{k}"
+            expected = binding["sections"][key]
+            rows = [
+                {
+                    **expected,
+                    "lora_artifact_id": x["owners_lora_then_geometry"][n][0],
+                    "geometry_artifact_id": x["owners_lora_then_geometry"][n][1],
+                    "nll": values[n],
+                }
+                for n in order
+            ]
+            require(
+                returned(order, x["owners_lora_then_geometry"], expected, rows)
+                == x["returned_score_projection_sha256"][key],
+                "altered crossed row attribution",
+            )
         require(
             set(raw) == set(primary["section_nll"][b]), "different crossover sample"
         )

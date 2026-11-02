@@ -65,13 +65,9 @@ nor NumPy is required. Set `DEST` to a new private directory.
 ```sh
 python3.12 -I -S -B -m unittest discover -s . -p 'test_*.py'
 python3.12 -I -S -B joint_protocol.py "$RAW" "$OLD/data/train.json" "$MODEL" "$TOKENIZERS_SITE" "$DEST/data"
-python3.12 -I -S -B joint_study.py run --old "$OLD" --data "$DEST/data" --out "$DEST/run" \
-    --model "$MODEL" --python "$PY" --wheel "$WHEEL" \
-    --plan-pin 944ed436b9d6eb40bba1ef0796d68fd091bbc33f40d9519912d00509fc1742f9 \
-    --data-pin 4d99b6419cdb9153cc8e74b4873e566d510f6b2a95d5b70b4eb4ad118c380ad0 \
-    --wheel-pin df0e099409048b35e8392db551dc0d675cce956c75ff5a8133b32bc25e0a4f98 \
-    --native-pin 3f9d520c5afefe6fd6216b1d86e719ee0347b54d24c10f7ee31534ba1fbba069
-python3.12 -I -S -B joint_study.py audit --old "$OLD" --data "$DEST/data" --out "$DEST/run" \
+python3.12 -I -S -B freeze_binding.py run --old "$OLD" --data "$DEST/data" --out "$DEST/run" \
+    --model "$MODEL" --python "$PY" --wheel "$WHEEL"
+python3.12 -I -S -B freeze_binding.py audit --old "$OLD" --data "$DEST/data" --out "$DEST/run" \
     --model "$MODEL" --wheel "$WHEEL"
 ```
 
@@ -80,3 +76,7 @@ chains, fresh-process boundary, data identities, target counts and all section
 contrasts are checked. The scoring worker restores the inference states
 without providing documents to the checkpoint loader; the training receipt
 itself does not prove that an inference consumer validated a corpus.
+The original runner accepted caller-supplied pins. The wrapper above takes them
+from the immutable [execution freeze](execution.json) and recomputes all 18
+[section content IDs](input_binding.json) directly from the fixed windows. This
+review addition authenticates the original run without retraining or rescoring.
