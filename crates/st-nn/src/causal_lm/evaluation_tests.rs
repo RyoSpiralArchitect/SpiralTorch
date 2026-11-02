@@ -18,6 +18,124 @@ fn policy(batch: usize) -> CausalLmEvaluationConfig {
 }
 
 #[test]
+fn variants_share_only_unadapted_blocks_and_preserve_individual_receipts() {
+    for arithmetic in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let base = load().with_readout_accumulator(arithmetic);
+        let late = base
+            .with_geometry(artifact(&base, "transformer.h.1.mlp", 0.4))
+            .unwrap();
+        let early = base
+            .with_geometry(artifact(&base, "transformer.h.0", 0.3))
+            .unwrap();
+        let lora = base.with_lora(1, 2, 4.).unwrap();
+        let g = lora.lora_loss_gradients(&[1, 2, 3, 4], [1, 4]).unwrap();
+        let lora = lora.step_lora_sgd(&g, 0.3).unwrap();
+        let joint = lora
+            .with_geometry(artifact(&base, "transformer.h.1.attn", 0.4))
+            .unwrap();
+        let documents = docs();
+        let mut labels: Vec<_> = documents.iter().map(|d| vec![-100; d.len()]).collect();
+        labels[3][7] = 2;
+        labels[4][2] = 7;
+        for (variants, depth) in [
+            (vec![&base, &base], 2),
+            (vec![&joint, &late, &lora, &base], 1),
+            (vec![&early, &late], 0),
+        ] {
+            for batch in [1, 2, 7] {
+                for mask in [None, Some(labels.as_slice())] {
+                    let result = NativeCausalLm::evaluate_variants(
+                        &variants,
+                        &documents,
+                        mask,
+                        policy(batch),
+                    )
+                    .unwrap();
+                    assert_eq!(result.shared_prefix_layers, depth);
+                    assert_eq!(result.evaluations.len(), variants.len());
+                    for (got, model) in result.evaluations.iter().zip(&variants) {
+                        let ordinary = model
+                            .evaluate_documents(&documents, mask, policy(batch))
+                            .unwrap();
+                        assert_eq!(
+                            serde_json::to_string(got).unwrap(),
+                            serde_json::to_string(&ordinary).unwrap()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comparison_rejects_unmatched_owners_and_enforces_each_budget() {
+    let base = load();
+    for wrong in [
+        vec![],
+        vec![&base],
+        vec![&base; MAX_EVALUATION_VARIANTS + 1],
+    ] {
+        assert!(NativeCausalLm::evaluate_variants(&wrong, &docs(), None, policy(1)).is_err());
+    }
+    let changed = base.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+    assert!(NativeCausalLm::comparison_plan(&[&base, &changed], &[4], policy(1), false).is_err());
+    let mut weights = parameters();
+    weights.get_mut("wte.weight").unwrap().1[0] += 1.;
+    let different = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&config()).unwrap(),
+        &archive(&weights),
+        Default::default(),
+    )
+    .unwrap();
+    assert!(
+        NativeCausalLm::evaluate_variants(&[&base, &different], &docs(), None, policy(1)).is_err()
+    );
+    let limited = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&config()).unwrap(),
+        &archive(&parameters()),
+        CausalLmLimits {
+            max_logit_elements: 11,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(NativeCausalLm::comparison_plan(&[&base, &limited], &[4], policy(1), false).is_err());
+    let variants = [&base, &limited];
+    let documents = vec![vec![1, 2, 3, 4]];
+    assert!(NativeCausalLm::evaluate_variants(
+        &variants,
+        &documents,
+        Some(&[vec![-100, -100, -100, 1]]),
+        policy(1)
+    )
+    .is_ok());
+    for invalid in [
+        vec![-100, -100, 2, 1],
+        vec![-100; 4],
+        vec![-100, -100, -100, 99],
+    ] {
+        assert!(NativeCausalLm::evaluate_variants(
+            &variants,
+            &documents,
+            Some(&[invalid]),
+            policy(1)
+        )
+        .is_err());
+    }
+    assert!(NativeCausalLm::comparison_plan(
+        &[&base, &base],
+        &[MAX_EVALUATION_TOKENS / 2 + 1],
+        policy(1),
+        true
+    )
+    .is_err());
+}
+
+#[test]
 fn corpus_nll_matches_target_weighted_manual_windows_and_preserves_geometry() {
     let base = load();
     for model in [

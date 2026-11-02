@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::ops::Range;
 
 pub const MAX_EVALUATION_TOKENS: usize = 16_777_216;
+pub const MAX_EVALUATION_VARIANTS: usize = 16;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +49,15 @@ pub struct CausalLmEvaluation {
     pub perplexity: Option<f64>,
 }
 
+/// Ordered independent scores. The count is frozen decoder layers executed once
+/// per active microbatch, not a timing measurement or a persistent activation cache.
+#[derive(Debug, Serialize)]
+pub struct CausalLmEvaluationComparison {
+    pub schema: &'static str,
+    pub shared_prefix_layers: usize,
+    pub evaluations: Vec<CausalLmEvaluation>,
+}
+
 fn groups(windows: &[CausalDocumentWindow], maximum: usize) -> Vec<Range<usize>> {
     let mut result = Vec::new();
     let mut start = 0;
@@ -73,6 +83,16 @@ impl NativeCausalLm {
         config: CausalLmEvaluationConfig,
         has_labels: bool,
     ) -> CausalLmResult<CausalDocumentWindows> {
+        self.corpus_plan(&[self], lengths, config, has_labels)
+    }
+
+    fn corpus_plan(
+        &self,
+        models: &[&Self],
+        lengths: &[usize],
+        config: CausalLmEvaluationConfig,
+        has_labels: bool,
+    ) -> CausalLmResult<CausalDocumentWindows> {
         config.validate()?;
         if config.context_length as usize - 1 > self.config.positions {
             return Err("evaluation context exceeds model position capacity".into());
@@ -83,6 +103,7 @@ impl NativeCausalLm {
         lengths
             .iter()
             .try_fold(0usize, |sum, &n| sum.checked_add(n))
+            .and_then(|n| n.checked_mul(models.len()))
             .filter(|&n| n <= MAX_EVALUATION_TOKENS)
             .ok_or("evaluation token count exceeds budget")?;
         let plan = CausalDocumentWindows::covering_targets(
@@ -93,12 +114,67 @@ impl NativeCausalLm {
             return Err("evaluation requires a within-document next-token target".into());
         }
         for group in groups(plan.windows(), config.microbatch_windows) {
-            self.loss_objective_input_count(
-                [group.len(), plan.windows()[group.start].length as usize],
-                has_labels,
-            )?;
+            for model in models {
+                model.loss_objective_input_count(
+                    [group.len(), plan.windows()[group.start].length as usize],
+                    has_labels,
+                )?;
+            }
         }
         Ok(plan)
+    }
+
+    /// Admit a roster before consuming a foreign or streamed corpus.
+    pub fn comparison_prefix_layers(models: &[&Self]) -> CausalLmResult<usize> {
+        if !(2..=MAX_EVALUATION_VARIANTS).contains(&models.len()) {
+            return Err("native comparison requires 2 to 16 variants".into());
+        }
+        let first = models[0];
+        let mut depth = first.config.layers;
+        for model in models {
+            if model.base_id != first.base_id
+                || model.readout_accumulator != first.readout_accumulator
+            {
+                return Err("comparison requires the same frozen base and readout policy".into());
+            }
+            if model.geometry.is_some() {
+                depth = depth.min(model.first_geometry_site()?.0);
+            }
+            if let Some(adapter) = &model.lora {
+                depth = depth.min(adapter.layer());
+            }
+        }
+        Ok(depth)
+    }
+
+    /// Foreign-input admission checks *all* variants before extracting any tokens.
+    pub fn comparison_plan(
+        models: &[&Self],
+        lengths: &[usize],
+        config: CausalLmEvaluationConfig,
+        has_labels: bool,
+    ) -> CausalLmResult<CausalDocumentWindows> {
+        Self::comparison_prefix_layers(models)?;
+        models[0].corpus_plan(models, lengths, config, has_labels)
+    }
+
+    /// Score immutable snapshots on identical windows. Only blocks strictly before
+    /// every geometry and LoRA site can be shared. Each variant's suffix, masking,
+    /// final normalization and readout are its own; no tensors survive a microbatch.
+    pub fn evaluate_variants(
+        models: &[&Self],
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+    ) -> CausalLmResult<CausalLmEvaluationComparison> {
+        let shared_prefix_layers = Self::comparison_prefix_layers(models)?;
+        let evaluations =
+            models[0].evaluate_corpus(models, shared_prefix_layers, documents, labels, config)?;
+        Ok(CausalLmEvaluationComparison {
+            schema: "spiraltorch.native_causal_lm_evaluation_comparison.v1",
+            shared_prefix_layers,
+            evaluations,
+        })
     }
 
     /// Score each document's positions 1..len once, including short tails.
@@ -111,8 +187,21 @@ impl NativeCausalLm {
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
     ) -> CausalLmResult<CausalLmEvaluation> {
+        self.evaluate_corpus(&[self], 0, documents, labels, config)?
+            .pop()
+            .ok_or_else(|| "missing evaluation result".into())
+    }
+
+    fn evaluate_corpus(
+        &self,
+        models: &[&Self],
+        shared: usize,
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+    ) -> CausalLmResult<Vec<CausalLmEvaluation>> {
         let lengths: Vec<_> = documents.iter().map(Vec::len).collect();
-        let plan = self.evaluation_plan(&lengths, config, labels.is_some())?;
+        let plan = self.corpus_plan(models, &lengths, config, labels.is_some())?;
         if documents
             .iter()
             .flatten()
@@ -152,7 +241,9 @@ impl NativeCausalLm {
         for group in &groups {
             let active = selected[group.clone()].iter().sum::<usize>();
             if active > 0 {
-                self.logit_count(active)?;
+                for model in models {
+                    model.logit_count(active)?;
+                }
             }
         }
         let plan_id = plan.plan_id()?;
@@ -171,7 +262,7 @@ impl NativeCausalLm {
                 }
             }
         }
-        let mut total_nll = 0.;
+        let mut totals = vec![0.; models.len()];
         let mut microbatches = 0;
         for group in groups {
             let targets = selected[group.clone()].iter().sum::<usize>();
@@ -188,37 +279,61 @@ impl NativeCausalLm {
                     targets.extend_from_slice(&labels.unwrap()[w.document as usize][span]);
                 }
             }
-            let loss = self.next_token_loss_with_objective(
+            let prepared = self.prepare_objective(
                 &ids,
                 [group.len(), width],
                 batch_labels.as_deref(),
                 CausalLmObjective::default(),
             )?;
-            if !loss.is_finite() {
-                return Err("evaluation produced non-finite NLL".into());
+            let prefix = self.forward_blocks(
+                self.embed(&prepared.input, prepared.shape)?,
+                prepared.shape,
+                0..shared,
+            )?;
+            // Transfer ownership to the last suffix, including the ordinary single-model path.
+            for ((model, total), start) in models
+                .iter()
+                .zip(&mut totals)
+                .zip(std::iter::repeat_n(prefix, models.len()))
+            {
+                let hidden =
+                    model.forward_blocks(start, prepared.shape, shared..model.config.layers)?;
+                let (_, loss) = model.causal_readout(hidden, &prepared)?;
+                if !loss.is_finite() {
+                    return Err("evaluation produced non-finite NLL".into());
+                }
+                *total += f64::from(loss) * targets as f64;
             }
-            total_nll += f64::from(loss) * targets as f64;
             microbatches += 1;
         }
-        let nll = total_nll / target_tokens as f64;
-        let perplexity = nll.exp();
-        Ok(CausalLmEvaluation {
-            schema: "spiraltorch.native_causal_lm_evaluation.v1",
-            base_model_identity: self.base_id.clone(),
-            geometry_artifact_id: self.geometry_artifact_id().map(str::to_owned),
-            lora_artifact_id: self.lora_artifact_id().map(str::to_owned),
-            readout_accumulator: self.readout_accumulator(),
-            data_id: format!("sha256:{:x}", hash.finalize()),
-            plan_id,
-            config,
-            window_count: windows.len(),
-            skipped_windows: selected.iter().filter(|&&n| n == 0).count(),
-            microbatches,
-            target_tokens,
-            ignored_targets: windows.iter().map(|w| u64::from(w.length - 1)).sum::<u64>()
-                - target_tokens,
-            nll,
-            perplexity: perplexity.is_finite().then_some(perplexity),
-        })
+        let data_id = format!("sha256:{:x}", hash.finalize());
+        let skipped_windows = selected.iter().filter(|&&n| n == 0).count();
+        let ignored_targets =
+            windows.iter().map(|w| u64::from(w.length - 1)).sum::<u64>() - target_tokens;
+        Ok(models
+            .iter()
+            .zip(totals)
+            .map(|(model, total_nll)| {
+                let nll = total_nll / target_tokens as f64;
+                let perplexity = nll.exp();
+                CausalLmEvaluation {
+                    schema: "spiraltorch.native_causal_lm_evaluation.v1",
+                    base_model_identity: self.base_id.clone(),
+                    geometry_artifact_id: model.geometry_artifact_id().map(str::to_owned),
+                    lora_artifact_id: model.lora_artifact_id().map(str::to_owned),
+                    readout_accumulator: self.readout_accumulator(),
+                    data_id: data_id.clone(),
+                    plan_id: plan_id.clone(),
+                    config,
+                    window_count: windows.len(),
+                    skipped_windows,
+                    microbatches,
+                    target_tokens,
+                    ignored_targets,
+                    nll,
+                    perplexity: perplexity.is_finite().then_some(perplexity),
+                }
+            })
+            .collect())
     }
 }

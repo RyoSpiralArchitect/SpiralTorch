@@ -123,7 +123,7 @@ fn geometry_pullback(
 }
 
 impl NativeCausalLm {
-    fn first_geometry_site(&self) -> CausalLmResult<(usize, String)> {
+    pub(super) fn first_geometry_site(&self) -> CausalLmResult<(usize, String)> {
         let runtime = self
             .geometry
             .as_ref()

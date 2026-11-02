@@ -296,6 +296,26 @@ impl PyNativeCausalLm {
             .map_err(error)
     }
 
+    #[staticmethod]
+    #[pyo3(signature=(variants, token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_variants(
+        py: Python<'_>,
+        variants: &Bound<'_, PyAny>,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<evaluation::PyNativeCausalLmEvaluationComparison> {
+        evaluation::compare(
+            py,
+            variants,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
     #[pyo3(signature=(token_documents, context_length, *, microbatch_windows=None, labels=None))]
     fn evaluate_documents(
         &self,

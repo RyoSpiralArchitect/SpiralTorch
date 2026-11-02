@@ -26,7 +26,10 @@ mod session;
 mod training;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use context::NativeCausalLmContext;
-pub use evaluation::{CausalLmEvaluation, CausalLmEvaluationConfig, MAX_EVALUATION_TOKENS};
+pub use evaluation::{
+    CausalLmEvaluation, CausalLmEvaluationComparison, CausalLmEvaluationConfig,
+    MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
+};
 pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,
     NativeCausalLmGenerator,
@@ -381,8 +384,16 @@ impl NativeCausalLm {
     }
 
     fn decode_hidden(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {
-        let mut hidden = self.embed(ids, shape)?;
-        for index in 0..self.blocks.len() {
+        self.forward_blocks(self.embed(ids, shape)?, shape, 0..self.blocks.len())
+    }
+
+    fn forward_blocks(
+        &self,
+        mut hidden: Tensor,
+        shape: [usize; 2],
+        blocks: std::ops::Range<usize>,
+    ) -> CausalLmResult<Tensor> {
+        for index in blocks {
             hidden = self
                 .run_block(index, hidden, shape, decoder::BlockPass::Forward)?
                 .output;

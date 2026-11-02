@@ -31,6 +31,35 @@ SPANS = [(2, 0, 2), (3, 0, 4), (3, 3, 7), (3, 6, 8), (4, 0, 4)]
 
 
 class NativeCausalLmEvaluationTests(unittest.TestCase):
+    def test_shared_evaluator_is_exact_and_preserves_variant_order(self):
+        late = self.base.with_geometry(fixtures["artifact"](self.base, path="transformer.h.1.mlp"))
+        lora = self.base.with_lora(1, 2, 4.)
+        fitted = lora.step_lora_sgd(lora.lora_loss_gradients([1,2,3,4], [1,4]), .2)
+        variants = [late, self.base, fitted, late]
+        masks = [[-100] * len(d) for d in DOCS]
+        masks[3][-1], masks[4][-2] = 2, 7
+        for labels in (None, masks):
+            r = st.NativeCausalLm.evaluate_variants(variants, DOCS, 4, microbatch_windows=2, labels=labels)
+            self.assertIsInstance(r, st.NativeCausalLmEvaluationComparison)
+            self.assertEqual(r.shared_prefix_layers, 1)
+            expected = [m.evaluate_documents(DOCS, 4, microbatch_windows=2, labels=labels).to_json() for m in variants]
+            self.assertEqual([s.to_json() for s in r.evaluations], expected)
+            self.assertEqual(json.loads(r.to_json())["evaluations"], [json.loads(s) for s in expected])
+        for module in (st, st._rs):
+            self.assertIn("NativeCausalLmEvaluationComparison", module.__all__)
+
+    def test_comparison_bounds_foreign_extraction(self):
+        class Poison:
+            def __len__(self): return 17
+            def __getitem__(self, index): raise AssertionError("variants extracted before admission")
+        with self.assertRaisesRegex(ValueError, "variants"):
+            st.NativeCausalLm.evaluate_variants(Poison(), [], 4)
+        class Corpus:
+            def __len__(self): raise AssertionError("documents inspected before variant ownership")
+        wide = self.base.with_readout_accumulator("f64")
+        with self.assertRaisesRegex(ValueError, "readout"):
+            st.NativeCausalLm.evaluate_variants([self.base, wide], Corpus(), 4)
+
     def setUp(self):
         self.config, self.weights = fixtures["fixture"]()
         self.base = st.NativeCausalLm.from_gpt2(self.config, self.weights)

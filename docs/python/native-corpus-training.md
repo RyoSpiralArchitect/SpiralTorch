@@ -272,6 +272,35 @@ reference suite, separately from training quality and speed claims.
 The later [stack integration qualification](../../benchmarks/results/2026-10-19-native-language-integration/README.md)
 adds active readout-policy, repetition-training and saved-generation combinations.
 
+### Compare adapter snapshots (source after 0.4.33)
+
+For an ablation, pass the ordered snapshots to one Rust evaluator. No PyTorch,
+NumPy, retraining or training documents are needed for scoring:
+
+```python
+comparison = st.NativeCausalLm.evaluate_variants(
+    [base, affine_model, free_radius_model], heldout_token_documents,
+    128, microbatch_windows=2,
+)
+baseline, affine, free = comparison.evaluations
+print(free.nll - affine.nll, comparison.shared_prefix_layers)
+```
+
+Rust callers use `NativeCausalLm::evaluate_variants(&[&base, &affine, &free],
+&documents, labels, config)`. Each result has the same fields, reduction and
+ordering as independent `evaluate_documents` calls. All variants must have
+identical frozen base identities and readout arithmetic. The count is bounded
+to 2 through 16, and document tokens multiplied by the number of variants must
+fit the evaluation token limit. Every variant's own activation, geometry and
+selected-logit limits still apply.
+
+For each active microbatch, embedding and all decoder layers **strictly before**
+the earliest geometry or LoRA intervention run once. Each remaining suffix is
+evaluated separately. There is no cache across windows, no training graph
+sharing and no assumption that a zero-initialized adapter will stay inactive.
+For a twelve-layer decoder with its earliest adapted site in layer 8 (zero
+based), the shared count is eight; this is not a wall-time speedup claim.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)
