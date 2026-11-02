@@ -511,6 +511,10 @@ that fit rather than evicting them during a sequential sweep. Oversized batches,
 a full cache, or an adapter in block zero still train normally. Only successful
 steps change the cache or its statistics. `skipped_block_calls` counts prefix
 block executions saved beyond within-step sharing, not a wall-time speedup.
+Do not share a cache across tenant or trust boundaries: hit statistics reveal
+when an input repeats. Clearing releases references, not a secure memory wipe.
+The [synthetic four-epoch CPU comparison](../../benchmarks/results/2026-11-03-native-training-prefix-cache/README.md)
+reports fill and reuse separately and checks every update and terminal checkpoint.
 
 ## Qualification Boundary
 

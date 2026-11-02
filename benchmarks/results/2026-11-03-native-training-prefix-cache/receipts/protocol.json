@@ -1,0 +1,79 @@
+{
+  "alpha": 4.0,
+  "arm_constructor_sha256": "1cf29b18972041f129b34fb5b3e1da069ad7b3b91068db84c8db9670605f119e",
+  "arms": [
+    "affine",
+    "saturation",
+    "projection",
+    "both"
+  ],
+  "batch_windows": 2,
+  "context": 25,
+  "documents": 12,
+  "epochs": 4,
+  "fixture_sha256": "ac11a4fa9e39bafd0f9e8b2f524ce0b5c0a67dabb3295adf78e77609a7ea30fc",
+  "geometry_strength": 0.25,
+  "installed": {
+    "all_original_files_match": true,
+    "native_sha256": "77551824a86c4a10b94ccc4039e847803c2c3dd9abe17db73cf23d25ec01ca5a",
+    "package_files": 207,
+    "python_bytecode_absent": true,
+    "version": "0.4.33",
+    "wheel_sha256": "5ee25cb65e43c29648391aaa9f951da911f67c8ae1502fca4ed257309b5c813a"
+  },
+  "layer": 5,
+  "lr": 0.01,
+  "max_entries": 6,
+  "max_values": 18432,
+  "order": [
+    [
+      "plain",
+      "cached"
+    ],
+    [
+      "cached",
+      "plain"
+    ],
+    [
+      "plain",
+      "cached"
+    ],
+    [
+      "cached",
+      "plain"
+    ],
+    [
+      "plain",
+      "cached"
+    ],
+    [
+      "cached",
+      "plain"
+    ]
+  ],
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "python": "3.12.6",
+  "rank": 2,
+  "schema": "spiraltorch.synthetic_prefix_cache_bench.v1",
+  "scope": "empty cache for each timed model cohort; only update loop timed; no real weights or data",
+  "script_sha256": "4ba77e9708490c9869fe3b8f896acbdd9cc071a273b3afeff198a17281ea79e4",
+  "shape": {
+    "heads": 4,
+    "layers": 6,
+    "positions": 32,
+    "vocabulary": 97,
+    "width": 64
+  },
+  "target_tokens_per_batch": 8,
+  "thread_env": {
+    "MKL_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "RAYON_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "warmup": [
+    "plain",
+    "cached"
+  ]
+}
