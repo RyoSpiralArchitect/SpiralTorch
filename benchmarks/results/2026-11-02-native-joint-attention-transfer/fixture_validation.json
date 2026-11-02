@@ -1,0 +1,103 @@
+{
+  "schema": "spiraltorch.native_lm.joint_session_fixture_validation.v1",
+  "study_engine_source": "79326de2dfa98695d4477d6b3f6eab5fb70c8aff",
+  "study_wheel_sha256": "df0e099409048b35e8392db551dc0d675cce956c75ff5a8133b32bc25e0a4f98",
+  "pre_gradient_ownership_optimization_wheel_sha256": "3db6c78c9b23ea7bc633c029650e7dda21ddb14aaadbaa45e40b22133922bdf3",
+  "checked_product_source": "35d2157a4219293453c86ab1bbafddda0b41d342",
+  "checked_package": {
+    "version": "0.4.33",
+    "wheel_sha256": "099067caf0bd8d203dc8d60ffb50a0fb8f448119fab0403b14bd59afbbf38c4d",
+    "package_files": 204,
+    "native_sha256": "de4cd5c6d1f9a715ff945c749c6bea4b64b16377b91c8864edae59b4415cd1c3",
+    "all_original_files_match": true,
+    "python_bytecode_absent": true
+  },
+  "one_window_reference": {
+    "config": "{\"context_length\":4,\"epochs\":2,\"learning_rate\":0.2,\"mode\":\"joint\"}",
+    "data_id": "sha256:1fc19f09dc39444d16757fa990fb23587f3f711f61651b80c31f4b4ad438e5bf",
+    "v1_pins": [
+      "sha256:c41eed52a9b1cf9da10318d622b939cc9af1107d87bb218e5038f52292aa38f6",
+      "sha256:123ea7610978f60066b334ac219e3eda4d4a2fcf5eeb5abf9c67705a4b5b800f",
+      "sha256:7ae9f9386cfeefaf7b9c3d493de7914eb3bc521c1ab4c04ef91d4e8d5ed34da3",
+      "sha256:7f212f055f92fdae54c77018bdb830c8693629dde708a65eea3471ef60a8dcc4",
+      "sha256:a05c60d963eb47a6793c0f09731244485d6a29a619b923e1b6c72013a1a9c5fa"
+    ]
+  },
+  "mode_batch_reference": {
+    "geometry/1": [
+      [
+        "sha256:bddd99f6a64bcab76dc1d7c1d8c17362a842a5b7e3b11230cf5c6478ce5d95e8",
+        "sha256:fdfa6398aa953d76ceceed042c4acb88f9b6f4bc9f004ec59b0eda762950b0cb",
+        "sha256:611f00139d23393202d486be7ecd0d7e1ffc378bffa299afddd867c8fe22cec5",
+        "sha256:b054ec12b1c086499759cd0933a5c8b375797b80031775deaa624de3de3d23c8",
+        "sha256:54c71ececf62b7fcb83345afe7ae6aefe8910fa57306b692f98d7593baf483e3",
+        "sha256:b8128908480269ec96f94a5a8f8ac84acbd4a1fcf948e19ad1382c392c892a33",
+        "sha256:940923e402ff80e203717e3692116f0d9899aee0f596c9c07f11af8724216de9"
+      ],
+      "55fdd4bdecf95fc0b7877a35c7e34d6d4394b072d262eec643f65a5b6c4e0b90"
+    ],
+    "geometry/2": [
+      [
+        "sha256:692ee2f6b1ddda98d9478067da2b1e4109b7d98377d295f92654e42d6de228f8",
+        "sha256:597d8d384c15a0d949d7c5b9fbf8544b038c43c7f93f11ecc987061881c1a08b",
+        "sha256:83fe45585716286bde7565d85a212e40df21768851c38a0d01ef0b8887dabd44",
+        "sha256:59c2f5ae75d4a1bde47bca93aaa794cf2df046df7985e4546fb69e7e828e41c9",
+        "sha256:323f3a54b99b22110e6bed0d32849ad4aa962e9a25d851c60c623605dcc0ba08"
+      ],
+      "0ae2f5a0ded6fb67606d0ace0bf7ce9578d1bb845fd60fb791d031145b40ade4"
+    ],
+    "joint/1": [
+      [
+        "sha256:3724a1e99a8ada2aae7db47a36c43e7a11776b8f21423f42b3dd06b50211bdfc",
+        "sha256:af28ebb144ca9afcfcfe5c278109eda7de904702857685de0d9dcaace0111c68",
+        "sha256:a8175e172cc6e1e878035eeca8098b525bc23ee4403f9f90109648d5b097555e",
+        "sha256:8d8259af4eb4bc33f8491b2f69b79e4cfe10629e8b5a8875cfe758b0c0172df2",
+        "sha256:6480e4264bc7ae1f8dfbc0bd56acd7ea113f0a2533f849590e8c21cca5a945e6",
+        "sha256:febfaf57bb42903a5669a29073a0ba3352346312dbd2adee9434d9b5aac3c4d8",
+        "sha256:4f241ae7236de2aa46bb463a4df52d3156f46bb6abe5eb1d887ac17e97dfd843"
+      ],
+      "eac4a346c04187491a77a8eaeee09e3b7a8d6f29ec55cf3e6e8c0caf93c6d89e"
+    ],
+    "joint/2": [
+      [
+        "sha256:d69dffb3b70b473fa339e8ec0c892aca00745891ff38b0134984c34d139bfd88",
+        "sha256:e652fe7204b07852fc823dc88e1e290cb860efa166d5190f17253037b53fbca5",
+        "sha256:115ef40b7c19cb7b0e976a139021e59e64fc4350077cac17ffeb36a2e19589e0",
+        "sha256:51ce9aa95ee0f49626e896750eaae2ee9e0332c2ae656821298a2299e95fa737",
+        "sha256:f6460dd0b574238584f4064a01322add8681b4940dd01370b09d95d387d85947"
+      ],
+      "b7fbf89a1c7f217be8f29a4b95ec9c6a163883b57e07bfa3aba713960ee2a39f"
+    ],
+    "lora/1": [
+      [
+        "sha256:20b7b000af10941c983a4089725792d1a4db6006bb16c4226141e8f6c22ed033",
+        "sha256:2243ac66822b09b4dcf1f5daac04a6b4087c46bb76170c587fcfe95256b7eda1",
+        "sha256:145669a68a35677f7446f1869a1638a03ee03ff0bff772af42c6b1095a8ddc92",
+        "sha256:9a3c4caa7525b4da8296090b485258b46ffc3da5fef4f74ba428ce682eb2d118",
+        "sha256:2ac10f6f7e7ca67aff0d27296505f6b101eeda500889142e186924c1a2d3de7e",
+        "sha256:b74098f09732c46914c4a181b4afc9e6186427109efdb35b471d54897f3f21d4",
+        "sha256:1ed273285a7dc9c1710db60c95e7f20c6fe8d5d2741bd99e43227b8429c307f1"
+      ],
+      "8eb41fca6c3bf80211aae4d15877e8c62896f41a9c6011faa573f6809c3100aa"
+    ],
+    "lora/2": [
+      [
+        "sha256:bef6fdab32d1bf61f870770f934208ad5fcde6db3b5afe57a05f786b706f7bb0",
+        "sha256:726cfc5d46a3e333aa438d65c166dfa711cb5556840695df3a448927dbd8e96a",
+        "sha256:112d07d466794caa04fee3aae64657af3fad52f081b07ac920a4acc8d05de3b0",
+        "sha256:4834d8da5a98479a58ea990d0c47215f00d5e25a52d20d67f8d5a3d1c0751103",
+        "sha256:0c61871bf1ad68915dd81979c5ccb8e4cd7de94d0bfa5bb031743179e2b8a758"
+      ],
+      "175c772986fa7efbf807fd1d978d04b6b042fab8b10dfb7a521c1a82c8241ee9"
+    ]
+  },
+  "native_library_tests": 1069,
+  "installed_python_tests": 112,
+  "python_skipped": 0,
+  "private_log_sha256": {"rust_library":"91bb0e22305f36194c3dea9c56a3731176215d240ec06e7c8f9ae0b92f79c60a","installed_python":"9b088e61045b21d3507754643659c289ed77190af11f855f91157d05f9118452","wasm32_compile":"c338a786c80953ed778a919c7df8c03fec806482ea9a999eac1f2795bc51f0eb","wheel_build":"8518b3f54b34a72f7f6e45a60730dd2f998379e76a851483641d189c87777c15"},
+  "allocation_probe_cpython312": {"prior_sparse_unicode_peak_bytes":4195383,"fixed_peak_bytes":1188159,"small_file_peaks_bytes":[10192,10192],"scope":"traced Python allocations; not process RSS"},
+  "initial_test_failures_retained": "Two fresh-process LoRA checks from the repository root imported the source stub and tried NumPy. The fixed child runs with -I -B and verifies package and native origins. No study worker was retried.",
+  "wasm32_nn_compile": true,
+  "browser_gpt2_run": false,
+  "quality_or_timing_claim": false
+}
