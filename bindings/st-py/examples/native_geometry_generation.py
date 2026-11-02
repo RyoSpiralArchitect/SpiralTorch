@@ -11,13 +11,17 @@ import spiraltorch as st
 
 def read_bytes(path, limit):
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-    with os.fdopen(os.open(path, flags), "rb") as stream:
-        info = os.fstat(stream.fileno())
+    fd = os.open(path, flags)
+    try:
+        info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= limit:
             raise ValueError("input must be a regular file within byte budget")
-        value = stream.read(info.st_size)
-        if len(value) != info.st_size or stream.read(1):
-            raise ValueError("input size changed while reading")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            value = stream.read(info.st_size)
+            if len(value) != info.st_size or stream.read(1):
+                raise ValueError("input size changed while reading")
+    finally:
+        os.close(fd)
     return value
 
 

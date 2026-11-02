@@ -7,8 +7,8 @@ import runpy
 import subprocess
 import sys
 import tempfile
-import tracemalloc
 import unittest
+from unittest.mock import patch
 
 
 class NoForeignML(importlib.abc.MetaPathFinder):
@@ -49,31 +49,30 @@ def finish(trainer):
 class NativeCausalLmSessionTests(unittest.TestCase):
     @unittest.skipUnless(sys.implementation.name == "cpython", "CPython allocation guard")
     def test_mixed_unicode_input_and_tiny_file_do_not_allocate_the_worst_case_budget(self):
-        base, _ = owners()
-        text = "a" * (1024 * 1024 - 1) + "\U0001f600"
-        invalid = "sha256:" + "0"*64
-        tracemalloc.start()
-        try:
-            with self.assertRaisesRegex(ValueError, "pinned identity"):
-                st.NativeCausalLm.from_session_checkpoint_at(base,text,invalid,update=0,
-                    recorded_data_id=invalid,post_lora_id=None,post_geometry_id=None)
-            peak = tracemalloc.get_traced_memory()[1]
-        finally:
-            tracemalloc.stop()
-        self.assertLess(peak, 2*len(text)+262144)
+        probe = Path(__file__).with_name("probe_session_input_allocations.py")
+        child = subprocess.run([sys.executable,"-I","-B","-X","tracemalloc=1",str(probe)],
+                               capture_output=True,text=True,check=True,timeout=30)
+        peaks = json.loads(child.stdout)
+        self.assertLess(peaks["unicode_peak"], 2*1024*1024+262144)
+        self.assertEqual(len(peaks["file_peaks"]),2)
+        self.assertTrue(all(p < 262144 for p in peaks["file_peaks"]))
+
+    @unittest.skipUnless(os.name == "posix", "directory descriptor on POSIX")
+    def test_both_example_readers_close_rejected_directory_descriptors(self):
         examples = Path(__file__).parents[1] / "examples"
         with tempfile.TemporaryDirectory() as tmp:
-            sample = Path(tmp) / "input"
-            sample.write_bytes(b"x"*4465)
             for filename, helper in (("native_training_session.py","read_limited"),("native_geometry_generation.py","read_bytes")):
                 read = runpy.run_path(str(examples/filename))[helper]
-                tracemalloc.start()
-                try:
-                    self.assertEqual(len(read(sample,256*1024*1024)),4465)
-                    peak = tracemalloc.get_traced_memory()[1]
-                finally:
-                    tracemalloc.stop()
-                self.assertLess(peak,262144)
+                real, opened = os.open, []
+                def track(path, flags):
+                    fd = real(path, flags)
+                    opened.append(fd)
+                    return fd
+                with patch("os.open", side_effect=track), self.assertRaisesRegex(ValueError,"regular file"):
+                    read(Path(tmp),256*1024*1024)
+                self.assertEqual(len(opened),1)
+                with self.assertRaises(OSError):
+                    os.fstat(opened[0])
 
     def test_batched_joint_steps_do_not_cross_rows_or_drop_epoch_tails(self):
         base, model = owners()
