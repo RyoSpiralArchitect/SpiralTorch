@@ -70,14 +70,29 @@ f32 words and their validation flags. Failed runs and failed reads are not
 successful measurements.
 
 Given independently saved `run-outcome.json` and `bits.json` in each of
-three directories, compare the four raw words and the final report weight:
+three directories, compare both the **complete instrumented report bytes**
+and the four raw words plus the final report weight:
 
 ```sh
 python3.12 -I -S -B compare_embedding_bits.py SERIAL WORKER0 WORKER1
 ```
 
-This compares one coordinate, not the whole report. A first differing word
-locates an observed boundary, not a faulty shader; equal words do not clear
-other coordinates or the original byte-for-byte gate. Bind wheel, adapter
-and run provenance separately. No measurements from a new GPU run are
-included here.
+Use `--reports-only` when a bits read fails. Whole-report comparison uses the
+original UTF-8 JSON value inside the saved Rust envelope, not Python's
+reserialization. A first differing word locates an observed boundary, not a
+faulty shader. Equal coordinates do not clear other parameters; even identical
+instrumented reports do not clear the original, uninstrumented CI gate.
+
+### Fixed local scope
+
+`run_embedding_trio.py WHEEL FAILURE_ZIP` defaults to CPU preflight in the
+pinned wheel's venv (`python -I -B`). Only `--execute-once NEW_PRIVATE_DIR`
+starts GPU work. One hardware Metal serial baseline followed by **one** pair of
+simultaneously released host calls on the same immutable study; 600 seconds for
+the owned process, no retries/rebuilds or fallback. The reference is consumed
+before the pair; both worker calls must return before any worker views are read.
+Host-call overlap is checked, not simultaneous GPU dispatch. Save individual
+outcomes before mapping and the whole-report comparison before worker maps.
+Stop on error or non-Metal reporting. Exit 0 means no observed difference in
+this trio, 2 means a difference, 124 means timeout; none is qualification.
+Existing attempt directories are never reused.
