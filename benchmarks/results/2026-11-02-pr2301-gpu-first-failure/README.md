@@ -122,3 +122,19 @@ To reproduce the compact result **without** running the model:
 ```sh
 python3.12 -I -S -B summarize_local_trio.py "$PRIVATE_TRIO" "$ORIGINAL_FAILURE_ZIP" | cmp - local_metal_trio.json
 ```
+
+### Hosted comparison boundary
+
+The historical job used the macOS 26 arm64 image `20261026.0455.2`, system
+26.6.2 build `25G83`, Python 3.12.10 and an Apple Paravirtual Metal adapter.
+The public fixture reproduces all 47,959 request bytes, so only the encrypted
+development wheel needs transporting. CPU preflight:
+`python -I -B run_embedding_trio.py WHEEL --hosted-fixture`.
+
+The dispatch template is inert outside the dedicated branch. It admits only
+the reviewed SHA, one first-attempt run, the pinned host and interpreter; the
+serial result must identify the expected adapter before the concurrent pair.
+No wheel is rebuilt, no diagnostic runs during ordinary CI, and only encrypted
+results leave the job. The original CI invoked three prior study tests in the
+same interpreter; this fresh instrumented trio intentionally does not. Even
+on the same runner image, it cannot certify the original uninstrumented test.

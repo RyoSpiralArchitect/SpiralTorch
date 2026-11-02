@@ -1,4 +1,4 @@
-"""One local instrumented Metal trio. Default: CPU preflight only."""
+"""One instrumented Metal trio. Default: CPU preflight only."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -20,6 +20,7 @@ from byte_release_artifacts import installed_identity, sha256, wheel_archive_inv
 from compare_embedding_bits import SELECTION, checked, compare, compare_reports, decode_json, report_bytes, require
 from inspect_retained import PINS
 from owned_process import run as owned_run
+import hosted_embedding_environment as hosted
 
 WHEEL = "d37b225ca991e6782d180f044dfbb44de9fc82fb45d9b0fbf6d6b077c7540f68"
 NATIVE = "022f6e4e057dba9b74d62406b6784aaf8dac8b12d131675ec8824d1cc413b56c"
@@ -45,12 +46,19 @@ def preflight(wheel, archive):
     require(sys.platform == "darwin" and platform.machine() == "arm64", "expected local Apple Silicon")
     require(all(importlib.util.find_spec(name) is None for name in ("torch", "numpy")),
             "expected the dependency-free validation environment")
-    require(sha256(wheel) == WHEEL and sha256(archive) == ARCHIVE, "different wheel or input archive")
+    require(sha256(wheel) == WHEEL, "different wheel")
     inventory = wheel_archive_inventory(wheel)
     require(inventory["native"]["sha256"] == NATIVE, "different wheel native library")
     installed = installed_identity(inventory)
-    with zipfile.ZipFile(archive) as z:
-        raw = z.read("round-0/request.json")
+    if archive is None:
+        from test_byte_corpus_study import fixture
+        raw = fixture()[0]
+        provenance = {"request_source": "public_fixture_pinned_bytes", "archive_transferred": False}
+    else:
+        require(sha256(archive) == ARCHIVE, "different input archive")
+        with zipfile.ZipFile(archive) as z:
+            raw = z.read("round-0/request.json")
+        provenance = {"archive_sha256": ARCHIVE}
     require(hashlib.sha256(raw).hexdigest() == SELECTION["request_sha256"], "different request")
     import spiraltorch as st
     native = Path(importlib.import_module("spiraltorch.spiraltorch").__file__).resolve()
@@ -60,12 +68,12 @@ def preflight(wheel, archive):
     require(decode_json(study.embedding_update_selection_json("geometry", 1, 2, 0)) == SELECTION,
             "different input coordinate")
     return study, {"schema": "spiraltorch.embedding_trio.preflight.v1", "selection": SELECTION,
-                   "archive_sha256": ARCHIVE, "installation": installed,
+                   **provenance, "installation": installed,
                    "python": platform.python_version(), "macos": platform.mac_ver()[0],
                    "architecture": platform.machine(), "gpu_calls": 0, "release_ready": False}
 
 
-def exercise(study, root):
+def exercise(study, root, *, expected_adapter=None):
     for role in ROLES:
         (root / role).mkdir(mode=0o700)
 
@@ -84,6 +92,8 @@ def exercise(study, root):
             report = decode_json(report_bytes(raw))
             require(report["adapter"].endswith("backend: Metal }") and "device_type: Cpu," not in report["adapter"],
                     "not a reported Metal GPU")
+            if expected_adapter is not None:
+                require(report["adapter"] == expected_adapter, "different historical Metal adapter")
             return obs, raw, (start, end)
         except Exception as error:
             record(path / "call-error.json", {"type": type(error).__name__, "message": str(error)[:2048]})
@@ -123,12 +133,17 @@ def exercise(study, root):
             "coordinate": coord, "release_ready": False}
 
 
-def worker(root, wheel, archive):
+def worker(root, wheel, archive=None):
     record(root / "worker-started.json", {"max_native_calls": 3, "max_worker_pairs": 1})
     try:
+        if archive is None:
+            observed = hosted.inspect()
+            bad = hosted.mismatches(observed)
+            record(root / "host-admission.json", {"observed": observed, "mismatches": bad})
+            require(not bad, "hosted admission failed: " + ", ".join(bad))
         study, receipt = preflight(wheel, archive)
         record(root / "preflight.json", receipt)
-        result = exercise(study, root)
+        result = exercise(study, root, expected_adapter=hosted.ADAPTER if archive is None else None)
     except Exception as error:
         record(root / "error.json", {"status": "error", "type": type(error).__name__, "message": str(error)[:2048]})
         return 1
@@ -139,14 +154,18 @@ def worker(root, wheel, archive):
 def execute_once(root, wheel, archive):
     root.mkdir(mode=0o700, exist_ok=False)
     record(root / "protocol.json", {"roles": ROLES, "max_seconds": LIMIT_SECONDS, "retries": 0,
-                                   "wheel_sha256": WHEEL, "native_sha256": NATIVE, "archive_sha256": ARCHIVE,
+                                   "wheel_sha256": WHEEL, "native_sha256": NATIVE,
+                                   **({"archive_sha256": ARCHIVE} if archive is not None else
+                                      {"request_source": "public_fixture_pinned_bytes", "archive_transferred": False}),
                                    "selection": SELECTION, "harness_sha256": sha256(__file__),
                                    "comparator_sha256": sha256(HERE / "compare_embedding_bits.py"),
                                    "release_ready": False})
     command = [sys.executable, "-I", "-B", "-c",
                "import sys,runpy; from pathlib import Path; "
                "raise SystemExit(runpy.run_path(sys.argv[1])['worker'](*map(Path,sys.argv[2:])))",
-               str(Path(__file__).resolve()), str(root.resolve()), str(wheel.resolve()), str(archive.resolve())]
+               str(Path(__file__).resolve()), str(root.resolve()), str(wheel.resolve())]
+    if archive is not None:
+        command.append(str(archive.resolve()))
     with (root / "worker.log").open("xb") as log:
         try:
             code = owned_run(command, timeout=LIMIT_SECONDS, stdout=log).returncode
@@ -159,9 +178,13 @@ def execute_once(root, wheel, archive):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wheel", type=Path)
-    parser.add_argument("archive", type=Path)
+    parser.add_argument("archive", type=Path, nargs="?")
+    parser.add_argument("--hosted-fixture", action="store_true",
+                        help="recreate only the pinned request; execution also requires the admitted hosted environment")
     parser.add_argument("--execute-once", type=Path, metavar="NEW_PRIVATE_DIRECTORY")
     args = parser.parse_args()
+    if args.hosted_fixture != (args.archive is None):
+        parser.error("select exactly one of the pinned archive or --hosted-fixture")
     if args.execute_once:
         raise SystemExit(execute_once(args.execute_once, args.wheel, args.archive))
     print(json.dumps(preflight(args.wheel, args.archive)[1], indent=2))
