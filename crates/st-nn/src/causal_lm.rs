@@ -11,16 +11,20 @@ use st_tensor::{
 };
 use std::sync::{Arc, OnceLock};
 
+mod adaptation;
 mod context;
 mod decoder;
 mod evaluation;
 mod generation;
 mod gpt2;
 mod learning;
+mod lora;
 mod objective;
 mod observation;
 mod repetition;
+mod session;
 mod training;
+pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use context::NativeCausalLmContext;
 pub use evaluation::{CausalLmEvaluation, CausalLmEvaluationConfig, MAX_EVALUATION_TOKENS};
 pub use generation::{
@@ -28,10 +32,15 @@ pub use generation::{
     NativeCausalLmGenerator,
 };
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
+pub use lora::NativeCausalLmLoraGradients;
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
 pub use observation::{CausalLmObservedTrainingStep, CausalLmSiteObservation};
 pub use repetition::CausalLmRepetition;
+pub use session::{
+    CausalLmTrainingSessionConfig, CausalLmTrainingSessionResume, CausalLmTrainingSessionStep,
+    NativeCausalLmTrainingSession,
+};
 pub use training::{
     CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
 };
@@ -176,6 +185,7 @@ pub struct NativeCausalLm {
     head: PackedB,
     backward_head: TransposeCache,
     geometry: Option<Arc<NativeGeometryRuntime>>,
+    lora: Option<Arc<lora::NativeLoraAdapter>>,
     readout_accumulator: CausalLmReadoutAccumulator,
 }
 
@@ -264,6 +274,7 @@ impl NativeCausalLm {
         }
         let mut next = self.clone();
         next.geometry = Some(Arc::new(runtime));
+        next.validate_adaptation_placement()?;
         Ok(next)
     }
 

@@ -11,6 +11,11 @@ pub struct PyNativeCausalLmEvaluation {
 #[pymethods]
 impl PyNativeCausalLmEvaluation {
     #[getter]
+    fn lora_artifact_id(&self) -> Option<&str> {
+        self.inner.lora_artifact_id.as_deref()
+    }
+
+    #[getter]
     fn readout_accumulator(&self) -> &'static str {
         self.inner.readout_accumulator.as_str()
     }

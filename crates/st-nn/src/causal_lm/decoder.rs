@@ -13,6 +13,7 @@ pub(super) enum BlockPass<'a> {
 
 pub(super) struct BlockCache {
     pub qkv: [Vec<f32>; 3],
+    pub attention_input: Tensor,
     pub after_attention: Tensor,
     pub pre_gelu: Tensor,
     pub attention_geometry: Option<NativeGeometryBatch>,
@@ -167,9 +168,9 @@ impl NativeCausalLm {
             None,
             None,
         )?;
-        let attention = block
-            .output
-            .forward(&self.merge_heads([attended.as_slice()], shape)?)?;
+        let attention_input = self.merge_heads([attended.as_slice()], shape)?;
+        let attention = self.project_attention_output(index, &attention_input)?;
+        let attention_input = capture.then_some(attention_input);
         let path = format!("transformer.h.{index}");
         let mut history = std::array::from_fn(|_| None);
         if inference && self.geometry_needs_history(&format!("{path}.attn"))? {
@@ -201,6 +202,7 @@ impl NativeCausalLm {
         });
         let cache = capture.then(|| BlockCache {
             qkv,
+            attention_input: attention_input.unwrap(),
             after_attention,
             pre_gelu: pre_gelu.unwrap(),
             attention_geometry,

@@ -285,6 +285,7 @@ pub(super) fn load(
         head,
         backward_head: Arc::new(OnceLock::new()),
         geometry: None,
+        lora: None,
         readout_accumulator: CausalLmReadoutAccumulator::F32,
     })
 }

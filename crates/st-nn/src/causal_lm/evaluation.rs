@@ -33,6 +33,8 @@ pub struct CausalLmEvaluation {
     pub schema: &'static str,
     pub base_model_identity: String,
     pub geometry_artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lora_artifact_id: Option<String>,
     pub readout_accumulator: CausalLmReadoutAccumulator,
     pub data_id: String,
     pub plan_id: String,
@@ -204,6 +206,7 @@ impl NativeCausalLm {
             schema: "spiraltorch.native_causal_lm_evaluation.v1",
             base_model_identity: self.base_id.clone(),
             geometry_artifact_id: self.geometry_artifact_id().map(str::to_owned),
+            lora_artifact_id: self.lora_artifact_id().map(str::to_owned),
             readout_accumulator: self.readout_accumulator(),
             data_id: format!("sha256:{:x}", hash.finalize()),
             plan_id,

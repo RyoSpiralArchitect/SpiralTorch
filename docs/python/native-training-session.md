@@ -1,0 +1,129 @@
+# One native adaptation contract in Rust and Python
+
+This source API builds on the native GPT-2 LoRA path. It is not a statement about
+APIs present in an already published wheel. Rust owns the decoder, loss,
+parameter pullback, SGD update, document window plan, cursor and checkpoint.
+Python only validates/transports inputs and calls those same owners. No PyTorch,
+NumPy, Transformers or Python optimizer is needed.
+
+## Composition and update modes
+
+One LoRA adapter may occupy `transformer.h.N.attn.c_proj`, followed by one
+geometry placement at `transformer.h.N.attn` in that same block:
+
+`frozen projection + LoRA -> geometry -> residual addition`
+
+`lora`, `geometry` and `joint` select which parameter group is updated. A frozen
+group still participates in the forward computation and, where required, the
+pullback. Joint gradients are computed from one immutable pre-update model;
+both new parameter groups are validated before the new model is returned.
+The frozen base and all previous model snapshots remain unchanged.
+
+Low-level `adaptation_loss_gradients` and `step_adaptation_sgd` use the same
+contract in both languages. Sealed gradients include both adaptation owners,
+the frozen base identity and readout policy; stale gradients cannot be applied
+after changing either group. The older single-group gradient methods remain
+available for single-group models. Use the adaptation methods for composition.
+
+## Shared document session
+
+`NativeCausalLmTrainingSession` is a fixed-order, document-safe SGD session.
+Each update consumes exactly one planned window. It does not concatenate
+across documents, add EOS, shuffle, batch/accumulate gradients or invent a
+scheduler. Configuration owns context length, epoch count, learning rate and
+update mode. SGD is stateless: there are no hidden momentum buffers.
+
+Given an existing native base model and compatible geometry artifact:
+
+```python
+import spiraltorch as st
+
+model = base.with_lora(0, 2, 4.0).with_geometry(geometry)
+session = st.NativeCausalLmTrainingSession(
+    model, token_documents, 16,
+    learning_rate=0.01, mode="joint", epochs=2,
+)
+report = session.step()
+checkpoint, checkpoint_id = session.to_json(), session.checkpoint_id
+resumed = st.NativeCausalLmTrainingSession.from_json(
+    base, token_documents, checkpoint, checkpoint_id,
+)
+while (report := resumed.step()) is not None:
+    print(report.update, report.loss, report.mode)
+trained_model = resumed.model
+```
+
+The corresponding Rust calls use the same serialized contract:
+
+```rust
+use st_nn::causal_lm::{
+    CausalLmAdaptationMode, CausalLmTrainingSessionConfig,
+    NativeCausalLmTrainingSession,
+};
+
+let model = base.with_lora(0, 2, 4.0)?.with_geometry(geometry)?;
+let config = CausalLmTrainingSessionConfig {
+    context_length: 16,
+    epochs: 2,
+    learning_rate: 0.01,
+    mode: CausalLmAdaptationMode::Joint,
+};
+let mut session = NativeCausalLmTrainingSession::new(model, documents.clone(), config)?;
+let report = session.step()?;
+let checkpoint = session.to_json()?;
+let checkpoint_id = session.checkpoint_id()?;
+let mut resumed = NativeCausalLmTrainingSession::from_json(
+    base, documents, checkpoint.as_bytes(), &checkpoint_id,
+)?;
+while let Some(report) = resumed.step()? {
+    println!("{} {}", report.update, report.loss);
+}
+let trained_model = resumed.model().clone();
+```
+
+Each checkpoint includes both attached adaptation states, their identities, the
+frozen base identity, document-content identity, cursor, config and readout
+policy. Supply the separately retained original base weights and documents when
+restoring. The saved readout policy is restored automatically. The caller must
+retain the checkpoint ID separately: a checksum recomputed from untrusted bytes
+is not proof that those bytes are the intended checkpoint.
+
+Rust writes the JSON consumed by Python, and Python returns the same Rust-written
+JSON consumed by Rust; there is no Python-specific checkpoint schema. Checkpoint
+validation is bounded, rejects mismatched documents/base and commits no partial
+session state on failure. The format is versioned independently of the older
+geometry/AdamW trainer checkpoint. It is not an import path for arbitrary PEFT
+adapters or a cross-version compatibility promise.
+
+The existing `NativeCausalLmTrainer` continues to provide its geometry-only
+AdamW/accumulation/objective path. This SGD session does not replace its optimizer
+or duplicate the observation/receipt recovery work in PR #2301.
+
+## Local-file example and verification boundary
+
+`bindings/st-py/examples/native_training_session.py` accepts a local GPT-2
+configuration, local safetensors archive, encoded token documents and an optional
+geometry artifact. Its checkpoint can be resumed with `--resume` and a separately
+retained `--expected-id`. It does not download a model or tokenize text.
+
+The Rust `native_training_session` example accepts six positional paths/values:
+`CONFIG WEIGHTS DOCUMENTS CHECKPOINT EXPECTED_ID OUTPUT`. It restores one checkpoint,
+performs one update, writes a checkpoint, and prints the update and new ID as JSON.
+To exercise the Python → Rust → Python handoff explicitly after building the
+local extension:
+
+```bash
+cargo build -p st-nn --example native_training_session
+ST_NATIVE_SESSION_EXAMPLE="$PWD/target/debug/examples/native_training_session" \
+  python bindings/st-py/tests/test_native_causal_lm_session.py
+```
+
+Without that environment variable only the cross-language executable test is
+skipped with an explicit reason; the fresh-Python-process restore test still runs.
+
+Tests use small deterministic fixtures to check group freezing, ownership,
+continuous-versus-restored training, f32/f64 policy and fresh-process generation
+with optional ML imports forbidden. These establish mechanics, not language
+quality or speed. This slice is CPU, one LoRA projection and one same-layer
+attention geometry; no GPU residency, full-model updates, arbitrary placement
+composition, joint AdamW, masked labels or repetition objective is promised.
