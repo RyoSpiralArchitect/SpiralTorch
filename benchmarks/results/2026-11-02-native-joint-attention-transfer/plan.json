@@ -1,0 +1,24 @@
+{
+  "schema":"spiraltorch.native_lm.joint_attention_transfer_plan.v1",
+  "parent_source":"6b2d88b482954cd48d8e77885a20a4478cb42298",
+  "seeds":[131,137,139],
+  "arms":["lora","affine","wave"],
+  "site":"transformer.h.8.attn",
+  "layer":8,"rank":4,"alpha":8.0,"context":64,"learning_rate":0.01,"epochs":1,
+  "train_sha256":"36a659f2cec5f642d09bb02428b2ba09dd10152152b38dc9098e99f49c043abb",
+  "training":"Frozen official GPT-2 small, initial Rust LoRA A identical in every run and B zero. Compare LoRA-only against joint LoRA+channel-affine and joint LoRA+WaveGate with freely learned radius. Use the original calibrated layer-8 MLP affine/wave parameters verbatim, relocated to the one native attention output following LoRA. Initial radius 4, strength 0.1, zero gates and nonzero matched output. Test exact site output and train-probe logits. Both joint arms train identical 6144 LoRA and 1536 channel parameters; WaveGate adds one scalar. No parameter/FLOP equivalence with LoRA alone. No clipping, optimizer tuning, AdamW or base weight updates.",
+  "budget":"512 disjoint encoded training windows from Pride and Prejudice chapters 1-49. Permute all windows by SHA256(seed:index). One native SGD update per 64-token window, 512 updates and 32256 shifted targets each. Prespecified fresh-process checkpoint/resume at 256 for every fit, same terminal cursor 512. Rotate arm order by seed. Seal all nine terminal states before any held-out forward or decode.",
+  "books":{
+    "mansfield":{"id":141,"title":"Mansfield Park","chapters":48,"sha256":"b34723544dbe8185e786d0fdd47e42e7e1ac4265b84141e31ca260c1e36b68d8"},
+    "worlds":{"id":36,"title":"The War of the Worlds","chapters":27,"sha256":"8417469e3ab664749f7b36ebb85799075818207b0380b54c27d07d592a44117d"},
+    "beagle":{"id":944,"title":"The Voyage of the Beagle","chapters":21,"sha256":"e13d57170a6dd9f7d97ddbc14cbde961dffbd95e8861ed199e5f00a525e7e52a"}
+  },
+  "sample":"Six midpoint chapters per book, twelve midpoint disjoint complete 64-token windows per chapter, no cross-chapter context; body headings only, collapse whitespace, no special tokens. Reject duplicated full windows within and across the samples and against training. 4536 targets per work. Old scored works, prompt sets and reserve not used. These are new study samples, not a claim about pretraining overlap.",
+  "measurement":"Unsmoothed token-weighted NLL on all 13 states: frozen base, three initial model states, nine restored terminal fits. Use one pinned Rust shared-prefix evaluator, independent scalar full-receipt parity on the first sampled chapter of the primary book for each state. Base and LoRA-only initial NLL must match; both joint starts must match on every chapter. Never pool the three books.",
+  "primary":"Wave minus affine NLL on Mansfield Park, negative favors WaveGate. Claim an incremental advantage in this sample only if strictly negative for all three seeds. Report all contrasts including null/adverse ones, and whether the radius actually changed. Report both joint-vs-LoRA-only contrasts and changes from each arm's own initial function. Different joint and LoRA-only starts prohibit attributing their final difference purely to learning the added branch.",
+  "transfer":"Report the same quantities separately on Wells (other-author fiction) and Darwin (natural-history narrative). No significance, mechanism, general generation-quality or wall-time claim.",
+  "prompts":["A quiet room holds a letter that nobody has opened.","At dawn the telescope showed an unfamiliar point of light.","To test the idea, the observer compared the two specimens."],
+  "generation":{"max_new_tokens":24,"eos_token_ids":[50256],"execution":{"kind":"kv_cache","max_values":2000000}},
+  "generation_scope":"Greedy with the same sealed recipe for every state and prompt after all fits. Keep raw IDs privately; publish continuation hashes, lengths and first divergent generated position (zero based) for paired joint arms. A different continuation is not a quality judgment.",
+  "limits":{"rayon_threads":4,"per_process_seconds":2700,"total_seconds":14400,"workers_at_once":1,"retries":0,"stop_at_first_failure":true,"cpu_only":true}
+}

@@ -1,0 +1,11 @@
+{
+  "schema":"spiraltorch.native_lm.joint_attention_freeze.v1",
+  "engine_source":"79326de2dfa98695d4477d6b3f6eab5fb70c8aff",
+  "development_wheel_sha256":"df0e099409048b35e8392db551dc0d675cce956c75ff5a8133b32bc25e0a4f98",
+  "native_sha256":"3f9d520c5afefe6fd6216b1d86e719ee0347b54d24c10f7ee31534ba1fbba069",
+  "plan_sha256":"944ed436b9d6eb40bba1ef0796d68fd091bbc33f40d9519912d00509fc1742f9","data_manifest_sha256":"4d99b6419cdb9153cc8e74b4873e566d510f6b2a95d5b70b4eb4ad118c380ad0",
+  "held_out_windows_sha256":"82aefded9311eb0f13f6de60e5a03c6028282a958bc6463a547e87c20201717c","prompt_ids_sha256":"4c5ec76f28ab961e1fc80c4f1c466bc6606caaf5df138a90757cc2499134c8fe",
+  "sections":{"beagle":[2,6,9,13,16,20],"mansfield":[5,13,21,29,37,45],"worlds":[3,7,12,16,21,25]},
+  "study_updates_before_freeze":0,"held_out_forwards_before_freeze":0,"greedy_decodes_before_freeze":0,
+  "public_wheel":false,"new_gpu_runs":0
+}
