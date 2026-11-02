@@ -20,7 +20,8 @@ models; they must not be mistaken for the native path below.
 | Add repetition-aware language learning | [Native repetition objective](native-repetition.md) | Shared Rust candidates, loss/VJP, two-normalizer reduction and pinned recipe; no Torch auxiliary loss |
 | Generate with ordinary or Z-Space control | [`NativeCausalLmGenerator`, `NativeCausalLmContext`](native-generation.md) | Rust selection, RNG and explicit K/V reuse; no Torch generation loop |
 | Execute portable geometry independently | [`NativeGeometryRuntime`](native-geometry-runtime.md) | Same admitted artifact recipes without a foreign model; standalone MSE is not LM fine-tuning |
-| Train a native dense or low-rank layer | `st.nn.Linear`, `st.nn.LoraLinear` | Rust forward/VJP and SGD, Realgrad or AmegaHypergrad; LoRA freezes its base, but is not a native decoder attachment or PEFT importer |
+| Train a native dense or low-rank layer | `st.nn.Linear`, `st.nn.LoraLinear` | Rust forward/VJP and SGD, Realgrad or AmegaHypergrad |
+| Train one GPT-2 attention output adapter (source after v0.4.33) | [Native LoRA](native-lora.md), `with_lora`, `lora_loss_gradients`, `step_lora_sgd` | Frozen base, one projection, native CPU stateless SGD and adapter reload; not a PEFT importer or geometry co-training |
 | Run other HF models or PEFT adapters today | `load_hf_causal_lm_artifact`, `prepare_hf_finetune_model`, HF Trainer helpers | Explicit optional Transformers/Torch/PEFT path, not a fallback inside `NativeCausalLm` |
 
 The native importer rejects unsupported configurations and extra tensors,
@@ -41,8 +42,9 @@ This inventory separates intentional transport from missing native execution:
 
 - [`hf_peft.py`](../../bindings/st-py/spiraltorch/hf_peft.py) loads foreign model
   objects and calls PEFT to attach/train LoRA. Native `LoraLinear` is a useful
-  layer primitive, but is not yet a PEFT-checkpoint executor or trainable LoRA
-  attachment in `NativeCausalLm`.
+  layer primitive. The separate source-only native LoRA path attaches one GPT-2
+  attention output projection and trains its A/B parameters; neither path is a
+  native PEFT-checkpoint executor.
 - [`hf_geometry_trainer.py`](../../bindings/st-py/spiraltorch/hf_geometry_trainer.py)
   and [`geometry_adapters.py`](../../bindings/st-py/spiraltorch/geometry_adapters.py)
   retain foreign model execution, Torch hook/autograd transport and HF training
@@ -67,9 +69,10 @@ import or changing a report's owner string is not a native implementation.
 1. Qualify native repetition learning through the installed-wheel gates and
    matched corpus studies. Mechanics and numerical parity do not establish
    fewer generation loops or better language quality.
-2. Connect native low-rank projections to decoder placements and weight loading,
-   then optimizer/checkpoint ownership. Verify a real parameter update and exact
-   continuation; a compatible artifact report or frozen forward is insufficient.
+2. Qualify the [single-projection native LoRA slice](native-lora.md), including
+   language-loss updates, frozen base, adapter reload and continuation. This source
+   slice uses stateless SGD with caller-owned windows/schedule; broader placements,
+   optimizer moments, PEFT loading and joint geometry learning remain separate work.
 3. Extend explicit architecture support with the required attention, positional
    and normalization kernels. Admit only tested configurations; do not replace
    unsupported variants with approximations or hidden foreign execution.

@@ -52,15 +52,44 @@ impl CausalLmTrainingConfig {
 }
 
 #[derive(Clone, Debug)]
-struct Corpus {
+pub(super) struct Corpus {
     documents: Vec<Vec<usize>>,
     labels: Option<Vec<Vec<i64>>>,
-    plan: CausalDocumentWindows,
-    id: String,
+    pub(super) plan: CausalDocumentWindows,
+    pub(super) id: String,
 }
 
 impl Corpus {
-    fn batch(&self, windows: &[CausalDocumentWindow]) -> (Vec<usize>, Option<Vec<i64>>) {
+    /// Shared identity and batching storage for admitted native training corpora.
+    pub(super) fn new(
+        documents: Vec<Vec<usize>>,
+        labels: Option<Vec<Vec<i64>>>,
+        plan: CausalDocumentWindows,
+    ) -> CausalLmResult<Self> {
+        let mut hash = Sha256::new();
+        hash.update(b"spiraltorch.native_causal_training_data.v1\0");
+        hash.update(plan.plan_id()?.as_bytes());
+        hash.update([u8::from(labels.is_some())]);
+        for (index, document) in documents.iter().enumerate() {
+            hash.update((document.len() as u64).to_le_bytes());
+            for &id in document {
+                hash.update((id as u64).to_le_bytes());
+            }
+            if let Some(labels) = &labels {
+                for &label in &labels[index] {
+                    hash.update(label.to_le_bytes());
+                }
+            }
+        }
+        Ok(Self {
+            documents,
+            labels,
+            plan,
+            id: format!("sha256:{:x}", hash.finalize()),
+        })
+    }
+
+    pub(super) fn batch(&self, windows: &[CausalDocumentWindow]) -> (Vec<usize>, Option<Vec<i64>>) {
         let count = windows.iter().map(|w| w.length as usize).sum();
         let mut ids = Vec::with_capacity(count);
         let mut labels = self.labels.as_ref().map(|_| Vec::with_capacity(count));
@@ -269,27 +298,7 @@ impl NativeCausalLmTrainer {
                 return Err("repetition labels must equal input IDs or -100".into());
             }
         }
-        let mut hash = Sha256::new();
-        hash.update(b"spiraltorch.native_causal_training_data.v1\0");
-        hash.update(plan.plan_id()?.as_bytes());
-        hash.update([u8::from(labels.is_some())]);
-        for (index, document) in documents.iter().enumerate() {
-            hash.update((document.len() as u64).to_le_bytes());
-            for &id in document {
-                hash.update((id as u64).to_le_bytes());
-            }
-            if let Some(labels) = &labels {
-                for &label in &labels[index] {
-                    hash.update(label.to_le_bytes());
-                }
-            }
-        }
-        let corpus = Arc::new(Corpus {
-            documents,
-            labels,
-            plan,
-            id: format!("sha256:{:x}", hash.finalize()),
-        });
+        let corpus = Arc::new(Corpus::new(documents, labels, plan)?);
         let result = Self {
             initial_optimizer_revision: optimizer.revision(),
             initial_optimizer_steps: optimizer.state().slots.iter().map(|s| s.steps).collect(),

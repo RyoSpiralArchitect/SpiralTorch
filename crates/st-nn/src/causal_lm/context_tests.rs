@@ -148,3 +148,51 @@ fn cached_generation_restores_original_prefill_chronology_and_v1_default_stays_u
     )
     .is_err());
 }
+
+#[test]
+fn learned_lora_prefill_and_appends_match_full_decoder_and_keep_snapshot() {
+    let base = load();
+    let initial = base.with_lora(0, 2, 4.).unwrap();
+    let gradients = initial.lora_loss_gradients(&[1, 2, 3, 4], [1, 4]).unwrap();
+    let model = initial.step_lora_sgd(&gradients, 0.3).unwrap();
+    assert_ne!(initial.lora_artifact_id(), model.lora_artifact_id());
+    let restored = base.with_lora_json(&model.lora_to_json().unwrap()).unwrap();
+    assert_eq!(model.lora_artifact_id(), restored.lora_artifact_id());
+    let mut context = NativeCausalLmContext::new(restored.clone(), vec![1, 2], 1024).unwrap();
+    let snapshot = context.clone();
+    assert_eq!(context.lora_artifact_id(), restored.lora_artifact_id());
+    assert_ne!(
+        restored.logits(&[1, 2], [1, 2], true).unwrap().data(),
+        base.logits(&[1, 2], [1, 2], true).unwrap().data()
+    );
+    for token in [3, 4, 5, 6, 7, 8] {
+        close(
+            &context.logits().unwrap().read_values().unwrap(),
+            restored
+                .logits(context.token_ids(), [1, context.token_ids().len()], true)
+                .unwrap()
+                .data(),
+        );
+        context.append(token).unwrap();
+    }
+    close(
+        &context.logits().unwrap().read_values().unwrap(),
+        restored
+            .logits(&[1, 2, 3, 4, 5, 6, 7, 8], [1, 8], true)
+            .unwrap()
+            .data(),
+    );
+    let later = restored
+        .step_lora_sgd(
+            &restored.lora_loss_gradients(&[4, 3, 2, 1], [1, 4]).unwrap(),
+            0.3,
+        )
+        .unwrap();
+    assert_ne!(later.lora_artifact_id(), snapshot.lora_artifact_id());
+    assert_eq!(snapshot.lora_artifact_id(), model.lora_artifact_id());
+    assert_eq!(snapshot.token_ids(), [1, 2]);
+    close(
+        &snapshot.logits().unwrap().read_values().unwrap(),
+        model.logits(&[1, 2], [1, 2], true).unwrap().data(),
+    );
+}

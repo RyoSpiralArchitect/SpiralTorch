@@ -111,6 +111,8 @@ struct Checkpoint {
     rng: String,
     base_model_identity: String,
     geometry_artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lora_artifact_id: Option<String>,
     config: CausalLmGenerationConfig,
     prompt_length: usize,
     tokens: Vec<usize>,
@@ -244,6 +246,7 @@ impl NativeCausalLmGenerator {
             rng: RNG.into(),
             base_model_identity: self.model.base_id.clone(),
             geometry_artifact_id: self.model.geometry_artifact_id().map(str::to_owned),
+            lora_artifact_id: self.model.lora_artifact_id().map(str::to_owned),
             config: self.config.clone(),
             prompt_length: self.prompt_length,
             tokens: self.tokens.clone(),
@@ -273,10 +276,11 @@ impl NativeCausalLmGenerator {
             || saved.rng != RNG
             || saved.base_model_identity != model.base_id
             || saved.geometry_artifact_id.as_deref() != model.geometry_artifact_id()
+            || saved.lora_artifact_id.as_deref() != model.lora_artifact_id()
             || saved.readout_accumulator != model.readout_accumulator
         {
             return Err(
-                "generation schema, RNG, base, geometry or readout accumulator owner mismatch"
+                "generation schema, RNG, base, geometry, LoRA or readout accumulator owner mismatch"
                     .into(),
             );
         }

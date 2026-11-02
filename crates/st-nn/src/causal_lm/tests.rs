@@ -4,6 +4,8 @@ use safetensors::tensor::{serialize, Dtype, TensorView};
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[path = "adaptation_tests.rs"]
+mod adaptation;
 #[path = "context_tests.rs"]
 mod context;
 #[path = "evaluation_tests.rs"]
@@ -12,6 +14,8 @@ mod evaluation;
 mod generation;
 #[path = "learning_tests.rs"]
 mod learning;
+#[path = "lora_tests.rs"]
+mod lora;
 
 fn config() -> serde_json::Value {
     json!({"model_type":"gpt2","vocab_size":11,"n_positions":8,"n_embd":4,"n_head":2,"n_layer":2})
@@ -455,3 +459,6 @@ fn frozen_geometry_is_identity_bound_and_affects_downstream_logits() {
         .with_geometry(artifact(&model, "transformer.h.0", 0.1))
         .is_err());
 }
+
+#[path = "session_tests.rs"]
+mod session;
