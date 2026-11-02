@@ -37,6 +37,27 @@ run `python3.12 -I -S -B public_scores.py` here. It reconstructs the original
 15 scalar score-file hashes and recomputes the reported contrasts from the
 [270 section scores](section_scores.json).
 
+## Backend Cross-check
+
+On source [205f350a2](https://github.com/RyoSpiralArchitect/SpiralTorch/commit/205f350a2acb3ea1b94cf3f88d114da4bd236da1),
+the Rust `NativeCausalLm.evaluate_variants` path shared eight frozen decoder
+layers per active microbatch. For **15 states x 18 sections**, NLL, target
+counts and data IDs matched the separately built scalar study wheel **exactly**.
+This was an inference-only check on the same sealed states, not a second
+training run or a wall-clock comparison.
+See the [frozen check](shared_prefix_plan.json) and [original result](shared_prefix.json).
+
+Independent review then tightened pre-admission of oversized lazy inputs,
+duplicate microbatch shapes and direct Rust document counts. On the
+[hardened source](https://github.com/RyoSpiralArchitect/SpiralTorch/commit/c10b315cdf20ef99b2be04ff7e6f6e9a2eea903b),
+an additional [three-state mixed-length probe](masked_probe.json) reproduced
+the entire scalar reports byte-for-byte, with 59 selected targets, 44 masked
+targets and one fully skipped window. This latter check is **not** a second
+270-score study on the hardened wheel. Local validation on that source:
+1,065 Rust library tests, 103 installed-wheel Python tests, and a WASM
+compile check (not browser GPT-2 execution). Neither development wheel is a
+PyPI release.
+
 ## What is matched
 
 Each pair starts from the same frozen GPT-2 and four function-matched,
@@ -85,3 +106,13 @@ IDs, checkpoint ownership, the 48 observed pairs in the second cohort, and
 every scored denominator. Six seed pairs share the same books; they are not
 six independent draws from a population of books. Generation and speed are
 not measured.
+
+For the optional backend checks, use fresh isolated environments with the
+respective exact development wheels. Set `RAYON_NUM_THREADS=4`,
+`VECLIB_MAXIMUM_THREADS=1`, and `OMP_NUM_THREADS=1`. Invoke
+[`verify_shared_prefix.py`](verify_shared_prefix.py) with the same inputs as
+the audit, the comparison wheel in `--wheel`, the result/wheel SHA-256 pins
+in [the receipt](shared_prefix.json), and a fresh `--receipt` file. For the
+post-review probe use [`masked_probe.py`](masked_probe.py) with the hardened
+wheel, `--old`, `--drift`, `--out`, `--model` and a new `--receipt`.
+The public score audit requires none of these wheels.
