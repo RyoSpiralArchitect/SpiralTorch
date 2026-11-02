@@ -107,8 +107,8 @@ class NativeCompletionTests(unittest.TestCase):
                     recorded_data_id=actual.data_id,post_lora_id=actual.model.lora_artifact_id,
                     post_geometry_id=actual.model.geometry_artifact_id)
         ids,labels = example.evaluation_document()
-        result = st.NativeCausalLm.evaluate_variants_by_answer([restored], [ids], 9, labels=[labels])
-        self.assertEqual(result.evaluations[0].target_tokens,4)
+        result = st.NativeCausalLm.evaluate_variants_by_answer([model,restored], [ids], 9, labels=[labels])
+        self.assertEqual([s.target_tokens for s in result.evaluations],[4,4])
         self.assertEqual((result.answer(0)["start"],result.answer(0)["end"]),(4,8))
         cfg = '{"max_new_tokens":3,"execution":{"kind":"kv_cache","max_values":1024}}'
         gen = st.NativeCausalLmGenerator(restored,example.prompt_ids,cfg)
