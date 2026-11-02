@@ -48,6 +48,13 @@ impl PyNativeCausalLmGenerator {
             .map(|report| report.map(|inner| PyNativeCausalLmGenerationStep { inner }))
             .map_err(error)
     }
+    fn step_token_id(&mut self, py: Python<'_>) -> PyResult<Option<usize>> {
+        py.detach(|| self.inner.step_token_id()).map_err(error)
+    }
+    fn advance_ids(&mut self, py: Python<'_>, count: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
+        let count = super::dimension(count)?;
+        py.detach(|| self.inner.advance_ids(count)).map_err(error)
+    }
     #[getter]
     fn finished(&self) -> bool {
         self.inner.finished()

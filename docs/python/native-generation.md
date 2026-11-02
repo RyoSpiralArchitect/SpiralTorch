@@ -1,6 +1,6 @@
 # Native language generation
 
-Development API, newer than the published 0.4.32 wheel. Python transports IDs;
+These examples target a development wheel exposing the APIs shown. Python transports IDs;
 Rust owns the decoder, geometry, filtering, Z-Space control, EOS and seeded
 selection. No Torch, NumPy, Transformers or remote code is needed on this path.
 The optional HF path remains explicit comparison/interop, not a fallback.
@@ -48,6 +48,33 @@ Geometry inside the decoder and Z-Space output control are separate intervention
 - Descending logits/adjusted logits determine rank; exact ties use the lowest token ID, including signed zero. Rounded probability ties do not change greedy ranking.
 - Sampling uses probabilities directly, not the older Z-Space reporting log-probability floor. Underflowed zero mass is never sampled. No Torch RNG equivalence is claimed.
 - Step `probability` and `entropy` describe the final filtered distribution, not the likelihood of a deterministic greedy policy. `control_entropy` is before nucleus filtering. JSON also records raw/controlled top IDs, candidate counts, temperature and the optional Z-Space contract version.
+
+### When only token IDs are needed
+
+```python
+# Each call advances the same generator. It can be mixed with step() and resume.
+token = generator.step_token_id()  # int or None when already finished
+more = generator.advance_ids(6)   # only newly emitted IDs; [] if finished
+```
+
+Plain greedy softmax can select the raw maximum without sorting, exponentiating,
+or building a probability report. A valid top-k and nucleus retain that token;
+equal logits select the lowest ID. The model **still computes vocabulary logits**.
+Z-Space can reorder candidates, and sampling needs their probabilities: these
+paths still execute the full Rust policy with the original RNG schedule.
+`step()` continues to return the normalized probability and both entropies
+with the ranked f64 reduction order. It is the right API when collecting telemetry.
+
+`advance_ids(count)` accepts 1..=1024 and stops at EOS or the configured limit;
+on error it commits **none** of the chunk. It may transiently hold an old and
+new KV snapshot. Users who need streaming progress should call `step_token_id()`
+or `step()` once per token.
+
+For clients that already have logits in WebAssembly, `greedyTokenIdF32(logits,
+history, configJson)` and `greedyTokenDecisionJsonF32(logits, history, configJson)`
+use this same core policy. Supply a `Float32Array`, a `Uint32Array` of recent IDs,
+and a greedy decoding config (e.g. `"{}"`). These adapters check the shape bounds
+before copying the typed arrays; neither requires a GPU or runs a language model.
 
 ## Cached execution
 

@@ -33,6 +33,8 @@ mod semantic_review;
 mod temperature_control;
 mod tensor_execution_receipt;
 mod tensor_mean;
+#[cfg(target_arch = "wasm32")]
+mod token_decoding;
 mod topos_control;
 mod topos_policy;
 mod topos_resonator;
@@ -136,6 +138,8 @@ pub use semantic_review::*;
 pub use temperature_control::*;
 pub use tensor_execution_receipt::*;
 pub use tensor_mean::*;
+#[cfg(target_arch = "wasm32")]
+pub use token_decoding::*;
 pub use topos_control::*;
 pub use topos_policy::*;
 #[cfg(target_arch = "wasm32")]

@@ -9,6 +9,10 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Native greedy ID, using the configured Z-Space policy when present. No GPU required. */
+    export function greedyTokenIdF32(logits: Float32Array, history: Uint32Array, configJson: string): number;
+    /** Full Rust TokenDecision, including exact final filtered probability and entropy. */
+    export function greedyTokenDecisionJsonF32(logits: Float32Array, history: Uint32Array, configJson: string): string;
     /** Requires nn. Compile aligned source spans into unshifted causal labels (no tokenizer or GPU). */
     export function alignCausalTargetsJson(input: string): string;
     /** Requires nn; GPU methods additionally require webgpu. Rust owns all study semantics. */

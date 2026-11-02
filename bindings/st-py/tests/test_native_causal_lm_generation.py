@@ -61,6 +61,36 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
         for name in ("NativeCausalLmGenerator", "NativeCausalLmGenerationStep"):
             self.assertIn(name, st.__all__)
 
+    def test_id_only_generation_interleaves_with_reports_and_restore_for_every_policy(self):
+        for execution in ({"kind":"full_prefix"},{"kind":"kv_cache","max_values":1024}):
+            for selection in ("greedy","sample"):
+                for dist in ({"kind":"softmax","temperature":.75},{"kind":"zspace","config":{"curvature":-1.}}):
+                    with self.subTest(execution=execution,selection=selection,distribution=dist["kind"]):
+                        kw=dict(execution=execution,seed=37,decoding=dict(selection=selection,distribution=dist,top_k=6,top_p=.8))
+                        full,ids=self.generator(**kw),self.generator(**kw)
+                        self.assertEqual(ids.step_token_id(),full.step().token_id)
+                        self.assertEqual(ids.checkpoint_id,full.checkpoint_id)
+                        ids=st.NativeCausalLmGenerator.from_json(self.model,ids.to_json(),ids.checkpoint_id)
+                        self.assertEqual(ids.advance_ids(2),[full.step().token_id for _ in range(2)])
+                        self.assertEqual(ids.step().to_json(),full.step().to_json())
+                        self.assertEqual(ids.advance_ids(1024),[full.step().token_id])
+                        self.assertEqual(ids.generated_ids,full.generated_ids)
+                        self.assertEqual(ids.to_json(),full.to_json())
+                        self.assertIsNone(ids.step_token_id())
+                        self.assertEqual(ids.advance_ids(1),[])
+
+    def test_id_chunk_validation_and_eos_preserve_cursor(self):
+        token=self.generator().step().token_id
+        ids=self.generator(eos_token_ids=[token])
+        before=ids.to_json()
+        for count in (0,-1,True,1025):
+            with self.assertRaises((ValueError,TypeError,OverflowError)):
+                ids.advance_ids(count)
+            self.assertEqual(ids.to_json(),before)
+        self.assertEqual(ids.advance_ids(4),[token])
+        self.assertEqual(ids.finish_reason,"eos")
+        self.assertEqual(ids.advance_ids(3),[])
+
     def test_sampled_zspace_exact_resume_and_control_does_not_disappear(self):
         generator = self.generator(seed=132, decoding={"selection": "sample", "top_k": 6, "top_p": .8,
                                   "distribution": {"kind": "zspace", "config": {"curvature": -1.}}})

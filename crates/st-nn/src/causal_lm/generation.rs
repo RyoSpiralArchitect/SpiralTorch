@@ -8,12 +8,14 @@ use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use st_core::inference::token_decoding::{
-    prepare_token_candidates, TokenDecision, TokenDecodingConfig, TokenSelection, MAX_HISTORY,
+    greedy_token_id_f32, prepare_token_candidates_f32, TokenDecision, TokenDecodingConfig,
+    TokenSelection, MAX_HISTORY,
 };
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_generation.v1";
 const RNG: &str = "rand_chacha_0_3_chacha20_seed_u64_top53.v1";
 const MAX_CHECKPOINT_BYTES: usize = 1_048_576;
+const MAX_NEW_TOKENS: usize = 1024;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -59,7 +61,7 @@ impl CausalLmGenerationConfig {
 
     /// Validate the largest prefix actually evaluated, before extracting foreign IDs.
     pub fn validate(&self, model: &NativeCausalLm, prompt_length: usize) -> CausalLmResult<()> {
-        if prompt_length == 0 || self.max_new_tokens == 0 || self.max_new_tokens > 1024 {
+        if prompt_length == 0 || self.max_new_tokens == 0 || self.max_new_tokens > MAX_NEW_TOKENS {
             return Err("generation requires a nonempty prompt and 1..=1024 new tokens".into());
         }
         let total = prompt_length
@@ -198,6 +200,55 @@ impl NativeCausalLmGenerator {
     }
 
     pub fn step(&mut self) -> CausalLmResult<Option<CausalLmGenerationStep>> {
+        let decision = self.advance_one(|s, logits| {
+            let decision = s.reported_decision(logits)?;
+            Ok((decision.token_id, decision))
+        })?;
+        Ok(decision.map(|decision| CausalLmGenerationStep {
+            step: self.generated_ids().len(),
+            decision,
+            finish_reason: self.finish_reason(),
+        }))
+    }
+
+    /// Same cursor and policy as step(), without constructing an unused telemetry report.
+    pub fn step_token_id(&mut self) -> CausalLmResult<Option<usize>> {
+        self.advance_one(|s, logits| {
+            let id = match s.config.decoding.selection {
+                TokenSelection::Greedy => {
+                    greedy_token_id_f32(logits, &s.tokens, &s.config.decoding)?
+                }
+                TokenSelection::Sample => s.reported_decision(logits)?.token_id,
+            };
+            Ok((id, id))
+        })
+    }
+
+    /// Return up to count newly generated IDs. Commit the whole chunk or none on failure.
+    pub fn advance_ids(&mut self, count: usize) -> CausalLmResult<Vec<usize>> {
+        if !(1..=MAX_NEW_TOKENS).contains(&count) {
+            return Err("generation chunk must request 1..=1024 tokens".into());
+        }
+        if self.finished() {
+            return Ok(Vec::new());
+        }
+        let mut candidate = self.clone();
+        let mut ids =
+            Vec::with_capacity(count.min(self.config.max_new_tokens - self.generated_ids().len()));
+        for _ in 0..count {
+            let Some(id) = candidate.step_token_id()? else {
+                break;
+            };
+            ids.push(id);
+        }
+        *self = candidate;
+        Ok(ids)
+    }
+
+    fn advance_one<T>(
+        &mut self,
+        select: impl FnOnce(&Self, &[f32]) -> CausalLmResult<(usize, T)>,
+    ) -> CausalLmResult<Option<T>> {
         if self.finished() {
             return Ok(None);
         }
@@ -230,9 +281,16 @@ impl NativeCausalLmGenerator {
                 .model
                 .logits(&self.tokens, [1, self.tokens.len()], true)?,
         };
-        let logits: Vec<_> = logits.data().iter().map(|&v| f64::from(v)).collect();
-        let candidates = prepare_token_candidates(&logits, &self.tokens, &self.config.decoding)?;
-        let decision = match self.config.decoding.selection {
+        let (id, output) = select(self, logits.data())?;
+        self.tokens.try_reserve(1)?;
+        self.tokens.push(id);
+        self.cache = next_cache;
+        Ok(Some(output))
+    }
+
+    fn reported_decision(&self, logits: &[f32]) -> CausalLmResult<TokenDecision> {
+        let candidates = prepare_token_candidates_f32(logits, &self.tokens, &self.config.decoding)?;
+        Ok(match self.config.decoding.selection {
             TokenSelection::Greedy => candidates.greedy(),
             TokenSelection::Sample => {
                 // One u64 (two ChaCha words) per accepted sampled token. Reconstructing
@@ -242,15 +300,7 @@ impl NativeCausalLmGenerator {
                 let uniform = (rng.next_u64() >> 11) as f64 / 9_007_199_254_740_992.0;
                 candidates.sample(uniform)?
             }
-        };
-        self.tokens.try_reserve(1)?;
-        self.tokens.push(decision.token_id);
-        self.cache = next_cache;
-        Ok(Some(CausalLmGenerationStep {
-            step: self.generated_ids().len(),
-            decision,
-            finish_reason: self.finish_reason(),
-        }))
+        })
     }
 
     pub fn to_json(&self) -> CausalLmResult<String> {
