@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 
 /// Clients must check this bound before eagerly converting document lengths.
 pub const MAX_DOCUMENTS: usize = 1_048_576;
-const MAX_WINDOWS: u64 = 1_048_576;
+pub(crate) const MAX_WINDOWS: u64 = 1_048_576;
 const MAX_RECIPE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Deserialize)]

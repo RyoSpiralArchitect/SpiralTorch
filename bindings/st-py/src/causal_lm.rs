@@ -200,6 +200,35 @@ impl PyNativeCausalLmLoraGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(base, payload, expected_id, *, update, recorded_data_id, post_lora_id, post_geometry_id))]
+    fn from_session_checkpoint_at(
+        py: Python<'_>,
+        base: &Self,
+        payload: &str,
+        expected_id: &str,
+        update: &Bound<'_, PyAny>,
+        recorded_data_id: &str,
+        post_lora_id: Option<&str>,
+        post_geometry_id: Option<&str>,
+    ) -> PyResult<Self> {
+        reject_bool(update)?;
+        let update = update.extract::<u64>()?;
+        py.detach(|| {
+            NativeCausalLm::from_session_checkpoint_at(
+                base.inner.clone(),
+                payload.as_bytes(),
+                expected_id,
+                update,
+                recorded_data_id,
+                post_lora_id,
+                post_geometry_id,
+            )
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
+    }
     /// Shared Rust-owned gradient operation, including composed adapter snapshots.
     fn adaptation_loss_gradients(
         &self,

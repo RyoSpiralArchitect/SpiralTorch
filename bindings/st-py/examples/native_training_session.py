@@ -29,7 +29,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.updates < 0:
         parser.error("--updates must be nonnegative")
-    weights = st.SafeTensorArchive.from_bytes(args.weights.read_bytes())
+    weights = st.SafeTensorArchive(args.weights)
     base = st.NativeCausalLm.from_gpt2(args.config.read_text(), weights)
     documents = json.loads(args.documents.read_text())
     if args.resume:
@@ -56,8 +56,12 @@ def main() -> None:
         reports.append(json.loads(report.to_json()))
     # Writing an output file is caller-owned; the Rust checkpoint itself is atomic
     # in memory, not a power-loss-safe filesystem transaction.
-    args.output.write_text(session.to_json())
-    print(json.dumps({"checkpoint_id": session.checkpoint_id,
+    payload, pin = session.checkpoint_with_id()
+    args.output.write_text(payload)
+    print(json.dumps({"checkpoint_id": pin,
+                      "recorded_data_id": session.data_id,
+                      "post_lora_id": session.model.lora_artifact_id,
+                      "post_geometry_id": session.model.geometry_artifact_id,
                       "completed_updates": session.completed_updates,
                       "total_updates": session.total_updates,
                       "readout_accumulator": session.model.readout_accumulator,

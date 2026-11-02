@@ -41,6 +41,73 @@ fn id(json: &str) -> String {
 }
 
 #[test]
+fn session_inference_binds_both_owners_cursor_and_recorded_corpus_without_resuming() {
+    let base = load();
+    for mode in [
+        CausalLmAdaptationMode::Lora,
+        CausalLmAdaptationMode::Geometry,
+        CausalLmAdaptationMode::Joint,
+    ] {
+        let model = adapted(&base, mode).with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+        let mut session =
+            NativeCausalLmTrainingSession::new(model, documents(), session_config(mode)).unwrap();
+        let step = session.step().unwrap().unwrap();
+        let (json, pin) = session.checkpoint_with_id().unwrap();
+        assert_eq!(json, session.to_json().unwrap());
+        assert_eq!(pin, session.checkpoint_id().unwrap());
+        let lora = step.post_lora_artifact_id.as_deref();
+        let geom = step.post_geometry_artifact_id.as_deref();
+        let restore = |base,
+                       json: &str,
+                       pin: &str,
+                       u,
+                       data: &str,
+                       l: Option<&str>,
+                       g: Option<&str>| {
+            NativeCausalLm::from_session_checkpoint_at(base, json.as_bytes(), pin, u, data, l, g)
+        };
+        let data = session.data_id();
+        let restored = restore(base.clone(), &json, &pin, 1, data, lora, geom).unwrap();
+        assert_eq!(
+            restored.readout_accumulator(),
+            CausalLmReadoutAccumulator::F64
+        );
+        assert_eq!(
+            restored.logits(&[1, 2, 3], [1, 3], false).unwrap(),
+            session.model().logits(&[1, 2, 3], [1, 3], false).unwrap()
+        );
+        assert!(restore(base.clone(), &json, &pin, 2, data, lora, geom).is_err());
+        assert!(restore(base.clone(), &json, &pin, 1, &id("other data"), lora, geom).is_err());
+        assert!(restore(base.clone(), &json, &id("other bytes"), 1, data, lora, geom).is_err());
+        assert!(restore(base.clone(), &json, &pin, 1, data, Some("wrong"), geom).is_err());
+        assert!(restore(base.clone(), &json, &pin, 1, data, lora, Some("wrong")).is_err());
+        assert!(restore(
+            adapted(&base, CausalLmAdaptationMode::Lora),
+            &json,
+            &pin,
+            1,
+            data,
+            lora,
+            geom
+        )
+        .is_err());
+        let mut invalid: serde_json::Value = serde_json::from_str(&json).unwrap();
+        invalid["updates"] = serde_json::json!(u64::MAX);
+        let forged = invalid.to_string();
+        assert!(restore(
+            base.clone(),
+            &forged,
+            &id(&forged),
+            u64::MAX,
+            data,
+            lora,
+            geom
+        )
+        .is_err());
+    }
+}
+
+#[test]
 fn session_save_resume_owns_policy_cursor_and_both_groups_exactly() {
     for readout in [
         CausalLmReadoutAccumulator::F32,

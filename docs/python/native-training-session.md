@@ -99,6 +99,27 @@ The existing `NativeCausalLmTrainer` continues to provide its geometry-only
 AdamW/accumulation/objective path. This SGD session does not replace its optimizer
 or duplicate the observation/receipt recovery work in PR #2301.
 
+### Score or generate without the training documents
+
+Source builds after 0.4.33 can export one serialization and its exact digest:
+`payload, pin = session.checkpoint_with_id()`. Retain the pin, completed update,
+recorded data ID and both post-update adapter IDs separately. A scorer with the
+bare matching base can then use the same snapshot, without shipping the corpus:
+
+```python
+model = st.NativeCausalLm.from_session_checkpoint_at(
+    base, payload, pin, update=update, recorded_data_id=data_id,
+    post_lora_id=lora_id, post_geometry_id=geometry_id,
+)
+score = model.evaluate_documents(held_out, 64, microbatch_windows=2)
+```
+
+`None` means that group **must be absent**. Both IDs, the cursor and the
+recorded data ID must match; the saved readout policy is restored. This is
+not a claim that the scorer verified the actual training data or that the
+session exhausted its planned windows. Use `from_json` with the documents
+to continue training. Rust exposes the same `from_session_checkpoint_at`.
+
 ## Local-file example and verification boundary
 
 `bindings/st-py/examples/native_training_session.py` accepts a local GPT-2

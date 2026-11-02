@@ -105,6 +105,41 @@ fn identity(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+impl NativeCausalLm {
+    /// Open a pinned SGD session for inference, without training documents.
+    /// Both optional owners must match exactly: None means absent, not unchecked.
+    /// A recorded data ID is not verification of a corpus or proof of exhaustion.
+    pub fn from_session_checkpoint_at(
+        base: Self,
+        bytes: &[u8],
+        expected_id: &str,
+        update: u64,
+        recorded_data_id: &str,
+        post_lora_id: Option<&str>,
+        post_geometry_id: Option<&str>,
+    ) -> CausalLmResult<Self> {
+        let state = NativeCausalLmTrainingSession::prepare_restore(base, bytes, expected_id)?;
+        let saved = &state.saved;
+        let context = saved.config.context_length as usize;
+        let max_windows =
+            crate::language_windows::MAX_WINDOWS.min((MAX_TRAINING_TOKENS / context) as u64);
+        if !crate::geometry_artifact::is_sha256_id(recorded_data_id)
+            || saved.data_id != recorded_data_id
+            || saved.updates != update
+            || max_windows == 0
+            || context - 1 > state.model.config.positions
+            || update > max_windows * u64::from(saved.config.epochs)
+            || state.model.lora_artifact_id() != post_lora_id
+            || state.model.geometry_artifact_id() != post_geometry_id
+        {
+            return Err(
+                "session checkpoint does not match a valid requested inference boundary".into(),
+            );
+        }
+        Ok(state.model)
+    }
+}
+
 impl NativeCausalLmTrainingSession {
     pub const MAX_TOKENS: usize = MAX_TRAINING_TOKENS;
 
@@ -144,6 +179,9 @@ impl NativeCausalLmTrainingSession {
         documents: Vec<Vec<usize>>,
         config: CausalLmTrainingSessionConfig,
     ) -> CausalLmResult<Self> {
+        if documents.len() > MAX_DOCUMENTS {
+            return Err("document count exceeds budget".into());
+        }
         let lengths: Vec<_> = documents.iter().map(Vec::len).collect();
         let plan = Self::document_plan(&model, config, &lengths)?;
         if documents
@@ -258,7 +296,14 @@ impl NativeCausalLmTrainingSession {
         Ok(json)
     }
     pub fn checkpoint_id(&self) -> CausalLmResult<String> {
-        Ok(identity(self.to_json()?.as_bytes()))
+        Ok(self.checkpoint_with_id()?.1)
+    }
+
+    /// Serialize the two adapter owners and cursor once and pin exactly these bytes.
+    pub fn checkpoint_with_id(&self) -> CausalLmResult<(String, String)> {
+        let json = self.to_json()?;
+        let id = identity(json.as_bytes());
+        Ok((json, id))
     }
 
     /// Verify a caller-pinned byte identity and recover the saved arithmetic

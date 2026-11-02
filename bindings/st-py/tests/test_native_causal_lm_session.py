@@ -46,6 +46,23 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_joint_session_snapshot_reopens_for_inference_without_documents(self):
+        base, model = owners("f64")
+        trained = session(model)
+        report = trained.step()
+        payload, pin = trained.checkpoint_with_id()
+        self.assertEqual((payload, pin), (trained.to_json(), trained.checkpoint_id))
+        options = dict(update=report.update, recorded_data_id=trained.data_id,
+                       post_geometry_id=trained.model.geometry_artifact_id, post_lora_id=trained.model.lora_artifact_id)
+        restored = st.NativeCausalLm.from_session_checkpoint_at(base, payload, pin, **options)
+        self.assertEqual(restored.readout_accumulator, "f64")
+        self.assertEqual(restored.forward(WINDOW, [1,4]).values(), trained.model.forward(WINDOW, [1,4]).values())
+        for key, wrong in (("update", 0), ("recorded_data_id", pin), ("post_geometry_id", None), ("post_lora_id", None)):
+            with self.assertRaises(ValueError):
+                st.NativeCausalLm.from_session_checkpoint_at(base, payload, pin, **{**options, key:wrong})
+        with self.assertRaises(TypeError):
+            st.NativeCausalLm.from_session_checkpoint_at(base, payload, pin, **{**options,"update":True})
+
     def test_geometry_checkpoint_does_not_inherit_external_lora(self):
         base, joint = owners()
         geometry = joint.geometry_artifact()
