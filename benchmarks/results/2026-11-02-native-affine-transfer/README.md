@@ -58,6 +58,11 @@ targets and one fully skipped window. This latter check is **not** a second
 compile check (not browser GPT-2 execution). Neither development wheel is a
 PyPI release.
 
+The [integration validation](integration_validation.json) records the final
+Python row-ownership fix separately. The installed wheel passed 105 tests,
+including the two-thread replacement regression. The Rust numerical core did
+not change after the mixed-length probe.
+
 ## What is matched
 
 Each pair starts from the same frozen GPT-2 and four function-matched,
