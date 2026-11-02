@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.synthetic_matched_sgd_bench.v1",
+  "base": "sha256:913d3b9555608aaefbc382f1b3ee1fa28a8e3b4993692fcf076263a8c493d71c",
+  "data_id": "sha256:a30afa80e182c8e680b04f8e207416ac2a07b8ec8b3f42bf9cb2410126fd3c74",
+  "paired_speed_ratios": [
+    1.901010346655777,
+    1.5977108479595958,
+    1.6689617524342515,
+    1.5138928825747184,
+    1.6531916304122647,
+    1.6793863507115747
+  ],
+  "median_paired_speed_ratio": 1.6610766914232582,
+  "trace_sha256": "5a85b98ffc51c26a48bed9a7b2c67f4c92d12ae917a997fdb2ec61daa4a78ba1",
+  "checkpoint_ids": [
+    "sha256:2f79bbb77cf0b702f29a45467f96bf85aa1a50c534039f6795dc93dcec6c11cd",
+    "sha256:84bc3b0771a60e14d0a735613f7530818925ce3c303e56b5044d74a79d38fa67",
+    "sha256:ceef48aeea293ffac925d5461c509a5babc2b4bf97a1a0adc845fbc51055de2e"
+  ],
+  "protocol_sha256": "3e466e2f4d971ce3e8be0baf78bb840a0320a696347239121a4586c647ca8a80",
+  "observations_sha256": "ec555dafe84279b4d43657e6d43b07667921ec07c592f9a6ffda88eed0030059",
+  "limits": "one synthetic host/shape/roster; not GPU, real GPT-2, PyTorch, or a quality comparison"
+}

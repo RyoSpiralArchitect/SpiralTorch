@@ -40,6 +40,63 @@ class Codec:
 
 
 class SupervisionTests(unittest.TestCase):
+    def test_matched_lora_frozen_and_trainable_wave_score_the_same_answers_as_independent_steps(self):
+        base, _ = FIXTURES["owners"]()
+        lora = base.with_lora(1, 2, 4.)
+        state = json.loads(FIXTURES["fixtures"]["artifact"](base, path="transformer.h.1.attn", trainable=True).state_json())
+        site = state["placements"][0]
+        site["recipe"] = {"schema": "spiraltorch.wave_gate_adapter.v2", "features": 4,
+                          "strength": .25, "learnable_radius": True,
+                          "kernel": {"curvature": -1., "saturation": 1., "porosity": .05, "max_values": 1024}}
+        site["tensors"].append({"name": "log_radius", "shape": [], "values": [0.], "requires_grad": True, "role": "parameter"})
+        geom = st.GeometryAdapterArtifact.create_json(json.dumps(state))
+        both = lora.with_geometry(geom)
+        ids, labels = st.encode_supervised_document(Codec(), CASE["text"], CASE["input"]["target_spans"])
+        session = st.NativeCausalLmTrainingSession
+        def new(model, mode):
+            return session(model, [ids], 6, labels=[labels], learning_rate=.1,
+                           mode=mode, batch_windows=2, epochs=2, window_policy="covering_targets")
+        control = new(lora, "lora")
+        arms = [control, control.fork_variant(both, "lora"), control.fork_variant(both, "joint")]
+        scalar = [new(lora,"lora"), new(both,"lora"), new(both,"joint")]
+        for update in (1,2):
+            depth, steps = session.step_matched(arms)
+            self.assertEqual(depth,1)
+            self.assertEqual([s.target_tokens for s in steps], [5]*3)
+            self.assertEqual([s.to_json() for s in steps], [s.step().to_json() for s in scalar])
+            self.assertEqual([s.checkpoint_with_id() for s in arms], [s.checkpoint_with_id() for s in scalar])
+            if update == 1:
+                self.assertEqual(steps[1].loss, steps[2].loss)
+                arms = [session.from_json(base, [ids], *s.checkpoint_with_id(), labels=[labels]) for s in arms]
+        self.assertIsNone(session.step_matched(arms))
+        self.assertEqual(arms[1].model.geometry_artifact_id, geom.artifact_id)
+        self.assertNotEqual(arms[2].model.geometry_artifact_id, geom.artifact_id)
+        scored = st.NativeCausalLm.evaluate_variants([s.model for s in arms], [ids], 6, labels=[labels])
+        self.assertEqual([v.to_json() for v in scored.evaluations],
+                         [s.model.evaluate_documents([ids], 6, labels=[labels]).to_json() for s in scalar])
+
+    def test_matched_binding_refuses_aliases_bad_rosters_and_mixed_cursors(self):
+        base, model = FIXTURES["owners"]()
+        a = FIXTURES["session"](model)
+        b = a.fork_variant(model, "lora")
+        session = st.NativeCausalLmTrainingSession
+        class Huge:
+            def __len__(self):
+                return session.MAX_MATCHED_VARIANTS + 1
+            def __getitem__(self, i):
+                raise AssertionError("oversized roster was visited")
+        for roster in (Huge(), [], [a], [a,a], [a,b,b], [a,base]):
+            with self.assertRaises((TypeError, ValueError)):
+                session.step_matched(roster)
+        self.assertEqual((a.completed_updates,b.completed_updates), (0,0))
+        b.step()
+        pins = (a.checkpoint_id,b.checkpoint_id)
+        with self.assertRaisesRegex(ValueError,"cursor"):
+            session.step_matched([a,b])
+        self.assertEqual((a.checkpoint_id,b.checkpoint_id), pins)
+        with self.assertRaisesRegex(ValueError,"unadvanced"):
+            b.fork_variant(model, "joint")
+
     def test_unshifted_multiturn_labels_match_rust_and_train_exactly(self):
         self.assertTrue({"encode_supervised_document", "CausalTargetAlignment"} <= set(st.__all__))
         plan = st.CausalTargetAlignment(**CASE["input"])

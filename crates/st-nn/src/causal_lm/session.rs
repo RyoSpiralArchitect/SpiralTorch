@@ -7,6 +7,9 @@ use crate::language_windows::{
 };
 use sha2::{Digest, Sha256};
 
+mod matched;
+pub use matched::CausalLmMatchedTrainingStep;
+
 const SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v1";
 const BATCH_SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v2";
 const DATA_SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v3";
@@ -78,6 +81,7 @@ pub struct NativeCausalLmTrainingSession {
     // v1/v2 keep their implicit fixed-width schedule. v3 stores live ranges
     // only, derived from the pinned corpus rather than trusted from a checkpoint.
     live_ranges: Option<Arc<[(u32, u32)]>>,
+    max_batch_targets: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -329,23 +333,39 @@ impl NativeCausalLmTrainingSession {
             }
             .into());
         }
-        if window_policy == CausalLmSessionWindowPolicy::CoveringTargets {
+        Self::admit_plan_shapes(
+            model,
+            &plan,
+            batch_windows,
+            DataPolicy {
+                window_policy,
+                has_labels,
+            },
+        )?;
+        Ok(plan)
+    }
+
+    fn admit_plan_shapes(
+        model: &NativeCausalLm,
+        plan: &CausalDocumentWindows,
+        batch_windows: usize,
+        data: DataPolicy,
+    ) -> CausalLmResult<()> {
+        if data.window_policy == CausalLmSessionWindowPolicy::CoveringTargets {
             for shape in unique_group_shapes(plan.windows(), batch_windows) {
-                model.adaptation_labeled_input_count(shape, has_labels)?;
+                model.adaptation_labeled_input_count(shape, data.has_labels)?;
             }
-            return Ok(plan);
+            return Ok(());
         }
         let windows = plan.windows().len();
+        let width = plan.windows()[0].length as usize;
         let rows = batch_windows.min(windows);
-        model.adaptation_labeled_input_count([rows, config.context_length as usize], has_labels)?;
+        model.adaptation_labeled_input_count([rows, width], data.has_labels)?;
         let tail = windows % batch_windows;
         if tail != 0 && tail != rows {
-            model.adaptation_labeled_input_count(
-                [tail, config.context_length as usize],
-                has_labels,
-            )?;
+            model.adaptation_labeled_input_count([tail, width], data.has_labels)?;
         }
-        Ok(plan)
+        Ok(())
     }
 
     pub fn new(
@@ -410,22 +430,28 @@ impl NativeCausalLmTrainingSession {
             Corpus::validate_labels(&documents, labels, model.config.vocabulary)?;
         }
         let corpus = Arc::new(Corpus::new(documents, labels, plan)?);
-        let live_ranges = if data_policy == DataPolicy::default() {
-            None
+        let (live_ranges, max_batch_targets) = if data_policy == DataPolicy::default() {
+            (
+                None,
+                batch_windows.min(corpus.plan.windows().len())
+                    * (config.context_length as usize - 1),
+            )
         } else {
             let windows = corpus.plan.windows();
             let mut live = Vec::new();
+            let mut maximum = 0;
             for range in equal_width_groups(windows, batch_windows) {
                 let active = corpus.active_targets(&windows[range.clone()]);
                 if active > 0 {
-                    model.logit_count(active)?;
+                    maximum = maximum.max(active);
                     live.push((range.start as u32, range.end as u32));
                 }
             }
             if live.is_empty() {
                 return Err("no supervised targets in training windows".into());
             }
-            Some(Arc::from(live))
+            model.logit_count(maximum)?;
+            (Some(Arc::from(live)), maximum)
         };
         Ok(Self {
             model,
@@ -435,6 +461,7 @@ impl NativeCausalLmTrainingSession {
             updates: 0,
             data_policy,
             live_ranges,
+            max_batch_targets,
         })
     }
     pub fn model(&self) -> &NativeCausalLm {
@@ -531,16 +558,25 @@ impl NativeCausalLmTrainingSession {
             labels.as_deref(),
             Some(self.config.mode),
         )?;
+        let (model, report) = self.sgd_candidate(start..end, &gradients)?;
+        Ok(Some(self.commit_candidate(model, report)))
+    }
+
+    fn sgd_candidate(
+        &self,
+        range: std::ops::Range<usize>,
+        gradients: &NativeCausalLmAdaptationGradients,
+    ) -> CausalLmResult<(NativeCausalLm, CausalLmTrainingSessionStep)> {
         let model = self.model.step_adaptation_sgd(
-            &gradients,
+            gradients,
             self.config.mode,
             self.config.learning_rate,
         )?;
         let report = CausalLmTrainingSessionStep {
             update: self.updates + 1,
             epoch: self.epoch(),
-            window_start: start,
-            window_end: end,
+            window_start: range.start,
+            window_end: range.end,
             target_tokens: gradients.target_tokens(),
             loss: gradients.loss(),
             mode: self.config.mode,
@@ -549,9 +585,17 @@ impl NativeCausalLmTrainingSession {
             pre_geometry_artifact_id: self.model.geometry_artifact_id().map(str::to_owned),
             post_geometry_artifact_id: model.geometry_artifact_id().map(str::to_owned),
         };
+        Ok((model, report))
+    }
+
+    fn commit_candidate(
+        &mut self,
+        model: NativeCausalLm,
+        report: CausalLmTrainingSessionStep,
+    ) -> CausalLmTrainingSessionStep {
         self.model = model;
-        self.updates += 1;
-        Ok(Some(report))
+        self.updates = report.update;
+        report
     }
 
     pub fn to_json(&self) -> CausalLmResult<String> {

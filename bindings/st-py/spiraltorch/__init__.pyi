@@ -206,6 +206,7 @@ class NativeCausalLmTrainingSessionStep:
 class NativeCausalLmTrainingSession:
     MAX_DOCUMENTS: int
     MAX_TOKENS: int
+    MAX_MATCHED_VARIANTS: int
     MAX_CHECKPOINT_BYTES: int
     MAX_CHECKPOINT_INTERVAL: int
     def __init__(self, model: NativeCausalLm, token_documents: Sequence[Sequence[int]], context_length: int,
@@ -215,6 +216,9 @@ class NativeCausalLmTrainingSession:
     @staticmethod
     def from_json(base: NativeCausalLm, token_documents: Sequence[Sequence[int]], payload: str | bytes,
                   expected_id: str, *, labels: Sequence[Sequence[int]] | None = None) -> NativeCausalLmTrainingSession: ...
+    def fork_variant(self, model: NativeCausalLm, mode: Literal["geometry", "lora", "joint"]) -> NativeCausalLmTrainingSession: ...
+    @staticmethod
+    def step_matched(sessions: Sequence[NativeCausalLmTrainingSession]) -> tuple[int, list[NativeCausalLmTrainingSessionStep]] | None: ...
     def step(self) -> NativeCausalLmTrainingSessionStep | None: ...
     @property
     def model(self) -> NativeCausalLm: ...

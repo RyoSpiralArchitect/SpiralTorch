@@ -42,8 +42,8 @@ use objective::PreparedCausalWindow;
 pub use observation::{CausalLmObservedTrainingStep, CausalLmSiteObservation};
 pub use repetition::CausalLmRepetition;
 pub use session::{
-    CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig, CausalLmTrainingSessionResume,
-    CausalLmTrainingSessionStep, NativeCausalLmTrainingSession,
+    CausalLmMatchedTrainingStep, CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig,
+    CausalLmTrainingSessionResume, CausalLmTrainingSessionStep, NativeCausalLmTrainingSession,
 };
 pub use training::{
     CausalLmObservedCheckpointFiles, CausalLmTrainingConfig, CausalLmTrainingResume,

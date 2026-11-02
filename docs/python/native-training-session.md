@@ -200,6 +200,54 @@ session state on failure. The format is versioned independently of the older
 geometry/AdamW trainer checkpoint. It is not an import path for arbitrary PEFT
 adapters or a cross-version compatibility promise.
 
+### Train matched variants without repeating the frozen prefix
+
+To separate the effect of *applying* geometry from the effect of *learning* it,
+start three arms from the same LoRA parameters. Give the last two the exact same
+geometry artifact (for example a WaveGate on the final attention block):
+
+```python
+Session = st.NativeCausalLmTrainingSession
+lora = base.with_lora(layer, 2, 4.0)
+both = lora.with_geometry(geometry)
+control = Session(lora, docs, 32, mode="lora", learning_rate=0.01,
+                  labels=labels, window_policy="covering_targets")
+arms = [control, control.fork_variant(both, "lora"), control.fork_variant(both, "joint")]
+while (update := Session.step_matched(arms)) is not None:
+    shared_layers, reports = update  # reports follow input order
+
+scores = st.NativeCausalLm.evaluate_variants(
+    [arm.model for arm in arms], eval_docs, 32, labels=eval_labels,
+)
+```
+
+`fork_variant` is only for an unadvanced session. It shares immutable corpus
+storage and the window schedule, while checking the new model's own shape and
+selected-logit limits. It does not copy trained weights from the session to
+the supplied model. Independent sessions (including separately pinned resumes)
+can also use `step_matched`. They must agree on the frozen base, readout,
+data ID including labels, window policy, batch size, epochs, learning rate and
+cursor. The API does **not** assert identical initial predictions or parameter
+counts across arms; choose explicit starting controls for a scientific comparison.
+
+One call embeds one batch and executes blocks strictly before the earliest
+**attached** adapter once, even if that adapter is frozen in an arm. Each arm
+then computes its own suffix, loss, backward replay and SGD update. It returns
+the actual shared depth and ordinary step reports; at exhaustion it returns
+`None`. This is not a persistent KV cache. A scheduling or numerical failure
+leaves every arm's weights and cursor unchanged. Save each arm using its
+ordinary v1/v2/v3 checkpoint and externally retained pin. The in-memory
+transaction is **not** a multi-file checkpoint transaction.
+
+Rust exposes `fork_variant(model, mode)` and
+`NativeCausalLmTrainingSession::step_matched(&mut [&mut control, &mut joint])`.
+For the fixed synthetic CPU benchmark, run
+`python -I -B tools/bench_native_matched_sgd.py --output NEW_DIRECTORY`
+from a checkout with its development wheel installed. It compares complete
+three-arm updates with independent steps on the **same** wheel, and saves
+every timed pair as well as its report/checkpoint identities. It does not
+benchmark PyTorch, GPU training or language quality.
+
 The existing `NativeCausalLmTrainer` continues to provide its geometry-only
 AdamW/accumulation/objective path. This SGD session does not replace its optimizer
 or checkpoint schema. Both use the same no-overwrite segment commit; see

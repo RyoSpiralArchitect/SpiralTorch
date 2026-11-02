@@ -1,6 +1,9 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
+#[path = "matched_session_tests.rs"]
+mod matched;
+
 fn session_config(mode: CausalLmAdaptationMode) -> CausalLmTrainingSessionConfig {
     CausalLmTrainingSessionConfig {
         context_length: 4,

@@ -1,0 +1,65 @@
+{
+  "shape": {
+    "width": 64,
+    "heads": 4,
+    "positions": 32,
+    "layers": 6,
+    "vocabulary": 97
+  },
+  "arms": [
+    "lora_only",
+    "frozen_wave_lora",
+    "joint_wave_lora"
+  ],
+  "layer": 5,
+  "rank": 2,
+  "alpha": 4.0,
+  "context": 25,
+  "batch_windows": 2,
+  "learning_rate": 0.02,
+  "epochs": 1,
+  "updates": 6,
+  "target_tokens_per_update": 8,
+  "order": [
+    [
+      "independent",
+      "matched"
+    ],
+    [
+      "matched",
+      "independent"
+    ],
+    [
+      "independent",
+      "matched"
+    ],
+    [
+      "matched",
+      "independent"
+    ],
+    [
+      "independent",
+      "matched"
+    ],
+    [
+      "matched",
+      "independent"
+    ]
+  ],
+  "warmup": [
+    "independent",
+    "matched"
+  ],
+  "thread_env": {
+    "RAYON_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "native_sha256": "6f33bf1865772551a5800afa8a3e907b4b1306001a56b2f2baea71fbe898ab75",
+  "script_sha256": "407a65c2d27b1b06db5627713755efe6105530f378bfc2a432b3e07a2ee289cc",
+  "fixture_sha256": "ac11a4fa9e39bafd0f9e8b2f524ce0b5c0a67dabb3295adf78e77609a7ea30fc",
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "python": "3.12.6",
+  "scope": "sequential warm CPU updates through Python; no setup, scoring, serialization or disk in timed loop"
+}

@@ -150,87 +150,71 @@ impl NativeCausalLm {
             self.validate_adaptation_mode(mode)?;
         }
         self.adaptation_labeled_input_count(shape, labels.is_some())?;
-        let (loss, target_tokens, parameters) = match (&self.lora, &self.geometry) {
-            (None, Some(_)) => {
-                let grads = self.geometry_loss_gradients_with_objective(
-                    windows,
-                    shape,
-                    labels,
-                    CausalLmObjective::default(),
-                )?;
-                (grads.loss(), grads.target_tokens(), grads.into_parameters())
-            }
-            (Some(adapter), geometry) => {
-                let prepared =
-                    self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
-                let mut hidden = self.embed(&prepared.input, prepared.shape)?;
-                let mut checkpoints = Vec::with_capacity(self.config.layers - adapter.layer() + 1);
-                for index in 0..self.config.layers {
-                    if index >= adapter.layer() {
-                        checkpoints.push(hidden.clone());
-                    }
-                    hidden = self
-                        .run_block(index, hidden, prepared.shape, decoder::BlockPass::Forward)?
-                        .output;
-                }
-                checkpoints.push(hidden.clone());
-                let hidden_rows = hidden.shape().0;
-                let selected = match &prepared.selected_rows {
-                    Some(rows) => hidden.gather_rows(rows)?,
-                    None => hidden,
-                };
-                let normalized = self
-                    .final_norm
-                    .forward(&selected, self.config.norm_epsilon)?;
-                let logits = self.project_readout(&normalized)?;
-                let config = prepared.objective.kernel_config();
-                let loss = logits
-                    .cross_entropy_with_logits(&prepared.labels, config)?
-                    .data()[0];
-                let seed = Tensor::from_vec(1, 1, vec![1.])?;
-                let d_logits =
-                    logits.cross_entropy_with_logits_backward(&prepared.labels, config, &seed)?;
-                let d_normalized = learning::frozen_pullback(
-                    &self.head,
-                    &self.backward_head,
-                    &d_logits,
-                    self.readout_accumulator,
-                )?;
-                let site = format!("transformer.h.{}.attn", adapter.layer());
-                let default_mode = if geometry.is_some() {
-                    CausalLmAdaptationMode::Joint
-                } else {
-                    CausalLmAdaptationMode::Lora
-                };
-                let target = match mode.unwrap_or(default_mode) {
-                    CausalLmAdaptationMode::Lora => learning::DecoderTarget::Lora,
-                    CausalLmAdaptationMode::Geometry => {
-                        learning::DecoderTarget::GeometryFrom(&site)
-                    }
-                    CausalLmAdaptationMode::Joint => learning::DecoderTarget::Joint,
-                };
-                let parameters = self.decoder_parameter_pullback(
-                    checkpoints,
-                    hidden_rows,
-                    selected,
-                    prepared.shape,
-                    prepared.selected_rows.as_deref(),
-                    d_normalized,
-                    adapter.layer(),
-                    target,
-                )?;
-                let want_lora = !matches!(target, learning::DecoderTarget::GeometryFrom(_));
-                let want_geometry = !matches!(target, learning::DecoderTarget::Lora);
-                if parameters.len() != usize::from(want_lora) + usize::from(want_geometry)
-                    || parameters.contains_key(&adapter.path()) != want_lora
-                    || parameters.contains_key(&site) != want_geometry
-                {
-                    return Err("incorrect selected adaptation gradient groups".into());
-                }
-                (loss, prepared.target_tokens, parameters)
-            }
-            (None, None) => return Err("native LM has no adaptation parameters".into()),
+        let prepared =
+            self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        self.adaptation_gradients_from_prefix(&prepared, hidden, 0, mode)
+    }
+
+    /// Caller has admitted this owner, selected mode, complete context and
+    /// selected logits. Hidden is the boundary before any participating adapter.
+    pub(super) fn adaptation_gradients_from_prefix(
+        &self,
+        prepared: &PreparedCausalWindow,
+        hidden: Tensor,
+        depth: usize,
+        mode: Option<CausalLmAdaptationMode>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        let (first, site) = match &self.lora {
+            Some(a) => (a.layer(), format!("transformer.h.{}.attn", a.layer())),
+            None => self.first_geometry_site()?,
         };
+        let mode = mode.unwrap_or(match (&self.lora, &self.geometry) {
+            (Some(_), Some(_)) => CausalLmAdaptationMode::Joint,
+            (Some(_), None) => CausalLmAdaptationMode::Lora,
+            (None, Some(_)) => CausalLmAdaptationMode::Geometry,
+            (None, None) => return Err("native LM has no adaptation parameters".into()),
+        });
+        let target = match mode {
+            CausalLmAdaptationMode::Lora => learning::DecoderTarget::Lora,
+            CausalLmAdaptationMode::Geometry => learning::DecoderTarget::GeometryFrom(&site),
+            CausalLmAdaptationMode::Joint => learning::DecoderTarget::Joint,
+        };
+        let learning::TrainingReadout {
+            checkpoints,
+            hidden_rows,
+            selected,
+            d_normalized,
+            loss,
+            ..
+        } = self.training_readout(prepared, hidden, depth, first, None)?;
+        let parameters = self.decoder_parameter_pullback(
+            checkpoints,
+            hidden_rows,
+            selected,
+            prepared.shape,
+            prepared.selected_rows.as_deref(),
+            d_normalized,
+            first,
+            target,
+        )?;
+        let want_lora = mode != CausalLmAdaptationMode::Geometry;
+        let placements = self
+            .geometry
+            .as_ref()
+            .filter(|_| mode != CausalLmAdaptationMode::Lora)
+            .map_or(&[][..], |g| g.artifact().record().placements.as_slice());
+        if parameters.len() != usize::from(want_lora) + placements.len()
+            || self
+                .lora
+                .as_ref()
+                .is_some_and(|a| parameters.contains_key(&a.path()) != want_lora)
+            || placements.iter().any(|p| !parameters.contains_key(&p.path))
+        {
+            return Err("incorrect selected adaptation gradient groups".into());
+        }
+        let target_tokens = prepared.target_tokens;
+        let shape = prepared.window_shape;
         if !loss.is_finite()
             || parameters
                 .values()

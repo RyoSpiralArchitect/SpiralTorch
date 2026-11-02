@@ -142,6 +142,8 @@ impl PyNativeCausalLmTrainingSession {
     const MAX_DOCUMENTS: usize = MAX_DOCUMENTS;
     #[classattr]
     const MAX_TOKENS: usize = NativeCausalLmTrainingSession::MAX_TOKENS;
+    #[classattr]
+    const MAX_MATCHED_VARIANTS: usize = NativeCausalLmTrainingSession::MAX_MATCHED_VARIANTS;
     #[new]
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature=(model, token_documents, context_length, *, learning_rate, mode="joint", epochs=None, batch_windows=None, labels=None, window_policy="disjoint"))]
@@ -252,6 +254,51 @@ impl PyNativeCausalLmTrainingSession {
             .map(|inner| Self { inner })
             .map_err(error)
     }
+    fn fork_variant(&self, py: Python<'_>, model: &PyNativeCausalLm, mode: &str) -> PyResult<Self> {
+        let mode = self::mode(mode)?;
+        py.detach(|| self.inner.fork_variant(model.inner.clone(), mode))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+
+    #[staticmethod]
+    fn step_matched(
+        py: Python<'_>,
+        sessions: &Bound<'_, PyAny>,
+    ) -> PyResult<Option<(usize, Vec<PyNativeCausalLmTrainingSessionStep>)>> {
+        let n = sessions.len()?;
+        if !(2..=Self::MAX_MATCHED_VARIANTS).contains(&n) {
+            return Err(error("matched training requires 2 to 16 sessions"));
+        }
+        // Index all foreign objects before taking any borrow. Pin distinct
+        // owners exclusively throughout the detached native transaction.
+        let mut owners: Vec<Bound<'_, Self>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let owner = sessions.get_item(i)?.cast_into::<Self>()?;
+            if owners.iter().any(|s| s.is(&owner)) {
+                return Err(error("matched training requires distinct session objects"));
+            }
+            owners.push(owner);
+        }
+        let mut guards = owners
+            .iter()
+            .map(|o| o.try_borrow_mut())
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut native: Vec<_> = guards.iter_mut().map(|s| &mut s.inner).collect();
+        let result = py
+            .detach(move || NativeCausalLmTrainingSession::step_matched(&mut native))
+            .map_err(error)?;
+        Ok(result.map(|r| {
+            (
+                r.shared_prefix_layers,
+                r.steps
+                    .into_iter()
+                    .map(|inner| PyNativeCausalLmTrainingSessionStep { inner })
+                    .collect(),
+            )
+        }))
+    }
+
     fn step(&mut self, py: Python<'_>) -> PyResult<Option<PyNativeCausalLmTrainingSessionStep>> {
         py.detach(|| self.inner.step())
             .map(|value| value.map(|inner| PyNativeCausalLmTrainingSessionStep { inner }))
