@@ -1,0 +1,97 @@
+{
+  "archive_sha256": {
+    "synthetic-byte-study-boundary-diagnostic": "5c538ba798b3bfb6a7417cc6cc913d2710f3d5c286c9d30d48e5c03f59a910db",
+    "synthetic-byte-study-detached-failure": "d259725a7b22b3a37e5b0a8e02062d84c29cc45c33ac60bed827d495b10750d5",
+    "unqualified-wheel-ci-gpu": "47048ae3c38fd3717d9886db1fa82d8cd63e6b4b1e0bd241f86eb4510ca6d349",
+    "unqualified-wheel-records-ci-gpu": "f8c6bcee0dd7abd69028b6d84fac90eadd294036c608f1ae1bdccd0aaeb39f42"
+  },
+  "backend": "Metal",
+  "boundary_probe": "not_selected",
+  "cause": "not established",
+  "gpu_reruns": 0,
+  "native_sha256": "7a7a664f4dc11ee16fd12a873417859b6766bf345511d8b516fd381855d320f4",
+  "release_candidate": false,
+  "request_sha256": "b18f2e92fa1b87c5254ad865e07102b26a9df7df870ef342eb73d0b3a5bfdd8f",
+  "round_zero_based": 0,
+  "run": {
+    "conclusion": "failure",
+    "head_sha": "72772b7c68911e23dd5dbabecb9a9715db10301e",
+    "html_url": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/41431026840",
+    "id": 41431026840,
+    "run_attempt": 1
+  },
+  "schema": "spiraltorch.retained_detached_pr2301.v1",
+  "test_merge": {
+    "parents": [
+      "71e6b61e0f2b7e7963679f1567a4b516139d0e44",
+      "72772b7c68911e23dd5dbabecb9a9715db10301e"
+    ],
+    "sha": "8d9843e6ec2ec1236ed4932691d2d29e442f440d",
+    "tree": "dafcd7b3338aa337d74ac173a9a4b87937d73563"
+  },
+  "wheel_sha256": "95924ad29a6584398a5b0cb175a2d8e07ec0ba875a64e870805248be2602cfb5",
+  "workers": [
+    {
+      "byte_equal": false,
+      "differences": [
+        {
+          "abs_delta": 1.862645149230957e-09,
+          "case": "geometry",
+          "f32_ulps": 4,
+          "index": 4,
+          "parameter": "token_embedding"
+        },
+        {
+          "abs_delta": 1.862645149230957e-09,
+          "case": "geometry",
+          "f32_ulps": 1,
+          "index": 2,
+          "parameter": "position_embedding"
+        },
+        {
+          "abs_delta": 3.725290298461914e-09,
+          "case": "geometry",
+          "f32_ulps": 1,
+          "index": 3,
+          "parameter": "position_embedding"
+        },
+        {
+          "abs_delta": 9.313225746154785e-10,
+          "case": "geometry",
+          "f32_ulps": 1,
+          "index": 1,
+          "parameter": "geometry.projection.bias"
+        },
+        {
+          "abs_delta": 7.105427357601002e-15,
+          "case": "geometry",
+          "f32_ulps": 1,
+          "index": 5,
+          "parameter": "block.0.qkv.bias"
+        },
+        {
+          "abs_delta": 7.105427357601002e-15,
+          "case": "geometry",
+          "f32_ulps": 1,
+          "index": 0,
+          "parameter": "block.0.output.bias"
+        },
+        {
+          "abs_delta": 7.105427357601002e-15,
+          "case": "geometry",
+          "f32_ulps": 1,
+          "index": 1,
+          "parameter": "block.0.output.bias"
+        }
+      ],
+      "other_field_differences": 0,
+      "worker": 0
+    },
+    {
+      "byte_equal": true,
+      "differences": [],
+      "other_field_differences": 0,
+      "worker": 1
+    }
+  ]
+}
