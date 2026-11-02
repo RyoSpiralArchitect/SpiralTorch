@@ -20,6 +20,16 @@ The request hash also matches the retained historical failure from run
 40252323265, but neither the cause nor the frequency follows from these two
 failures. No first-update boundary was captured by this particular job.
 
+One coordinate gives a specific next check. The affected token-embedding
+scalar is row 2, column 0. That token contributes **once in update 1 and zero
+times in update 2** (input positions only, not shifted targets). The embedding
+pullback has one writer per output scalar and a fixed slot order: an unordered
+sum of multiple contributions *at this coordinate* cannot explain the difference.
+The input adjoint is already the sum of the block and geometry branches.
+Compare its bits, the token-2 parameter gradient, and the post-SGD value at
+update 1 before assigning blame to either branch, the update, or readback.
+These intermediate values were not present in the retained reports.
+
 To verify privately retained evidence without importing the package or
 executing GPU code, place the four unmodified ZIPs and the Actions artifact
 listing (`artifacts.json`) together. `run-identity.json` contains the provider

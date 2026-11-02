@@ -39,6 +39,21 @@ def f32_order(value):
     return 0x80000000 - (word & 0x7FFFFFFF) if word >> 31 else 0x80000000 + word
 
 
+def input_occurrences(request, token):
+    steps = request["config"]["steps"]
+    require(steps > 0, "invalid causal context")
+    counts = []
+    for batch in request["train_batches"]:
+        n = 0
+        for doc, start in batch:
+            require(0 <= doc < len(request["train_documents"]), "invalid document")
+            ids = request["train_documents"][doc]
+            require(0 <= start and start + steps < len(ids), "missing shifted target")
+            n += ids[start : start + steps].count(token)
+        counts.append(n)
+    return counts
+
+
 def members(data, limit):
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         files = z.infolist()
@@ -160,6 +175,18 @@ def inspect(root):
                     "f32_ulps": abs(f32_order(e["actual"]) - f32_order(e["expected"])),
                 }
             )
+            spec = p["parameters"][block]
+            if spec["name"] == "token_embedding":
+                vocab, width = spec["shape"]
+                require(
+                    width == request["config"]["width"] and 0 <= index < vocab * width,
+                    "invalid embedding address",
+                )
+                token, col = divmod(index, width)
+                differences[-1]["embedding_coordinate"] = [token, col]
+                differences[-1]["input_occurrences_by_update"] = input_occurrences(
+                    request, token
+                )
         comparisons.append(
             {
                 "worker": worker,

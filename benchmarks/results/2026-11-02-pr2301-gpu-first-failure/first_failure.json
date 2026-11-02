@@ -37,8 +37,16 @@
         {
           "abs_delta": 1.862645149230957e-09,
           "case": "geometry",
+          "embedding_coordinate": [
+            2,
+            0
+          ],
           "f32_ulps": 4,
           "index": 4,
+          "input_occurrences_by_update": [
+            1,
+            0
+          ],
           "parameter": "token_embedding"
         },
         {
