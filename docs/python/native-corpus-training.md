@@ -383,6 +383,12 @@ once. At most `NativeCausalLmAnswerComparison.MAX_SCORE_CELLS` (65,536)
 answer/variant pairs can be retained; the aggregate-only API is unaffected.
 The result contains positions and counts, not raw token IDs, text or logits.
 
+For a worked example, see the [matched GPT-2 field-extraction study](../../benchmarks/results/2026-11-03-native-wave-affine-extraction/RESULTS.md).
+It compares WaveGate with a trainable affine adapter of the same size and
+initial gate/bias Jacobian. Across three training orders the affine arm had
+slightly lower answer-weighted NLL without changing a single answer's top-1
+hit count. The saved answer scores let you check both statements without a model.
+
 To score **saved** native SGD arms without training or a tokenizer, use
 `bindings/st-py/examples/native_answer_comparison.py`:
 
