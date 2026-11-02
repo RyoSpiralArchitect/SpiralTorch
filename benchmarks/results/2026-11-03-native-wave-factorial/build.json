@@ -1,0 +1,6 @@
+{
+  "core_commit": "33ab011b242cf14947a5b073984201c9ab9444e7",
+  "wheel_sha256": "62c686ee0f0286bedac757f63196c297a1c873219172f0cc2dfa14c86df03fc3",
+  "native_sha256": "58cbfe5243cda67cd4c0059dced539db098df464a013b629e0507eb3b74a4e73",
+  "profile": "release, python-default only, Rust 1.99.1, macOS arm64, local CPU instrument"
+}
