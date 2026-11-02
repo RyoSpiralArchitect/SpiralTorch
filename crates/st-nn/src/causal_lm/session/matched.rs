@@ -51,6 +51,13 @@ impl NativeCausalLmTrainingSession {
     pub fn step_matched(
         sessions: &mut [&mut Self],
     ) -> CausalLmResult<Option<CausalLmMatchedTrainingStep>> {
+        Self::step_matched_with_observation(sessions, false)
+    }
+
+    pub fn step_matched_with_observation(
+        sessions: &mut [&mut Self],
+        observe_geometry: bool,
+    ) -> CausalLmResult<Option<CausalLmMatchedTrainingStep>> {
         if !(2..=Self::MAX_MATCHED_VARIANTS).contains(&sessions.len()) {
             return Err("matched training requires 2 to 16 sessions".into());
         }
@@ -105,8 +112,9 @@ impl NativeCausalLmTrainingSession {
                 hidden,
                 depth,
                 Some(s.config.mode),
+                observe_geometry,
             )?;
-            candidates.push(s.sgd_candidate(range.clone(), &gradients)?);
+            candidates.push(s.sgd_candidate(range.clone(), gradients)?);
         }
         let steps = sessions
             .iter_mut()

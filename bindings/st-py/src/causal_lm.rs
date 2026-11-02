@@ -255,7 +255,7 @@ impl PyNativeCausalLm {
     }
     /// With no mode, expose all attached gradients. Otherwise retain the full
     /// forward function but return only the Rust-selected parameter groups.
-    #[pyo3(signature=(windows, shape, *, mode=None, labels=None))]
+    #[pyo3(signature=(windows, shape, *, mode=None, labels=None, observe_geometry=false))]
     fn adaptation_loss_gradients(
         &self,
         py: Python<'_>,
@@ -263,6 +263,7 @@ impl PyNativeCausalLm {
         shape: &Bound<'_, PyAny>,
         mode: Option<&str>,
         labels: Option<&Bound<'_, PyAny>>,
+        observe_geometry: bool,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
         let mode = mode.map(session::mode).transpose()?;
         if let Some(mode) = mode {
@@ -276,11 +277,12 @@ impl PyNativeCausalLm {
         let windows = tokens(windows, count)?;
         let labels = loss_labels(labels, count)?;
         py.detach(|| {
-            self.inner.adaptation_loss_gradients_with_labels(
+            self.inner.adaptation_window_gradients(
                 &windows,
                 shape,
                 labels.as_deref(),
                 mode,
+                observe_geometry,
             )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })

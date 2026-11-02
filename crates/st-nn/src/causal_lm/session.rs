@@ -68,6 +68,9 @@ pub struct CausalLmTrainingSessionStep {
     pub post_lora_artifact_id: Option<String>,
     pub pre_geometry_artifact_id: Option<String>,
     pub post_geometry_artifact_id: Option<String>,
+    /// A separate optional pre-update receipt, never part of the legacy step JSON.
+    #[serde(skip)]
+    pub observation: Option<Box<CausalLmAdaptationObservation>>,
 }
 
 #[derive(Clone, Debug)]
@@ -546,29 +549,37 @@ impl NativeCausalLmTrainingSession {
     /// Compute both groups from the same pre-update snapshot. No session field
     /// changes until every selected parameter update has validated successfully.
     pub fn step(&mut self) -> CausalLmResult<Option<CausalLmTrainingSessionStep>> {
+        self.step_with_observation(false)
+    }
+
+    pub fn step_with_observation(
+        &mut self,
+        observe_geometry: bool,
+    ) -> CausalLmResult<Option<CausalLmTrainingSessionStep>> {
         if self.exhausted() {
             return Ok(None);
         }
         let std::ops::Range { start, end } = self.next_range();
         let windows = &self.plan().windows()[start..end];
         let (ids, labels) = self.corpus.batch(windows);
-        let gradients = self.model.adaptation_loss_gradients_with_labels(
+        let gradients = self.model.adaptation_window_gradients(
             &ids,
             [end - start, windows[0].length as usize],
             labels.as_deref(),
             Some(self.config.mode),
+            observe_geometry,
         )?;
-        let (model, report) = self.sgd_candidate(start..end, &gradients)?;
+        let (model, report) = self.sgd_candidate(start..end, gradients)?;
         Ok(Some(self.commit_candidate(model, report)))
     }
 
     fn sgd_candidate(
         &self,
         range: std::ops::Range<usize>,
-        gradients: &NativeCausalLmAdaptationGradients,
+        gradients: NativeCausalLmAdaptationGradients,
     ) -> CausalLmResult<(NativeCausalLm, CausalLmTrainingSessionStep)> {
         let model = self.model.step_adaptation_sgd(
-            gradients,
+            &gradients,
             self.config.mode,
             self.config.learning_rate,
         )?;
@@ -584,6 +595,7 @@ impl NativeCausalLmTrainingSession {
             post_lora_artifact_id: model.lora_artifact_id().map(str::to_owned),
             pre_geometry_artifact_id: self.model.geometry_artifact_id().map(str::to_owned),
             post_geometry_artifact_id: model.geometry_artifact_id().map(str::to_owned),
+            observation: gradients.observation,
         };
         Ok((model, report))
     }

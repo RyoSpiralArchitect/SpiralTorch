@@ -24,9 +24,14 @@ pub struct NativeCausalLmAdaptationGradients {
     target_tokens: usize,
     shape: [usize; 2],
     parameters: BTreeMap<String, BTreeMap<String, Vec<f32>>>,
+    pub(super) observation: Option<Box<CausalLmAdaptationObservation>>,
 }
 
 impl NativeCausalLmAdaptationGradients {
+    pub fn observation(&self) -> Option<&CausalLmAdaptationObservation> {
+        self.observation.as_deref()
+    }
+
     pub fn loss(&self) -> f32 {
         self.loss
     }
@@ -146,6 +151,18 @@ impl NativeCausalLm {
         labels: Option<&[i64]>,
         mode: Option<CausalLmAdaptationMode>,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.adaptation_window_gradients(windows, shape, labels, mode, false)
+    }
+
+    /// Optionally measure the actual residual and adjoint while computing the same sealed gradients.
+    pub fn adaptation_window_gradients(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        mode: Option<CausalLmAdaptationMode>,
+        observe_geometry: bool,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
         if let Some(mode) = mode {
             self.validate_adaptation_mode(mode)?;
         }
@@ -153,7 +170,7 @@ impl NativeCausalLm {
         let prepared =
             self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
         let hidden = self.embed(&prepared.input, prepared.shape)?;
-        self.adaptation_gradients_from_prefix(&prepared, hidden, 0, mode)
+        self.adaptation_gradients_from_prefix(&prepared, hidden, 0, mode, observe_geometry)
     }
 
     /// Caller has admitted this owner, selected mode, complete context and
@@ -164,6 +181,7 @@ impl NativeCausalLm {
         hidden: Tensor,
         depth: usize,
         mode: Option<CausalLmAdaptationMode>,
+        observe_geometry: bool,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
         let (first, site) = match &self.lora {
             Some(a) => (a.layer(), format!("transformer.h.{}.attn", a.layer())),
@@ -180,6 +198,7 @@ impl NativeCausalLm {
             CausalLmAdaptationMode::Geometry => learning::DecoderTarget::GeometryFrom(&site),
             CausalLmAdaptationMode::Joint => learning::DecoderTarget::Joint,
         };
+        let mut trace = observe_geometry.then(observation::AdaptationTrace::default);
         let learning::TrainingReadout {
             checkpoints,
             hidden_rows,
@@ -187,7 +206,13 @@ impl NativeCausalLm {
             d_normalized,
             loss,
             ..
-        } = self.training_readout(prepared, hidden, depth, first, None)?;
+        } = self.training_readout(
+            prepared,
+            hidden,
+            depth,
+            first,
+            trace.as_mut().map(|t| &mut t.forward),
+        )?;
         let parameters = self.decoder_parameter_pullback(
             checkpoints,
             hidden_rows,
@@ -197,6 +222,7 @@ impl NativeCausalLm {
             d_normalized,
             first,
             target,
+            trace.as_mut(),
         )?;
         let want_lora = mode != CausalLmAdaptationMode::Geometry;
         let placements = self
@@ -224,7 +250,7 @@ impl NativeCausalLm {
         {
             return Err("nonfinite adaptation loss or gradient".into());
         }
-        Ok(NativeCausalLmAdaptationGradients {
+        let mut gradients = NativeCausalLmAdaptationGradients {
             base_id: self.base_id.clone(),
             lora_id: self.lora_artifact_id().map(str::to_owned),
             geometry_id: self.geometry_artifact_id().map(str::to_owned),
@@ -233,7 +259,12 @@ impl NativeCausalLm {
             target_tokens,
             shape,
             parameters,
-        })
+            observation: None,
+        };
+        if let Some(trace) = trace {
+            gradients.observation = Some(Box::new(trace.finish(self, mode, &gradients)?));
+        }
+        Ok(gradients)
     }
 
     /// Construct both updates from the same immutable source, committing only

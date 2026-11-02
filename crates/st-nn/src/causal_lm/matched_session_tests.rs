@@ -145,6 +145,7 @@ fn actual_qkv_projections_skip_only_the_duplicate_frozen_forward_blocks() {
         c.fork_variant(j, Joint).unwrap(),
     ];
     let mut ordinary = paired.clone();
+    let mut tapped = paired.clone();
     let normal = measure(|| {
         for s in &mut ordinary {
             s.step().unwrap();
@@ -158,6 +159,119 @@ fn actual_qkv_projections_skip_only_the_duplicate_frozen_forward_blocks() {
     });
     // Each arm replays its own last block in backward. Only two duplicate primals disappear.
     assert_eq!((normal, shared), (9, 7));
+    assert_eq!(
+        measure(|| {
+            let reports = Session::step_matched_with_observation(
+                &mut tapped.iter_mut().collect::<Vec<_>>(),
+                true,
+            )
+            .unwrap()
+            .unwrap();
+            assert!(reports.steps.iter().all(|s| s.observation.is_some()));
+            assert!(reports.steps[0]
+                .observation
+                .as_ref()
+                .unwrap()
+                .sites
+                .is_empty());
+        }),
+        shared
+    );
+    for (ordinary, tapped) in paired.iter().zip(tapped) {
+        assert_eq!(
+            ordinary.checkpoint_with_id().unwrap(),
+            tapped.checkpoint_with_id().unwrap()
+        );
+    }
+}
+
+#[test]
+fn adaptation_observation_measures_the_effective_jacobian_without_making_unused_gradients() {
+    let base = load();
+    let path = "transformer.h.1.attn";
+    let mut r = geometry_at(&base, 1).record().clone();
+    // y = x + 0.5 * (2 * x) = 2x, hence dx = 2dy, independent of the CE seed.
+    r.placements[0]
+        .tensors
+        .iter_mut()
+        .find(|t| t.name == "gate")
+        .unwrap()
+        .values
+        .fill(2.);
+    let model = base
+        .with_lora(1, 2, 3.)
+        .unwrap()
+        .with_geometry(GeometryAdapterArtifact::create(r).unwrap())
+        .unwrap();
+    let labels = Some(&[-100, -100, 3, 4][..]);
+    for mode in [Joint, Lora, Geometry] {
+        let make = |tap| {
+            model
+                .adaptation_window_gradients(&[1, 2, 3, 4], [1, 4], labels, Some(mode), tap)
+                .unwrap()
+        };
+        let (plain, measured) = (make(false), make(true));
+        assert!(plain.observation().is_none());
+        assert_eq!(plain.parameters(), measured.parameters());
+        assert_eq!(plain.loss(), measured.loss());
+        let obs = measured.observation().unwrap();
+        assert_eq!(obs.target_tokens, 2);
+        assert_eq!(
+            obs.geometry_artifact_id.as_deref(),
+            model.geometry_artifact_id()
+        );
+        let s = &obs.sites[path];
+        assert_eq!(s.elements, 12);
+        assert!(s.input_rms > 0.);
+        assert_eq!(s.relative_residual_rms, Some(1.));
+        assert!(s.pullback.upstream_rms > 0.);
+        assert_eq!(
+            s.pullback.input_adjoint_rms,
+            (mode != Geometry).then_some(2. * s.pullback.upstream_rms)
+        );
+        assert_eq!(
+            s.pullback.relative_correction_rms,
+            (mode != Geometry).then_some(1.)
+        );
+        assert!(s.wave.is_none());
+        assert!(s.log_radius_gradient.is_none());
+        if mode == Lora {
+            assert!(s.parameter_gradient_l2.is_empty());
+        } else {
+            assert_eq!(s.parameter_gradient_l2.len(), 1); // frozen bias is not observed as trainable
+            assert_eq!(
+                s.parameter_gradient_l2["gate"],
+                plain.parameters()[path]["gate"]
+                    .iter()
+                    .map(|&g| f64::from(g).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+            );
+        }
+    }
+}
+
+#[test]
+fn zero_upstream_is_a_measured_zero_not_an_invented_gain() {
+    let mut cfg = config();
+    cfg["tie_word_embeddings"] = json!(false);
+    let mut weights = parameters();
+    weights.insert("lm_head.weight".into(), (vec![11, 4], vec![0.; 44]));
+    let base = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&cfg).unwrap(),
+        &archive(&weights),
+        Default::default(),
+    )
+    .unwrap();
+    let model = adapted(&base, Joint);
+    let gradients = model
+        .adaptation_window_gradients(&[1, 2, 3], [1, 3], None, Some(Joint), true)
+        .unwrap();
+    let back = &gradients.observation().unwrap().sites["transformer.h.0.attn"].pullback;
+    assert_eq!(back.upstream_rms, 0.);
+    assert_eq!(back.input_adjoint_rms, Some(0.));
+    assert_eq!(back.correction_rms, Some(0.));
+    assert_eq!(back.relative_correction_rms, None);
 }
 
 #[test]

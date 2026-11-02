@@ -512,6 +512,14 @@ impl NativeGeometryRuntime {
 }
 
 impl NativeGeometryBatch {
+    /// Inspect the captured Wave map only when requested. Identity bypasses have no projection.
+    pub fn wave_conditioning(&self) -> Option<crate::WaveGateConditioning> {
+        match &self.pullback {
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => Some(batch.conditioning()),
+            _ => None,
+        }
+    }
+
     pub fn output(&self) -> &Tensor {
         &self.output
     }

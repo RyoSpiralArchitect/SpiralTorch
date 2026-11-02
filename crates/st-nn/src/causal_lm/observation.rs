@@ -4,6 +4,10 @@ use crate::geometry_artifact::GeometryAdapterTensorRole;
 use crate::geometry_runtime::ParameterGradients;
 use std::collections::BTreeMap;
 
+mod adaptation;
+pub(super) use adaptation::AdaptationTrace;
+pub use adaptation::{CausalLmAdaptationObservation, CausalLmAdaptationSite, CausalLmSitePullback};
+
 #[derive(Debug, Serialize)]
 pub struct CausalLmObservedTrainingStep {
     pub schema: &'static str,

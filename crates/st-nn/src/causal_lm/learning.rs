@@ -124,10 +124,15 @@ fn geometry_pullback(
     upstream: Tensor,
     parameters: &mut Parameters,
     target: DecoderTarget<'_>,
+    trace: Option<&mut observation::AdaptationTrace>,
 ) -> CausalLmResult<Option<Tensor>> {
     if let Some(batch) = batch {
         if matches!(target, DecoderTarget::Lora) {
-            return Ok(Some(batch.vjp_input(upstream.data())?));
+            let input = batch.vjp_input(upstream.data())?;
+            if let Some(t) = trace {
+                t.pullback(&path, &batch, &upstream, Some(&input))?;
+            }
+            return Ok(Some(input));
         }
         let (input, gradient) = if matches!(target, DecoderTarget::GeometryFrom(first) if path == first)
         {
@@ -136,6 +141,9 @@ fn geometry_pullback(
             let gradient = batch.vjp(upstream.data())?;
             (Some(gradient.input), gradient.parameters)
         };
+        if let Some(t) = trace {
+            t.pullback(&path, &batch, &upstream, input.as_ref())?;
+        }
         if parameters.insert(path, gradient).is_some() {
             return Err("duplicate geometry gradient placement".into());
         }
@@ -416,6 +424,7 @@ impl NativeCausalLm {
             d_normalized,
             first_layer,
             DecoderTarget::GeometryFrom(&first_site),
+            None,
         )?;
         if parameters.len()
             != self
@@ -443,6 +452,7 @@ impl NativeCausalLm {
         d_normalized: Tensor,
         first_layer: usize,
         target: DecoderTarget<'_>,
+        mut trace: Option<&mut observation::AdaptationTrace>,
     ) -> CausalLmResult<Parameters> {
         let c = &self.config;
         let d_selected = selected.layer_norm_input_backward(
@@ -475,6 +485,7 @@ impl NativeCausalLm {
                 gradient,
                 &mut parameters,
                 target,
+                trace.as_deref_mut(),
             )?
             else {
                 break;
@@ -485,6 +496,7 @@ impl NativeCausalLm {
                 residual.clone(),
                 &mut parameters,
                 target,
+                trace.as_deref_mut(),
             )?
             else {
                 break;
@@ -506,6 +518,7 @@ impl NativeCausalLm {
                 residual.clone(),
                 &mut parameters,
                 target,
+                trace.as_deref_mut(),
             )?
             else {
                 break;

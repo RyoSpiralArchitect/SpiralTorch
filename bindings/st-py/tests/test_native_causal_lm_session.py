@@ -47,6 +47,51 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_opt_in_joint_observation_matches_normal_updates_and_binds_pre_update_owners(self):
+        base, seed = owners()
+        record = json.loads(seed.geometry_artifact().state_json())
+        site = record["placements"][0]
+        site["recipe"] = dict(schema="spiraltorch.wave_gate_adapter.v2", features=4, strength=.25,
+                              learnable_radius=True, kernel=dict(curvature=-1., saturation=1., porosity=.05, max_values=1024))
+        for t in site["tensors"]:
+            t.update(values=[0.] * 4, requires_grad=True)
+        site["tensors"].append(dict(name="log_radius", shape=[], values=[0.], role="parameter", requires_grad=True))
+        model = base.with_lora(0, 2, 4.).with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(record)))
+        ids, mask = [1, 2, 3, 4], [-100, -100, 3, 4]
+        initial = model.adaptation_loss_gradients(ids, [1, 4], labels=mask, observe_geometry=True)
+        plain = model.adaptation_loss_gradients(ids, [1, 4], labels=mask)
+        self.assertIsNone(plain.observation_json())
+        self.assertEqual(initial.parameter_gradients(), plain.parameter_gradients())
+        obs = json.loads(initial.observation_json())
+        self.assertEqual((obs["loss"], obs["target_tokens"], obs["window_shape"]), (plain.loss, 2, [1, 4]))
+        self.assertEqual(obs["geometry_artifact_id"], model.geometry_artifact_id)
+        s = obs["sites"][site["path"]]
+        self.assertEqual((s["elements"], s["residual_rms"], s["pullback"]["correction_rms"]), (12, 0., 0.))
+        self.assertEqual((s["wave"]["rows"], s["wave"]["relative_radial_gain_min"], s["log_radius_gradient"]), (3, 1., 0.))
+        self.assertEqual(set(s["parameter_gradient_l2"]), {"gate", "bias", "log_radius"})
+        Session = st.NativeCausalLmTrainingSession
+        def new():
+            return Session(model, [ids, ids], 4, labels=[mask, mask], mode="joint", learning_rate=.1)
+        normal, single, cohort = new(), new(), [new(), new()]
+        for i in range(2):
+            bare = normal.step()
+            step = single.step(observe_geometry=True)
+            _, matched = Session.step_matched(cohort, observe_geometry=True)
+            self.assertIsNone(bare.observation_json())
+            self.assertNotIn("observation", json.loads(step.to_json()))
+            for r in [step, *matched]:
+                self.assertEqual(r.to_json(), bare.to_json())
+                self.assertEqual(r.observation_json(), step.observation_json())
+                receipt = json.loads(r.observation_json())
+                self.assertEqual(receipt["lora_artifact_id"], r.pre_lora_artifact_id)
+                self.assertEqual(receipt["geometry_artifact_id"], r.pre_geometry_artifact_id)
+                if i == 0:
+                    self.assertEqual(receipt, obs)
+            self.assertTrue(all(item.checkpoint_id == normal.checkpoint_id for item in [single, *cohort]))
+        self.assertIsNone(Session.step_matched(cohort, observe_geometry=True))
+        self.assertGreater(receipt["sites"][site["path"]]["residual_rms"], 0.)
+        self.assertLess(receipt["sites"][site["path"]]["wave"]["relative_radial_gain_min"], 1.)
+
     def test_mask_excludes_targets_but_not_their_prompt(self):
         base, both = owners()
         labels = [-100, -100, 7, -100]

@@ -40,7 +40,10 @@ pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use lora::NativeCausalLmLoraGradients;
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
-pub use observation::{CausalLmObservedTrainingStep, CausalLmSiteObservation};
+pub use observation::{
+    CausalLmAdaptationObservation, CausalLmAdaptationSite, CausalLmObservedTrainingStep,
+    CausalLmSiteObservation, CausalLmSitePullback,
+};
 pub use repetition::CausalLmRepetition;
 pub use session::{
     CausalLmMatchedTrainingStep, CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig,

@@ -409,6 +409,39 @@ training data ID and common update. It does not read training documents, prove
 matching training hyperparameters, or certify split independence. Only a
 complete result is linked at a new output name; existing files are not replaced.
 
+### Inspect the residual and its pullback
+
+On a pinned native SGD model you can differentiate a **training** window
+without updating its weights. The opt-in tap runs inside the same Rust
+forward/backward traversal as ordinary gradients:
+
+```python
+import json
+
+g = model.adaptation_loss_gradients(ids, [1, len(ids)], labels=labels,
+                                    mode="joint", observe_geometry=True)
+site = json.loads(g.observation_json())["sites"]["transformer.h.11.attn"]
+print(site["relative_residual_rms"], site["pullback"]["relative_correction_rms"])
+print(site["parameter_gradient_l2"], site["wave"])
+```
+
+The first ratio is RMS(output - input) / RMS(input); the second is
+RMS(dx - dy) / RMS(dy), where dy is the arriving loss gradient and dx includes
+the residual's identity path. Both differences use actual rounded tensors,
+then accumulate in f64. Denominators cover **all** input positions (also the
+prompt); only labeled targets seed the mean CE. Zero denominators are null,
+not zero. So is the input adjoint when the ordinary backward pass stops after
+computing parameter gradients. An unselected parameter is absent, not a
+measured zero. Wave-only conditioning describes the captured map's local
+saturation and projection gains, not the measured CE gradient.
+
+To observe online instead, use `session.step(observe_geometry=True)` or
+`NativeCausalLmTrainingSession.step_matched(sessions, observe_geometry=True)`.
+Each step's `observation_json()` describes its **pre-update** owners. It is
+separate from the original step JSON and checkpoint bytes. The tap is off by
+default, emits no activations, and does not add a decoder replay. Measuring a
+saved endpoint cannot reconstruct its training trajectory.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)

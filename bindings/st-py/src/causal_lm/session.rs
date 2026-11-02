@@ -36,6 +36,13 @@ pub struct PyNativeCausalLmAdaptationGradients {
 }
 #[pymethods]
 impl PyNativeCausalLmAdaptationGradients {
+    fn observation_json(&self) -> PyResult<Option<String>> {
+        self.inner
+            .observation()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(error)
+    }
     #[getter]
     fn loss(&self) -> f32 {
         self.inner.loss()
@@ -79,6 +86,14 @@ pub struct PyNativeCausalLmTrainingSessionStep {
 }
 #[pymethods]
 impl PyNativeCausalLmTrainingSessionStep {
+    fn observation_json(&self) -> PyResult<Option<String>> {
+        self.inner
+            .observation
+            .as_deref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(error)
+    }
     #[getter]
     fn update(&self) -> u64 {
         self.inner.update
@@ -262,9 +277,11 @@ impl PyNativeCausalLmTrainingSession {
     }
 
     #[staticmethod]
+    #[pyo3(signature=(sessions, *, observe_geometry=false))]
     fn step_matched(
         py: Python<'_>,
         sessions: &Bound<'_, PyAny>,
+        observe_geometry: bool,
     ) -> PyResult<Option<(usize, Vec<PyNativeCausalLmTrainingSessionStep>)>> {
         let n = sessions.len()?;
         if !(2..=Self::MAX_MATCHED_VARIANTS).contains(&n) {
@@ -286,7 +303,12 @@ impl PyNativeCausalLmTrainingSession {
             .collect::<Result<Vec<_>, _>>()?;
         let mut native: Vec<_> = guards.iter_mut().map(|s| &mut s.inner).collect();
         let result = py
-            .detach(move || NativeCausalLmTrainingSession::step_matched(&mut native))
+            .detach(move || {
+                NativeCausalLmTrainingSession::step_matched_with_observation(
+                    &mut native,
+                    observe_geometry,
+                )
+            })
             .map_err(error)?;
         Ok(result.map(|r| {
             (
@@ -299,8 +321,13 @@ impl PyNativeCausalLmTrainingSession {
         }))
     }
 
-    fn step(&mut self, py: Python<'_>) -> PyResult<Option<PyNativeCausalLmTrainingSessionStep>> {
-        py.detach(|| self.inner.step())
+    #[pyo3(signature=(*, observe_geometry=false))]
+    fn step(
+        &mut self,
+        py: Python<'_>,
+        observe_geometry: bool,
+    ) -> PyResult<Option<PyNativeCausalLmTrainingSessionStep>> {
+        py.detach(|| self.inner.step_with_observation(observe_geometry))
             .map(|value| value.map(|inner| PyNativeCausalLmTrainingSessionStep { inner }))
             .map_err(error)
     }
