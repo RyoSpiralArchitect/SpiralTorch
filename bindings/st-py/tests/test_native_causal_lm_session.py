@@ -48,6 +48,38 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_multi_site_observation_preserves_early_stop_and_non_wave_pullbacks(self):
+        geo = runpy.run_path(str(Path(__file__).with_name("test_native_geometry_runtime.py")))
+        config, weights = fixtures["fixture"](width=3, heads=1)
+        base = st.NativeCausalLm.from_gpt2(config, weights)
+        for kind in ("affine", "fixed", "learned", "topos", "elliptic", "anchored", "causal", "gated", *geo["FRACTIONAL_KINDS"]):
+            with self.subTest(kind=kind):
+                record = json.loads(geo["artifact"](kind).state_json())
+                record["base_model_identity"] = base.base_model_identity
+                last = record["placements"][0]
+                last["path"] = "transformer.h.1.mlp"
+                if kind == "affine":
+                    last["recipe"]["max_values"] = 64
+                first = json.loads(geo["artifact"]("learned").state_json())["placements"][0]
+                first["path"] = "transformer.h.0.attn"
+                first["recipe"]["strength"] = 0.
+                record["placements"].insert(0, first)
+                model = base.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(record)))
+                def grad(tap):
+                    return model.adaptation_loss_gradients(WINDOW, [1, 4], mode="geometry", observe_geometry=tap)
+                plain, actual = grad(False), grad(True)
+                self.assertEqual(actual.parameter_gradients(), plain.parameter_gradients())
+                sites = json.loads(actual.observation_json())["sites"]
+                self.assertEqual(set(sites), {first["path"], last["path"]})
+                stopped, continued = sites[first["path"]], sites[last["path"]]
+                self.assertIsNone(stopped["pullback"]["correction_rms"])
+                self.assertIsNone(stopped["wave"])  # zero-strength bypass did not project
+                self.assertEqual(stopped["residual_rms"], 0.)
+                self.assertEqual(stopped["log_radius_gradient"], 0.)
+                self.assertIsNotNone(continued["pullback"]["input_adjoint_rms"])
+                self.assertEqual(continued["wave"] is not None, kind in ("learned", "fixed"))
+                self.assertEqual(continued["log_radius_gradient"] is not None, kind == "learned")
+
     def test_opt_in_joint_observation_matches_normal_updates_and_binds_pre_update_owners(self):
         base, seed = owners()
         record = json.loads(seed.geometry_artifact().state_json())

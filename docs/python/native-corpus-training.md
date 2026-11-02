@@ -442,6 +442,11 @@ separate from the original step JSON and checkpoint bytes. The tap is off by
 default, emits no activations, and does not add a decoder replay. Measuring a
 saved endpoint cannot reconstruct its training trajectory.
 
+The [train-only GPT-2 read-back](../../benchmarks/results/2026-11-03-native-extraction-pullback/RESULTS.md)
+shows why the two ratios matter: fixed WaveGate's forward residual was about
+one sixth of affine's while its correction to the arriving gradient was about
+four fifths as large. Neither ratio is the gain of the full residual connection.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)
