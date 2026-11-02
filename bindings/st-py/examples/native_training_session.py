@@ -84,11 +84,7 @@ def main() -> None:
         if report is None:
             break
         reports.append(json.loads(report.to_json()))
-    # Writing an output file is caller-owned; the Rust checkpoint itself is atomic
-    # in memory, not a power-loss-safe filesystem transaction.
-    payload, pin = session.checkpoint_with_id()
-    with args.output.open("x", encoding="utf-8") as stream:
-        stream.write(payload)
+    pin = session.save_checkpoint_new(args.output)
     print(json.dumps({"checkpoint_id": pin,
                       "recorded_data_id": session.data_id,
                       "post_lora_id": session.model.lora_artifact_id,

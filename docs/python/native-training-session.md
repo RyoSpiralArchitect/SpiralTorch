@@ -160,6 +160,17 @@ being opened. No training document path is used by generation.
 
 ## Local-file example and verification boundary
 
+Rust and Python expose `session.save_checkpoint_new(path)`. It stages the exact
+v1/v2 payload in the destination directory, syncs it, publishes it **without
+overwriting an existing name**, and returns the same pin as `checkpoint_with_id`.
+Keep that pin separately. Use an existing directory under your control; on
+Unix the filesystem must support hard links and directory sync. A write error
+before publication leaves the final name absent and earlier checkpoints intact.
+An error after publication (for example, directory sync failure) can leave a
+complete file: compare its bytes to the intended pin rather than retrying or
+deleting it. Hard process termination can leave a temporary file, not a new
+guarantee about unsaved updates. A step log is not a resumable checkpoint.
+
 `bindings/st-py/examples/native_training_session.py` accepts a local GPT-2
 configuration, local safetensors archive, encoded token documents and an optional
 geometry artifact. Its checkpoint can be resumed with `--resume` and a separately

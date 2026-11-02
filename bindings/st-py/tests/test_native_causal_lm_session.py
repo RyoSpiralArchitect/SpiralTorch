@@ -47,6 +47,24 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_checkpoint_file_uses_native_bytes_and_refuses_existing_names(self):
+        base, model = owners()
+        with tempfile.TemporaryDirectory() as tmp:
+            for batch in (1, 2):
+                path = Path(tmp) / f"batch-{batch}.json"
+                trainer = st.NativeCausalLmTrainingSession(model, DOCS, 4, learning_rate=.2, epochs=2, batch_windows=batch)
+                trainer.step()
+                payload, pin = trainer.checkpoint_with_id()
+                self.assertEqual(trainer.save_checkpoint_new(path), pin)
+                self.assertEqual(path.read_bytes(), payload.encode())
+                recovered = st.NativeCausalLmTrainingSession.from_json(base, DOCS, path.read_bytes(), pin)
+                self.assertEqual(recovered.step().to_json(), trainer.step().to_json())
+                cursor = trainer.completed_updates
+                with self.assertRaises(FileExistsError):
+                    trainer.save_checkpoint_new(path)
+                self.assertEqual(trainer.completed_updates, cursor)
+                self.assertEqual(path.read_bytes(), payload.encode())
+
     def test_masked_backward_keeps_the_other_owner_in_the_forward(self):
         _, model = owners()
         full = model.adaptation_loss_gradients(WINDOW, [1, 4])

@@ -40,6 +40,41 @@ fn id(json: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(json.as_bytes()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn file_checkpoint_publishes_exact_v1_and_v2_bytes_without_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = load();
+    let mode = CausalLmAdaptationMode::Joint;
+    for batch in [1, 2] {
+        let path = dir.path().join(format!("checkpoint-{batch}.json"));
+        let mut s = NativeCausalLmTrainingSession::new_batched(
+            adapted(&base, mode),
+            documents(),
+            session_config(mode),
+            batch,
+        )
+        .unwrap();
+        s.step().unwrap().unwrap();
+        let (json, pin) = s.checkpoint_with_id().unwrap();
+        assert_eq!(s.save_checkpoint_new(&path).unwrap(), pin);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes, json.as_bytes());
+        let mut restored =
+            NativeCausalLmTrainingSession::from_json(base.clone(), documents(), &bytes, &pin)
+                .unwrap();
+        s.step().unwrap().unwrap();
+        restored.step().unwrap().unwrap();
+        assert_eq!(
+            restored.checkpoint_id().unwrap(),
+            s.checkpoint_id().unwrap()
+        );
+        assert!(s.save_checkpoint_new(&path).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+        assert_eq!(restored.completed_updates(), s.completed_updates());
+    }
+}
+
 #[test]
 fn session_inference_binds_both_owners_cursor_and_recorded_corpus_without_resuming() {
     let base = load();

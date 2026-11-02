@@ -282,6 +282,14 @@ impl PyNativeCausalLmTrainingSession {
     fn checkpoint_with_id(&self, py: Python<'_>) -> PyResult<(String, String)> {
         py.detach(|| self.inner.checkpoint_with_id()).map_err(error)
     }
+
+    fn save_checkpoint_new(&self, py: Python<'_>, path: std::path::PathBuf) -> PyResult<String> {
+        py.detach(|| self.inner.save_checkpoint_new(&path))
+            .map_err(|e| match e.downcast::<std::io::Error>() {
+                Ok(io) => PyErr::from(*io),
+                Err(other) => error(other),
+            })
+    }
 }
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {

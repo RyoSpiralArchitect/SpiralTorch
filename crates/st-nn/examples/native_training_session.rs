@@ -4,8 +4,8 @@
 //! Stdout contains the checkpoint identity and the optional update report.
 use st_nn::causal_lm::{CausalLmResult, NativeCausalLm, NativeCausalLmTrainingSession};
 use st_nn::weights::{SafeTensorArchive, WeightLoadLimits};
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 fn read_limited(path: &str, limit: usize) -> CausalLmResult<Vec<u8>> {
@@ -49,12 +49,7 @@ fn main() -> CausalLmResult<()> {
         serde_json::from_slice(&read_limited(&args[2], 256 * 1024 * 1024)?)?;
     let mut session = resume.resume(documents)?;
     let step = session.step()?;
-    let (payload, pin) = session.checkpoint_with_id()?;
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&args[5])?
-        .write_all(payload.as_bytes())?;
+    let pin = session.save_checkpoint_new(&args[5])?;
     println!(
         "{}",
         serde_json::json!({"checkpoint_id": pin, "step": step})

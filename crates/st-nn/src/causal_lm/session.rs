@@ -415,6 +415,14 @@ impl NativeCausalLmTrainingSession {
         Ok((json, id))
     }
 
+    /// Stage the exact v1/v2 bytes and return their pin after no-clobber
+    /// publication. Saving never advances the cursor or changes either adapter.
+    pub fn save_checkpoint_new(&self, path: impl AsRef<std::path::Path>) -> CausalLmResult<String> {
+        let (payload, pin) = self.checkpoint_with_id()?;
+        st_core::runtime::atomic_create_new(path.as_ref(), payload.as_bytes())?;
+        Ok(pin)
+    }
+
     /// Verify a caller-pinned byte identity and recover the saved arithmetic
     /// policy and both parameter groups on an unadapted matching base. The hash
     /// detects mismatched bytes; it is not a signature or training provenance proof.
