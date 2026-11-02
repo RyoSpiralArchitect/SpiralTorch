@@ -70,6 +70,42 @@ fn forward_diagnostic_captures_before_second_backward_and_reads_after_model_drop
     assert_eq!(observation.run_outcome.to_string(), original);
 }
 
+#[test]
+#[ignore = "Requires a separately authorized real-GPU diagnostic run"]
+fn embedding_probe_reads_the_selected_step_after_later_updates_and_model_drop() {
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.embedding.probe").unwrap();
+    let study = request(false);
+    let observed = pollster::block_on(
+        study
+            .embedding_update_probe("geometry", 1, 2, 0)
+            .unwrap()
+            .run(runtime),
+    )
+    .unwrap();
+    assert_eq!(observed.run_outcome["status"], "completed");
+    assert_eq!(observed.run_outcome["capture_status"], "views_retained");
+    drop(study);
+    let bits = observed.views.unwrap().read_bits().unwrap();
+    assert_eq!(bits["attempted_revisions"], json!([0, 1]));
+    assert_eq!(bits["selection"], observed.run_outcome["selection"]);
+    let values = &bits["f32_bits"];
+    let initial = (0.1 + 4.0f32 * 0.01).to_bits();
+    assert_eq!(values["weight_before"], initial);
+    let input = f32::from_bits(values["embedding_output_gradient"].as_u64().unwrap() as u32);
+    // The embedding kernel starts at +0, including for a single -0 contribution.
+    assert_eq!(
+        values["token_parameter_gradient"],
+        (0.0f32 + input).to_bits()
+    );
+    let geometry = &observed.run_outcome["report"]["cases"][1];
+    // Token 2 is absent in the second update; its final weight is the first update's result.
+    assert_eq!(
+        values["weight_after"],
+        (geometry["final_parameters"][0][4].as_f64().unwrap() as f32).to_bits()
+    );
+}
+
 fn request(adamw: bool) -> ByteCorpusStudy {
     let mut value = optimizer::tests::designs()[1].clone();
     for case in value["cases"].as_array_mut().unwrap() {

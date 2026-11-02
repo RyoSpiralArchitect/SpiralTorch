@@ -1,7 +1,7 @@
 //! Bounded matched corpus studies with request-bound, all-case resume.
 //! Native and browser clients share model math, data order and acceptance gates.
 #[cfg(feature = "wgpu")]
-use crate::resident::{ResidentByteDecoder, ResidentByteDecoderForward};
+use crate::resident::{ResidentByteDecoder, ResidentByteDecoderForward, ResidentByteDecoderVjp};
 use crate::{
     resident::{
         AttentionInferencePlan, AttentionMask, ByteDecoderCheckpoint, ByteDecoderGeometryPlan,
@@ -27,7 +27,13 @@ use std::collections::BTreeSet;
 pub type ByteCorpusStudyResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type Result<T> = ByteCorpusStudyResult<T>;
 #[cfg(feature = "wgpu")]
-type UpdateObserverFn = fn(&str, usize, &ResidentByteDecoder) -> Result<()>;
+struct SubmittedStep<'a> {
+    model: &'a ResidentByteDecoder,
+    tape: &'a ResidentByteDecoderForward,
+    gradients: &'a ResidentByteDecoderVjp,
+}
+#[cfg(feature = "wgpu")]
+type UpdateObserverFn = fn(&str, usize, SubmittedStep<'_>) -> Result<()>;
 #[cfg(feature = "wgpu")]
 type ForwardObserverFn =
     fn(&str, usize, &ResidentByteDecoder, &ResidentByteDecoderForward) -> Result<()>;
@@ -38,6 +44,7 @@ mod artifact;
 mod boundary;
 mod calibration;
 mod clipping;
+mod embedding_probe;
 mod forward_diagnostic;
 #[cfg(any(feature = "wgpu", test))]
 mod generation;
@@ -58,6 +65,9 @@ pub use artifact::{ResidentByteInference, ResidentByteInferenceForward};
 #[cfg(feature = "wgpu")]
 pub use boundary::ByteCorpusBoundaryObservation;
 pub use calibration::{ByteCorpusBiasCalibration, ByteCorpusPreparedBiasStudy};
+#[cfg(feature = "wgpu")]
+pub use embedding_probe::{ByteEmbeddingObservation, ByteEmbeddingViews};
+pub use embedding_probe::{ByteEmbeddingProbe, ByteEmbeddingSelection};
 #[cfg(feature = "wgpu")]
 pub use forward_diagnostic::ByteCorpusForwardDiagnosticObservation;
 #[cfg(feature = "wgpu")]
@@ -769,7 +779,7 @@ impl ByteCorpusStudy {
     pub async fn run_with_update_observer(
         &self,
         runtime: WgpuRuntime,
-        observer: impl FnMut(&str, usize, &ResidentByteDecoder) -> Result<()>,
+        mut observer: impl FnMut(&str, usize, &ResidentByteDecoder) -> Result<()>,
     ) -> Result<Value> {
         Ok(self
             .execute(
@@ -777,7 +787,9 @@ impl ByteCorpusStudy {
                 None,
                 self.total_updates(),
                 false,
-                Some(observer),
+                Some(|name: &str, update, step: SubmittedStep<'_>| {
+                    observer(name, update, step.model)
+                }),
                 None::<ForwardObserverFn>,
             )
             .await?
@@ -822,7 +834,7 @@ impl ByteCorpusStudy {
         mut forward_observer: Option<G>,
     ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)>
     where
-        F: FnMut(&str, usize, &ResidentByteDecoder) -> Result<()>,
+        F: FnMut(&str, usize, SubmittedStep<'_>) -> Result<()>,
         G: FnMut(&str, usize, &ResidentByteDecoder, &ResidentByteDecoderForward) -> Result<()>,
     {
         if capture || self.request.optimizer.is_some() {
@@ -916,7 +928,15 @@ impl ByteCorpusStudy {
                 };
                 pending.push((update, loss.value().clone()));
                 if let Some(observe) = observer.as_mut() {
-                    observe(&case.name, step + 1, &model)?;
+                    observe(
+                        &case.name,
+                        step + 1,
+                        SubmittedStep {
+                            model: &model,
+                            tape: &tape,
+                            gradients: &gradients,
+                        },
+                    )?;
                 }
                 if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
                     // Bounded bursts; all receipts are drained even at a pause

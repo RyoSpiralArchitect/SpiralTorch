@@ -39,3 +39,45 @@ contains the Git commit's `sha, tree` (SHA) and ordered `parents` (SHA list).
 ```sh
 python3.12 -I -S -B inspect_retained.py "$RETAINED" | cmp - first_failure.json
 ```
+
+## Observe the missing boundary in a future run
+
+The original wheel does **not** have this probe. In a development build,
+selection is CPU-only and does not import Torch or NumPy:
+
+```python
+from spiraltorch.nn import ByteCorpusStudy
+
+study = ByteCorpusStudy.from_json(request_bytes)  # exact bytes, not re-encoded JSON
+selection = study.embedding_update_selection_json("geometry", 1, 2, 0)
+```
+
+For the pinned request, the selected input position is batch row 0, time 1.
+The Rust equivalent is `study.embedding_update_probe("geometry", 1, 2, 0)?`.
+The probe only supports uninterrupted, unclipped stateless SGD and a byte
+occurring exactly once in the selected input batch. It does not substitute a
+different optimizer or attempt to apportion a repeated token's gradient.
+
+On an explicitly instrumented run, `study.run_wgpu_with_embedding_probe(...)`
+retains four immutable scalar views of the **actual** update: the table weight
+used by the forward, its summed embedding-output gradient at the input slot,
+the token-table parameter gradient, and the submitted post-update weight.
+There is no diagnostic copy, map, or replay between updates. The views do
+retain their larger backing allocations, so scheduling/resource reuse can
+still differ from the unobserved run. Save `observation.run_outcome_json`
+before calling the one-shot `observation.read_bits_json()`, which copies four
+f32 words and their validation flags. Failed runs and failed reads are not
+successful measurements.
+
+Given independently saved `run-outcome.json` and `bits.json` in each of
+three directories, compare the four raw words and the final report weight:
+
+```sh
+python3.12 -I -S -B compare_embedding_bits.py SERIAL WORKER0 WORKER1
+```
+
+This compares one coordinate, not the whole report. A first differing word
+locates an observed boundary, not a faulty shader; equal words do not clear
+other coordinates or the original byte-for-byte gate. Bind wheel, adapter
+and run provenance separately. No measurements from a new GPU run are
+included here.

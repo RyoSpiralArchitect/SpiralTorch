@@ -45,12 +45,13 @@ pub use byte_study::{
     ByteCorpusBiasCalibration, ByteCorpusCheckpointSelection, ByteCorpusHeadwiseControls,
     ByteCorpusInferencePolicy, ByteCorpusMixtureControls, ByteCorpusModelArtifact,
     ByteCorpusPreparedBiasStudy, ByteCorpusQueryMixtureControls, ByteCorpusStudy,
-    ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment,
-    BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
+    ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment, ByteEmbeddingProbe,
+    ByteEmbeddingSelection, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{
     ByteCorpusBoundaryObservation, ByteCorpusForwardDiagnosticObservation, ByteCorpusGeneration,
+    ByteEmbeddingObservation, ByteEmbeddingViews,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{ResidentByteCandidate, ResidentByteServing};

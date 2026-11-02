@@ -12,9 +12,11 @@ use st_nn::resident::{
 use std::sync::Arc;
 
 mod boundary;
+mod embedding_probe;
 mod forward_diagnostic;
 mod preparation;
 use boundary::PyByteCorpusBoundaryObservation;
+use embedding_probe::PyByteEmbeddingObservation;
 use forward_diagnostic::PyByteCorpusForwardDiagnosticObservation;
 
 fn value_error(error: impl std::fmt::Display) -> PyErr {
@@ -301,6 +303,43 @@ impl PyByteCorpusStudy {
         }
     }
 
+    /// Validate a unique input position in an unclipped SGD run without a GPU.
+    fn embedding_update_selection_json(
+        &self,
+        py: Python<'_>,
+        case_name: &str,
+        update: &Bound<'_, PyAny>,
+        token: &Bound<'_, PyAny>,
+        feature: &Bound<'_, PyAny>,
+    ) -> PyResult<String> {
+        let probe = embedding_probe::select(&self.inner, py, case_name, update, token, feature)?;
+        serde_json::to_string(probe.selection()).map_err(value_error)
+    }
+
+    /// Observe an uninterrupted study. Save run_outcome_json before reading bits.
+    fn run_wgpu_with_embedding_probe(
+        &self,
+        py: Python<'_>,
+        case_name: &str,
+        update: &Bound<'_, PyAny>,
+        token: &Bound<'_, PyAny>,
+        feature: &Bound<'_, PyAny>,
+    ) -> PyResult<PyByteEmbeddingObservation> {
+        let probe = embedding_probe::select(&self.inner, py, case_name, update, token, feature)?;
+        #[cfg(feature = "wgpu")]
+        {
+            on_gpu(py, |runtime| {
+                let observed = pollster::block_on(probe.run(runtime)).map_err(value_error)?;
+                PyByteEmbeddingObservation::from_observation(observed)
+            })
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            let _ = probe;
+            requires_wgpu()
+        }
+    }
+
     /// CPU-only selection and all-case resume validation; no runtime selection.
     #[pyo3(signature = (case_name, before_update, *, resume=None, max_bytes=None))]
     fn validate_forward_diagnostic(
@@ -468,6 +507,7 @@ pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyByteCorpusStudyCheckpoint>()?;
     module.add_class::<PyByteCorpusStudySegment>()?;
     module.add_class::<PyByteCorpusBoundaryObservation>()?;
+    module.add_class::<PyByteEmbeddingObservation>()?;
     module.add_class::<PyByteCorpusForwardDiagnosticObservation>()?;
     module.add("BYTE_CORPUS_STUDY_MAX_BYTES", BYTE_CORPUS_STUDY_MAX_BYTES)?;
     module.add(
