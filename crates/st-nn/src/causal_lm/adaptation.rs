@@ -98,7 +98,7 @@ impl NativeCausalLm {
     pub fn adaptation_gradient_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
         self.validate_adaptation_placement()?;
         if self.lora.is_some() {
-            self.lora_gradient_input_count(shape)
+            self.lora_pullback_input_count(shape)
         } else {
             self.geometry_gradient_input_count(shape)
         }

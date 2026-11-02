@@ -53,6 +53,23 @@ fn create_with_readout(
 }
 
 #[test]
+fn geometry_checkpoint_cannot_restore_unrecorded_lora() {
+    let mut trainer = create(config());
+    trainer.step_observed().unwrap();
+    let (json, id) = trainer.checkpoint_with_id().unwrap();
+    let base = load();
+    let restored =
+        NativeCausalLm::from_training_checkpoint(base.clone(), json.as_bytes(), &id).unwrap();
+    assert_eq!(
+        restored.geometry_artifact_id(),
+        trainer.model().geometry_artifact_id()
+    );
+    let external = base.with_lora(0, 2, 4.).unwrap();
+    let err = NativeCausalLm::from_training_checkpoint(external, json.as_bytes(), &id).unwrap_err();
+    assert!(err.to_string().contains("does not own LoRA"));
+}
+
+#[test]
 fn training_resume_requires_same_readout_policy_and_preserves_default_bytes() {
     for accumulator in [
         CausalLmReadoutAccumulator::F32,

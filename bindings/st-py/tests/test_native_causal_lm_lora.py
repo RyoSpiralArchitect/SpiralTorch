@@ -54,6 +54,7 @@ class NativeCausalLmLoraTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             updated.step_lora_sgd(gradients, .3)
         self.assertIn("NativeCausalLmLoraGradients", st.__all__)
+        self.assertIn("NativeCausalLmLoraGradients", st._rs.__all__)
 
     def test_metadata_generation_and_cached_parity_after_reload(self):
         model = self.step(self.initial)
@@ -126,6 +127,9 @@ print(json.dumps({'adapter': model.lora_to_json(), 'tokens': generator.token_ids
             self.initial.lora_loss_gradients(Poison(), [1, 99])
         with self.assertRaises(TypeError):
             self.initial.lora_loss_gradients([1, True, 3, 4], SHAPE)
+        colocated = fixtures["artifact"](self.base, path="transformer.h.0.attn", trainable=True)
+        with self.assertRaisesRegex(ValueError, "adaptation_loss_gradients"):
+            self.initial.with_geometry(colocated).lora_loss_gradients(Poison(), SHAPE)
         geometry = fixtures["artifact"](self.base, trainable=True)
         with self.assertRaises(ValueError):
             self.initial.with_geometry(geometry)

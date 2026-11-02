@@ -46,6 +46,24 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_geometry_checkpoint_does_not_inherit_external_lora(self):
+        base, joint = owners()
+        geometry = joint.geometry_artifact()
+        trainer = st.NativeCausalLmTrainer(
+            base.with_geometry(geometry), st.NativeGeometryAdamW(geometry), DOCS, 4,
+            learning_rate=.01,
+        )
+        trainer.step_observed()
+        payload, pin = trainer.to_json(), trainer.checkpoint_id
+        restored = st.NativeCausalLm.from_training_checkpoint(base, payload, pin)
+        self.assertEqual(restored.geometry_artifact_id, trainer.model.geometry_artifact_id)
+        lora = base.with_lora(0, 2, 4.)
+        changed = lora.step_lora_sgd(lora.lora_loss_gradients(WINDOW, [1, 4]), .2)
+        self.assertNotEqual(base.forward(WINDOW, [1, 4]).values(), changed.forward(WINDOW, [1, 4]).values())
+        for external in (lora, changed):
+            with self.subTest(adapter=external.lora_artifact_id), self.assertRaisesRegex(ValueError, "LoRA"):
+                st.NativeCausalLm.from_training_checkpoint(external, payload, pin)
+
     def test_groups_update_atomically_from_one_snapshot(self):
         base, model = owners()
         initial = model.adaptation_loss_gradients(WINDOW, [1, 4])
