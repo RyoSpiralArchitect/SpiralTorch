@@ -66,6 +66,9 @@ impl NativeCausalLmGradients {
     pub fn parameters(&self) -> &Parameters {
         &self.parameters
     }
+    pub(super) fn into_parameters(self) -> Parameters {
+        self.parameters
+    }
 }
 
 pub(super) fn frozen_pullback(

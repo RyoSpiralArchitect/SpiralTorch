@@ -115,23 +115,18 @@ impl NativeCausalLm {
         let (loss, target_tokens, parameters) = match (&self.lora, &self.geometry) {
             (None, Some(_)) => {
                 let grads = self.geometry_loss_gradients(windows, shape)?;
-                (
-                    grads.loss(),
-                    grads.target_tokens(),
-                    grads.parameters().clone(),
-                )
+                (grads.loss(), grads.target_tokens(), grads.into_parameters())
             }
             (Some(adapter), None) => {
                 let grads = self.lora_loss_gradients(windows, shape)?;
+                let (loss, targets) = (grads.loss(), grads.target_tokens());
+                let (a, b) = grads.into_parameters();
                 (
-                    grads.loss(),
-                    grads.target_tokens(),
+                    loss,
+                    targets,
                     BTreeMap::from([(
                         adapter.path(),
-                        BTreeMap::from([
-                            ("a".into(), grads.a().to_vec()),
-                            ("b".into(), grads.b().to_vec()),
-                        ]),
+                        BTreeMap::from([("a".into(), a), ("b".into(), b)]),
                     )]),
                 )
             }
@@ -245,17 +240,21 @@ impl NativeCausalLm {
             CausalLmAdaptationMode::Geometry | CausalLmAdaptationMode::Joint
         ) {
             let runtime = self.geometry.as_ref().unwrap();
-            // Geometry runtime requires exactly its placement set, not LoRA's
-            // separate parameter path. Keep both groups' source identity sealed.
-            let mut parameters = gradients.parameters.clone();
-            if let Some(lora) = &self.lora {
-                parameters.remove(&lora.path());
-            }
-            next.geometry = Some(Arc::new(runtime.with_gradients_sgd(
-                self.geometry_artifact_id().unwrap(),
-                &parameters,
-                learning_rate,
-            )?));
+            let id = runtime.artifact().artifact_id();
+            let candidate = if let Some(lora) = &self.lora {
+                // Pass geometry's placement map by reference without copying LoRA A/B or any channel vectors.
+                let external = lora.path();
+                let view = gradients
+                    .parameters
+                    .iter()
+                    .filter(|(path, _)| *path != &external)
+                    .map(|(path, g)| (path.clone(), g))
+                    .collect();
+                runtime.with_gradients_sgd(id, &view, learning_rate)?
+            } else {
+                runtime.with_gradients_sgd(id, &gradients.parameters, learning_rate)?
+            };
+            next.geometry = Some(Arc::new(candidate));
         }
         Ok(next)
     }

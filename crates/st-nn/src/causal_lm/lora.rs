@@ -136,6 +136,9 @@ impl NativeCausalLmLoraGradients {
     pub fn b(&self) -> &[f32] {
         &self.b
     }
+    pub(super) fn into_parameters(self) -> (Vec<f32>, Vec<f32>) {
+        (self.a, self.b)
+    }
 }
 
 impl NativeCausalLm {

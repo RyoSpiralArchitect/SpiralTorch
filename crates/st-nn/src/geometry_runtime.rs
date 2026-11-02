@@ -15,6 +15,7 @@ use crate::{
 };
 use st_core::backend::device_caps::DeviceCaps;
 use st_tensor::{Tensor, TensorUtilBackend};
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 
 mod elliptic;
@@ -36,7 +37,8 @@ mod sequence_tests;
 mod topos;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-pub(crate) type ParameterGradients = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
+type PlacementGradients = BTreeMap<String, Vec<f32>>;
+pub(crate) type ParameterGradients = BTreeMap<String, PlacementGradients>;
 
 #[derive(Debug)]
 enum Pullback {
@@ -389,10 +391,10 @@ impl NativeGeometryRuntime {
 
     /// Shared atomic update for gradients obtained from the same frozen artifact.
     /// Kept crate-private: clients submit sealed learning batches, not arbitrary maps.
-    pub(crate) fn with_gradients_sgd(
+    pub(crate) fn with_gradients_sgd<V: Borrow<PlacementGradients>>(
         &self,
         source_id: &str,
-        gradients: &ParameterGradients,
+        gradients: &BTreeMap<String, V>,
         learning_rate: f32,
     ) -> Result<Self> {
         self.validate_gradients(source_id, gradients)?;
@@ -404,6 +406,7 @@ impl NativeGeometryRuntime {
             let Some(values) = gradients.get(&placement.path) else {
                 continue;
             };
+            let values = values.borrow();
             for parameter in &mut placement.tensors {
                 if parameter.role != GeometryAdapterTensorRole::Parameter
                     || !parameter.requires_grad
@@ -424,12 +427,17 @@ impl NativeGeometryRuntime {
         Ok(Self::new(GeometryAdapterArtifact::create(record)?))
     }
 
-    fn validate_gradients(&self, source_id: &str, gradients: &ParameterGradients) -> Result<()> {
+    fn validate_gradients<V: Borrow<PlacementGradients>>(
+        &self,
+        source_id: &str,
+        gradients: &BTreeMap<String, V>,
+    ) -> Result<()> {
         if source_id != self.artifact.artifact_id() {
             return Err("geometry snapshot is stale or belongs to another artifact".into());
         }
         let mut trainable = false;
         for (path, values) in gradients {
+            let values = values.borrow();
             let placement = self.placement(path)?;
             let parameters = placement
                 .tensors
