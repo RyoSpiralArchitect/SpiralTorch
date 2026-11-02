@@ -2,6 +2,7 @@
 use super::*;
 use crate::language_windows::{CausalDocumentWindow, CausalDocumentWindows, MAX_DOCUMENTS};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::ops::Range;
 
 pub const MAX_EVALUATION_TOKENS: usize = 16_777_216;
@@ -58,23 +59,48 @@ pub struct CausalLmEvaluationComparison {
     pub evaluations: Vec<CausalLmEvaluation>,
 }
 
-fn groups(windows: &[CausalDocumentWindow], maximum: usize) -> Vec<Range<usize>> {
-    let mut result = Vec::new();
+fn groups(
+    windows: &[CausalDocumentWindow],
+    maximum: usize,
+) -> impl Iterator<Item = Range<usize>> + '_ {
     let mut start = 0;
-    while start < windows.len() {
-        let width = windows[start].length;
+    std::iter::from_fn(move || {
+        let width = windows.get(start)?.length;
         let count = windows[start..]
             .iter()
             .take(maximum)
             .take_while(|w| w.length == width)
             .count();
-        result.push(start..start + count);
+        let range = start..start + count;
         start += count;
-    }
-    result
+        Some(range)
+    })
+}
+
+fn unique_shapes(
+    windows: &[CausalDocumentWindow],
+    maximum: usize,
+) -> impl Iterator<Item = [usize; 2]> + '_ {
+    let mut seen = HashSet::new();
+    let mut previous = None;
+    groups(windows, maximum).filter_map(move |g| {
+        let shape = [g.len(), windows[g.start].length as usize];
+        if previous.replace(shape) == Some(shape) {
+            return None;
+        }
+        seen.insert(shape).then_some(shape)
+    })
 }
 
 impl NativeCausalLm {
+    /// Per-corpus input allowance, accounting for all owners in a comparison.
+    pub fn evaluation_token_limit(owners: usize) -> CausalLmResult<usize> {
+        if !(1..=MAX_EVALUATION_VARIANTS).contains(&owners) {
+            return Err("invalid evaluation owner count".into());
+        }
+        Ok(MAX_EVALUATION_TOKENS / owners)
+    }
+
     /// Bounds before foreign token extraction. Explicit labels defer only the
     /// exact selected-logit count, never the context/geometry work budgets.
     pub fn evaluation_plan(
@@ -100,11 +126,11 @@ impl NativeCausalLm {
         if lengths.len() > MAX_DOCUMENTS {
             return Err("document count exceeds budget".into());
         }
+        let token_limit = Self::evaluation_token_limit(models.len())?;
         lengths
             .iter()
             .try_fold(0usize, |sum, &n| sum.checked_add(n))
-            .and_then(|n| n.checked_mul(models.len()))
-            .filter(|&n| n <= MAX_EVALUATION_TOKENS)
+            .filter(|&n| n <= token_limit)
             .ok_or("evaluation token count exceeds budget")?;
         let plan = CausalDocumentWindows::covering_targets(
             lengths.iter().map(|&n| n as u32).collect(),
@@ -113,12 +139,9 @@ impl NativeCausalLm {
         if plan.windows().is_empty() {
             return Err("evaluation requires a within-document next-token target".into());
         }
-        for group in groups(plan.windows(), config.microbatch_windows) {
+        for shape in unique_shapes(plan.windows(), config.microbatch_windows) {
             for model in models {
-                model.loss_objective_input_count(
-                    [group.len(), plan.windows()[group.start].length as usize],
-                    has_labels,
-                )?;
+                model.loss_objective_input_count(shape, has_labels)?;
             }
         }
         Ok(plan)
@@ -200,6 +223,9 @@ impl NativeCausalLm {
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
     ) -> CausalLmResult<Vec<CausalLmEvaluation>> {
+        if documents.len() > MAX_DOCUMENTS {
+            return Err("document count exceeds budget".into());
+        }
         let lengths: Vec<_> = documents.iter().map(Vec::len).collect();
         let plan = self.corpus_plan(models, &lengths, config, labels.is_some())?;
         if documents
@@ -236,15 +262,13 @@ impl NativeCausalLm {
         if target_tokens == 0 {
             return Err("evaluation has no selected targets".into());
         }
-        let groups = groups(windows, config.microbatch_windows);
-        // Admit every selected readout before evaluating the first batch.
-        for group in &groups {
-            let active = selected[group.clone()].iter().sum::<usize>();
-            if active > 0 {
-                for model in models {
-                    model.logit_count(active)?;
-                }
-            }
+        // A fixed owner's readout size is monotonic in selected rows, including masked tails.
+        let maximum_active = groups(windows, config.microbatch_windows)
+            .map(|g| selected[g].iter().sum::<usize>())
+            .max()
+            .unwrap_or(0);
+        for model in models {
+            model.logit_count(maximum_active)?;
         }
         let plan_id = plan.plan_id()?;
         let mut hash = Sha256::new();
@@ -264,7 +288,7 @@ impl NativeCausalLm {
         }
         let mut totals = vec![0.; models.len()];
         let mut microbatches = 0;
-        for group in groups {
+        for group in groups(windows, config.microbatch_windows) {
             let targets = selected[group.clone()].iter().sum::<usize>();
             if targets == 0 {
                 continue;
@@ -335,5 +359,22 @@ impl NativeCausalLm {
                 }
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    #[test]
+    fn admission_checks_distinct_shapes_in_first_seen_order() {
+        let mut lengths = vec![4; 1025];
+        lengths.push(3);
+        lengths.extend([4; 8]);
+        let plan = CausalDocumentWindows::covering_targets(lengths, 4).unwrap();
+        assert_eq!(
+            unique_shapes(plan.windows(), 8).collect::<Vec<_>>(),
+            [[8, 4], [1, 4], [1, 3]]
+        );
     }
 }

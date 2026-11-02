@@ -132,11 +132,16 @@ impl PyNativeCausalLmTrainer {
         };
         NativeCausalLmTrainer::validate_owners(&model.inner, &optimizer.inner, config)
             .map_err(error)?;
-        let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
-            NativeCausalLmTrainer::document_plan(&model.inner, config, lengths, has_labels)
-                .map(|_| ())
-                .map_err(error)
-        })?;
+        let (docs, labels) = documents(
+            token_documents,
+            labels,
+            NativeCausalLmTrainer::MAX_TOKENS,
+            |lengths, has_labels| {
+                NativeCausalLmTrainer::document_plan(&model.inner, config, lengths, has_labels)
+                    .map(|_| ())
+                    .map_err(error)
+            },
+        )?;
         py.detach(|| {
             NativeCausalLmTrainer::new(
                 model.inner.clone(),
@@ -169,16 +174,21 @@ impl PyNativeCausalLmTrainer {
                 )
             })
             .map_err(error)?;
-        let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
-            NativeCausalLmTrainer::document_plan(
-                resume.model(),
-                resume.config(),
-                lengths,
-                has_labels,
-            )
-            .map(|_| ())
-            .map_err(error)
-        })?;
+        let (docs, labels) = documents(
+            token_documents,
+            labels,
+            NativeCausalLmTrainer::MAX_TOKENS,
+            |lengths, has_labels| {
+                NativeCausalLmTrainer::document_plan(
+                    resume.model(),
+                    resume.config(),
+                    lengths,
+                    has_labels,
+                )
+                .map(|_| ())
+                .map_err(error)
+            },
+        )?;
         py.detach(|| resume.resume(docs, labels))
             .map(|inner| Self { inner })
             .map_err(error)

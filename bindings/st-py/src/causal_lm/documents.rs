@@ -8,6 +8,7 @@ type Documents = (Vec<Vec<usize>>, Option<Vec<Vec<i64>>>);
 pub(super) fn documents(
     value: &Bound<'_, PyAny>,
     labels: Option<&Bound<'_, PyAny>>,
+    max_tokens: usize,
     admit: impl FnOnce(&[usize], bool) -> PyResult<()>,
 ) -> PyResult<Documents> {
     let count = value.len()?;
@@ -23,9 +24,14 @@ pub(super) fn documents(
     }
     let mut rows = Vec::with_capacity(count);
     let mut lengths = Vec::with_capacity(count);
+    let mut remaining = max_tokens;
     for index in 0..count {
         let row = value.get_item(index)?;
-        lengths.push(row.len()?);
+        let length = row.len()?;
+        remaining = remaining
+            .checked_sub(length)
+            .ok_or_else(|| error("document token count exceeds budget"))?;
+        lengths.push(length);
         rows.push(row);
     }
     admit(&lengths, labels.is_some())?;

@@ -110,12 +110,15 @@ pub(super) fn evaluate(
     labels: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyNativeCausalLmEvaluation> {
     let config = policy(context_length, microbatch_windows)?;
-    let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
-        model
-            .inner
-            .evaluation_plan(lengths, config, has_labels)
-            .map(|_| ())
-            .map_err(error)
+    let limit = NativeCausalLm::evaluation_token_limit(1).map_err(error)?;
+    let (docs, labels) = documents(token_documents, labels, limit, |lengths, has_labels| {
+        py.detach(|| {
+            model
+                .inner
+                .evaluation_plan(lengths, config, has_labels)
+                .map(|_| ())
+        })
+        .map_err(error)
     })?;
     py.detach(|| {
         model
@@ -149,10 +152,12 @@ pub(super) fn compare(
         .collect::<PyResult<Vec<_>>>()?;
     let models: Vec<_> = owners.iter().map(|obj| &obj.get().inner).collect();
     NativeCausalLm::comparison_prefix_layers(&models).map_err(error)?;
-    let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
-        NativeCausalLm::comparison_plan(&models, lengths, config, has_labels)
-            .map(|_| ())
-            .map_err(error)
+    let limit = NativeCausalLm::evaluation_token_limit(count).map_err(error)?;
+    let (docs, labels) = documents(token_documents, labels, limit, |lengths, has_labels| {
+        py.detach(|| {
+            NativeCausalLm::comparison_plan(&models, lengths, config, has_labels).map(|_| ())
+        })
+        .map_err(error)
     })?;
     py.detach(|| NativeCausalLm::evaluate_variants(&models, &docs, labels.as_deref(), config))
         .map(|inner| PyNativeCausalLmEvaluationComparison { inner })

@@ -152,11 +152,16 @@ impl PyNativeCausalLmTrainingSession {
             mode: self::mode(mode)?,
             epochs: u32::try_from(limit(epochs, 1)?).map_err(error)?,
         };
-        let (docs, _) = documents(token_documents, None, |lengths, _| {
-            NativeCausalLmTrainingSession::document_plan(&model.inner, config, lengths)
-                .map(|_| ())
-                .map_err(error)
-        })?;
+        let (docs, _) = documents(
+            token_documents,
+            None,
+            NativeCausalLmTrainingSession::MAX_TOKENS,
+            |lengths, _| {
+                NativeCausalLmTrainingSession::document_plan(&model.inner, config, lengths)
+                    .map(|_| ())
+                    .map_err(error)
+            },
+        )?;
         py.detach(|| NativeCausalLmTrainingSession::new(model.inner.clone(), docs, config))
             .map(|inner| Self { inner })
             .map_err(error)
@@ -178,11 +183,20 @@ impl PyNativeCausalLmTrainingSession {
                 )
             })
             .map_err(error)?;
-        let (docs, _) = documents(token_documents, None, |lengths, _| {
-            NativeCausalLmTrainingSession::document_plan(resume.model(), resume.config(), lengths)
+        let (docs, _) = documents(
+            token_documents,
+            None,
+            NativeCausalLmTrainingSession::MAX_TOKENS,
+            |lengths, _| {
+                NativeCausalLmTrainingSession::document_plan(
+                    resume.model(),
+                    resume.config(),
+                    lengths,
+                )
                 .map(|_| ())
                 .map_err(error)
-        })?;
+            },
+        )?;
         py.detach(|| resume.resume(docs))
             .map(|inner| Self { inner })
             .map_err(error)

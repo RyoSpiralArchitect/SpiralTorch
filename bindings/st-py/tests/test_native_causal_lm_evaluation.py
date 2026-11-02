@@ -60,6 +60,18 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "readout"):
             st.NativeCausalLm.evaluate_variants([self.base, wide], Corpus(), 4)
 
+    def test_token_budget_stops_lazy_row_access_at_first_excess(self):
+        class LazyCorpus:
+            def __init__(self, first): self.first = first
+            def __len__(self): return 2
+            def __getitem__(self, index):
+                if index: raise AssertionError("fetched a row after budget exhaustion")
+                return range(self.first)
+        with self.assertRaisesRegex(ValueError, "token count exceeds budget"):
+            st.NativeCausalLm.evaluate_variants([self.base, self.base], LazyCorpus(8_388_609), 4)
+        with self.assertRaisesRegex(ValueError, "token count exceeds budget"):
+            self.base.evaluate_documents(LazyCorpus(16_777_217), 4)
+
     def setUp(self):
         self.config, self.weights = fixtures["fixture"]()
         self.base = st.NativeCausalLm.from_gpt2(self.config, self.weights)
