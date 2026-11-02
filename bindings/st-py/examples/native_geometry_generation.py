@@ -2,17 +2,27 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 
 import spiraltorch as st
 
 
+def read_bytes(path, limit):
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= limit:
+            raise ValueError("input must be a regular file within byte budget")
+        value = stream.read(info.st_size)
+        if len(value) != info.st_size or stream.read(1):
+            raise ValueError("input size changed while reading")
+    return value
+
+
 def read(path, limit):
-    with path.open("rb") as stream:
-        value = stream.read(limit + 1)
-    if len(value) > limit:
-        raise ValueError("input file exceeds byte budget")
-    return value.decode("utf-8")
+    return read_bytes(path, limit).decode("utf-8")
 
 
 def main(argv=None):
@@ -23,6 +33,9 @@ def main(argv=None):
     parser.add_argument("--recipe-json", type=Path)
     parser.add_argument("--training-checkpoint", type=Path)
     parser.add_argument("--training-checkpoint-id")
+    parser.add_argument("--session-checkpoint", type=Path, help="native SGD LoRA/geometry checkpoint")
+    parser.add_argument("--session-checkpoint-id", help="separately retained checkpoint SHA-256 identity")
+    parser.add_argument("--session-boundary", type=Path, help="bounded metadata from the native training session example")
     parser.add_argument("--artifact", type=Path)
     parser.add_argument("--artifact-id")
     parser.add_argument("--observed-run", type=Path, help="private source run with an explicitly selected observed pair")
@@ -37,8 +50,25 @@ def main(argv=None):
     observed = (args.observed_run is not None, args.observed_update is not None, args.observation_id is not None)
     if any(observed) and (not all(observed) or not args.observation_id or not 0 < args.observed_update < 2**64):
         parser.error("observed inference needs observed-run, a positive observed-update and observation-id")
-    if sum((args.training_checkpoint is not None, args.artifact is not None, all(observed))) > 1:
-        parser.error("choose one training checkpoint, geometry artifact, or observed pair")
+    session = (args.session_checkpoint is not None, args.session_checkpoint_id is not None, args.session_boundary is not None)
+    if any(session) and (not all(session) or not args.session_checkpoint_id):
+        parser.error("session inference needs session-checkpoint, session-checkpoint-id and session-boundary")
+    if sum((args.training_checkpoint is not None, args.artifact is not None, all(observed), all(session))) > 1:
+        parser.error("choose just one inference model source")
+    boundary = None
+    session_payload = None
+    if all(session):
+        if not hasattr(st.NativeCausalLm, "from_session_checkpoint_at"):
+            parser.error("session inference needs a matching source build after 0.4.33")
+        meta = json.loads(read(args.session_boundary, 1_048_576))
+        keys = ("recorded_data_id", "post_lora_id", "post_geometry_id")
+        if (not isinstance(meta, dict) or meta.get("checkpoint_id") != args.session_checkpoint_id
+                or "completed_updates" not in meta or not all(k in meta for k in keys)):
+            raise ValueError("session boundary is missing or belongs to another checkpoint")
+        boundary = dict(update=meta["completed_updates"], **{k:meta[k] for k in keys})
+        session_payload = read_bytes(args.session_checkpoint, st.NativeCausalLmTrainingSession.MAX_CHECKPOINT_BYTES)
+        if "sha256:" + hashlib.sha256(session_payload).hexdigest() != args.session_checkpoint_id:
+            raise ValueError("session checkpoint differs from pinned identity")
     if all(observed) and not hasattr(st.NativeCausalLm, "from_training_checkpoint_at"):
         parser.error("observed inference needs a matching SpiralTorch source build after 0.4.33")
     if args.resume:
@@ -54,6 +84,9 @@ def main(argv=None):
     if args.training_checkpoint:
         model = st.NativeCausalLm.from_training_checkpoint(model, read(args.training_checkpoint, 128 * 1024 * 1024),
                                                           args.training_checkpoint_id)
+    elif boundary is not None:
+        model = st.NativeCausalLm.from_session_checkpoint_at(model, session_payload, args.session_checkpoint_id, **boundary)
+        del session_payload
     elif args.artifact:
         artifact = st.GeometryAdapterArtifact.from_json(read(args.artifact, 64 * 1024 * 1024),
                                                         args.artifact_id, model.base_model_identity)
@@ -91,6 +124,10 @@ def main(argv=None):
     if all(observed):
         result["observed_training_boundary"] = {"update": args.observed_update, "observation_id": args.observation_id,
                                                 "training_documents_verified": False}
+    if boundary is not None:
+        result["lora_artifact_id"] = model.lora_artifact_id
+        result["session_boundary"] = {**boundary, "checkpoint_id":args.session_checkpoint_id,
+                                      "training_documents_verified":False}
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")

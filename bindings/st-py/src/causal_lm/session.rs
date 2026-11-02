@@ -133,9 +133,12 @@ pub struct PyNativeCausalLmTrainingSession {
 #[pymethods]
 impl PyNativeCausalLmTrainingSession {
     #[classattr]
+    const MAX_CHECKPOINT_BYTES: usize = NativeCausalLmTrainingSession::MAX_PAYLOAD_BYTES;
+    #[classattr]
     const MAX_DOCUMENTS: usize = MAX_DOCUMENTS;
     #[new]
-    #[pyo3(signature=(model, token_documents, context_length, *, learning_rate, mode="joint", epochs=None))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(model, token_documents, context_length, *, learning_rate, mode="joint", epochs=None, batch_windows=None))]
     fn new(
         py: Python<'_>,
         model: &PyNativeCausalLm,
@@ -144,6 +147,7 @@ impl PyNativeCausalLmTrainingSession {
         learning_rate: &Bound<'_, PyAny>,
         mode: &str,
         epochs: Option<&Bound<'_, PyAny>>,
+        batch_windows: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         reject_bool(learning_rate)?;
         let config = CausalLmTrainingSessionConfig {
@@ -152,34 +156,49 @@ impl PyNativeCausalLmTrainingSession {
             mode: self::mode(mode)?,
             epochs: u32::try_from(limit(epochs, 1)?).map_err(error)?,
         };
+        let batch = limit(batch_windows, 1)?;
+        NativeCausalLmTrainingSession::validate_policy(&model.inner, config, batch)
+            .map_err(error)?;
         let (docs, _) = documents(
             token_documents,
             None,
             NativeCausalLmTrainingSession::MAX_TOKENS,
             |lengths, _| {
-                NativeCausalLmTrainingSession::document_plan(&model.inner, config, lengths)
+                py.detach(|| {
+                    NativeCausalLmTrainingSession::document_plan_batched(
+                        &model.inner,
+                        config,
+                        lengths,
+                        batch,
+                    )
                     .map(|_| ())
-                    .map_err(error)
+                })
+                .map_err(error)
             },
         )?;
-        py.detach(|| NativeCausalLmTrainingSession::new(model.inner.clone(), docs, config))
-            .map(|inner| Self { inner })
-            .map_err(error)
+        py.detach(|| {
+            NativeCausalLmTrainingSession::new_batched(model.inner.clone(), docs, config, batch)
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
     }
     #[staticmethod]
     fn from_json(
         py: Python<'_>,
         base: &PyNativeCausalLm,
         token_documents: &Bound<'_, PyAny>,
-        payload: &str,
-        expected_id: &str,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
     ) -> PyResult<Self> {
+        let expected_id = super::session_input::pin(expected_id)?;
+        let payload = super::session_input::payload(payload)?;
+        let bytes = payload.as_bytes();
         let resume = py
             .detach(|| {
                 NativeCausalLmTrainingSession::prepare_restore(
                     base.inner.clone(),
-                    payload.as_bytes(),
-                    expected_id,
+                    bytes,
+                    &expected_id,
                 )
             })
             .map_err(error)?;
@@ -188,12 +207,15 @@ impl PyNativeCausalLmTrainingSession {
             None,
             NativeCausalLmTrainingSession::MAX_TOKENS,
             |lengths, _| {
-                NativeCausalLmTrainingSession::document_plan(
-                    resume.model(),
-                    resume.config(),
-                    lengths,
-                )
-                .map(|_| ())
+                py.detach(|| {
+                    NativeCausalLmTrainingSession::document_plan_batched(
+                        resume.model(),
+                        resume.config(),
+                        lengths,
+                        resume.batch_windows(),
+                    )
+                    .map(|_| ())
+                })
                 .map_err(error)
             },
         )?;
@@ -225,6 +247,10 @@ impl PyNativeCausalLmTrainingSession {
         self.inner.updates_per_epoch()
     }
     #[getter]
+    fn batch_windows(&self) -> usize {
+        self.inner.batch_windows()
+    }
+    #[getter]
     fn total_updates(&self) -> u64 {
         self.inner.total_updates()
     }
@@ -241,7 +267,7 @@ impl PyNativeCausalLmTrainingSession {
         self.inner.exhausted()
     }
     fn config_json(&self) -> PyResult<String> {
-        serde_json::to_string(&self.inner.config()).map_err(error)
+        self.inner.config_json().map_err(error)
     }
     fn plan_json(&self) -> PyResult<String> {
         self.inner.plan().to_json().map_err(error)

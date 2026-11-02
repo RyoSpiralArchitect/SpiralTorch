@@ -17,6 +17,7 @@ mod documents;
 mod evaluation;
 mod generation;
 mod session;
+mod session_input;
 mod training;
 use accumulation::PyNativeCausalLmAccumulator;
 use session::PyNativeCausalLmAdaptationGradients;
@@ -206,24 +207,30 @@ impl PyNativeCausalLm {
     fn from_session_checkpoint_at(
         py: Python<'_>,
         base: &Self,
-        payload: &str,
-        expected_id: &str,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
         update: &Bound<'_, PyAny>,
-        recorded_data_id: &str,
-        post_lora_id: Option<&str>,
-        post_geometry_id: Option<&str>,
+        recorded_data_id: &Bound<'_, PyAny>,
+        post_lora_id: Option<&Bound<'_, PyAny>>,
+        post_geometry_id: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         reject_bool(update)?;
         let update = update.extract::<u64>()?;
+        let expected_id = session_input::pin(expected_id)?;
+        let data = session_input::pin(recorded_data_id)?;
+        let lora = post_lora_id.map(session_input::pin).transpose()?;
+        let geometry = post_geometry_id.map(session_input::pin).transpose()?;
+        let payload = session_input::payload(payload)?;
+        let bytes = payload.as_bytes();
         py.detach(|| {
             NativeCausalLm::from_session_checkpoint_at(
                 base.inner.clone(),
-                payload.as_bytes(),
-                expected_id,
+                bytes,
+                &expected_id,
                 update,
-                recorded_data_id,
-                post_lora_id,
-                post_geometry_id,
+                &data,
+                lora.as_deref(),
+                geometry.as_deref(),
             )
         })
         .map(|inner| Self { inner })

@@ -28,10 +28,18 @@ available for single-group models. Use the adaptation methods for composition.
 ## Shared document session
 
 `NativeCausalLmTrainingSession` is a fixed-order, document-safe SGD session.
-Each update consumes exactly one planned window. It does not concatenate
-across documents, add EOS, shuffle, batch/accumulate gradients or invent a
-scheduler. Configuration owns context length, epoch count, learning rate and
-update mode. SGD is stateless: there are no hidden momentum buffers.
+Each update consumes one planned window by default. To compute **one** mean-loss
+SGD update over independent rows, pass `batch_windows=N`, or call Rust
+`NativeCausalLmTrainingSession::new_batched(model, documents, config, n)`.
+Each row keeps its own context; the last batch of each epoch may be smaller.
+The session neither adds EOS nor shuffles, accumulates across updates or invents
+a scheduler. SGD is stateless: there are no hidden momentum buffers.
+
+Batching is opt-in and changes the learning trajectory: two serial SGD updates
+are not one update over two windows. The default retains v1 checkpoint bytes;
+batched sessions use v2, seal their batch size, and resume from the same
+epoch-local batch boundary. `window_start` and `window_end` report the actual
+half-open window range; `target_tokens` includes all shifted targets in it.
 
 Given an existing native base model and compatible geometry artifact:
 
@@ -44,7 +52,7 @@ session = st.NativeCausalLmTrainingSession(
     learning_rate=0.01, mode="joint", epochs=2,
 )
 report = session.step()
-checkpoint, checkpoint_id = session.to_json(), session.checkpoint_id
+checkpoint, checkpoint_id = session.checkpoint_with_id()
 resumed = st.NativeCausalLmTrainingSession.from_json(
     base, token_documents, checkpoint, checkpoint_id,
 )
@@ -70,8 +78,7 @@ let config = CausalLmTrainingSessionConfig {
 };
 let mut session = NativeCausalLmTrainingSession::new(model, documents.clone(), config)?;
 let report = session.step()?;
-let checkpoint = session.to_json()?;
-let checkpoint_id = session.checkpoint_id()?;
+let (checkpoint, checkpoint_id) = session.checkpoint_with_id()?;
 let mut resumed = NativeCausalLmTrainingSession::from_json(
     base, documents, checkpoint.as_bytes(), &checkpoint_id,
 )?;
@@ -119,6 +126,18 @@ recorded data ID must match; the saved readout policy is restored. This is
 not a claim that the scorer verified the actual training data or that the
 session exhausted its planned windows. Use `from_json` with the documents
 to continue training. Rust exposes the same `from_session_checkpoint_at`.
+The binding accepts immutable `bytes` directly or strictly encoded UTF-8
+`str` up to the native session limit (128 MiB). The saved geometry must admit
+the minimum training shape implied by the recorded cursor, even without access
+to the original corpus.
+
+For local files, pass `--session-checkpoint CHECKPOINT --session-checkpoint-id PIN
+--session-boundary RESULT.json` to `bindings/st-py/examples/native_geometry_generation.py`
+alongside its ordinary model, prompt, recipe and output arguments. The training
+example's JSON result contains the required five boundary fields; a compact
+copy of those fields without step reports also works. The checkpoint pin must
+come from the caller's retained selection, not be recomputed from the file
+being opened. No training document path is used by generation.
 
 ## Local-file example and verification boundary
 
@@ -129,7 +148,8 @@ retained `--expected-id`. It does not download a model or tokenize text.
 
 The Rust `native_training_session` example accepts six positional paths/values:
 `CONFIG WEIGHTS DOCUMENTS CHECKPOINT EXPECTED_ID OUTPUT`. It restores one checkpoint,
-performs one update, writes a checkpoint, and prints the update and new ID as JSON.
+performs one update, writes a new checkpoint file, and prints the update and
+new ID as JSON. Neither example silently overwrites an existing checkpoint.
 To exercise the Python → Rust → Python handoff explicitly after building the
 local extension:
 

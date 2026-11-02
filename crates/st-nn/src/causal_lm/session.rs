@@ -6,10 +6,11 @@ use crate::language_windows::{CausalDocumentWindows, MAX_DOCUMENTS};
 use sha2::{Digest, Sha256};
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v1";
+const BATCH_SCHEMA: &str = "spiraltorch.native_causal_lm_training_session.v2";
 const MAX_CHECKPOINT_BYTES: usize = 128 * 1024 * 1024;
 
-/// One disjoint full document window per SGD update. No hidden scheduler,
-/// shuffling, tokenizer, EOS insertion, gradient accumulation or optimizer moments.
+/// Fixed-order, full document windows. Batching is opt-in via `new_batched`;
+/// there is no hidden scheduler, shuffling, gradient accumulation or momentum.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CausalLmTrainingSessionConfig {
@@ -53,6 +54,7 @@ pub struct NativeCausalLmTrainingSession {
     model: NativeCausalLm,
     corpus: Arc<Corpus>,
     config: CausalLmTrainingSessionConfig,
+    batch_windows: usize,
     updates: u64,
 }
 
@@ -69,6 +71,17 @@ struct Checkpoint {
     geometry_id: Option<String>,
     lora_json: Option<String>,
     lora_id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "declared_batch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    batch_windows: Option<u32>,
+}
+
+// Missing means v1. Explicit null must not silently downgrade a malformed v2 policy.
+fn declared_batch<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<u32>, D::Error> {
+    u32::deserialize(input).map(Some)
 }
 
 /// Artifact/config owners verified before a binding reads foreign corpus values.
@@ -78,18 +91,53 @@ pub struct CausalLmTrainingSessionResume {
 }
 
 impl CausalLmTrainingSessionResume {
+    fn validate_recorded_boundary(&self) -> CausalLmResult<()> {
+        let context = self.saved.config.context_length as usize;
+        let epochs = u64::from(self.saved.config.epochs);
+        let max_windows =
+            crate::language_windows::MAX_WINDOWS.min((MAX_TRAINING_TOKENS / context) as u64);
+        if !crate::geometry_artifact::is_sha256_id(&self.saved.data_id)
+            || context - 1 > self.model.config.positions
+            || max_windows == 0
+            || self.saved.updates > max_windows.div_ceil(self.batch_windows() as u64) * epochs
+        {
+            return Err("invalid recorded training session boundary".into());
+        }
+        // Without the corpus we can only prove a minimum shape. More than one
+        // update per epoch requires a full batch, even if the final batch was short.
+        let min_rows = if self.saved.updates > epochs {
+            self.batch_windows()
+        } else {
+            1
+        };
+        if let Some(runtime) = &self.model.geometry {
+            for p in &runtime.artifact().record().placements {
+                runtime.sequence_dimensions(&p.path, [min_rows, context - 1])?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn config(&self) -> CausalLmTrainingSessionConfig {
         self.saved.config
     }
     pub fn model(&self) -> &NativeCausalLm {
         &self.model
     }
+    pub fn batch_windows(&self) -> usize {
+        self.saved.batch_windows.unwrap_or(1) as usize
+    }
     pub fn resume(
         self,
         documents: Vec<Vec<usize>>,
     ) -> CausalLmResult<NativeCausalLmTrainingSession> {
-        let mut restored =
-            NativeCausalLmTrainingSession::new(self.model, documents, self.saved.config)?;
+        let batch_windows = self.batch_windows();
+        let mut restored = NativeCausalLmTrainingSession::new_batched(
+            self.model,
+            documents,
+            self.saved.config,
+            batch_windows,
+        )?;
         if restored.data_id() != self.saved.data_id {
             return Err("training session document content or plan changed".into());
         }
@@ -120,15 +168,8 @@ impl NativeCausalLm {
     ) -> CausalLmResult<Self> {
         let state = NativeCausalLmTrainingSession::prepare_restore(base, bytes, expected_id)?;
         let saved = &state.saved;
-        let context = saved.config.context_length as usize;
-        let max_windows =
-            crate::language_windows::MAX_WINDOWS.min((MAX_TRAINING_TOKENS / context) as u64);
-        if !crate::geometry_artifact::is_sha256_id(recorded_data_id)
-            || saved.data_id != recorded_data_id
+        if saved.data_id != recorded_data_id
             || saved.updates != update
-            || max_windows == 0
-            || context - 1 > state.model.config.positions
-            || update > max_windows * u64::from(saved.config.epochs)
             || state.model.lora_artifact_id() != post_lora_id
             || state.model.geometry_artifact_id() != post_geometry_id
         {
@@ -142,6 +183,7 @@ impl NativeCausalLm {
 
 impl NativeCausalLmTrainingSession {
     pub const MAX_TOKENS: usize = MAX_TRAINING_TOKENS;
+    pub const MAX_PAYLOAD_BYTES: usize = MAX_CHECKPOINT_BYTES;
 
     /// Admit lengths/work before bindings eagerly copy nested token arrays.
     pub fn document_plan(
@@ -149,8 +191,29 @@ impl NativeCausalLmTrainingSession {
         config: CausalLmTrainingSessionConfig,
         lengths: &[usize],
     ) -> CausalLmResult<CausalDocumentWindows> {
+        Self::document_plan_batched(model, config, lengths, 1)
+    }
+
+    pub fn validate_policy(
+        model: &NativeCausalLm,
+        config: CausalLmTrainingSessionConfig,
+        batch_windows: usize,
+    ) -> CausalLmResult<()> {
         config.validate()?;
         model.validate_adaptation_mode(config.mode)?;
+        if batch_windows == 0 || batch_windows > crate::language_windows::MAX_WINDOWS as usize {
+            return Err("training session batch_windows exceeds its valid range".into());
+        }
+        Ok(())
+    }
+
+    pub fn document_plan_batched(
+        model: &NativeCausalLm,
+        config: CausalLmTrainingSessionConfig,
+        lengths: &[usize],
+        batch_windows: usize,
+    ) -> CausalLmResult<CausalDocumentWindows> {
+        Self::validate_policy(model, config, batch_windows)?;
         if lengths.len() > MAX_DOCUMENTS {
             return Err("document count exceeds budget".into());
         }
@@ -170,7 +233,13 @@ impl NativeCausalLmTrainingSession {
         if plan.windows().is_empty() {
             return Err("no full document windows".into());
         }
-        model.adaptation_gradient_input_count([1, config.context_length as usize])?;
+        let windows = plan.windows().len();
+        let rows = batch_windows.min(windows);
+        model.adaptation_gradient_input_count([rows, config.context_length as usize])?;
+        let tail = windows % batch_windows;
+        if tail != 0 && tail != rows {
+            model.adaptation_gradient_input_count([tail, config.context_length as usize])?;
+        }
         Ok(plan)
     }
 
@@ -179,11 +248,22 @@ impl NativeCausalLmTrainingSession {
         documents: Vec<Vec<usize>>,
         config: CausalLmTrainingSessionConfig,
     ) -> CausalLmResult<Self> {
+        Self::new_batched(model, documents, config, 1)
+    }
+
+    /// One target-mean SGD update on up to `batch_windows` independent rows.
+    /// The last batch of each epoch can be short; it never borrows from the next epoch.
+    pub fn new_batched(
+        model: NativeCausalLm,
+        documents: Vec<Vec<usize>>,
+        config: CausalLmTrainingSessionConfig,
+        batch_windows: usize,
+    ) -> CausalLmResult<Self> {
         if documents.len() > MAX_DOCUMENTS {
             return Err("document count exceeds budget".into());
         }
         let lengths: Vec<_> = documents.iter().map(Vec::len).collect();
-        let plan = Self::document_plan(&model, config, &lengths)?;
+        let plan = Self::document_plan_batched(&model, config, &lengths, batch_windows)?;
         if documents
             .iter()
             .flatten()
@@ -196,6 +276,7 @@ impl NativeCausalLmTrainingSession {
             model,
             corpus,
             config,
+            batch_windows,
             updates: 0,
         })
     }
@@ -204,6 +285,25 @@ impl NativeCausalLmTrainingSession {
     }
     pub fn config(&self) -> CausalLmTrainingSessionConfig {
         self.config
+    }
+    pub fn batch_windows(&self) -> usize {
+        self.batch_windows
+    }
+    pub fn config_json(&self) -> CausalLmResult<String> {
+        #[derive(Serialize)]
+        struct Policy {
+            #[serde(flatten)]
+            config: CausalLmTrainingSessionConfig,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            batch_windows: Option<u32>,
+        }
+        Ok(serde_json::to_string(&Policy {
+            config: self.config,
+            batch_windows: self.declared_batch(),
+        })?)
+    }
+    fn declared_batch(&self) -> Option<u32> {
+        (self.batch_windows > 1).then_some(self.batch_windows as u32)
     }
     pub fn data_id(&self) -> &str {
         &self.corpus.id
@@ -215,7 +315,7 @@ impl NativeCausalLmTrainingSession {
         self.updates
     }
     pub fn updates_per_epoch(&self) -> u64 {
-        self.plan().windows().len() as u64
+        self.plan().windows().len().div_ceil(self.batch_windows) as u64
     }
     pub fn total_updates(&self) -> u64 {
         self.updates_per_epoch() * u64::from(self.config.epochs)
@@ -230,7 +330,7 @@ impl NativeCausalLmTrainingSession {
         if self.exhausted() {
             self.plan().windows().len()
         } else {
-            (self.updates % self.updates_per_epoch()) as usize
+            (self.updates % self.updates_per_epoch()) as usize * self.batch_windows
         }
     }
 
@@ -241,10 +341,11 @@ impl NativeCausalLmTrainingSession {
             return Ok(None);
         }
         let start = self.next_window();
-        let (ids, _) = self.corpus.batch(&self.plan().windows()[start..start + 1]);
+        let end = (start + self.batch_windows).min(self.plan().windows().len());
+        let (ids, _) = self.corpus.batch(&self.plan().windows()[start..end]);
         let gradients = self
             .model
-            .adaptation_loss_gradients(&ids, [1, self.config.context_length as usize])?;
+            .adaptation_loss_gradients(&ids, [end - start, self.config.context_length as usize])?;
         let model = self.model.step_adaptation_sgd(
             &gradients,
             self.config.mode,
@@ -254,7 +355,7 @@ impl NativeCausalLmTrainingSession {
             update: self.updates + 1,
             epoch: self.epoch(),
             window_start: start,
-            window_end: start + 1,
+            window_end: end,
             target_tokens: gradients.target_tokens(),
             loss: gradients.loss(),
             mode: self.config.mode,
@@ -270,7 +371,12 @@ impl NativeCausalLmTrainingSession {
 
     pub fn to_json(&self) -> CausalLmResult<String> {
         let checkpoint = Checkpoint {
-            schema: SCHEMA.into(),
+            schema: if self.batch_windows == 1 {
+                SCHEMA
+            } else {
+                BATCH_SCHEMA
+            }
+            .into(),
             base_model_identity: self.model.base_id.clone(),
             data_id: self.data_id().into(),
             config: self.config,
@@ -288,6 +394,7 @@ impl NativeCausalLmTrainingSession {
                 .map(|_| self.model.lora_to_json())
                 .transpose()?,
             lora_id: self.model.lora_artifact_id().map(str::to_owned),
+            batch_windows: self.declared_batch(),
         };
         let json = serde_json::to_string(&checkpoint)?;
         if json.len() > MAX_CHECKPOINT_BYTES {
@@ -321,7 +428,14 @@ impl NativeCausalLmTrainingSession {
             return Err("training session checkpoint differs from pinned identity".into());
         }
         let saved: Checkpoint = serde_json::from_slice(bytes)?;
-        if saved.schema != SCHEMA || saved.base_model_identity != base.base_id {
+        let valid_policy = match (saved.schema.as_str(), saved.batch_windows) {
+            (SCHEMA, None) => true,
+            (BATCH_SCHEMA, Some(n)) => {
+                (2..=crate::language_windows::MAX_WINDOWS).contains(&u64::from(n))
+            }
+            _ => false,
+        };
+        if !valid_policy || saved.base_model_identity != base.base_id {
             return Err("training session checkpoint schema or base mismatch".into());
         }
         if base.geometry.is_some() || base.lora.is_some() {
@@ -349,7 +463,9 @@ impl NativeCausalLmTrainingSession {
             _ => return Err("incomplete training session LoRA snapshot".into()),
         }
         model.validate_adaptation_mode(saved.config.mode)?;
-        Ok(CausalLmTrainingSessionResume { saved, model })
+        let restored = CausalLmTrainingSessionResume { saved, model };
+        restored.validate_recorded_boundary()?;
+        Ok(restored)
     }
     pub fn from_json(
         base: NativeCausalLm,

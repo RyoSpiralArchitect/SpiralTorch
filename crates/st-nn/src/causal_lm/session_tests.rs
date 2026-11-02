@@ -51,10 +51,13 @@ fn session_inference_binds_both_owners_cursor_and_recorded_corpus_without_resumi
         let model = adapted(&base, mode).with_readout_accumulator(CausalLmReadoutAccumulator::F64);
         let mut session =
             NativeCausalLmTrainingSession::new(model, documents(), session_config(mode)).unwrap();
+        let initial_lora = session.model().lora_artifact_id().map(str::to_owned);
+        let initial_geometry = session.model().geometry_artifact_id().map(str::to_owned);
         let step = session.step().unwrap().unwrap();
         let (json, pin) = session.checkpoint_with_id().unwrap();
         assert_eq!(json, session.to_json().unwrap());
         assert_eq!(pin, session.checkpoint_id().unwrap());
+        assert_eq!(pin, id(&json));
         let lora = step.post_lora_artifact_id.as_deref();
         let geom = step.post_geometry_artifact_id.as_deref();
         let restore = |base,
@@ -67,6 +70,30 @@ fn session_inference_binds_both_owners_cursor_and_recorded_corpus_without_resumi
             NativeCausalLm::from_session_checkpoint_at(base, json.as_bytes(), pin, u, data, l, g)
         };
         let data = session.data_id();
+        if mode == CausalLmAdaptationMode::Joint {
+            assert_ne!(initial_lora.as_deref(), lora);
+            assert_ne!(initial_geometry.as_deref(), geom);
+            assert!(restore(
+                base.clone(),
+                &json,
+                &pin,
+                1,
+                data,
+                initial_lora.as_deref(),
+                geom
+            )
+            .is_err());
+            assert!(restore(
+                base.clone(),
+                &json,
+                &pin,
+                1,
+                data,
+                lora,
+                initial_geometry.as_deref()
+            )
+            .is_err());
+        }
         let restored = restore(base.clone(), &json, &pin, 1, data, lora, geom).unwrap();
         assert_eq!(
             restored.readout_accumulator(),
@@ -105,6 +132,212 @@ fn session_inference_binds_both_owners_cursor_and_recorded_corpus_without_resumi
         )
         .is_err());
     }
+}
+
+#[test]
+fn corpus_free_restore_rejects_intrinsic_geometry_work_that_could_not_have_trained() {
+    let base = load();
+    let mut recipe: serde_json::Value = serde_json::from_str(geometry(&base).to_json()).unwrap();
+    recipe["placements"][0]["recipe"]["max_values"] = json!(12);
+    let geometry =
+        GeometryAdapterArtifact::create_json(&serde_json::to_vec(&recipe).unwrap()).unwrap();
+    let mut session = NativeCausalLmTrainingSession::new_batched(
+        base.with_geometry(geometry).unwrap(),
+        vec![vec![1, 2, 3, 4]],
+        session_config(CausalLmAdaptationMode::Geometry),
+        2,
+    )
+    .unwrap();
+    session.step().unwrap();
+    let (json, pin) = session.checkpoint_with_id().unwrap();
+    assert!(
+        NativeCausalLmTrainingSession::prepare_restore(base.clone(), json.as_bytes(), &pin).is_ok()
+    );
+    let saved: serde_json::Value = serde_json::from_str(&json).unwrap();
+    for (context, updates) in [(5, 1), (4, 3)] {
+        let mut fake = saved.clone();
+        fake["config"]["context_length"] = json!(context);
+        fake["updates"] = json!(updates);
+        let text = fake.to_string();
+        assert!(NativeCausalLm::from_session_checkpoint_at(
+            base.clone(),
+            text.as_bytes(),
+            &id(&text),
+            updates,
+            session.data_id(),
+            None,
+            session.model().geometry_artifact_id()
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn batched_session_updates_once_per_target_mean_and_keeps_epoch_tails() {
+    let documents = vec![vec![1, 2, 3, 4], vec![8, 7, 6, 5], vec![5, 4, 3, 2]];
+    for mode in [
+        CausalLmAdaptationMode::Lora,
+        CausalLmAdaptationMode::Geometry,
+        CausalLmAdaptationMode::Joint,
+    ] {
+        let base = load();
+        let mut manual = adapted(&base, mode);
+        let cfg = session_config(mode);
+        let mut session =
+            NativeCausalLmTrainingSession::new_batched(manual.clone(), documents.clone(), cfg, 2)
+                .unwrap();
+        assert_eq!(
+            (
+                session.batch_windows(),
+                session.updates_per_epoch(),
+                session.total_updates()
+            ),
+            (2, 2, 4)
+        );
+        for (u, (start, end)) in [(0, 2), (2, 3), (0, 2), (2, 3)].into_iter().enumerate() {
+            let ids: Vec<_> = documents[start..end].iter().flatten().copied().collect();
+            let grads = manual
+                .adaptation_loss_gradients(&ids, [end - start, 4])
+                .unwrap();
+            let separate: Vec<_> = documents[start..end]
+                .iter()
+                .map(|row| manual.adaptation_loss_gradients(row, [1, 4]).unwrap())
+                .collect();
+            let n = separate.len() as f32;
+            assert!(
+                (grads.loss() - separate.iter().map(|g| g.loss()).sum::<f32>() / n).abs() < 3e-6
+            );
+            for (path, values) in grads.parameters() {
+                for (p, g) in values {
+                    for (i, &v) in g.iter().enumerate() {
+                        let mean = separate
+                            .iter()
+                            .map(|row| row.parameters()[path][p][i])
+                            .sum::<f32>()
+                            / n;
+                        assert!(
+                            (mean - v).abs() < 3e-5,
+                            "{path}:{p}[{i}] mean={mean} actual={v}"
+                        );
+                    }
+                }
+            }
+            manual = manual
+                .step_adaptation_sgd(&grads, mode, cfg.learning_rate)
+                .unwrap();
+            let r = session.step().unwrap().unwrap();
+            assert_eq!(
+                (
+                    r.update,
+                    r.epoch,
+                    r.window_start,
+                    r.window_end,
+                    r.target_tokens
+                ),
+                (u as u64 + 1, (u / 2) as u32, start, end, 3 * (end - start))
+            );
+            assert_eq!(r.loss, grads.loss());
+            assert_eq!(
+                session.model().lora_artifact_id(),
+                manual.lora_artifact_id()
+            );
+            assert_eq!(
+                session.model().geometry_artifact_id(),
+                manual.geometry_artifact_id()
+            );
+            let (json, pin) = session.checkpoint_with_id().unwrap();
+            let saved: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                saved["schema"],
+                "spiraltorch.native_causal_lm_training_session.v2"
+            );
+            assert_eq!(saved["batch_windows"], 2);
+            let inference = NativeCausalLm::from_session_checkpoint_at(
+                base.clone(),
+                json.as_bytes(),
+                &pin,
+                r.update,
+                session.data_id(),
+                r.post_lora_artifact_id.as_deref(),
+                r.post_geometry_artifact_id.as_deref(),
+            )
+            .unwrap();
+            assert_eq!(
+                inference.logits(&[1, 2, 3], [1, 3], true).unwrap(),
+                manual.logits(&[1, 2, 3], [1, 3], true).unwrap()
+            );
+            session = NativeCausalLmTrainingSession::from_json(
+                base.clone(),
+                documents.clone(),
+                json.as_bytes(),
+                &pin,
+            )
+            .unwrap();
+            assert_eq!(session.to_json().unwrap(), json);
+        }
+        assert!(session.exhausted());
+        assert_eq!(session.next_window(), 3);
+        assert!(session.step().unwrap().is_none());
+    }
+}
+
+#[test]
+fn batch_admission_and_wire_versions_refuse_ambiguous_or_impossible_policies() {
+    let base = load();
+    let cfg = session_config(CausalLmAdaptationMode::Joint);
+    let model = adapted(&base, cfg.mode);
+    for count in [0, 1_048_577] {
+        assert!(
+            NativeCausalLmTrainingSession::new_batched(model.clone(), documents(), cfg, count)
+                .is_err()
+        );
+    }
+    let ordinary = NativeCausalLmTrainingSession::new(model.clone(), documents(), cfg).unwrap();
+    let explicit =
+        NativeCausalLmTrainingSession::new_batched(model.clone(), documents(), cfg, 1).unwrap();
+    assert_eq!(ordinary.to_json().unwrap(), explicit.to_json().unwrap());
+    assert!(!ordinary.to_json().unwrap().contains("batch_windows"));
+    assert_eq!(
+        ordinary.config_json().unwrap(),
+        serde_json::to_string(&cfg).unwrap()
+    );
+    let broad = NativeCausalLmTrainingSession::new_batched(model, documents(), cfg, 100).unwrap();
+    assert_eq!(broad.updates_per_epoch(), 1);
+    let batch: serde_json::Value = serde_json::from_str(&broad.to_json().unwrap()).unwrap();
+    for (schema, count) in [
+        ("v1", Some(json!(2))),
+        ("v1", Some(serde_json::Value::Null)),
+        ("v2", None),
+        ("v2", Some(json!(1))),
+        ("v2", Some(json!(0))),
+        ("v2", Some(json!(1_048_577))),
+    ] {
+        let mut fake = batch.clone();
+        fake["schema"] = json!(format!(
+            "spiraltorch.native_causal_lm_training_session.{schema}"
+        ));
+        fake.as_object_mut().unwrap().remove("batch_windows");
+        if let Some(n) = count {
+            fake["batch_windows"] = n;
+        }
+        let payload = fake.to_string();
+        assert!(NativeCausalLmTrainingSession::prepare_restore(
+            base.clone(),
+            payload.as_bytes(),
+            &id(&payload)
+        )
+        .is_err());
+    }
+    let mut too_far = batch;
+    too_far["updates"] = json!(3);
+    let payload = too_far.to_string();
+    assert!(NativeCausalLmTrainingSession::from_json(
+        base,
+        documents(),
+        payload.as_bytes(),
+        &id(&payload)
+    )
+    .is_err());
 }
 
 #[test]
