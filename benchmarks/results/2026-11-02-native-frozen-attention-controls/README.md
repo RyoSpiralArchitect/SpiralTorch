@@ -21,6 +21,25 @@ All 18 sections were **already inspected** in the original study. This tests a
 missing matched control, not new independent generalization, a radius-only
 effect, or generation quality. No new text is decoded.
 
+## Original outcome: stopped before scoring
+
+The first attempt hit `ENOSPC` while writing the second half of the
+seed-139 affine step log. [File-only inspection](interrupted_run.json) verifies
+four terminal checkpoints (affine and WaveGate at seeds 131 and 137) and
+2,352 complete step records in total. For seed 139 the last sealed checkpoint
+is update **256**, not 304: the next 48 reports have no corresponding persisted
+weights. The 139 WaveGate fit never started. The supervisor could not persist
+its own first-error JSON; the original worker stderr and source-file hashes
+are retained. No checkpoint was regenerated and no worker was retried.
+
+All six terminals were required before evaluation. **There is no held-out
+score or joint-versus-fixed conclusion for this attempt.** To authenticate the
+retained failure rather than launch another study:
+
+```sh
+python3.12 -I -S -B audit_interrupted.py --out "$PRIMARY" --old "$OLD" --data "$DATA" --model "$MODEL" --wheel "$WHEEL" | cmp - interrupted_run.json
+```
+
 ## Reproduce
 
 Use the parent study's retained training/evaluation inputs and exact scientific
