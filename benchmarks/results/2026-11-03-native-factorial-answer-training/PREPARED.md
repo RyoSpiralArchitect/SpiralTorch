@@ -33,3 +33,35 @@ integrity, and rejection of unknown archive members.
 This input receipt contains **no learning or quality outcome**. To run the
 registered model trial, use the frozen source commit and the manifest pin
 above. Only the original training run may create its exclusive fit attempt.
+
+### Independent endpoint read-back
+
+Only the **verifier** changed. The frozen wheel, inputs, optimizer, generation,
+grading and decision rule are unchanged. A three-document synthetic probe on
+the fixed wheel showed the earlier read-back still produced the same summary
+after changing one aggregate NLL from 2.52268 to 3.52268. This was a missing
+consistency check, not evidence of a wrong native score in a pretrained run.
+
+For each endpoint the verifier now recomputes the corpus window-plan ID,
+masked counts and adjacent equal-width microbatches. It reconciles every
+variant's aggregate token NLL against the individual answer scores, rounding
+each token-weighted batch mean to f32 before accumulating in f64 as the Rust
+evaluator does. A conservative f64 error interval handles means at a rounding
+midpoint. Perplexity is checked separately. The primary comparison still
+weights **answers** equally; this read-back does not use the token mean as a
+substitute. With original input bytes it independently recomputes the masked
+content ID; the compact archive alone verifies plan and cross-endpoint identity,
+not the private tokens. Fit and grading worker receipts must also agree with
+the common deadline and remaining CPU budget.
+
+A [synthetic rehearsal](endpoint-qualification.json) using the pinned
+development wheel exercised the start, four reloaded checkpoints and 40
+prompt-only streams. A separate geometry fixture produced four distinct
+aggregate NLLs; exchanging two columns including their perplexities was
+rejected. These checks cannot establish that logits were produced by a
+particular model without trusting the original run, nor do they predict
+which operator, if any, will win. To run the endpoint and worker regressions:
+
+```sh
+"$VENV/bin/python" -I -B test_endpoints.py -v
+```

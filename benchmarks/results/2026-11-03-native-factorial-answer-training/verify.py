@@ -11,6 +11,7 @@ import zipfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import run as st  # noqa: E402
+from endpoint_check import EndpointPlan  # noqa: E402
 d,r=st.d,st.readout
 check,read,sha=d.check,d.old.read,d.old.sha
 COMMIT="ab63b0e3f64412b72814b8c32c89aebda9891964"
@@ -139,19 +140,68 @@ def training(root,order,origin,train_rows,stats,originals,*,width=d.p.WIDTH):
     return previous,plan["data_id"]
 
 
+def verified_endpoint(loc, rows, plan, owners, *, base_id, layer, stops, vocabulary, cap, decode=None, initial=False):
+    raw=read(loc/"scores.json")["scores"]
+    plan.verify_scores(raw,len(d.ARMS))
+    check(raw["comparison"]["shared_prefix_layers"]==layer,"wrong scoring prefix")
+    ev=raw["comparison"]["evaluations"]
+    for e,ids in zip(ev,owners,strict=True):
+        check([e["lora_artifact_id"],e["geometry_artifact_id"]]==ids and e["base_model_identity"]==base_id
+              and e["readout_accumulator"]=="f32","evaluation ownership or accumulator")
+    gens=r.lines(loc/"generated.jsonl")
+    scored=r.lines(loc/"lines.jsonl")
+    n=len(rows)
+    check(n==len(plan.stats) and len(gens)==len(d.ARMS)*n,"endpoint cardinality")
+    for g,s in zip(gens,scored,strict=True):
+        ids=g["generated_ids"]
+        check(0<len(ids)<=cap and all(type(v) is int and 0<=v<vocabulary for v in ids)
+              and not stops.intersection(ids[:-1]) and g["finish_reason"]==("eos" if ids[-1] in stops else "length")
+              and (ids[-1] in stops or len(ids)==cap),"invalid prompt-only generation boundary")
+        if decode is not None:
+            check(decode(ids)==s["generated_text"],"wrong decoded generation text")
+    if initial:
+        check(all(a["scores"]==[a["scores"][0]]*len(d.ARMS) for a in raw["answers"]) and all(
+              gens[i]["generated_ids"]==gens[j*n+i]["generated_ids"] for i in range(n) for j in range(1,len(d.ARMS))),
+              "initial model behavior differs")
+    return r.describe(loc,rows), (ev[0]["data_id"],plan.plan_id), len(gens)
+
+
+def verify_fit_budget(root,prepared,attempt,end):
+    start,deadline=attempt["started_epoch"],attempt["deadline"]
+    limit=st.LIMIT
+    cpu0,wall0=prepared["cpu_seconds"],prepared["wall_seconds"]
+    check(attempt["retries"]==0 and attempt["limit_seconds"]==limit and
+          deadline==start+limit-max(cpu0,wall0)-1 and end["exit_code"]==0 and
+          start<=end["finished_epoch"]<=deadline and cpu0<=end["cpu_seconds"]<limit and
+          wall0<=end["active_wall_seconds"]<limit and math.isclose(end["finished_epoch"]-start+wall0,
+          end["active_wall_seconds"],rel_tol=0,abs_tol=.1),"invalid attempt budget")
+    prior_cpu,prior_started=cpu0,start
+    for phase in ("fit","grade"):
+        launch,worker=(read(root/(phase+"-"+k+".json")) for k in ("launch","worker"))
+        cap=launch["cpu_limit"]
+        check(type(cap) is int and type(worker["cpu_limit"]) is int and 0<cap==worker["cpu_limit"] and
+              launch["deadline"]==deadline and prior_started<=launch["started_epoch"]<=worker["started_epoch"]<deadline and
+              worker["started_epoch"]<=end["finished_epoch"] and prior_cpu<=launch["prior_cpu"]<=end["cpu_seconds"] and
+              launch["prior_cpu"]+cap<=limit, "invalid "+phase+" worker budget or chronology")
+        prior_cpu,prior_started=launch["prior_cpu"],worker["started_epoch"]
+
+
 def verify(root,originals=None,tok=None):
     m,rows=verify_inputs(root,originals,tok)
+    content=None
+    if originals is not None:
+        raw_content=(originals/"eval-content.json").read_bytes()
+        check(hashlib.sha256(raw_content).hexdigest()==m["files"]["eval-content.json"],"original evaluation content drift")
+        content=json.loads(raw_content)
+    endpoint_plan=EndpointPlan.build(m["lengths"]["eval"],d.p.CONTEXT,2,content=content)
     fit,result,end=(read(root/f) for f in ("fit.json","result.json","complete.json"))
     check(fit["manifest_sha256"]==result["manifest_sha256"]==INPUT_PIN and result["fit_sha256"]==sha(root/"fit.json")
           and end["result_sha256"]==sha(root/"result.json") and fit["receipt_sha256"]==st.fit_pins(root)
           and result["lines_sha256"]=={p:sha(root/p/"lines.jsonl") for p in POINTS},"receipt/line hashes")
     attempt=read(root/"attempt.json")
     prepared=read(root/"prepared.json")
-    check(attempt["retries"]==0 and attempt["limit_seconds"]==3600 and attempt["manifest_sha256"]==INPUT_PIN
-          and attempt["prepared_sha256"]==sha(root/"prepared.json") and end["exit_code"]==0
-          and end["finished_epoch"]<=attempt["deadline"] and 0<end["cpu_seconds"]<3600 and 0<end["active_wall_seconds"]<3600
-          and math.isclose(end["finished_epoch"]-attempt["started_epoch"]+prepared["wall_seconds"],end["active_wall_seconds"],abs_tol=.1),
-          "invalid attempt budget")
+    check(attempt["manifest_sha256"]==INPUT_PIN and attempt["prepared_sha256"]==sha(root/"prepared.json"),"wrong attempt inputs")
+    verify_fit_budget(root,prepared,attempt,end)
     origins=read(root/"owners.json")
     origin=origins["owners"]
     check(origins["arms"]==list(d.ARMS) and origins["trainable_counts"]==[4608]*4 and len(origin)==4
@@ -165,40 +215,19 @@ def verify(root,originals=None,tok=None):
             owner,data_id=training(root,point,origin,rows["train"],m["lengths"]["train"],originals)
             check(data_id not in data_ids,"repeated permutation")
             data_ids.add(data_id)
-        loc=root/point
-        raw=read(loc/"scores.json")["scores"]
-        check(raw["document_count"]==raw["scored_documents"]==len(raw["answers"])==d.EVAL and
-              raw["comparison"]["shared_prefix_layers"]==11,"wrong scoring window count")
-        for e,ids in zip(raw["comparison"]["evaluations"],owner,strict=True):
-            check([e["lora_artifact_id"],e["geometry_artifact_id"]]==ids and e["base_model_identity"]==d.old.BASE_ID
-                  and e["readout_accumulator"]=="f32" and e["config"]==dict(context_length=64,microbatch_windows=2)
-                  and e["target_tokens"]==111 and e["window_count"]==d.EVAL and e["skipped_windows"]==0,"evaluation ownership or labels")
-            plans.add((e["data_id"],e["plan_id"]))
-        for ans,(_,b,a,_) in zip(raw["answers"],m["lengths"]["eval"],strict=True):
-            check((ans["start"],ans["end"])==(a,b),"target includes delimiter/prompt or misses content")
-        gens=r.lines(loc/"generated.jsonl")
-        scored=r.lines(loc/"lines.jsonl")
-        for g,s in zip(gens,scored,strict=True):
-            ids=g["generated_ids"]
-            stops={d.NL,d.EOS}
-            check(0<len(ids)<=d.MAX_NEW and all(type(v) is int and 0<=v<=d.EOS for v in ids)
-                  and not stops.intersection(ids[:-1]) and g["finish_reason"]==("eos" if ids[-1] in stops else "length")
-                  and (ids[-1] in stops or len(ids)==d.MAX_NEW),"invalid prompt-only generation boundary")
-            if tok is not None:
-                check(tok.decode(ids,skip_special_tokens=False)==s["generated_text"],"wrong decoded generation text")
-        stream_count+=len(gens)
-        if point=="initial":
-            check(all(a["scores"]==[a["scores"][0]]*4 for a in raw["answers"]) and all(
-                  gens[i]["generated_ids"]==gens[j*d.EVAL+i]["generated_ids"] for i in range(d.EVAL) for j in range(1,4)),
-                  "initial model behavior differs")
-        descriptions[point]=r.describe(loc,rows["eval"])
+        descriptions[point],identity,n=verified_endpoint(root/point,rows["eval"],endpoint_plan,owner,
+                base_id=d.old.BASE_ID,layer=d.p.LAYER,stops={d.NL,d.EOS},vocabulary=d.EOS+1,cap=d.MAX_NEW,
+                decode=None if tok is None else lambda ids:tok.decode(ids,skip_special_tokens=False),initial=point=="initial")
+        plans.add(identity)
+        stream_count+=n
     check(len(plans)==1 and next(iter(plans))[0]==fit["eval_data_id"] and descriptions==result["endpoints"] and
           d.decision([descriptions[o] for o in d.ORDERS])==result["decision"],"changed heldout set, contrasts or decision")
     check((fit["arm_updates"],fit["restored_checkpoints"],fit["scoring_points"],fit["greedy_streams"])==
           (5760,12,4,stream_count) and stream_count==1152,"experiment count")
     return dict(arm_updates=5760,checkpoint_boundaries=12,original_checkpoints_verified=12 if originals else 0,
                 distinct_eval_records=72,endpoint_sets=4,greedy_streams=stream_count,generated_text_redecoded=tok is not None,
-                model_executions_by_verifier=0,decision=result["decision"])
+                aggregate_scores_reconciled=len(POINTS)*len(d.ARMS),eval_plan_verified=True,
+                eval_content_id_recomputed=endpoint_plan.data_id is not None,model_executions_by_verifier=0,decision=result["decision"])
 
 
 def export(root,zip_path):
