@@ -20,6 +20,8 @@ use std::collections::BTreeMap;
 
 mod elliptic;
 mod fractional;
+mod wave_factorial;
+pub use wave_factorial::{WaveFactorConfig, WaveFactorEnergies, WaveFactorObservation};
 mod optimizer;
 pub use optimizer::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
 
@@ -46,6 +48,7 @@ enum Pullback {
     Affine(Box<ChannelAffineLearningBatch>),
     Wave(Box<WaveGateLearningBatch>),
     WaveRadius(Box<WaveGateLearningBatch>),
+    WaveStage(Box<WaveGateLearningBatch>),
     Elliptic(Box<elliptic::EllipticRuntimeBatch>),
     Topos(Box<topos::ToposRuntimeBatch>),
     Fractional(Box<fractional::FractionalRuntimeBatch>),
@@ -128,6 +131,7 @@ impl NativeGeometryRuntime {
             GeometryAdapterRecipe::ChannelAffine { .. }
             | GeometryAdapterRecipe::Wave { .. }
             | GeometryAdapterRecipe::WaveRadius { .. }
+            | GeometryAdapterRecipe::WaveStage { .. }
             | GeometryAdapterRecipe::Topos { .. }
             | GeometryAdapterRecipe::Elliptic { .. }
             | GeometryAdapterRecipe::EllipticAnchored { .. } => RowLocal,
@@ -145,6 +149,7 @@ impl NativeGeometryRuntime {
     pub fn dimensions(&self, path: &str) -> Result<(usize, usize)> {
         match &self.placement(path)?.recipe {
             GeometryAdapterRecipe::ChannelAffine { features, max_values, .. } => Ok((*features, *max_values)),
+            GeometryAdapterRecipe::WaveStage { features, max_values, .. } => Ok((*features, *max_values)),
             GeometryAdapterRecipe::Wave { features, kernel, .. }
             | GeometryAdapterRecipe::WaveRadius { features, kernel, .. } => Ok((*features, kernel.max_values)),
             GeometryAdapterRecipe::Topos { features, kernel, .. } => Ok((*features, kernel.max_values)),
@@ -268,6 +273,7 @@ impl NativeGeometryRuntime {
             GeometryAdapterRecipe::ChannelAffine { strength, .. }
             | GeometryAdapterRecipe::Wave { strength, .. }
             | GeometryAdapterRecipe::WaveRadius { strength, .. }
+            | GeometryAdapterRecipe::WaveStage { strength, .. }
             | GeometryAdapterRecipe::Topos { strength, .. }
             | GeometryAdapterRecipe::Elliptic { strength, .. }
             | GeometryAdapterRecipe::EllipticAnchored { strength, .. } => strength as f32,
@@ -288,6 +294,8 @@ impl NativeGeometryRuntime {
                         features,
                     )?))
                 }
+                GeometryAdapterRecipe::WaveStage { max_values, stage, .. } => Pullback::WaveStage(Box::new(
+                    stage.forward(input, tensor(placement, "gate"), tensor(placement, "bias"), [rows, features], *max_values)?)),
                 GeometryAdapterRecipe::Topos { kernel, .. } => Pullback::Topos(Box::new(
                     topos::ToposRuntimeBatch::forward(placement, kernel, &input_tensor)?,
                 )),
@@ -343,7 +351,7 @@ impl NativeGeometryRuntime {
         let residual = match &pullback {
             Pullback::Identity => None,
             Pullback::Affine(batch) => Some(batch.output()),
-            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => Some(batch.output()),
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => Some(batch.output()),
             Pullback::Elliptic(batch) => Some(batch.output()),
             Pullback::Topos(batch) => Some(batch.output()),
             Pullback::Fractional(batch) => Some(batch.output()),
@@ -563,7 +571,7 @@ impl NativeGeometryBatch {
         let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
         let branch = match &self.pullback {
             Pullback::Affine(batch) => batch.vjp_input(&scaled)?,
-            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => batch.vjp_input(&scaled)?,
             Pullback::Topos(batch) => batch.vjp_input(&scaled)?,
             Pullback::Fractional(batch) => batch.vjp_input(&scaled)?,
             Pullback::Elliptic(batch) => batch.vjp_input(&scaled)?,
@@ -592,7 +600,7 @@ impl NativeGeometryBatch {
                 let (input, gate, bias) = batch.vjp_requested(scaled.data(), need_input)?;
                 channel_pullback(input, gate, bias, None)
             }
-            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => {
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
                 let need_radius = self.placement.tensors.iter().any(|t| {
                     t.name == "log_radius" && t.role == GeometryAdapterTensorRole::Parameter
                 });

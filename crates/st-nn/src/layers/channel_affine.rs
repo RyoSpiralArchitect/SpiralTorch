@@ -78,6 +78,10 @@ impl ChannelAffineKernel {
 }
 
 impl ChannelAffineLearningBatch {
+    pub(crate) fn input(&self) -> &Tensor {
+        &self.input
+    }
+
     pub fn output(&self) -> &Tensor {
         &self.output
     }

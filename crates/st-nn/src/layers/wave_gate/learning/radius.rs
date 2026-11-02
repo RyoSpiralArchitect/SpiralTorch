@@ -149,17 +149,37 @@ impl ProjectionRadius {
         input: &Tensor,
         gate: &Tensor,
         bias: &Tensor,
+        stages: WaveStages,
+    ) -> PureResult<Tensor> {
+        match stages {
+            WaveStages::Both => self.forward_map::<true, true>(topos, input, gate, bias),
+            WaveStages::Saturation => self.forward_map::<true, false>(topos, input, gate, bias),
+            WaveStages::Projection => self.forward_map::<false, true>(topos, input, gate, bias),
+        }
+    }
+
+    fn forward_map<const SAT: bool, const PROJECT: bool>(
+        &self,
+        topos: &OpenCartesianTopos,
+        input: &Tensor,
+        gate: &Tensor,
+        bias: &Tensor,
     ) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         let scale = f64::from((-topos.curvature()).sqrt());
-        let gate: Vec<_> = gate.data().iter().map(|&v| topos.saturate(v)).collect();
+        let rewrite = |v| if SAT { topos.saturate(v) } else { v };
+        let gate: Vec<_> = gate.data().iter().copied().map(rewrite).collect();
         let mut data = Vec::with_capacity(input.data().len());
         let mut z = Vec::with_capacity(cols);
         for row in input.data().chunks_exact(cols) {
             z.clear();
-            z.extend((0..cols).map(|c| topos.saturate(row[c] * gate[c] + bias.data()[c])));
-            let (_, tangent, _, _) = self.row(&z, scale);
-            data.extend(z.iter().map(|&v| (f64::from(v) * tangent / scale) as f32));
+            z.extend((0..cols).map(|c| rewrite(row[c] * gate[c] + bias.data()[c])));
+            if PROJECT {
+                let (_, tangent, _, _) = self.row(&z, scale);
+                data.extend(z.iter().map(|&v| (f64::from(v) * tangent / scale) as f32));
+            } else {
+                data.extend_from_slice(&z);
+            }
         }
         let output = Tensor::from_vec(rows, cols, data)?;
         topos.guard_tensor("wave_gate_radius_output", &output)?;
@@ -169,17 +189,35 @@ impl ProjectionRadius {
     fn visit_affine_adjoint(
         &self,
         topos: &OpenCartesianTopos,
+        tensors: [&Tensor; 4],
+        need_radius: bool,
+        stages: WaveStages,
+        consume: impl FnMut(usize, f64, (f32, f32), f32),
+    ) -> f64 {
+        match stages {
+            WaveStages::Both => self.visit_map::<true, true>(topos, tensors, need_radius, consume),
+            WaveStages::Saturation => self.visit_map::<true, false>(topos, tensors, false, consume),
+            WaveStages::Projection => self.visit_map::<false, true>(topos, tensors, false, consume),
+        }
+    }
+
+    fn visit_map<const SAT: bool, const PROJECT: bool>(
+        &self,
+        topos: &OpenCartesianTopos,
         [input, gate, bias, upstream]: [&Tensor; 4],
         need_radius: bool,
         mut consume: impl FnMut(usize, f64, (f32, f32), f32),
     ) -> f64 {
         let (_, cols) = input.shape();
         let scale = f64::from((-topos.curvature()).sqrt());
-        let gates: Vec<_> = gate
-            .data()
-            .iter()
-            .map(|&v| topos.saturate_with_slope(v))
-            .collect();
+        let rewrite = |x| {
+            if SAT {
+                topos.saturate_with_slope(x)
+            } else {
+                (x, 1.)
+            }
+        };
+        let gates: Vec<_> = gate.data().iter().map(|&v| rewrite(v)).collect();
         let mut dr = 0.0f64;
         // Reuse row-local storage without changing reduction order or precision.
         let mut affine = Vec::with_capacity(cols);
@@ -190,9 +228,13 @@ impl ProjectionRadius {
             .zip(upstream.data().chunks_exact(cols))
         {
             affine.clear();
-            affine.extend(
-                (0..cols).map(|c| topos.saturate_with_slope(x[c] * gates[c].0 + bias.data()[c])),
-            );
+            affine.extend((0..cols).map(|c| rewrite(x[c] * gates[c].0 + bias.data()[c])));
+            if !PROJECT {
+                for c in 0..cols {
+                    consume(c, f64::from(dy[c]) * f64::from(affine[c].1), gates[c], x[c]);
+                }
+                continue;
+            }
             z.clear();
             z.extend(affine.iter().map(|&(v, _)| v));
             let (norm, tangent, radial, log_gain) = self.row(&z, scale);
@@ -225,10 +267,11 @@ impl ProjectionRadius {
         &self,
         topos: &OpenCartesianTopos,
         tensors: [&Tensor; 4],
+        stages: WaveStages,
     ) -> PureResult<Tensor> {
         let (rows, cols) = tensors[0].shape();
         let mut dx = Vec::with_capacity(tensors[0].data().len());
-        self.visit_affine_adjoint(topos, tensors, false, |_, da, (g, _), _| {
+        self.visit_affine_adjoint(topos, tensors, false, stages, |_, da, (g, _), _| {
             dx.push((da * f64::from(g)) as f32);
         });
         let input = Tensor::from_vec(rows, cols, dx)?;
@@ -244,6 +287,7 @@ impl ProjectionRadius {
         bias: &Tensor,
         upstream: &Tensor,
         [need_input, need_radius]: [bool; 2],
+        stages: WaveStages,
     ) -> PureResult<(WaveGatePartialVjp, Option<f32>)> {
         let (rows, cols) = input.shape();
         let mut dx = need_input.then(|| Vec::with_capacity(input.data().len()));
@@ -253,6 +297,7 @@ impl ProjectionRadius {
             topos,
             [input, gate, bias, upstream],
             need_radius,
+            stages,
             |c, da, (g, dg_draw), x| {
                 if let Some(dx) = &mut dx {
                     dx.push((da * f64::from(g)) as f32);

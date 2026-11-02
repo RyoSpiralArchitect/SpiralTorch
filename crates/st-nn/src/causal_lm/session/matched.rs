@@ -112,7 +112,7 @@ impl NativeCausalLmTrainingSession {
                 hidden,
                 depth,
                 Some(s.config.mode),
-                observe_geometry,
+                observe_geometry.then(observation::AdaptationTrace::default),
             )?;
             candidates.push(s.sgd_candidate(range.clone(), gradients)?);
         }

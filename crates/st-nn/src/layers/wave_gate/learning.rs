@@ -5,6 +5,13 @@ use st_core::backend::device_caps::DeviceCaps;
 mod radius;
 use radius::ProjectionRadius;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WaveStages {
+    Both,
+    Saturation,
+    Projection,
+}
+
 /// Immutable CPU recipe for external optimizers; no training-policy rewrites.
 #[derive(Clone, Debug)]
 pub struct WaveGateKernel {
@@ -20,6 +27,7 @@ pub struct WaveGateLearningBatch {
     bias: Tensor,
     output: Tensor,
     radius: Option<ProjectionRadius>,
+    stages: WaveStages,
 }
 
 /// Local conditioning of the captured map, not a full loss-gradient estimate.
@@ -74,7 +82,7 @@ impl WaveGateKernel {
         rows: usize,
         features: usize,
     ) -> PureResult<WaveGateLearningBatch> {
-        self.forward_impl(input, gate, bias, rows, features, None)
+        self.forward_impl(input, gate, bias, rows, features, None, WaveStages::Both)
     }
 
     /// R=exp(log_radius), with fixed origin gain I/sqrt(-curvature).
@@ -96,6 +104,27 @@ impl WaveGateKernel {
             rows,
             features,
             Some(ProjectionRadius::new(log_radius)?),
+            WaveStages::Both,
+        )
+    }
+
+    pub(crate) fn forward_stage(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        bias: &[f32],
+        shape: [usize; 2],
+        log_radius: f32,
+        stages: WaveStages,
+    ) -> PureResult<WaveGateLearningBatch> {
+        self.forward_impl(
+            input,
+            gate,
+            bias,
+            shape[0],
+            shape[1],
+            Some(ProjectionRadius::new(log_radius)?),
+            stages,
         )
     }
 
@@ -108,6 +137,7 @@ impl WaveGateKernel {
         rows: usize,
         features: usize,
         radius: Option<ProjectionRadius>,
+        stages: WaveStages,
     ) -> PureResult<WaveGateLearningBatch> {
         let count = rows.checked_mul(features);
         if features == 0 || count != Some(input.len()) {
@@ -132,7 +162,7 @@ impl WaveGateKernel {
         // thread-local trainer policy. The guard also restores the caller's policy.
         let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
         let output = if let Some(radius) = radius {
-            radius.forward(&self.topos, &input, &gate, &bias)?
+            radius.forward(&self.topos, &input, &gate, &bias, stages)?
         } else {
             self.layer(&gate, &bias)?.forward(&input)?
         };
@@ -143,6 +173,7 @@ impl WaveGateKernel {
             bias,
             output,
             radius,
+            stages,
         })
     }
 
@@ -157,6 +188,10 @@ impl WaveGateKernel {
 }
 
 impl WaveGateLearningBatch {
+    pub(crate) fn input(&self) -> &Tensor {
+        &self.input
+    }
+
     pub fn output(&self) -> &Tensor {
         &self.output
     }
@@ -257,6 +292,7 @@ impl WaveGateLearningBatch {
             radius.vjp_input(
                 &self.kernel.topos,
                 [&self.input, &self.gate, &self.bias, upstream],
+                self.stages,
             )
         } else {
             self.kernel
@@ -279,7 +315,7 @@ impl WaveGateLearningBatch {
         need_input: bool,
         need_radius: bool,
     ) -> PureResult<(WaveGatePartialVjp, Option<f32>)> {
-        if need_radius && self.radius.is_none() {
+        if need_radius && (self.radius.is_none() || self.stages != WaveStages::Both) {
             return Err(TensorError::InvalidValue {
                 label: "wave_gate_snapshot_has_no_log_radius",
             });
@@ -298,6 +334,7 @@ impl WaveGateLearningBatch {
                 &self.bias,
                 &upstream,
                 [need_input, need_radius],
+                self.stages,
             )
         } else {
             self.kernel

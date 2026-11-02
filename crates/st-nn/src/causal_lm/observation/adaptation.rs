@@ -1,6 +1,7 @@
 //! Optional scalar tap of one real adaptation window. Forward measurement is not repeated on replay.
 use super::*;
 use crate::geometry_runtime::NativeGeometryBatch;
+use crate::geometry_runtime::{WaveFactorConfig, WaveFactorObservation};
 use crate::WaveGateConditioning;
 
 #[derive(Clone, Debug, Serialize)]
@@ -30,6 +31,8 @@ pub struct CausalLmAdaptationSite {
     pub log_radius_gradient: Option<f32>,
     /// None for non-Wave sites and strength-zero bypasses.
     pub wave: Option<WaveGateConditioning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave_factorial: Option<WaveFactorObservation>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -44,11 +47,18 @@ pub struct CausalLmSitePullback {
 
 #[derive(Default)]
 pub(in crate::causal_lm) struct AdaptationTrace {
+    factor_config: Option<WaveFactorConfig>,
     pub(in crate::causal_lm) forward: ResidualSums,
     sites: BTreeMap<String, CausalLmAdaptationSite>,
 }
 
 impl AdaptationTrace {
+    pub(in crate::causal_lm) fn factorial(config: WaveFactorConfig) -> Self {
+        Self {
+            factor_config: Some(config),
+            ..Self::default()
+        }
+    }
     pub(in crate::causal_lm) fn pullback(
         &mut self,
         path: &str,
@@ -108,6 +118,16 @@ impl AdaptationTrace {
             parameter_gradient_l2: BTreeMap::new(),
             log_radius_gradient: None,
             wave: batch.wave_conditioning(),
+            wave_factorial: self
+                .factor_config
+                .map(|c| {
+                    batch.wave_factorial(
+                        c,
+                        upstream,
+                        input_adjoint.ok_or("wave factorial requires the factual input adjoint")?,
+                    )
+                })
+                .transpose()?,
         };
         if self.sites.insert(path.to_owned(), site).is_some() {
             return Err("duplicate adaptation pullback observation".into());
@@ -159,7 +179,11 @@ impl AdaptationTrace {
             }
         }
         Ok(CausalLmAdaptationObservation {
-            schema: "spiraltorch.native_causal_lm_adaptation_observation.v1",
+            schema: if self.factor_config.is_some() {
+                "spiraltorch.native_causal_lm_adaptation_observation.v2"
+            } else {
+                "spiraltorch.native_causal_lm_adaptation_observation.v1"
+            },
             base_model_identity: gradients.base_model_identity().to_owned(),
             lora_artifact_id: gradients.lora_artifact_id().map(str::to_owned),
             geometry_artifact_id: gradients.geometry_artifact_id().map(str::to_owned),

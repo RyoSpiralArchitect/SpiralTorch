@@ -447,6 +447,34 @@ shows why the two ratios matter: fixed WaveGate's forward residual was about
 one sixth of affine's while its correction to the arriving gradient was about
 four fifths as large. Neither ratio is the gain of the full residual connection.
 
+To isolate the local operators on **identical** hidden input, gate, bias,
+residual strength and incoming loss gradient:
+
+```python
+factor = dict(curvature=-1., saturation=1., porosity=.05, log_radius=0.)
+obs = json.loads(model.wave_factorial_observation_json(ids, [1, len(ids)], factor, labels=labels))
+f = obs["sites"]["transformer.h.11.attn"]["wave_factorial"]
+for kind in ("affine", "saturation", "projection", "both"):
+    print(kind, f[kind]["residual_sq"], f[kind]["correction_sq"])
+```
+
+The four values are local counterfactuals, not four model losses. Only the
+factual map ran in the decoder. The local replay must reproduce its actual
+rounded output and input adjoint exactly. Pool squared energies across windows
+before taking RMS ratios. Saturation rewrites both the gate and affine value;
+projection includes the curvature-dependent origin gain and the fixed radius.
+
+Both partial maps can also be **trained or used for inference** with a native
+geometry artifact. Use recipe schema `spiraltorch.wave_stage_adapter.v1` with
+`features`, `strength`, `max_values`, and either
+`stage={"kind":"saturation","saturation":1.0,"porosity":0.05}` or
+`stage={"kind":"projection","curvature":-1.0,"log_radius":0.0}`. Both own
+ordinary gate and bias parameters only. A fixed log radius is recipe state,
+not a dummy trainable parameter. Use the existing channel-affine and Wave v2
+recipes for the other two corners. Native joint SGD, pinned checkpoint
+restoration and KV inference share these row-local maps. Optional Torch module
+reconstruction does not implement the new stage recipe.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)

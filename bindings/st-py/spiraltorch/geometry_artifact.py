@@ -91,6 +91,8 @@ def restore_stack(artifact: Any, *, expected_base_model_identity: str, device: A
     with torch.random.fork_rng(devices=[]), torch.device("cpu"):
         for placement in record["placements"]:
             recipe = placement["recipe"]
+            if recipe["schema"] not in allowed:
+                raise ValueError(f"{recipe['schema']} has no Torch module reconstruction; use NativeGeometryRuntime")
             options = {key: value for key, value in recipe.items()
                        if key not in {"schema", "kernel", "warp"}}
             options.update(recipe.get("kernel", recipe.get("warp", {})))

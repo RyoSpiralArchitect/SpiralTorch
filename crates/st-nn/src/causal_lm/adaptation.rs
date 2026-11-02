@@ -170,7 +170,52 @@ impl NativeCausalLm {
         let prepared =
             self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
         let hidden = self.embed(&prepared.input, prepared.shape)?;
-        self.adaptation_gradients_from_prefix(&prepared, hidden, 0, mode, observe_geometry)
+        self.adaptation_gradients_from_prefix(
+            &prepared,
+            hidden,
+            0,
+            mode,
+            observe_geometry.then(observation::AdaptationTrace::default),
+        )
+    }
+
+    pub fn admit_wave_factorial(
+        &self,
+        config: crate::geometry_runtime::WaveFactorConfig,
+    ) -> CausalLmResult<()> {
+        self.validate_adaptation_mode(CausalLmAdaptationMode::Joint)?;
+        let site = &self
+            .geometry_artifact()
+            .ok_or("missing factorial geometry")?
+            .record()
+            .placements[0];
+        config.admit(site)?;
+        Ok(())
+    }
+
+    /// Hold the input, gate, bias, residual strength and arriving CE gradient fixed.
+    /// Only the factual map participates in the decoder; alternatives are local VJPs.
+    pub fn wave_factorial_observation(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        config: crate::geometry_runtime::WaveFactorConfig,
+    ) -> CausalLmResult<Box<CausalLmAdaptationObservation>> {
+        self.admit_wave_factorial(config)?;
+        self.adaptation_labeled_input_count(shape, labels.is_some())?;
+        let prepared =
+            self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        self.adaptation_gradients_from_prefix(
+            &prepared,
+            hidden,
+            0,
+            Some(CausalLmAdaptationMode::Joint),
+            Some(observation::AdaptationTrace::factorial(config)),
+        )?
+        .observation
+        .ok_or_else(|| "missing wave factorial receipt".into())
     }
 
     /// Caller has admitted this owner, selected mode, complete context and
@@ -181,7 +226,7 @@ impl NativeCausalLm {
         hidden: Tensor,
         depth: usize,
         mode: Option<CausalLmAdaptationMode>,
-        observe_geometry: bool,
+        mut trace: Option<observation::AdaptationTrace>,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
         let (first, site) = match &self.lora {
             Some(a) => (a.layer(), format!("transformer.h.{}.attn", a.layer())),
@@ -198,7 +243,6 @@ impl NativeCausalLm {
             CausalLmAdaptationMode::Geometry => learning::DecoderTarget::GeometryFrom(&site),
             CausalLmAdaptationMode::Joint => learning::DecoderTarget::Joint,
         };
-        let mut trace = observe_geometry.then(observation::AdaptationTrace::default);
         let learning::TrainingReadout {
             checkpoints,
             hidden_rows,

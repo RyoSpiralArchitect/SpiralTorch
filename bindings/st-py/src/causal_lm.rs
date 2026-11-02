@@ -289,6 +289,40 @@ impl PyNativeCausalLm {
         .map_err(error)
     }
 
+    /// Four local channel maps on a single factual decoder forward and CE pullback.
+    #[pyo3(signature=(windows, shape, config, *, labels=None))]
+    fn wave_factorial_observation_json(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        config: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<String> {
+        let config = serde_json::from_value(crate::json::py_to_json_bounded(
+            config,
+            2048,
+            16,
+            3,
+            "wave factorial",
+        )?)
+        .map_err(error)?;
+        self.inner.admit_wave_factorial(config).map_err(error)?;
+        let shape = self::shape(shape)?;
+        let count = self
+            .inner
+            .adaptation_labeled_input_count(shape, labels.is_some())
+            .map_err(error)?;
+        let ids = tokens(windows, count)?;
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner
+                .wave_factorial_observation(&ids, shape, labels.as_deref(), config)
+                .and_then(|r| Ok(serde_json::to_string(&r)?))
+        })
+        .map_err(error)
+    }
+
     #[pyo3(signature=(gradients, mode, learning_rate))]
     fn step_adaptation_sgd(
         &self,
