@@ -80,13 +80,16 @@ class NativeCausalLmLoraTests(unittest.TestCase):
     def test_fresh_process_sgd_continuation_and_generation(self):
         script = r'''
 import importlib.abc, json, runpy, sys
+from pathlib import Path
 class NoForeign(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'torch', 'numpy', 'transformers', 'accelerate', 'safetensors'}:
+        if fullname.split('.')[0] in {'torch', 'numpy', 'transformers', 'peft', 'accelerate', 'safetensors'}:
             raise AssertionError('foreign ML import: ' + fullname)
 sys.meta_path.insert(0, NoForeign())
 import spiraltorch as st
 request = json.load(sys.stdin)
+if [str(Path(st.__file__).resolve()), str(Path(st._rs.__file__).resolve())] != request['origins']:
+    raise ValueError('fresh process loaded a different package or extension')
 fixture = runpy.run_path(request['fixture'])['fixture']
 config, weights = fixture()
 base = st.NativeCausalLm.from_gpt2(config, weights).with_readout_accumulator(request['readout'])
@@ -102,8 +105,9 @@ print(json.dumps({'adapter': model.lora_to_json(), 'tokens': generator.token_ids
                 once = self.step(self.initial.with_readout_accumulator(readout))
                 twice = self.step(once, [4, 3, 2, 1])
                 result = subprocess.run(
-                    [sys.executable, "-c", script],
-                    input=json.dumps({"fixture": FIXTURE, "adapter": once.lora_to_json(), "readout": readout}),
+                    [sys.executable, "-I", "-B", "-c", script],
+                    input=json.dumps({"fixture": FIXTURE, "adapter": once.lora_to_json(), "readout": readout,
+                                      "origins":[str(Path(st.__file__).resolve()), str(Path(st._rs.__file__).resolve())]}),
                     text=True, capture_output=True, check=True, timeout=60,
                 )
                 result = json.loads(result.stdout)
