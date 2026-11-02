@@ -1,86 +1,117 @@
 name: Byte Study Replay Diagnosis
-
+run-name: PR 2301 embedding coordinate - one hosted trio
 on:
   workflow_dispatch:
     inputs:
-      source_commit:
-        description: "Native source: historical failure or integrated hardening; never publishes"
-        type: choice
-        required: true
-        default: "7ad0c100e9b5beddb224182b728e648d376ac8b8"
-        options:
-          - "7ad0c100e9b5beddb224182b728e648d376ac8b8"
-          - "073254cf5dce4074a930ff29aef6e2e48aa7fce3"
-
+      harness_commit: {description: "Exact reviewed one-shot branch SHA", required: true, type: string}
 permissions:
   contents: read
-
+  actions: read
 concurrency:
-  group: byte-study-replay-${{ github.ref }}
+  group: pr2301-embedding-trio-20261103
   cancel-in-progress: false
-
 jobs:
   diagnose:
     runs-on: macos-26
-    timeout-minutes: 180
+    timeout-minutes: 30
+    defaults:
+      run: {shell: bash}
     env:
-      RUSTUP_TOOLCHAIN: "1.99.1"
+      TRIO_EXPECTED_SHA: ${{ inputs.harness_commit }}
+      SCOPE: benchmarks/results/2026-11-02-pr2301-gpu-first-failure
+      WHEEL_NAME: spiraltorch-0.4.33-cp38-abi3-macosx_11_0_arm64.whl
+      RESULT_RECIPIENT: age1e5cpxswgm00j6pfnynh2a26ac8c8mq92czgyykjm6l9k95033gcq9qzxea
     steps:
-      - uses: actions/checkout@v5
+      - name: Bind this first dispatch
+        env:
+          HOSTED_KIND: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = RyoSpiralArchitect/SpiralTorch
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/spiralreality/embedding-trio-hosted-20261103
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_SHA" = "$TRIO_EXPECTED_SHA"
+          test "$HOSTED_KIND" = github-hosted
+          umask 077
+          root="$RUNNER_TEMP/pr2301-embedding-trio"
+          mkdir -m 700 "$root" "$root/evidence" "$root/cipher"
+          printf 'TRIO_ROOT=%s\nTRIO_RUNNER_KIND=%s\n' "$root" "$HOSTED_KIND" >> "$GITHUB_ENV"
+          printf '%s\n' "$GITHUB_RUN_ID" > "$root/evidence/run-id"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.sha }}
           path: harness
           persist-credentials: false
-      - name: Validate the declared native source
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /benchmarks/results/2026-11-02-pr2301-gpu-first-failure/
+            /tools/byte_release_artifacts.py
+            /tools/byte_study_diagnostics.py
+            /tools/owned_process.py
+            /tools/byte_corpus_study.py
+            /tools/test_byte_corpus_study.py
+            /.github/diagnostics/pr2301-embedding/wheel.age
+      - name: Prepare pinned encryption tool
+        run: |
+          set -euo pipefail
+          umask 077
+          curl -fsSL --max-time 120 https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-darwin-arm64.tar.gz -o "$TRIO_ROOT/age.tgz"
+          printf '%s  %s\n' e2020b073c44f692685a24d6abc378817eb81ffaaf49fd0531ef8565f767f2f5 "$TRIO_ROOT/age.tgz" | shasum -a 256 --check
+          tar -xzf "$TRIO_ROOT/age.tgz" -C "$TRIO_ROOT"
+          test "$("$TRIO_ROOT/age/age" --version)" = v1.3.2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.10'
+      - name: Admit image, checkout and unique run before key access
+        working-directory: harness
         env:
-          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          case "$SOURCE_COMMIT" in
-            7ad0c100e9b5beddb224182b728e648d376ac8b8|073254cf5dce4074a930ff29aef6e2e48aa7fce3) ;;
-            *) echo "Source is not a declared immutable revision." >&2; exit 1 ;;
-          esac
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.source_commit }}
-          path: native-source
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.99.1"
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12.10"
-      - name: Test the non-GPU replay supervisor
+          set -euo pipefail
+          umask 077
+          python -I -S -B "$SCOPE/hosted_embedding_environment.py" "$TRIO_ROOT/evidence/admission.json"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/byte_study_replay.yml/runs" \
+            -f head_sha="$GITHUB_SHA" -f branch="${GITHUB_REF#refs/heads/}" -f event=workflow_dispatch -F per_page=2 \
+            --jq '{count:.total_count,ids:[.workflow_runs[].id]}' > "$TRIO_ROOT/evidence/roster.json"
+          python -I -S -B -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d=={"count":1,"ids":[int(os.environ["GITHUB_RUN_ID"])]} else "not a unique dispatch")' "$TRIO_ROOT/evidence/roster.json"
+          python -I -S -B -m unittest discover -s "$SCOPE" -p 'test_*.py' > "$TRIO_ROOT/evidence/cpu-tests.log" 2>&1
+      - name: Decrypt only the pinned development wheel
         working-directory: harness
-        run: python -I -S -B tools/test_run_byte_study_replay.py
-      - name: Build a private native wheel
-        working-directory: native-source
+        env:
+          WHEEL_IDENTITY: ${{ secrets.ST_EMBED_TRIO_20261103_INPUT }}
         run: |
-          git diff --exit-code HEAD --
-          test "$(rustc --version | cut -d ' ' -f 2)" = "1.99.1"
-          rustc --version --verbose
-          cargo --version --verbose
-          python -m venv "$RUNNER_TEMP/replay-env"
-          "$RUNNER_TEMP/replay-env/bin/python" -m pip install "maturin==1.15.0"
-          "$RUNNER_TEMP/replay-env/bin/maturin" build --release --locked \
-            -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/replay-wheel"
-          "$RUNNER_TEMP/replay-env/bin/python" -m pip install --no-deps \
-            --no-cache-dir "$RUNNER_TEMP/replay-wheel/"*.whl
-      - name: Run the fixed two-phase diagnosis once
+          set -euo pipefail
+          umask 077
+          packet=.github/diagnostics/pr2301-embedding/wheel.age
+          printf '%s  %s\n' 3463057cd137842d1240103d250255d76011f40b2c7fff9d02d8d2e4bef4acd7 "$packet" | shasum -a 256 --check
+          test -n "$WHEEL_IDENTITY"
+          printf '%s\n' "$WHEEL_IDENTITY" | env -u WHEEL_IDENTITY "$TRIO_ROOT/age/age" -d -i - -o "$TRIO_ROOT/$WHEEL_NAME" "$packet"
+          unset WHEEL_IDENTITY
+          printf '%s  %s\n' d37b225ca991e6782d180f044dfbb44de9fc82fb45d9b0fbf6d6b077c7540f68 "$TRIO_ROOT/$WHEEL_NAME" | shasum -a 256 --check
+      - name: Install without dependencies; execute one bounded trio
         working-directory: harness
         run: |
-          wheels=("$RUNNER_TEMP/replay-wheel/"*.whl)
-          test "${#wheels[@]}" -eq 1
-          "$RUNNER_TEMP/replay-env/bin/python" -I -B tools/run_byte_study_replay.py \
-            --source-root ../native-source \
-            --wheel "${wheels[0]}" \
-            --output "$RUNNER_TEMP/byte-study-replay" \
-            --timeout-seconds 7200
-      - name: Retain the first outcome, including incomplete runs
+          set -euo pipefail
+          umask 077
+          python -m venv "$TRIO_ROOT/venv"
+          py="$TRIO_ROOT/venv/bin/python"
+          "$py" -I -B -m pip --isolated install --no-index --no-compile --no-cache-dir --no-deps "$TRIO_ROOT/$WHEEL_NAME" > "$TRIO_ROOT/evidence/install.log" 2>&1
+          "$py" -I -B "$SCOPE/run_embedding_trio.py" "$TRIO_ROOT/$WHEEL_NAME" --hosted-fixture --execute-once "$TRIO_ROOT/evidence/trio"
+      - name: Seal completed or partial evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        run: |
+          set -euo pipefail
+          umask 077
+          test -s "$TRIO_ROOT/evidence/run-id"
+          tar -czf "$TRIO_ROOT/evidence.tgz" -C "$TRIO_ROOT" evidence
+          "$TRIO_ROOT/age/age" -e -r "$RESULT_RECIPIENT" -o "$TRIO_ROOT/cipher/evidence.tgz.age" "$TRIO_ROOT/evidence.tgz"
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: synthetic-byte-study-replay-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/byte-study-replay/
-          if-no-files-found: warn
+          name: pr2301-embedding-trio-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr2301-embedding-trio/cipher/evidence.tgz.age
+          if-no-files-found: error
           retention-days: 1
+          compression-level: 0
