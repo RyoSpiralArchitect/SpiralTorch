@@ -1,0 +1,12 @@
+{
+  "schema":"spiraltorch.native_lm.frozen_attention_control_plan.v1",
+  "parent_source":"9d917c05294a68827e59f33c71b595e128c0345c",
+  "primary_result":"3343e45654f20cc1547c4d2757dddc4acd5cd660984f6274deb2e64864f72fa8",
+  "initial_receipt":"5cbcaf4f77f9af2bae2c83878ca34c3c2672d3928159b505764762bd24d1bd85",
+  "order":["131-affine","131-wave","137-wave","137-affine","139-affine","139-wave"],
+  "training":"Six additional fits of the original pinned GPT-2 small CPU wheel. Attach the identical nonzero layer-8 attention branch and identical rank-4 alpha-8 LoRA used by the matching archived joint fit. Change only the optimizer group mask from joint to lora. The geometry still participates in forward and input differentiation. Reuse the original 512 disjoint 64-token training windows, per-seed order, f32 readout, SGD 0.01, one epoch, one window/update. Restore in a fresh process at 256. No architecture or radius selection. Stop on any geometry change, data/engine mismatch, first loss or first LoRA post-ID mismatch with the matching original joint step.",
+  "scoring":"Seal all six terminal checkpoints before scoring. Score six new frozen-geometry and six previous joint checkpoints together on all 18 original sections with the original two-window evaluator. Require each returned row's owners, fixed section content/plan, model, counters and the 108 original joint NLLs exactly. Compare scalar full reports for all six frozen controls on the first Mansfield section. Keep all 108 new frozen scores. No new decoding, reserve data or reruns.",
+  "primary":"For each matched seed compute NLL(joint WaveGate) minus NLL(fixed WaveGate + trained LoRA) on Mansfield Park. Strictly negative at all three seeds supports incremental learning on this already inspected sample only. Report the affine analogue, fixed Wave minus fixed affine, and the difference between the two joint-minus-fixed deltas per book/seed. Lower NLL is better. Do not pool books, treat order seeds as independent corpora or interpret an interaction as a pure radius effect.",
+  "scope":"Matched follow-up on previously inspected samples, not a new blind transfer test. Retained joint arms are contemporaneously rescored anchors, not new training runs. Preserve first failure and incomplete observations. No GPU, remote jobs, public-wheel changes or new datasets.",
+  "limits":{"rayon_threads":4,"workers_at_once":1,"per_process_seconds":1500,"total_seconds":7200,"retries":0}
+}
