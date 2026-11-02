@@ -25,6 +25,24 @@ the frozen base identity and readout policy; stale gradients cannot be applied
 after changing either group. The older single-group gradient methods remain
 available for single-group models. Use the adaptation methods for composition.
 
+By default the low-level call still returns gradients for **every** attached
+group. To train LoRA through an unchanged geometry, use the optional mask:
+
+```python
+g = model.adaptation_loss_gradients(window_ids, [1, len(window_ids)], mode="lora")
+next_model = model.step_adaptation_sgd(g, "lora", 0.01)
+assert next_model.geometry_artifact_id == model.geometry_artifact_id
+```
+
+Rust exposes `adaptation_loss_gradients_for(windows, shape, mode)`. Sessions
+select from this same operation automatically. A partial gradient cannot be
+used for a group it did not compute. Geometry-only stops at the first geometry
+site without differentiating LoRA; LoRA-only still applies the geometry's input
+adjoint. For standalone geometry, `batch.vjp_input(upstream)` (or Python's
+`vjp_input_buffer`) returns that adjoint alone. Channel-affine and explicit-radius
+WaveGate omit the channel/radius reductions; other recipes may internally use
+their full pullback. This is a work-elision claim, not a throughput benchmark.
+
 ## Shared document session
 
 `NativeCausalLmTrainingSession` is a fixed-order, document-safe SGD session.

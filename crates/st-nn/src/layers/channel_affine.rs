@@ -82,6 +82,16 @@ impl ChannelAffineLearningBatch {
         &self.output
     }
 
+    pub(crate) fn vjp_input(&self, upstream: &Tensor) -> PureResult<Tensor> {
+        if upstream.shape() != self.input.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: upstream.shape(),
+                right: self.input.shape(),
+            });
+        }
+        upstream.mul_row_with_backend(&self.gate, TensorUtilBackend::Cpu)
+    }
+
     /// Parameter gradients are sums, not row means, using shared tensor reductions.
     pub fn vjp(&self, upstream: &[f32]) -> PureResult<ChannelAffineVjp> {
         let (input, grad_gate, grad_bias) = self.vjp_requested(upstream, true)?;
@@ -107,9 +117,7 @@ impl ChannelAffineLearningBatch {
         }
         let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
         let upstream = Tensor::from_vec(rows, features, upstream.to_vec())?;
-        let grad_input = need_input
-            .then(|| upstream.mul_row_with_backend(&self.gate, TensorUtilBackend::Cpu))
-            .transpose()?;
+        let grad_input = need_input.then(|| self.vjp_input(&upstream)).transpose()?;
         let products = upstream.hadamard_with_backend(&self.input, TensorUtilBackend::Cpu)?;
         let grad_gate = Tensor::from_vec(
             1,

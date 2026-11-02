@@ -157,6 +157,42 @@ fn selective_updates_preserve_frozen_groups_and_seal_both_owners() {
 }
 
 #[test]
+fn selected_backward_matches_full_snapshots_and_rejects_an_uncomputed_group() {
+    use CausalLmAdaptationMode::{Geometry, Joint, Lora};
+    for p in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let m = model(0, p);
+        let ids = [1, 2, 3, 4, 4, 3, 2, 1];
+        let all = m.adaptation_loss_gradients(&ids, [2, 4]).unwrap();
+        for (mode, other) in [(Lora, Geometry), (Geometry, Lora), (Joint, Joint)] {
+            let g = m.adaptation_loss_gradients_for(&ids, [2, 4], mode).unwrap();
+            assert_eq!(
+                (g.target_tokens(), g.loss().to_bits()),
+                (all.target_tokens(), all.loss().to_bits())
+            );
+            assert_eq!(g.lora_artifact_id(), all.lora_artifact_id());
+            assert_eq!(g.geometry_artifact_id(), all.geometry_artifact_id());
+            assert_eq!(g.parameters().len(), if mode == Joint { 2 } else { 1 });
+            for (path, v) in g.parameters() {
+                assert_eq!(v, &all.parameters()[path]);
+            }
+            let same = m.step_adaptation_sgd(&all, mode, 0.1).unwrap();
+            let next = m.step_adaptation_sgd(&g, mode, 0.1).unwrap();
+            assert_eq!(next.geometry_artifact_id(), same.geometry_artifact_id());
+            assert_eq!(next.lora_artifact_id(), same.lora_artifact_id());
+            if mode != Joint {
+                assert!(m.step_adaptation_sgd(&g, other, 0.1).is_err());
+                assert!(m.step_adaptation_sgd(&g, Joint, 0.1).is_err());
+                let changed_other = m.step_adaptation_sgd(&all, other, 0.1).unwrap();
+                assert!(changed_other.step_adaptation_sgd(&g, mode, 0.1).is_err());
+            }
+        }
+    }
+}
+
+#[test]
 fn composition_admission_zero_delta_and_single_group_compatibility() {
     let base = load();
     let geo = geometry(&base, 0, 0.);

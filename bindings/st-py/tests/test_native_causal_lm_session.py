@@ -47,6 +47,28 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_masked_backward_keeps_the_other_owner_in_the_forward(self):
+        _, model = owners()
+        full = model.adaptation_loss_gradients(WINDOW, [1, 4])
+        all_groups = full.parameter_gradients()
+        for mode in ("lora", "geometry", "joint"):
+            selected = model.adaptation_loss_gradients(WINDOW, [1, 4], mode=mode)
+            self.assertEqual(selected.loss, full.loss)
+            self.assertEqual(selected.lora_artifact_id, full.lora_artifact_id)
+            self.assertEqual(selected.geometry_artifact_id, full.geometry_artifact_id)
+            actual = selected.parameter_gradients()
+            self.assertEqual(len(actual), 2 if mode == "joint" else 1)
+            self.assertEqual(actual, {k: all_groups[k] for k in actual})
+            expected = model.step_adaptation_sgd(full, mode, .2)
+            updated = model.step_adaptation_sgd(selected, mode, .2)
+            self.assertEqual((updated.lora_artifact_id, updated.geometry_artifact_id),
+                             (expected.lora_artifact_id, expected.geometry_artifact_id))
+            if mode != "joint":
+                with self.assertRaises(ValueError):
+                    model.step_adaptation_sgd(selected, "joint", .2)
+        with self.assertRaises(ValueError):
+            model.adaptation_loss_gradients(WINDOW, [1, 4], mode="both-ish")
+
     @unittest.skipUnless(sys.implementation.name == "cpython", "CPython allocation guard")
     def test_mixed_unicode_input_and_tiny_file_do_not_allocate_the_worst_case_budget(self):
         probe = Path(__file__).with_name("probe_session_input_allocations.py")

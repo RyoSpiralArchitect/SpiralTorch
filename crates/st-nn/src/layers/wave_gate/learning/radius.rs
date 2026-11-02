@@ -166,26 +166,20 @@ impl ProjectionRadius {
         Ok(output)
     }
 
-    pub fn vjp(
+    fn visit_affine_adjoint(
         &self,
         topos: &OpenCartesianTopos,
-        input: &Tensor,
-        gate: &Tensor,
-        bias: &Tensor,
-        upstream: &Tensor,
-        requested: [bool; 2],
-    ) -> PureResult<(WaveGatePartialVjp, Option<f32>)> {
-        let [need_input, need_radius] = requested;
-        let (rows, cols) = input.shape();
+        [input, gate, bias, upstream]: [&Tensor; 4],
+        need_radius: bool,
+        mut consume: impl FnMut(usize, f64, (f32, f32), f32),
+    ) -> f64 {
+        let (_, cols) = input.shape();
         let scale = f64::from((-topos.curvature()).sqrt());
         let gates: Vec<_> = gate
             .data()
             .iter()
             .map(|&v| topos.saturate_with_slope(v))
             .collect();
-        let mut dx = need_input.then(|| Vec::with_capacity(input.data().len()));
-        let mut dg = vec![0.0f64; cols];
-        let mut db = vec![0.0f64; cols];
         let mut dr = 0.0f64;
         // Reuse row-local storage without changing reduction order or precision.
         let mut affine = Vec::with_capacity(cols);
@@ -218,16 +212,55 @@ impl ProjectionRadius {
                 };
                 let dz = (tangent * (f64::from(dy[c]) - aligned) + radial * aligned) / scale;
                 let da = dz * f64::from(affine[c].1);
-                if let Some(dx) = &mut dx {
-                    dx.push((da * f64::from(gates[c].0)) as f32);
-                }
-                dg[c] += da * f64::from(x[c]) * f64::from(gates[c].1);
-                db[c] += da;
+                consume(c, da, gates[c], x[c]);
                 if need_radius {
                     dr += f64::from(dy[c]) * f64::from(z[c]) * log_gain / scale;
                 }
             }
         }
+        dr
+    }
+
+    pub(super) fn vjp_input(
+        &self,
+        topos: &OpenCartesianTopos,
+        tensors: [&Tensor; 4],
+    ) -> PureResult<Tensor> {
+        let (rows, cols) = tensors[0].shape();
+        let mut dx = Vec::with_capacity(tensors[0].data().len());
+        self.visit_affine_adjoint(topos, tensors, false, |_, da, (g, _), _| {
+            dx.push((da * f64::from(g)) as f32);
+        });
+        let input = Tensor::from_vec(rows, cols, dx)?;
+        topos.guard_tensor("wave_gate_radius_gradient", &input)?;
+        Ok(input)
+    }
+
+    pub fn vjp(
+        &self,
+        topos: &OpenCartesianTopos,
+        input: &Tensor,
+        gate: &Tensor,
+        bias: &Tensor,
+        upstream: &Tensor,
+        [need_input, need_radius]: [bool; 2],
+    ) -> PureResult<(WaveGatePartialVjp, Option<f32>)> {
+        let (rows, cols) = input.shape();
+        let mut dx = need_input.then(|| Vec::with_capacity(input.data().len()));
+        let mut dg = vec![0.0f64; cols];
+        let mut db = vec![0.0f64; cols];
+        let dr = self.visit_affine_adjoint(
+            topos,
+            [input, gate, bias, upstream],
+            need_radius,
+            |c, da, (g, dg_draw), x| {
+                if let Some(dx) = &mut dx {
+                    dx.push((da * f64::from(g)) as f32);
+                }
+                dg[c] += da * f64::from(x) * f64::from(dg_draw);
+                db[c] += da;
+            },
+        );
         let result = WaveGatePartialVjp {
             grad_input: dx.map(|dx| Tensor::from_vec(rows, cols, dx)).transpose()?,
             grad_gate: Tensor::from_vec(1, cols, dg.into_iter().map(|v| v as f32).collect())?,

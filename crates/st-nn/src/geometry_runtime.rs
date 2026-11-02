@@ -538,6 +538,32 @@ impl NativeGeometryBatch {
         Ok(self.pullback(upstream, false)?.parameters)
     }
 
+    /// Adjoint of a frozen residual branch with respect to input only. Channel
+    /// affine and explicit-radius WaveGate skip the unused parameter reductions.
+    pub fn vjp_input(&self, upstream: &[f32]) -> Result<Tensor> {
+        if !matches!(
+            &self.pullback,
+            Pullback::Identity | Pullback::Affine(_) | Pullback::Wave(_) | Pullback::WaveRadius(_)
+        ) {
+            return Ok(self.vjp(upstream)?.input);
+        }
+        let (rows, cols) = self.output.shape();
+        if upstream.len() != self.output.data().len() || upstream.iter().any(|v| !v.is_finite()) {
+            return Err("invalid native geometry upstream shape or values".into());
+        }
+        let direction = Tensor::from_vec(rows, cols, upstream.to_vec())?;
+        if matches!(&self.pullback, Pullback::Identity) {
+            return Ok(direction);
+        }
+        let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
+        let branch = match &self.pullback {
+            Pullback::Affine(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => batch.vjp_input(&scaled)?,
+            _ => unreachable!(),
+        };
+        Ok(direction.add_with_backend(&branch, TensorUtilBackend::Cpu)?)
+    }
+
     fn pullback(&self, upstream: &[f32], need_input: bool) -> Result<NativeGeometryPullback> {
         let (rows, features) = self.output.shape();
         if upstream.len() != self.output.data().len() || upstream.iter().any(|v| !v.is_finite()) {
@@ -849,6 +875,9 @@ mod tests {
         let runtime = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(record).unwrap());
         let batch = runtime.forward("site", &[f32::MAX; 3], 1).unwrap();
         assert!(batch.vjp_parameters(&[4.; 3]).is_err());
+        assert_eq!(batch.vjp_input(&[4.; 3]).unwrap().data(), &[3.8; 3]);
+        assert!(batch.vjp_input(&[]).is_err());
+        assert!(batch.vjp_input(&[f32::NAN; 3]).is_err());
     }
 
     #[test]
@@ -864,6 +893,7 @@ mod tests {
             let runtime = NativeGeometryRuntime::new(artifact(wave, radius, 0.4));
             let batch = runtime.forward("site", &x, 2).unwrap();
             let gradient = batch.vjp(&upstream).unwrap();
+            assert_eq!(batch.vjp_input(&upstream).unwrap(), gradient.input);
             assert_eq!(
                 batch.vjp_parameters(&upstream).unwrap(),
                 gradient.parameters

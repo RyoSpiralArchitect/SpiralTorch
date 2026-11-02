@@ -243,6 +243,26 @@ impl WaveGateLearningBatch {
             .map(|(vjp, radius)| (vjp.into_full(), radius.unwrap()))
     }
 
+    pub(crate) fn vjp_input(&self, upstream: &Tensor) -> PureResult<Tensor> {
+        if upstream.shape() != self.input.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: upstream.shape(),
+                right: self.input.shape(),
+            });
+        }
+        if let Some(radius) = self.radius {
+            self.kernel
+                .topos
+                .guard_tensor("wave_gate_radius_upstream", upstream)?;
+            radius.vjp_input(
+                &self.kernel.topos,
+                [&self.input, &self.gate, &self.bias, upstream],
+            )
+        } else {
+            self.vjp(upstream.data()).map(|g| g.grad_input)
+        }
+    }
+
     pub(crate) fn vjp_requested(
         &self,
         upstream: &[f32],

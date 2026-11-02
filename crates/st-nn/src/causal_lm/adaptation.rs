@@ -111,6 +111,27 @@ impl NativeCausalLm {
         windows: &[usize],
         shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.adaptation_gradients(windows, shape, None)
+    }
+
+    /// Differentiate only the selected group(s), without removing unselected
+    /// adapters from the forward or the pullback into earlier trainable weights.
+    pub fn adaptation_loss_gradients_for(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        mode: CausalLmAdaptationMode,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.validate_adaptation_mode(mode)?;
+        self.adaptation_gradients(windows, shape, Some(mode))
+    }
+
+    fn adaptation_gradients(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        mode: Option<CausalLmAdaptationMode>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
         self.adaptation_gradient_input_count(shape)?;
         let (loss, target_tokens, parameters) = match (&self.lora, &self.geometry) {
             (None, Some(_)) => {
@@ -159,8 +180,14 @@ impl NativeCausalLm {
                     &d_logits,
                     self.readout_accumulator,
                 )?;
-                // Empty first geometry site forces its input VJP, then the
-                // terminal LoRA parameter VJP stops before the frozen base.
+                let site = format!("transformer.h.{}.attn", adapter.layer());
+                let target = match mode.unwrap_or(CausalLmAdaptationMode::Joint) {
+                    CausalLmAdaptationMode::Lora => learning::DecoderTarget::Lora,
+                    CausalLmAdaptationMode::Geometry => {
+                        learning::DecoderTarget::GeometryFrom(&site)
+                    }
+                    CausalLmAdaptationMode::Joint => learning::DecoderTarget::Joint,
+                };
                 let parameters = self.decoder_parameter_pullback(
                     checkpoints,
                     hidden.shape().0,
@@ -169,14 +196,15 @@ impl NativeCausalLm {
                     None,
                     d_normalized,
                     adapter.layer(),
-                    "",
-                    true,
+                    target,
                 )?;
-                if parameters.len() != 2
-                    || !parameters.contains_key(&adapter.path())
-                    || !parameters.contains_key(&format!("transformer.h.{}.attn", adapter.layer()))
+                let want_lora = !matches!(target, learning::DecoderTarget::GeometryFrom(_));
+                let want_geometry = !matches!(target, learning::DecoderTarget::Lora);
+                if parameters.len() != usize::from(want_lora) + usize::from(want_geometry)
+                    || parameters.contains_key(&adapter.path()) != want_lora
+                    || parameters.contains_key(&site) != want_geometry
                 {
-                    return Err("incomplete composed adaptation gradients".into());
+                    return Err("incorrect selected adaptation gradient groups".into());
                 }
                 (loss, prepared.target_tokens, parameters)
             }

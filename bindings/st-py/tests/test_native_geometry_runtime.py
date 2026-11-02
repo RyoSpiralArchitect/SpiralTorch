@@ -119,7 +119,9 @@ class NativeGeometryTests(unittest.TestCase):
                         saved = st.GeometryAdapterArtifact.create_json(json.dumps(state))
                         runtime = st.NativeGeometryRuntime(saved)
                         batch = runtime.forward_sequence_buffer("site", values, (2, 2))
-                        expected = batch.vjp(list(upstream))[1]
+                        dx, expected = batch.vjp(list(upstream))
+                        self.assertEqual(batch.vjp_input(list(upstream)), dx)
+                        self.assertEqual(batch.vjp_input_buffer(upstream), array("f", dx).tobytes())
                         self.assertEqual(batch.vjp_parameters(list(upstream)), expected)
                         buffers = batch.vjp_parameters_buffer(upstream)
                         self.assertEqual(buffers, {name: array("f", v).tobytes() for name, v in expected.items()})

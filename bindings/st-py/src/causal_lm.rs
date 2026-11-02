@@ -236,22 +236,34 @@ impl PyNativeCausalLm {
         .map(|inner| Self { inner })
         .map_err(error)
     }
-    /// Shared Rust-owned gradient operation, including composed adapter snapshots.
+    /// With no mode, expose all attached gradients. Otherwise retain the full
+    /// forward function but return only the Rust-selected parameter groups.
+    #[pyo3(signature=(windows, shape, *, mode=None))]
     fn adaptation_loss_gradients(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        mode: Option<&str>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let mode = mode.map(session::mode).transpose()?;
+        if let Some(mode) = mode {
+            self.inner.validate_adaptation_mode(mode).map_err(error)?;
+        }
         let shape = self::shape(shape)?;
         let count = self
             .inner
             .adaptation_gradient_input_count(shape)
             .map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.adaptation_loss_gradients(&windows, shape))
-            .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
-            .map_err(error)
+        py.detach(|| match mode {
+            Some(mode) => self
+                .inner
+                .adaptation_loss_gradients_for(&windows, shape, mode),
+            None => self.inner.adaptation_loss_gradients(&windows, shape),
+        })
+        .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+        .map_err(error)
     }
 
     #[pyo3(signature=(gradients, mode, learning_rate))]

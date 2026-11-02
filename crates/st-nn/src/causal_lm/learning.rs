@@ -103,15 +103,26 @@ impl Dense {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum DecoderTarget<'a> {
+    GeometryFrom(&'a str),
+    Lora,
+    Joint,
+}
+
 fn geometry_pullback(
     path: String,
     batch: Option<NativeGeometryBatch>,
     upstream: Tensor,
     parameters: &mut Parameters,
-    first_site: &str,
+    target: DecoderTarget<'_>,
 ) -> CausalLmResult<Option<Tensor>> {
     if let Some(batch) = batch {
-        let (input, gradient) = if path == first_site {
+        if matches!(target, DecoderTarget::Lora) {
+            return Ok(Some(batch.vjp_input(upstream.data())?));
+        }
+        let (input, gradient) = if matches!(target, DecoderTarget::GeometryFrom(first) if path == first)
+        {
             (None, batch.vjp_parameters(upstream.data())?)
         } else {
             let gradient = batch.vjp(upstream.data())?;
@@ -368,8 +379,7 @@ impl NativeCausalLm {
             selected_rows,
             d_normalized,
             first_layer,
-            &first_site,
-            false,
+            DecoderTarget::GeometryFrom(&first_site),
         )?;
         if parameters.len()
             != self
@@ -396,8 +406,7 @@ impl NativeCausalLm {
         selected_rows: Option<&[usize]>,
         d_normalized: Tensor,
         first_layer: usize,
-        first_site: &str,
-        lora: bool,
+        target: DecoderTarget<'_>,
     ) -> CausalLmResult<Parameters> {
         let c = &self.config;
         let d_selected = selected.layer_norm_input_backward(
@@ -430,7 +439,7 @@ impl NativeCausalLm {
                 cache.block_geometry,
                 gradient,
                 &mut parameters,
-                first_site,
+                target,
             )?
             else {
                 break;
@@ -440,7 +449,7 @@ impl NativeCausalLm {
                 cache.mlp_geometry,
                 residual.clone(),
                 &mut parameters,
-                first_site,
+                target,
             )?
             else {
                 break;
@@ -461,12 +470,13 @@ impl NativeCausalLm {
                 cache.attention_geometry,
                 residual.clone(),
                 &mut parameters,
-                first_site,
+                target,
             )?
             else {
                 break;
             };
-            if lora && index == first_layer {
+            if matches!(target, DecoderTarget::Lora | DecoderTarget::Joint) && index == first_layer
+            {
                 let adapter = self.lora.as_ref().ok_or("missing native LoRA adapter")?;
                 let (a, b) = adapter.vjp_parameters(&cache.attention_input, &attention)?;
                 parameters.insert(

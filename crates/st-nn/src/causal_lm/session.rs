@@ -343,9 +343,11 @@ impl NativeCausalLmTrainingSession {
         let start = self.next_window();
         let end = (start + self.batch_windows).min(self.plan().windows().len());
         let (ids, _) = self.corpus.batch(&self.plan().windows()[start..end]);
-        let gradients = self
-            .model
-            .adaptation_loss_gradients(&ids, [end - start, self.config.context_length as usize])?;
+        let gradients = self.model.adaptation_loss_gradients_for(
+            &ids,
+            [end - start, self.config.context_length as usize],
+            self.config.mode,
+        )?;
         let model = self.model.step_adaptation_sgd(
             &gradients,
             self.config.mode,

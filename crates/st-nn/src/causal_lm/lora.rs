@@ -309,8 +309,7 @@ impl NativeCausalLm {
             None,
             d_normalized,
             adapter.record.layer,
-            "",
-            true,
+            super::learning::DecoderTarget::Lora,
         )?;
         let values = parameters
             .get(&adapter.path())
