@@ -65,8 +65,100 @@ fn geometry_checkpoint_cannot_restore_unrecorded_lora() {
         trainer.model().geometry_artifact_id()
     );
     let external = base.with_lora(0, 2, 4.).unwrap();
-    let err = NativeCausalLm::from_training_checkpoint(external, json.as_bytes(), &id).unwrap_err();
+    let err = NativeCausalLm::from_training_checkpoint(external.clone(), json.as_bytes(), &id)
+        .unwrap_err();
     assert!(err.to_string().contains("does not own LoRA"));
+    let err = NativeCausalLm::from_training_checkpoint_at(
+        external,
+        json.as_bytes(),
+        &id,
+        trainer.completed_updates(),
+        trainer.data_id(),
+        restored.geometry_artifact_id().unwrap(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("does not own LoRA"));
+}
+
+#[test]
+fn inference_boundary_binds_recorded_cursor_data_and_post_geometry_without_a_corpus() {
+    let mut trainer = create(config());
+    let step = trainer.step().unwrap().unwrap();
+    let (payload, pin) = trainer.checkpoint_with_id().unwrap();
+    let load_at = |u, data: &str, post: &str| {
+        NativeCausalLm::from_training_checkpoint_at(load(), payload.as_bytes(), &pin, u, data, post)
+    };
+    let model = load_at(
+        step.update,
+        trainer.data_id(),
+        &step.post_geometry_artifact_id,
+    )
+    .unwrap();
+    assert_eq!(
+        model.geometry_artifact().unwrap().to_json(),
+        trainer.model().geometry_artifact().unwrap().to_json()
+    );
+    assert!(load_at(
+        step.update + 1,
+        trainer.data_id(),
+        &step.post_geometry_artifact_id
+    )
+    .is_err());
+    let unrelated = format!("sha256:{}", "0".repeat(64));
+    assert!(load_at(step.update, &unrelated, &step.post_geometry_artifact_id).is_err());
+    assert!(load_at(
+        step.update,
+        trainer.data_id(),
+        &step.pre_geometry_artifact_id
+    )
+    .is_err());
+    let mut forged: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    forged["data_id"] = serde_json::json!("invalid");
+    let bytes = serde_json::to_vec(&forged).unwrap();
+    let id = format!("sha256:{:x}", Sha256::digest(&bytes));
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        &bytes,
+        &id,
+        step.update,
+        "invalid",
+        &step.post_geometry_artifact_id
+    )
+    .is_err());
+}
+
+#[test]
+fn inference_cannot_substitute_another_cursor_even_when_the_weights_are_identical() {
+    let mut trainer = create(CausalLmTrainingConfig {
+        learning_rate: 0.,
+        ..config()
+    });
+    let first = trainer.step().unwrap().unwrap();
+    let second = trainer.step().unwrap().unwrap();
+    assert_eq!(
+        first.post_geometry_artifact_id,
+        second.post_geometry_artifact_id
+    );
+    assert_eq!(trainer.optimizer().revision(), 0);
+    let (bytes, pin) = trainer.checkpoint_with_id().unwrap();
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        bytes.as_bytes(),
+        &pin,
+        first.update,
+        trainer.data_id(),
+        &first.post_geometry_artifact_id
+    )
+    .is_err());
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        bytes.as_bytes(),
+        &pin,
+        second.update,
+        trainer.data_id(),
+        &second.post_geometry_artifact_id
+    )
+    .is_ok());
 }
 
 #[test]

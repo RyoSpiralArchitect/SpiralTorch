@@ -129,6 +129,9 @@ for ordinary next-token supervision. Tokenization is external and explicit.
 It uses local `config.json` / `model.safetensors`, a pinned initial artifact and
 an explicit JSON recipe containing context/batch/accumulation/epoch/rate/decay/
 smoothing fields plus `max_gradient_norm` (a positive value or `null`).
+Source builds after 0.4.33 additionally accept optional `max_log_radius_drift`
+in the **fresh-run** recipe to enable [per-site projected AdamW](native-geometry-adamw.md#bound-wavegate-radius-drift-source-after-0433).
+On resume the optimizer restores that policy from its pinned bytes, not a new recipe.
 
 ```sh
 python -I bindings/st-py/examples/native_geometry_corpus_training.py \
@@ -185,6 +188,10 @@ supporting hard links. Receipts contain per-site measurements; keep them
 private along with the optimizer/geometry state. File pins identify bytes,
 not authors or past execution; the example does not guarantee recovery after
 power loss, and does not upload, prune or auto-select checkpoints.
+
+For [inference from the same saved pair](native-generation.md#generate-from-a-specific-observed-update-source-after-0433),
+`load_observed_model` verifies the recorded boundary without requiring or
+validating training documents. That is intentionally distinct from a data-verified resume.
 
 The [offline process-cut probe](../../bindings/st-py/tests/probe_observed_checkpoint_recovery.py)
 uses a deterministic two-block test model, not the book-study weights. Given

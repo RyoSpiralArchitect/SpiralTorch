@@ -261,8 +261,10 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
         for objective in (None, repetition):
             with self.subTest(repetition=objective is not None):
                 self._check_packaged_periodic_evaluation(objective)
+        with self.subTest(bounded_wave_radius=True):
+            self._check_packaged_periodic_evaluation(None, bounded=True)
 
-    def _check_packaged_periodic_evaluation(self, repetition):
+    def _check_packaged_periodic_evaluation(self, repetition, *, bounded=False):
         example = importlib.import_module("examples.native_geometry_corpus_training")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -281,6 +283,15 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             (model_dir / "config.json").write_text(self.config)
             base = st.NativeCausalLm.from_gpt2(self.config, st.SafeTensorArchive(model_path))
             artifact = fixtures["artifact"](base, trainable=True)
+            if bounded:
+                state = json.loads(artifact.state_json())
+                site = state["placements"][0]
+                site["recipe"] = {"schema":"spiraltorch.wave_gate_adapter.v2","features":4,"strength":.5,
+                                  "learnable_radius":True,
+                                  "kernel":{"curvature":-1.,"saturation":1.,"porosity":.05,"max_values":1024}}
+                site["tensors"].append({"name":"log_radius","shape":[],"values":[0.],
+                                        "role":"parameter","requires_grad":True})
+                artifact = st.GeometryAdapterArtifact.create_json(json.dumps(state))
             geometry = root / "geometry.json"
             geometry.write_text(artifact.to_json())
             data = root / "data.json"
@@ -292,6 +303,8 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
                 epochs=2, learning_rate=.01, weight_decay=0., label_smoothing=.2, max_gradient_norm=.1)
             if repetition is not None:
                 settings["repetition"] = repetition
+            if bounded:
+                settings["max_log_radius_drift"] = .0001
             recipe.write_text(json.dumps(settings))
             common = ["--model-dir", str(model_dir), "--data-json", str(data), "--save-every", "1"]
             fresh = ["--recipe-json", str(recipe), "--artifact", str(geometry), "--artifact-id", artifact.artifact_id]
@@ -316,6 +329,10 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
                               "--checkpoint-id", early["checkpoints"][-1]["checkpoint_id"],
                               "--output", str(root / "observed-resumed")])
             expected = (root / "plain/checkpoint-000004.json").read_bytes()
+            if bounded:
+                optimizer = json.loads(json.loads(expected)["optimizer_json"])
+                self.assertEqual(optimizer["schema"], "spiraltorch.native_geometry_adamw.v2")
+                self.assertGreater(optimizer["radius_drift"]["sites"][0]["projections"], 0)
             if repetition is not None:
                 training = [json.loads(row) for row in (root / "plain/steps.jsonl").read_text().splitlines()]
                 self.assertEqual(len(training), 4)

@@ -25,14 +25,22 @@ def main(argv=None):
     parser.add_argument("--training-checkpoint-id")
     parser.add_argument("--artifact", type=Path)
     parser.add_argument("--artifact-id")
+    parser.add_argument("--observed-run", type=Path, help="private source run with an explicitly selected observed pair")
+    parser.add_argument("--observed-update", type=int)
+    parser.add_argument("--observation-id")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--resume-id")
     parser.add_argument("--stop-after", type=int, help="absolute generated-token boundary; recipe stays sealed")
     args = parser.parse_args(argv)
     if bool(args.training_checkpoint) != bool(args.training_checkpoint_id) or bool(args.artifact) != bool(args.artifact_id):
         parser.error("every training checkpoint or geometry artifact needs its pinned identity")
-    if args.training_checkpoint and args.artifact:
-        parser.error("choose a training checkpoint OR an artifact")
+    observed = (args.observed_run is not None, args.observed_update is not None, args.observation_id is not None)
+    if any(observed) and (not all(observed) or not args.observation_id or not 0 < args.observed_update < 2**64):
+        parser.error("observed inference needs observed-run, a positive observed-update and observation-id")
+    if sum((args.training_checkpoint is not None, args.artifact is not None, all(observed))) > 1:
+        parser.error("choose one training checkpoint, geometry artifact, or observed pair")
+    if all(observed) and not hasattr(st.NativeCausalLm, "from_training_checkpoint_at"):
+        parser.error("observed inference needs a matching SpiralTorch source build after 0.4.33")
     if args.resume:
         if not args.resume_id or args.prompt_json or args.recipe_json:
             parser.error("resume needs a pinned generation ID and no replacement prompt/recipe")
@@ -50,6 +58,10 @@ def main(argv=None):
         artifact = st.GeometryAdapterArtifact.from_json(read(args.artifact, 64 * 1024 * 1024),
                                                         args.artifact_id, model.base_model_identity)
         model = model.with_geometry(artifact)
+    elif all(observed):
+        from spiraltorch.native_corpus_runs import load_observed_model
+        model = load_observed_model(args.observed_run, args.observed_update,
+                                    expected_observation_id=args.observation_id, base=model)
     if args.resume:
         generator = st.NativeCausalLmGenerator.from_json(model, read(args.resume, 1_048_576), args.resume_id)
     else:
@@ -76,6 +88,9 @@ def main(argv=None):
               "checkpoint_id": generator.checkpoint_id, "generated_tokens": len(generator.generated_ids),
               "finished": generator.finished, "finish_reason": generator.finish_reason,
               "scope": "frozen GPT-2 CPU generation; no corpus validation or quality claim"}
+    if all(observed):
+        result["observed_training_boundary"] = {"update": args.observed_update, "observation_id": args.observation_id,
+                                                "training_documents_verified": False}
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")

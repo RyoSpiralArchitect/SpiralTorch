@@ -14,7 +14,11 @@ from pathlib import Path
 import stat
 import tempfile
 
-__all__ = ["step_and_save_observation", "restore_observed_checkpoint"]
+__all__ = [
+    "step_and_save_observation",
+    "restore_observed_checkpoint",
+    "load_observed_model",
+]
 
 _SCHEMA = "spiraltorch.native_corpus.observed_checkpoint.v1"
 _OBSERVED = "spiraltorch.native_lm.observed_training_step.v1"
@@ -103,39 +107,77 @@ def step_and_save_observation(trainer, directory):
     }
 
 
-def restore_observed_checkpoint(
-    directory, update, *, expected_observation_id, base, token_documents, labels=None
-):
-    """Restore an explicitly selected, receipt-pinned pair; no terminal run summary needed."""
-    from . import NativeCausalLmTrainer
-
+def _observed_pair(directory, update, expected_observation_id, base):
     checkpoint, receipt = _paths(directory, update)
     raw = _read(receipt, _RECEIPT_LIMIT)
     if _pin(raw) != expected_observation_id:
         raise ValueError("observation receipt differs from its pin")
     record = json.loads(raw)
-    saved, observation = record["checkpoint"], record["observation"]
+    try:
+        saved, observation = record["checkpoint"], record["observation"]
+        step = observation["step"]
+        cid, data_id, post_id = (
+            saved["checkpoint_id"],
+            observation["data_id"],
+            step["post_geometry_artifact_id"],
+        )
+        schema, observed_schema = record["schema"], observation["schema"]
+        file, cursor, step_cursor, base_id = (
+            saved["file"],
+            saved["updates"],
+            step["update"],
+            observation["base_model_identity"],
+        )
+    except (KeyError, TypeError) as exc:
+        raise ValueError("invalid observation receipt structure") from exc
     if (
-        record["schema"] != _SCHEMA
-        or observation["schema"] != _OBSERVED
-        or saved["file"] != checkpoint.name
-        or saved["updates"] != update
-        or observation["step"]["update"] != update
-        or observation["base_model_identity"] != base.base_model_identity
+        schema != _SCHEMA
+        or observed_schema != _OBSERVED
+        or file != checkpoint.name
+        or type(cursor) is not int
+        or type(step_cursor) is not int
+        or cursor != update
+        or step_cursor != update
+        or base_id != base.base_model_identity
+        or not all(isinstance(v, str) for v in (cid, data_id, post_id))
     ):
         raise ValueError("observation receipt does not identify this update and base")
-    trainer = NativeCausalLmTrainer.from_json(
+    return _read(checkpoint, _CHECKPOINT_LIMIT).decode(), cid, data_id, post_id
+
+
+def load_observed_model(directory, update, *, expected_observation_id, base):
+    """Load a model for inference without reading training tokens or claiming corpus verification."""
+    from . import NativeCausalLm
+
+    raw, cid, data_id, post_id = _observed_pair(
+        directory, update, expected_observation_id, base
+    )
+    return NativeCausalLm.from_training_checkpoint_at(
         base,
-        token_documents,
-        _read(checkpoint, _CHECKPOINT_LIMIT).decode(),
-        saved["checkpoint_id"],
-        labels=labels,
+        raw,
+        cid,
+        update=update,
+        recorded_data_id=data_id,
+        post_geometry_id=post_id,
+    )
+
+
+def restore_observed_checkpoint(
+    directory, update, *, expected_observation_id, base, token_documents, labels=None
+):
+    """Restore an explicitly selected, receipt-pinned pair and verify the supplied ordered corpus."""
+    from . import NativeCausalLmTrainer
+
+    raw, cid, data_id, post_id = _observed_pair(
+        directory, update, expected_observation_id, base
+    )
+    trainer = NativeCausalLmTrainer.from_json(
+        base, token_documents, raw, cid, labels=labels
     )
     if (
         trainer.completed_updates != update
-        or trainer.data_id != observation["data_id"]
-        or trainer.model.geometry_artifact_id
-        != observation["step"]["post_geometry_artifact_id"]
+        or trainer.data_id != data_id
+        or trainer.model.geometry_artifact_id != post_id
     ):
         raise ValueError("observed step and native checkpoint do not agree")
     return trainer

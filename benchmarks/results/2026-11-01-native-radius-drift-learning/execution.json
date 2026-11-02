@@ -1,0 +1,18 @@
+{
+  "schema": "spiraltorch.native_lm.radius_drift_learning_execution.v1",
+  "protocol_source": "43ee960968e7ed2f3fec2febcd8560ddd619da2d",
+  "optimizer_source": "c54eb1144cdc939f6eca3a595742f56754495e54",
+  "plan_sha256": "51b9e3c0431e4c5eb5d704f2592a09da8b83f67e787a21c0fa1cfea8f9ef08c2",
+  "data_manifest_sha256": "8cb239f9fb2e63ea13bf3df5a0ee2ea0ee2562b2c56f56253aab07f00335968b",
+  "evaluation_sha256": "f39fc860354edc3e80fd292f86874f2739fb2a0750fbd5f2ee9d0f617bdff9ab",
+  "development_wheel_sha256": "660e67b131e5556beeedcf2dadb84df556d1b00bc945cc14d14599f0b68ef10c",
+  "native_sha256": "3c0e46e56ff063ec58ac75d23dbd0ae05e29f86994fbade2d5f7ace9c945bdaf",
+  "public_release": false,
+  "toolchain": "Rust 1.99.1, maturin 1.15.0, arm64 macOS 14, default features plus logic and kdsl",
+  "original_training_window_count": 512,
+  "targets_per_evaluation_book": 7056,
+  "study_updates_before_declaration": 0,
+  "evaluation_forward_passes_before_declaration": 0,
+  "prior_retention_probe_reused": false,
+  "private_raw_outputs_only": true
+}

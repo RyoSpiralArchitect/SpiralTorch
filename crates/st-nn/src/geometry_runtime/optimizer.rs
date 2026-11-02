@@ -6,8 +6,11 @@ use sha2::{Digest, Sha256};
 pub use st_kernel_contracts::adamw::{AdamWConfig, AdamWStep};
 use st_kernel_contracts::adamw::{AdamWSlot, AdamWState};
 pub use st_kernel_contracts::gradient_clip::GlobalNormClip;
+mod radius_drift;
+use radius_drift::RadiusDrift;
 
 const SCHEMA: &str = "spiraltorch.native_geometry_adamw.v1";
+const RADIUS_SCHEMA: &str = "spiraltorch.native_geometry_adamw.v2";
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 /// Immutable optimizer snapshot paired with one exact geometry artifact.
@@ -20,6 +23,7 @@ pub struct NativeGeometryAdamW {
     state: AdamWState,
     revision: u64,
     clip: Option<GlobalNormClip>,
+    radius_drift: Option<RadiusDrift>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,8 +37,19 @@ struct Checkpoint {
     max_gradient_norm: Option<f32>,
     revision: u64,
     slots: Vec<Slot>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_drift"
+    )]
+    radius_drift: Option<RadiusDrift>,
 }
 
+fn present_drift<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<RadiusDrift>, D::Error> {
+    RadiusDrift::deserialize(d).map(Some)
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Slot {
@@ -107,7 +122,31 @@ impl NativeGeometryAdamW {
             state: AdamWState { config, slots },
             revision: 0,
             clip,
+            radius_drift: None,
         })
+    }
+
+    /// Project only trainable WaveGate log radii onto intervals around their
+    /// individual initial values. AdamW moments and clocks still advance.
+    pub fn new_with_log_radius_drift(
+        artifact: &GeometryAdapterArtifact,
+        config: AdamWConfig,
+        clip: Option<GlobalNormClip>,
+        max_delta: f32,
+    ) -> Result<Self> {
+        let drift = RadiusDrift::new(artifact, max_delta)?;
+        let mut optimizer = Self::new(artifact, config, clip)?;
+        optimizer.radius_drift = Some(drift);
+        Ok(optimizer)
+    }
+
+    pub fn max_log_radius_drift(&self) -> Option<f32> {
+        self.radius_drift.as_ref().map(RadiusDrift::max_delta)
+    }
+
+    /// Number of individual radius candidates changed by projection, across sites.
+    pub fn log_radius_projection_count(&self) -> Option<u64> {
+        self.radius_drift.as_ref().map(RadiusDrift::projections)
     }
 
     pub fn geometry_artifact_id(&self) -> &str {
@@ -153,7 +192,12 @@ impl NativeGeometryAdamW {
     pub fn to_json(&self) -> Result<String> {
         let c = self.state.config;
         let checkpoint = Checkpoint {
-            schema: SCHEMA.into(),
+            schema: if self.radius_drift.is_some() {
+                RADIUS_SCHEMA
+            } else {
+                SCHEMA
+            }
+            .into(),
             geometry_artifact_id: self.geometry_id.clone(),
             beta1: c.beta1(),
             beta2: c.beta2(),
@@ -173,6 +217,7 @@ impl NativeGeometryAdamW {
                     steps: slot.steps,
                 })
                 .collect(),
+            radius_drift: self.radius_drift.clone(),
         };
         let json = serde_json::to_string(&checkpoint)?;
         if json.len() > MAX_BYTES {
@@ -205,7 +250,12 @@ impl NativeGeometryAdamW {
             return Err("native geometry AdamW checkpoint differs from pinned identity".into());
         }
         let record: Checkpoint = serde_json::from_slice(bytes)?;
-        if record.schema != SCHEMA || record.geometry_artifact_id != artifact.artifact_id() {
+        let schema = if record.radius_drift.is_some() {
+            RADIUS_SCHEMA
+        } else {
+            SCHEMA
+        };
+        if record.schema != schema || record.geometry_artifact_id != artifact.artifact_id() {
             return Err("native geometry AdamW checkpoint schema or artifact mismatch".into());
         }
         let config = AdamWConfig::new(record.beta1, record.beta2, record.epsilon)?;
@@ -234,11 +284,12 @@ impl NativeGeometryAdamW {
         state.validate(&shapes, record.revision)?;
         // The shared slot validator permits independently clocked tensors. This
         // owner updates all trainable tensors of a selected placement together.
-        validate_placement_clocks(
-            &result.keys,
-            &state.slots.iter().map(|s| s.steps).collect::<Vec<_>>(),
-            record.revision,
-        )?;
+        let clocks: Vec<_> = state.slots.iter().map(|s| s.steps).collect();
+        validate_placement_clocks(&result.keys, &clocks, record.revision)?;
+        if let Some(drift) = &record.radius_drift {
+            drift.validate(artifact, &result.keys, &clocks)?;
+        }
+        result.radius_drift = record.radius_drift;
         result.state = state;
         result.revision = record.revision;
         Ok(result)
@@ -285,17 +336,19 @@ impl NativeGeometryRuntime {
             .revision
             .checked_add(1)
             .ok_or("native geometry AdamW revision exhausted")?;
-        let mut squared_norm = 0f64;
-        for (path, name) in &optimizer.keys {
-            if let Some(values) = gradients.get(path) {
-                for &value in &values[name] {
-                    squared_norm += f64::from(value) * f64::from(value);
-                }
-            }
-        }
         let factors = optimizer
             .clip
-            .map(|c| c.factors(squared_norm))
+            .map(|c| {
+                let mut squared_norm = 0f64;
+                for (path, name) in &optimizer.keys {
+                    if let Some(values) = gradients.get(path) {
+                        for &value in &values[name] {
+                            squared_norm += f64::from(value) * f64::from(value);
+                        }
+                    }
+                }
+                c.factors(squared_norm)
+            })
             .transpose()?;
         let factors = factors.as_ref().map_or(&[][..], |f| f.as_slice());
         let mut record = self.artifact.record().clone();
@@ -327,6 +380,12 @@ impl NativeGeometryRuntime {
                     slot.second[i] = candidate.second;
                     slot.steps = candidate.steps;
                 }
+                if let Some(bound) = &mut next.radius_drift {
+                    if p.name == "log_radius" {
+                        // WaveRadius owns one scalar; gates and biases need no per-element branch.
+                        p.values[0] = bound.project(&placement.path, p.values[0])?;
+                    }
+                }
             }
         }
         let artifact = GeometryAdapterArtifact::create(record)?;
@@ -336,5 +395,7 @@ impl NativeGeometryRuntime {
     }
 }
 
+#[cfg(test)]
+mod radius_tests;
 #[cfg(test)]
 mod tests;

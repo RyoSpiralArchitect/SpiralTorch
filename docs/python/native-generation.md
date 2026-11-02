@@ -124,6 +124,39 @@ and optimizer clocks, but does **not** read or verify the corpus or prove traini
 completion. Use [`NativeCausalLmTrainer.from_json`](native-corpus-training.md)
 for a data-verified training resume.
 
+### Generate from a specific observed update (source after 0.4.33)
+
+An inference client does **not** need the private training corpus or a finished
+run summary to use an [observed recovery point](native-corpus-training.md#keep-an-observed-recovery-point-source-after-0433):
+
+```python
+from spiraltorch.native_corpus_runs import load_observed_model
+
+model = load_observed_model(run_directory, 64, expected_observation_id=receipt_pin, base=base)
+generator = st.NativeCausalLmGenerator(model, prompt_ids, generation_recipe_json)
+```
+
+Supply an **explicit update and pinned receipt**, never an inferred latest file.
+Rust validates the base, checkpoint and nested optimizer/geometry state, and
+cross-checks the recorded cursor, training-data ID and post-update geometry
+against the receipt. It does **not** compare actual training tokens/labels or
+assert how far training could have continued. Use `restore_observed_checkpoint`
+with the original ordered documents to resume training. As for other local
+pins, a party who can replace both bytes and expected pins is not authenticated.
+
+The example accepts `--observed-run "$RUN" --observed-update 64 --observation-id "$PIN"`
+instead of an artifact or a bare training checkpoint. The same selection can
+also restore generation with `--resume` and `--resume-id`. Its result records
+`training_documents_verified: false`; no tokens are loaded from the FT run.
+A generation checkpoint binds the base and geometry, not the history of a
+training receipt. Retain the same receipt pin across invocations if that
+lineage matters; identical weights alone cannot establish it.
+
+The [runtime qualification](../../benchmarks/results/2026-11-01-native-radius-drift-learning/runtime_checks.json)
+compares four greedy steps from one real bounded-GPT-2 intermediate snapshot,
+using both the observed pair and the bare training checkpoint. The matching
+steps test the handoff, not prose quality.
+
 ## Offline example
 
 [`native_geometry_generation.py`](../../bindings/st-py/examples/native_geometry_generation.py)
