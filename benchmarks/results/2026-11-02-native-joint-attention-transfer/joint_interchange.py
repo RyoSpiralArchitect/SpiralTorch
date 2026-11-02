@@ -6,8 +6,6 @@ import math
 import os
 from pathlib import Path
 import sys
-import time
-from datetime import datetime, timezone
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -25,7 +23,6 @@ from joint_protocol import (
 from joint_worker import load_base, paths, wheels
 from common import FORBIDDEN, digest
 from freeze_binding import bind_inputs, bind_run, match_rows
-import owned_process
 
 INTERCHANGE_SHA256 = "fa1eb9f2fb0d0eaa47f597dfe50d83dddb4ecb6d1dcec4e6f826ef5fe7fa7741"
 
@@ -195,93 +192,23 @@ def run(a):
 
 
 if __name__ == "__main__":
+    from interchange_supervisor import dispatch
+
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     paths(parser)
     parser.add_argument("--result-pin", required=True)
     parser.add_argument("--receipt", type=Path, required=True)
-    parser.add_argument("--worker-claim", help=argparse.SUPPRESS)
-    args = parser.parse_args()
-    args.attempt = args.receipt.with_name(args.receipt.name + ".attempt")
-    claim = args.attempt / "claim.json"
-    require(
-        sha(HERE / "interchange_plan.json") == INTERCHANGE_SHA256,
-        "not the predeclared crossover plan",
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--worker-claim", help=argparse.SUPPRESS)
+    actions.add_argument(
+        "--adopt-legacy",
+        action="store_true",
+        help="register the verified historical outcome without executing a worker",
     )
-    limits = read(HERE / "interchange_plan.json")["limits"]
-    if args.worker_claim:
-        require(
-            sha(claim) == args.worker_claim
-            and read(claim)["primary_result_sha256"] == args.result_pin
-            and read(claim)["worker_sha256"] == sha(Path(__file__))
-            and read(claim)["plan_sha256"] == INTERCHANGE_SHA256
-            and read(claim)["limits"] == limits
-            and os.environ["RAYON_NUM_THREADS"] == str(limits["rayon_threads"])
-            and os.environ["OMP_NUM_THREADS"]
-            == os.environ["VECLIB_MAXIMUM_THREADS"]
-            == "1",
-            "unbound crossover worker",
-        )
-        save(args.attempt / "worker-start.json", {"claim_sha256": args.worker_claim})
-        save(args.receipt, run(args))
-    else:
-        args.attempt.mkdir(mode=0o700, exist_ok=False)
-        start = time.monotonic()
-        try:
-            require(not args.receipt.exists(), "refuse existing result")
-            save(
-                claim,
-                {
-                    "primary_result_sha256": args.result_pin,
-                    "worker_sha256": sha(Path(__file__)),
-                    "plan_sha256": sha(HERE / "interchange_plan.json"),
-                    "limits": limits,
-                    "started_utc": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-            os.environ.update(
-                RAYON_NUM_THREADS=str(limits["rayon_threads"]),
-                OMP_NUM_THREADS="1",
-                VECLIB_MAXIMUM_THREADS="1",
-                HF_HUB_OFFLINE="1",
-                TRANSFORMERS_OFFLINE="1",
-            )
-            with (
-                (args.attempt / "stdout").open("xb") as out,
-                (args.attempt / "stderr").open("xb") as err,
-            ):
-                child = owned_process.run(
-                    [
-                        sys.executable,
-                        "-I",
-                        "-B",
-                        str(Path(__file__).resolve()),
-                        *sys.argv[1:],
-                        "--worker-claim",
-                        sha(claim),
-                    ],
-                    timeout=limits["per_worker_seconds"],
-                    stdout=out,
-                    stderr=err,
-                )
-            require(child.returncode == 0, "first crossover worker failed")
-            save(
-                args.attempt / "status.json",
-                {
-                    "status": "complete",
-                    "claim_sha256": sha(claim),
-                    "result_sha256": sha(args.receipt),
-                    "elapsed_seconds": time.monotonic() - start,
-                    "attempts": 1,
-                },
-            )
-        except BaseException as error:
-            save(
-                args.attempt / "first-error.json",
-                {
-                    "type": type(error).__name__,
-                    "message": str(error),
-                    "elapsed_seconds": time.monotonic() - start,
-                },
-            )
-            raise
+    actions.add_argument(
+        "--export-only",
+        action="store_true",
+        help="export an already successful attempt, never rerun it",
+    )
+    dispatch(parser.parse_args(), run)
