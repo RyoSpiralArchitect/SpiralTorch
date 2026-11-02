@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "answer_evaluation_tests.rs"]
+mod answers;
+
 fn docs() -> Vec<Vec<usize>> {
     vec![
         vec![],

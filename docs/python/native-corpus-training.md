@@ -346,6 +346,63 @@ sharing and no assumption that a zero-initialized adapter will stay inactive.
 For a twelve-layer decoder with its earliest adapted site in layer 8 (zero
 based), the shared count is eight; this is not a wall-time speedup claim.
 
+### Compare the same answers
+
+The corpus average can hide regressions on many short answers. To keep the
+ordinary scores **and** find those cases, use the opt-in answer evaluator:
+
+```python
+r = st.NativeCausalLm.evaluate_variants_by_answer(
+    [lora, frozen_wave, joint_wave], docs, 64, labels=labels, microbatch_windows=2,
+)
+change = r.contrast(reference=1, candidate=2)
+print(change["token_weighted_delta_nll"], change["answer_weighted_delta_nll"])
+print(change["improved"], change["tied"], change["regressed"])
+print(r.answer(0))  # original document index, [start, end) target positions and ordered scores
+```
+
+An answer is a maximal run of non-ignored **target IDs** in one document,
+starting at position 1 or later. Consecutive labeled intervals without a masked
+separator are one answer. Window and batch boundaries do not split an answer,
+but **context still resets** at each window. Without labels, every document
+with at least two IDs contributes one answer. Empty, singleton and all-masked
+documents count in `document_count`, not in `scored_documents`.
+
+Deltas are candidate minus reference: a **negative delta** favors the candidate.
+One weights targets equally, the other weights answers equally.
+Improved/tied/regressed compare per-answer means without a tolerance. Top-1
+hits use the supplied label and lowest-ID tie break. An all-correct answer is
+**teacher-forced**, not a generated exact match. With replacement labels the
+prefix still comes from the input IDs, not the replacements. These are descriptive counts,
+not significance tests. `r.evaluations` preserves the original v1 corpus
+receipts, including their f32 microbatch means; answer means accumulate row NLL
+in f64, so subtracting two v1 receipts need not give a bit-identical delta.
+
+Rust owns both reductions and computes the logits and each row's partition only
+once. At most `NativeCausalLmAnswerComparison.MAX_SCORE_CELLS` (65,536)
+answer/variant pairs can be retained; the aggregate-only API is unaffected.
+The result contains positions and counts, not raw token IDs, text or logits.
+
+To score **saved** native SGD arms without training or a tokenizer, use
+`bindings/st-py/examples/native_answer_comparison.py`:
+
+```bash
+python -I -B bindings/st-py/examples/native_answer_comparison.py \
+    --model-dir "$MODEL" --documents eval.json --documents-sha256 "$EVAL_HEX" \
+    --variant frozen frozen.ck "$FROZEN_PIN" frozen-boundary.json \
+    --variant joint joint.ck "$JOINT_PIN" joint-boundary.json \
+    --reference frozen --context 64 --microbatch-windows 2 --output new-scores.json
+```
+
+Use regular local checkpoint, boundary and evaluation files. The evaluation JSON
+must contain exactly `token_documents` and `labels`; supply its independently
+retained SHA-256 hex digest. Each boundary is the training example's selected
+checkpoint metadata (`completed_updates`, `checkpoint_id`, `recorded_data_id`,
+`post_lora_id`, `post_geometry_id`). The CLI checks the pins, owners, recorded
+training data ID and common update. It does not read training documents, prove
+matching training hyperparameters, or certify split independence. Only a
+complete result is linked at a new output name; existing files are not replaced.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)

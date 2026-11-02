@@ -9687,7 +9687,7 @@ if _resolve_rs_attr("CausalTargetAlignment") is not None:
     _EXPORTED.update(("CausalTargetAlignment", "encode_supervised_document"))
 for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact",
               "NativeGeometryRuntime", "NativeGeometryBatch", "NativeGeometryAdamW", "SafeTensorArchive",
-              "NdTensor", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmGradients",
+              "NdTensor", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",
               "NativeCausalLmLoraGradients", "NativeCausalLmAccumulator", "NativeCausalLmAdaptationGradients",
               "NativeCausalLmTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
               "NativeCausalLmTrainingStep", "NativeCausalLmObservedTrainingStep", "NativeCausalLmGenerator",

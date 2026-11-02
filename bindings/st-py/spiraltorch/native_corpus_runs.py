@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import stat
 
+from .native_session_io import read_limited as _read
+
 __all__ = [
     "step_and_save_observation",
     "restore_observed_checkpoint",
@@ -40,20 +42,6 @@ def _paths(directory, update):
         root / f"checkpoint-{update:06d}.json",
         root / f"observation-{update:06d}.json",
     )
-
-
-def _read(path, limit):
-    if not stat.S_ISREG(path.lstat().st_mode):
-        raise ValueError("expected a regular file, not a link")
-    flags = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    with open(path, "rb", opener=lambda p, f: os.open(p, f | flags)) as stream:
-        info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= limit:
-            raise ValueError("expected a regular file within the native recovery budget")
-        raw = stream.read(info.st_size)
-        if len(raw) != info.st_size or stream.read(1):
-            raise ValueError("file size changed during native recovery")
-        return raw
 
 
 def step_and_save_observation(trainer, directory):

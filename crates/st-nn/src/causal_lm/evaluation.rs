@@ -6,6 +6,12 @@ use crate::language_windows::{
 };
 use sha2::{Digest, Sha256};
 
+mod answers;
+pub use answers::{
+    CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmScoredAnswer,
+    MAX_ANSWER_SCORE_CELLS,
+};
+
 pub const MAX_EVALUATION_TOKENS: usize = 16_777_216;
 pub const MAX_EVALUATION_VARIANTS: usize = 16;
 
@@ -58,6 +64,16 @@ pub struct CausalLmEvaluationComparison {
     pub schema: &'static str,
     pub shared_prefix_layers: usize,
     pub evaluations: Vec<CausalLmEvaluation>,
+}
+
+impl CausalLmEvaluationComparison {
+    fn new(shared_prefix_layers: usize, evaluations: Vec<CausalLmEvaluation>) -> Self {
+        Self {
+            schema: "spiraltorch.native_causal_lm_evaluation_comparison.v1",
+            shared_prefix_layers,
+            evaluations,
+        }
+    }
 }
 
 impl NativeCausalLm {
@@ -159,13 +175,18 @@ impl NativeCausalLm {
         config: CausalLmEvaluationConfig,
     ) -> CausalLmResult<CausalLmEvaluationComparison> {
         let shared_prefix_layers = Self::comparison_prefix_layers(models)?;
-        let evaluations =
-            models[0].evaluate_corpus(models, shared_prefix_layers, documents, labels, config)?;
-        Ok(CausalLmEvaluationComparison {
-            schema: "spiraltorch.native_causal_lm_evaluation_comparison.v1",
+        let evaluations = models[0].evaluate_corpus(
+            models,
+            shared_prefix_layers,
+            documents,
+            labels,
+            config,
+            None,
+        )?;
+        Ok(CausalLmEvaluationComparison::new(
             shared_prefix_layers,
             evaluations,
-        })
+        ))
     }
 
     /// Score each document's positions 1..len once, including short tails.
@@ -178,7 +199,7 @@ impl NativeCausalLm {
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
     ) -> CausalLmResult<CausalLmEvaluation> {
-        self.evaluate_corpus(&[self], 0, documents, labels, config)?
+        self.evaluate_corpus(&[self], 0, documents, labels, config, None)?
             .pop()
             .ok_or_else(|| "missing evaluation result".into())
     }
@@ -190,6 +211,7 @@ impl NativeCausalLm {
         documents: &[Vec<usize>],
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
+        mut answers: Option<&mut answers::AnswerCollector>,
     ) -> CausalLmResult<Vec<CausalLmEvaluation>> {
         if documents.len() > MAX_DOCUMENTS {
             return Err("document count exceeds budget".into());
@@ -230,6 +252,9 @@ impl NativeCausalLm {
         if target_tokens == 0 {
             return Err("evaluation has no selected targets".into());
         }
+        if let Some(detail) = answers.as_deref_mut() {
+            detail.prepare(&lengths, labels, models.len())?;
+        }
         // A fixed owner's readout size is monotonic in selected rows, including masked tails.
         let maximum_active = groups(windows, config.microbatch_windows)
             .map(|g| selected[g].iter().sum::<usize>())
@@ -261,6 +286,9 @@ impl NativeCausalLm {
             if targets == 0 {
                 continue;
             }
+            if let Some(detail) = answers.as_deref_mut() {
+                detail.begin_batch(targets)?;
+            }
             let width = windows[group.start].length as usize;
             let mut ids = Vec::with_capacity(group.len() * width);
             let mut batch_labels = labels.map(|_| Vec::with_capacity(group.len() * width));
@@ -283,14 +311,22 @@ impl NativeCausalLm {
                 0..shared,
             )?;
             // Transfer ownership to the last suffix, including the ordinary single-model path.
-            for ((model, total), start) in models
+            for (index, ((model, total), start)) in models
                 .iter()
                 .zip(&mut totals)
                 .zip(std::iter::repeat_n(prefix, models.len()))
+                .enumerate()
             {
                 let hidden =
                     model.forward_blocks(start, prepared.shape, shared..model.config.layers)?;
-                let (_, loss) = model.causal_readout(hidden, &prepared)?;
+                let loss = match answers.as_deref_mut() {
+                    Some(detail) => detail.score(
+                        index,
+                        model.causal_logits(hidden, &prepared)?,
+                        &prepared.labels,
+                    )?,
+                    None => model.causal_readout(hidden, &prepared)?.1,
+                };
                 if !loss.is_finite() {
                     return Err("evaluation produced non-finite NLL".into());
                 }

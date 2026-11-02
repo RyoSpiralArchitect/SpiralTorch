@@ -74,6 +74,11 @@ class SupervisionTests(unittest.TestCase):
         scored = st.NativeCausalLm.evaluate_variants([s.model for s in arms], [ids], 6, labels=[labels])
         self.assertEqual([v.to_json() for v in scored.evaluations],
                          [s.model.evaluate_documents([ids], 6, labels=[labels]).to_json() for s in scalar])
+        by_answer = st.NativeCausalLm.evaluate_variants_by_answer([s.model for s in arms], [ids], 6, labels=[labels])
+        self.assertEqual(json.loads(by_answer.to_json())["comparison"], json.loads(scored.to_json()))
+        self.assertEqual([(r["start"], r["end"]) for r in map(by_answer.answer, range(len(by_answer)))], [(4,7),(9,11)])
+        effect = by_answer.contrast(1,2)  # fixed and trainable WaveGate on the same gold answers
+        self.assertEqual((effect["answer_count"],effect["target_tokens"]), (2,5))
 
     def test_matched_binding_refuses_aliases_bad_rosters_and_mixed_cursors(self):
         base, model = FIXTURES["owners"]()

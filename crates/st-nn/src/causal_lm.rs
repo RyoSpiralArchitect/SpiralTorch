@@ -28,8 +28,9 @@ mod training;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use context::NativeCausalLmContext;
 pub use evaluation::{
-    CausalLmEvaluation, CausalLmEvaluationComparison, CausalLmEvaluationConfig,
-    MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
+    CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
+    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmScoredAnswer,
+    MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
 };
 pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,

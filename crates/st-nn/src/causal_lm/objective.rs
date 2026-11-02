@@ -184,6 +184,18 @@ impl NativeCausalLm {
         hidden: Tensor,
         prepared: &PreparedCausalWindow,
     ) -> CausalLmResult<(Tensor, f32)> {
+        let logits = self.causal_logits(hidden, prepared)?;
+        let loss = logits
+            .cross_entropy_with_logits(&prepared.labels, prepared.objective.kernel_config())?
+            .data()[0];
+        Ok((logits, loss))
+    }
+
+    pub(super) fn causal_logits(
+        &self,
+        hidden: Tensor,
+        prepared: &PreparedCausalWindow,
+    ) -> CausalLmResult<Tensor> {
         let selected = match &prepared.selected_rows {
             Some(rows) => hidden.gather_rows(rows)?,
             None => hidden,
@@ -191,10 +203,6 @@ impl NativeCausalLm {
         let normalized = self
             .final_norm
             .forward(&selected, self.config.norm_epsilon)?;
-        let logits = self.project_readout(&normalized)?;
-        let loss = logits
-            .cross_entropy_with_logits(&prepared.labels, prepared.objective.kernel_config())?
-            .data()[0];
-        Ok((logits, loss))
+        self.project_readout(&normalized)
     }
 }

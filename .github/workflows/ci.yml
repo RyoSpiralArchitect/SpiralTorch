@@ -729,6 +729,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
           python -I -B bindings/st-py/tests/test_native_causal_supervision.py -v
+          python -I -B bindings/st-py/tests/test_native_answer_comparison.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_training.py -v

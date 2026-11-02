@@ -31,7 +31,8 @@ pub use autograd::{
 };
 pub use backend::faer_dense;
 pub use classification::{
-    class_indices_from_tensor, CrossEntropyConfig, LossReduction, UnlikelihoodPosition,
+    class_indices_from_tensor, ClassScoreGroup, CrossEntropyConfig, LossReduction,
+    UnlikelihoodPosition,
 };
 pub use ensemble::mean_tensors_scaled;
 pub use execution::{

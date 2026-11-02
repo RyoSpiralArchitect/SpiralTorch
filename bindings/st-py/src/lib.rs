@@ -541,6 +541,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "NativeCausalLm",
         "NativeCausalLmEvaluation",
         "NativeCausalLmEvaluationComparison",
+        "NativeCausalLmAnswerComparison",
         "NativeCausalLmGradients",
         "NativeCausalLmLoraGradients",
         "NativeCausalLmAccumulator",

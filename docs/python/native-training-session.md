@@ -216,10 +216,14 @@ arms = [control, control.fork_variant(both, "lora"), control.fork_variant(both, 
 while (update := Session.step_matched(arms)) is not None:
     shared_layers, reports = update  # reports follow input order
 
-scores = st.NativeCausalLm.evaluate_variants(
+scores = st.NativeCausalLm.evaluate_variants_by_answer(
     [arm.model for arm in arms], eval_docs, 32, labels=eval_labels,
 )
+wave_learning = scores.contrast(reference=1, candidate=2)
 ```
+
+See [paired answer scores](native-corpus-training.md#compare-the-same-answers)
+for target- versus answer-weighted deltas and scoring pinned arms from disk.
 
 `fork_variant` is only for an unadvanced session. It shares immutable corpus
 storage and the window schedule, while checking the new model's own shape and
