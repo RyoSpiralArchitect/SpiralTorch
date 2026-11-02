@@ -166,7 +166,8 @@ review addition authenticates the original run without retraining or rescoring.
 To reproduce the secondary run in an independent primary run directory, invoke
 `joint_interchange.py` using the isolated study interpreter and the common
 `--old --data --out --model --wheel` arguments above. Supply the published
-primary hash as `--result-pin` and a fresh private `--receipt` path. Within
+primary hash as `--result-pin` and a fresh private `--receipt` filename in an
+existing directory **outside** the primary run, not a symlink. Within
 that primary run directory there is one numerical attempt per primary-result
 and crossover-plan hash pair, regardless of the export filename. A timed-out
 or failed worker's staged result is not exportable. A successful supervisor

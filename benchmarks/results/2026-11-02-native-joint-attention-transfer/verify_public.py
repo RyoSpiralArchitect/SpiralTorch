@@ -323,14 +323,39 @@ def check_attempt(x, receipt):
 
 def raw_score_hashes(attempt, x):
     ids = read(HERE / "input_binding.json")["sections"]
+    public = read(HERE / "score_roster.json")
+    check(read(HERE / "results.json"), public)
     files = {p.stem: p for p in (attempt / "native-scores").glob("*.json")}
     require(set(files) == set(ids), "raw native section roster")
     for key, p in files.items():
         book, section = key.rsplit("-", 1)
         raw = read(p)
+        common = public["groups"][key]["common"]
         require(
-            raw["shared_prefix_layers"] == 8
-            and returned(
+            set(raw) == {"schema", "shared_prefix_layers", "evaluations"}
+            and raw["schema"] == "spiraltorch.native_causal_lm_evaluation_comparison.v1"
+            and type(raw["shared_prefix_layers"]) is int
+            and raw["shared_prefix_layers"] == 8
+            and isinstance(raw["evaluations"], list),
+            "invalid native report envelope",
+        )
+        for row in raw["evaluations"]:
+            require(
+                set(row)
+                == set(common)
+                | {"nll", "perplexity", "lora_artifact_id", "geometry_artifact_id"}
+                and wire({k: row[k] for k in common}) == wire(common)
+                and type(row["nll"]) is float
+                and math.isfinite(row["nll"])
+                and type(row["perplexity"]) is float
+                and math.isfinite(row["perplexity"])
+                and math.isclose(
+                    row["perplexity"], math.exp(row["nll"]), rel_tol=1e-14
+                ),
+                "incomplete or inconsistent native report row",
+            )
+        require(
+            returned(
                 x["returned_order"],
                 x["owners_lora_then_geometry"],
                 ids[key],

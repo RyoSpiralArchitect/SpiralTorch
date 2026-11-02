@@ -41,9 +41,18 @@ def identify(a):
     )
     a.attempt = attempt_path(a.out, a.result_pin)
     require(
-        not a.receipt.resolve().is_relative_to(a.attempt.parent),
-        "export must be outside the claim registry",
+        not (a.attempt.parent.is_symlink() or a.attempt.is_symlink()),
+        "claim registry must stay inside its private primary run",
     )
+    # Compare directory identities, not spelling: APFS may fold case or Unicode.
+    parent = a.receipt.parent.resolve(strict=True)
+    require(parent.is_dir() and not a.receipt.is_symlink(), "invalid export path")
+    require(
+        not any(p.samefile(a.out) for p in (parent, *parent.parents))
+        and not (a.receipt.exists() and a.receipt.samefile(a.out)),
+        "export must be outside the private primary run",
+    )
+    a.receipt = parent / a.receipt.name
 
 
 def admissible_result(attempt, primary):

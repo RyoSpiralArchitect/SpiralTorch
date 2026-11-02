@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 import unittest
 import os
+import math
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -25,7 +26,73 @@ def primary_args(root, result=None):
     return args
 
 
+def replay_reports(a, pin, _seconds, edit=None):
+    x = read(HERE / "interchange_results.json")
+    save(a.attempt / "worker-start.json", {"claim_sha256": pin})
+    save(a.attempt / "candidate.json", x)
+    reports = a.attempt / "native-scores"
+    reports.mkdir()
+    for section, group in read(HERE / "score_roster.json")["groups"].items():
+        book, i = section.rsplit("-", 1)
+        rows = []
+        for name in x["returned_order"]:
+            lora, geometry = x["owners_lora_then_geometry"][name]
+            nll = x["section_nll"][book][i][name]
+            rows.append(
+                {
+                    **group["common"],
+                    "lora_artifact_id": lora,
+                    "geometry_artifact_id": geometry,
+                    "nll": nll,
+                    "perplexity": math.exp(nll),
+                }
+            )
+        report = {
+            "schema": "spiraltorch.native_causal_lm_evaluation_comparison.v1",
+            "shared_prefix_layers": 8,
+            "evaluations": rows,
+        }
+        if edit is not None:
+            edit(report)
+        save(reports / (section + ".json"), report)
+
+
 class Bindings(unittest.TestCase):
+    def test_receipt_cannot_alias_private_staging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = primary_args(root)
+            alt = root / "different-parent"
+            alt.symlink_to(a.out, target_is_directory=True)
+            alias = a.out / ".INTERCHANGE-CLAIMS" / a.attempt.name / "candidate.json"
+            for path in (alias, alt / "candidate.json"):
+                a.receipt = path
+                with (
+                    self.subTest(path=path),
+                    self.assertRaises((ValueError, FileNotFoundError)),
+                ):
+                    identify(a)
+            a.attempt.mkdir(parents=True)
+            a.receipt = alias
+            with self.assertRaises((ValueError, FileNotFoundError)):
+                identify(a)
+            a.receipt = root / "export.json"
+            a.receipt.symlink_to(a.attempt / "candidate.json")
+            with self.assertRaises(ValueError):
+                identify(a)
+            self.assertFalse((a.attempt / "worker-start.json").exists())
+
+    def test_registry_cannot_be_relocated_under_an_external_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = primary_args(root)
+            destination = root / "elsewhere"
+            destination.mkdir()
+            a.attempt.parent.symlink_to(destination, target_is_directory=True)
+            a.receipt = destination / a.attempt.name / "candidate.json"
+            with self.assertRaisesRegex(ValueError, "claim registry"):
+                identify(a)
+
     def test_failed_secondary_worker_retains_its_only_attempt(self):
         with tempfile.TemporaryDirectory() as tmp:
             a = primary_args(Path(tmp))
@@ -89,38 +156,11 @@ class Bindings(unittest.TestCase):
             self.assertFalse(a.receipt.exists())
 
     def test_success_requires_raw_sections_then_exports_without_a_second_worker(self):
-        primary, x = (
-            read(HERE / "results.json"),
-            read(HERE / "interchange_results.json"),
-        )
-
-        def replay_files(a, pin, _seconds):
-            save(a.attempt / "worker-start.json", {"claim_sha256": pin})
-            save(a.attempt / "candidate.json", x)
-            reports = a.attempt / "native-scores"
-            reports.mkdir()
-            ids = read(HERE / "input_binding.json")["sections"]
-            for section, identity in ids.items():
-                book, i = section.rsplit("-", 1)
-                rows = []
-                for name in x["returned_order"]:
-                    lora, geometry = x["owners_lora_then_geometry"][name]
-                    rows.append(
-                        {
-                            **identity,
-                            "lora_artifact_id": lora,
-                            "geometry_artifact_id": geometry,
-                            "nll": x["section_nll"][book][i][name],
-                        }
-                    )
-                save(
-                    reports / (section + ".json"),
-                    {"shared_prefix_layers": 8, "evaluations": rows},
-                )
+        primary = read(HERE / "results.json")
 
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ):
             a = primary_args(Path(tmp), primary)
-            supervise(a, launch=replay_files)
+            supervise(a, launch=replay_reports)
             self.assertEqual(read(a.attempt / "status.json")["attempts"], 1)
             first = a.receipt
             self.assertEqual(
@@ -141,6 +181,25 @@ class Bindings(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "raw native section roster"):
                 publish(a)
             self.assertFalse(a.receipt.exists())
+
+    def test_partial_or_inaccurate_native_report_cannot_be_sealed(self):
+        for edit in (
+            lambda r: r.pop("schema"),
+            lambda r: r["evaluations"][0].pop("config"),
+            lambda r: r["evaluations"][0].update(target_tokens=755),
+            lambda r: r["evaluations"][0].update(perplexity=1.0),
+        ):
+            with (
+                self.subTest(edit=edit),
+                tempfile.TemporaryDirectory() as tmp,
+                patch.dict(os.environ),
+            ):
+                a = primary_args(Path(tmp), read(HERE / "results.json"))
+                with self.assertRaisesRegex(ValueError, "native report"):
+                    supervise(a, launch=lambda *args: replay_reports(*args, edit=edit))
+                self.assertFalse(
+                    a.receipt.exists() or (a.attempt / "status.json").exists()
+                )
 
     def test_zero_exit_without_native_sections_cannot_complete(self):
         def incomplete(a, pin, _seconds):
