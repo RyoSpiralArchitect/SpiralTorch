@@ -310,6 +310,7 @@ class NativeCausalLmSessionTests(unittest.TestCase):
     def test_fresh_process_restores_both_groups_and_readout(self):
         script = r'''
 import importlib.abc, json, runpy, sys
+from pathlib import Path
 class NoForeign(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in {'torch','numpy','transformers','accelerate','safetensors'}:
@@ -317,6 +318,8 @@ class NoForeign(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, NoForeign())
 import spiraltorch as st
 request=json.load(sys.stdin)
+assert sys.flags.isolated and sys.dont_write_bytecode
+assert [str(Path(m.__file__).resolve()) for m in (st,st._rs)] == request['origins']
 config, weights=runpy.run_path(request['fixture'])['fixture']()
 base=st.NativeCausalLm.from_gpt2(config,weights)
 trainer=st.NativeCausalLmTrainingSession.from_json(base,request['docs'],request['checkpoint'],request['id'])
@@ -330,9 +333,10 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
             base, model = owners(readout)
             trainer = session(model)
             trainer.step()
-            payload = {"fixture": FIXTURE, "docs": DOCS, "checkpoint": trainer.to_json(), "id": trainer.checkpoint_id}
+            payload = {"fixture": FIXTURE, "docs": DOCS, "checkpoint": trainer.to_json(), "id": trainer.checkpoint_id,
+                       "origins": [str(Path(m.__file__).resolve()) for m in (st, st._rs)]}
             reports = finish(trainer)
-            child = subprocess.run([sys.executable, "-c", script], input=json.dumps(payload), text=True,
+            child = subprocess.run([sys.executable, "-I", "-B", "-c", script], input=json.dumps(payload), text=True,
                                    capture_output=True, timeout=60, cwd=tempfile.gettempdir())
             self.assertEqual(child.returncode, 0, child.stderr)
             result = json.loads(child.stdout)
