@@ -7,6 +7,36 @@ GPT-2 small. Rust owns training, scoring, reductions and checkpoint parsing;
 neither PyTorch nor NumPy is used. This compares two **native adapters**, not
 native training against PyTorch, LoRA or full-model fine-tuning.
 
+## Result
+
+**Ordinary channel-affine had lower held-out NLL in all 18 book/seed pairs.**
+Both adaptations improved on frozen GPT-2 in all 18. The preregistered
+same-author criterion for free radius failed (0/6). The direction held in
+all 108 sampled section/seed comparisons too; those are repeated evaluations
+of the same sections, not 108 independent books.
+
+| Book | Frozen NLL | Initial NLL (both) | Mean free minus affine, 101/103/107 | Mean free minus affine, 109/113/127 |
+| --- | ---: | ---: | ---: | ---: |
+| Sense and Sensibility | 4.220843 | 4.220789 | +0.003989 | +0.004044 |
+| Frankenstein | 4.051046 | 4.050914 | +0.001635 | +0.001662 |
+| The Chemical History of a Candle | 3.844245 | 3.844304 | +0.000477 | +0.000493 |
+
+Positive favors affine. Starting NLL matched **exactly in every section**.
+The finite transfer effect is larger in the same-author novel than in the
+science lectures; do not infer a general genre effect from one book per type.
+These results do not negate the earlier free-versus-fixed-radius comparison:
+winning against fixed radius and beating an ordinary affine adaptation are
+different claims. There is no basis here to promote free radius to a default.
+
+[All paired values, section contrasts, model and step identities](results.json)
+are retained, including changes from both controls. The independent file-only
+audit reproduced the complete primary result with SHA-256
+`9a2e7ec01b7dc1e730d05216e2d5ed7d038ae3033a33baa8d3723b916b282a40`.
+To inspect the result **without any private inputs or installed ML library**,
+run `python3.12 -I -S -B public_scores.py` here. It reconstructs the original
+15 scalar score-file hashes and recomputes the reported contrasts from the
+[270 section scores](section_scores.json).
+
 ## What is matched
 
 Each pair starts from the same frozen GPT-2 and four function-matched,
