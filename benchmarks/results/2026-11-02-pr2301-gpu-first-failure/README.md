@@ -96,3 +96,29 @@ outcomes before mapping and the whole-report comparison before worker maps.
 Stop on error or non-Metal reporting. Exit 0 means no observed difference in
 this trio, 2 means a difference, 124 means timeout; none is qualification.
 Existing attempt directories are never reused.
+
+### Local result (not a CI rerun)
+
+[The saved local comparison](local_metal_trio.json) records one instrumented
+trio on Apple M4 Metal, using the pinned development wheel. Both workers'
+complete report bytes matched the serial result; their host calls overlapped
+for 155.9 ms. The four observed f32 words also matched across all three:
+
+| Weight before | Embedding-output gradient | Token-table gradient | Weight after |
+| --- | --- | --- | --- |
+| `3bcd8de5` | `b5ab005e` | `b5ab005e` | `3bcd8e6e` |
+
+The local final report kept that post-update word. With these measured local
+inputs, both a rounded f32 product and an exact product land inside the same
+output rounding cell. The original hosted serial and worker 1 ended at
+`3bcd8e6e`; worker 0 ended four ULP away at `3bcd8e6a`. Its first-update
+gradient is still unknown. Across the different adapters, wheels and observation
+modes, even the two serial reports differ at 226 final-parameter fields and
+nine other fields, including adapter metadata. This comparison cannot assign
+those differences to hardware, establish determinism, or qualify the red CI run.
+
+To reproduce the compact result **without** running the model:
+
+```sh
+python3.12 -I -S -B summarize_local_trio.py "$PRIVATE_TRIO" "$ORIGINAL_FAILURE_ZIP" | cmp - local_metal_trio.json
+```
