@@ -475,6 +475,12 @@ recipes for the other two corners. Native joint SGD, pinned checkpoint
 restoration and KV inference share these row-local maps. Optional Torch module
 reconstruction does not implement the new stage recipe.
 
+The [matched four-map read-back](../../benchmarks/results/2026-11-03-native-wave-factorial/RESULTS.md)
+includes all six trained endpoints, exact factual anchors and a standalone
+verifier. On fixed-Wave weights a single threshold-crossing coordinate per
+document carried about 69-70% of the plain forward energy, but none of its
+measured input-adjoint correction energy.
+
 ## Qualification Boundary
 
 The [one-chapter GPT-2 qualification](../../benchmarks/results/2026-10-18-native-corpus-training/README.md)

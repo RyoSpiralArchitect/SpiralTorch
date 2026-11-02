@@ -1,0 +1,20 @@
+{
+  "schema": "spiraltorch.wave_factorial_qualification.v1",
+  "instrument_core": "33ab011b242cf14947a5b073984201c9ab9444e7",
+  "frozen_study": "c82c55b429a0f661435d3acf4bb3f86d2d7880a5",
+  "rust_cpu": {"st_nn": 1098, "st_tensor": 475, "failures": 0, "final_log_sha256": "39655094e5f004e92a91ac11987ace8bf218fa9159415c781a3455e2dfdfbfcb"},
+  "installed_python": {"tests": 141, "failures": 0, "skips": 0, "log_sha256": "7af276971e62178f9a87f8bf6f0586b6c3e18933671204ef8d794ca2ca4dff10"},
+  "study_tests": {"synthetic_and_design": 2, "archive_and_tampering": 2},
+  "wasm_nn": {"command": "cargo +stable check --locked --offline -p spiraltorch-wasm --target wasm32-unknown-unknown --no-default-features --features nn", "success": true, "browser_execution": false, "log_sha256": "aeaa1885105f0eb12756cbc53f0372a42e8a8f425afa2e1ca4ee657fa98148c4"},
+  "old_and_new_synthetic_factual_observations_and_gradients_sha256": "02f4691524b996fd86b7514d62ceffb498ba23a0fe24e0e78a467a95b6d5b957",
+  "non_study_test_development": {"failure": "new overflow-only Rust test passed Tensor instead of slice; fixed test call, no production or study rerun", "log_sha256": "a774302c0a208894da45564e4222da8f7906ab657af9915a2470c4df5de9fde4"},
+  "pretrained_attempts": 1,
+  "factual_windows_matching_prior_receipts": 576,
+  "local_maps": 2304,
+  "target_tokens_per_checkpoint": 148,
+  "model_updates": 0,
+  "heldout_windows": 0,
+  "gpu": false,
+  "result_sha256": "e42a1e62edbd3db74c4c3dae1dea5b15ec4a9fa873fad0315ec67188c47f4bb7",
+  "compressed_scalar_receipts_sha256": "00c1f1ffc460ed57759ccbe0cbf70aebe5df9abc8d86ab169f93a3eb0a1d1d37"
+}
