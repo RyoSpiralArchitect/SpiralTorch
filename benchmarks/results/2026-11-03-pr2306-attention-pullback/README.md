@@ -39,6 +39,14 @@ representation. That establishes a representation change, **not historical
 root cause**. The regular full test still runs every original case and layout;
 a failure now also identifies the case, layout, first differing bits and zero counts.
 
+On a local Apple M4 Metal integrated GPU, the saved original-kernel and
+candidate-kernel binaries each ran this same public case **once**, contiguous
+then strided. Both passed. Maximum query error was 9.313225746154785e-9 in
+all four observations; all reported per-tensor maxima matched. No new SGD,
+no retry, no manual hosted GPU execution. Combined elapsed time: 1.81 s.
+This is a local non-reproduction, not a successful reproduction-and-fix.
+[Evidence and binary pins](evidence.json) retain both outcomes.
+
 ```sh
 cargo test --locked --release -p st-backend-wgpu --test resident_attention_vjp causal_pair_bias_cpu_reference_matches_frozen_torch -- --exact --nocapture
 cargo test --locked --release -p st-backend-wgpu --lib packed_stats_keep_integer_metadata_in_word_storage
