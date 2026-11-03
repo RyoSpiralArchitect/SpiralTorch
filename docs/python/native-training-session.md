@@ -202,6 +202,10 @@ adapters or a cross-version compatibility promise.
 
 ### One completion, three uses
 
+The [four-arm native GPT-2 study](../../benchmarks/results/2026-11-03-native-factorial-answer-training/RESULTS.md)
+used the underlying session and prompt-only generation APIs on a frozen earlier
+wheel. It reports both answer NLL and actual emitted lines; they need not move together.
+
 In a development wheel with `CausalCompletion`, the prompt, answer and optional
 literal terminator have distinct roles. Train on answer + terminator, measure
 answer content only, and generate from the independently encoded prompt alone:

@@ -4,6 +4,9 @@ The [same-input local factorial](../2026-11-03-native-wave-factorial/RESULTS.md)
 measured residuals and adjoints, not learning quality. Here each condition gets
 its own actual joint fit. Nothing from the prior fits initializes these arms.
 
+The [completed run and verification](RESULTS.md) report all four arms, including
+the negative joint gate and frequent empty generations.
+
 ## Frozen comparison
 
 Use the pinned native GPT-2 small base, deterministic attention output LoRA
