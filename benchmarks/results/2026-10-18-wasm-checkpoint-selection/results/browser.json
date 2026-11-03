@@ -1,0 +1,239 @@
+{
+  "schema": "spiraltorch.wasm_checkpoint_selection.browser.v1",
+  "passed": true,
+  "selection": {
+    "source": "retained_learning",
+    "checks": [
+      "empty selection",
+      "saved artifact and owned selection result: seed11_ordinary",
+      "saved artifact and owned selection result: seed11_geometry",
+      "saved artifact and owned selection result: seed11_geometry_frozen",
+      "saved artifact and owned selection result: seed29_ordinary",
+      "saved artifact and owned selection result: seed29_geometry",
+      "saved artifact and owned selection result: seed29_geometry_frozen",
+      "saved artifact and owned selection result: seed47_ordinary",
+      "saved artifact and owned selection result: seed47_geometry",
+      "saved artifact and owned selection result: seed47_geometry_frozen",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "case coercion",
+      "policy coercion",
+      "unknown case",
+      "unknown policy",
+      "foreign request import",
+      "chronology rejection",
+      "chronology rejection",
+      "bounded append",
+      "unselected case history fork",
+      "disposed handle is not JSON",
+      "disposed collection",
+      "intrinsic string validation avoids reentrant borrow",
+      "request and artifact independent ownership"
+    ],
+    "count": 31,
+    "models": [
+      {
+        "case_name": "seed11_ordinary",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:0369df00f4d7e613fcced8e0758d58fd85f0d711e8ca10405608ccb814917020",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed11_geometry",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:4c6a5160deae178521253f9bc54a445ff910947e70116a7fda5fbcc683b2e340",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed11_geometry_frozen",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:53b9d4605f5e0025437f640bff0f7eb18a8efff2f83e979aa55d3213ff5b2e65",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed29_ordinary",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:6359a7a864c5a629d970d51e883868729173226ae5819709235259712d67ca77",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed29_geometry",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:cfe0cf00cbbc98b304f84392ea367ffb3b0b4aecc0631197aa966d8158dc5f9a",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed29_geometry_frozen",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:e79a212c60f72891a85834f5fc44271daae8fb1d8451a1879e741d93f281ceb8",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed47_ordinary",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:f781dcae7fad7485458308dac0020d829def3584390581283d836dda827225fd",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed47_geometry",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:4ea94db03f774ea0fef3bd65bb6fc8730a4fd6806f835c0e66547acd2f1071f2",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed47_geometry_frozen",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:9a3be466494580ef01fed2d8ecf49f836efccf5a58a7a872da97dd2018164a52",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      }
+    ]
+  },
+  "models": [
+    {
+      "case_name": "seed11_ordinary",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:0369df00f4d7e613fcced8e0758d58fd85f0d711e8ca10405608ccb814917020",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "1ebd0241864341d4756d94bf416cabc48ed1aa523162a9b139c9d9cc9a63fe6e",
+      "loss": 5.480050086975098,
+      "generation_sha256": "deb0c2345d98852f1f7b7c1d9eabf3a3cf77adf711644a2224d7efbaba4b24e4",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed11_geometry",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:4c6a5160deae178521253f9bc54a445ff910947e70116a7fda5fbcc683b2e340",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "56d6f2244433527d9ff5f59d613cdfe60a5f227b442935c45b054408bc117206",
+      "loss": 5.474123001098633,
+      "generation_sha256": "23ae50fc0478f4c939a0a2e26a7409010503e1f2466e6a236dfaf1e3cecfc576",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed11_geometry_frozen",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:53b9d4605f5e0025437f640bff0f7eb18a8efff2f83e979aa55d3213ff5b2e65",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "58a8b9d4ac3bbfdbe339a7dab3493773a94900f35493380b07ad7c42b5d790bc",
+      "loss": 5.474027156829834,
+      "generation_sha256": "b597df4df07988e57d9a8ec972063a1dc8a4f3fe1718c18a3654ad7d8d0497d6",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed29_ordinary",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:6359a7a864c5a629d970d51e883868729173226ae5819709235259712d67ca77",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "6495ae917f4cffb95967e99a592a73fcb7c83f6092a5e94bdbd8bfad7c570313",
+      "loss": 5.489130020141602,
+      "generation_sha256": "000b7d872c9947e397876b9119f925bde10f17fb01b5febaf809114f97f4d8d0",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed29_geometry",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:cfe0cf00cbbc98b304f84392ea367ffb3b0b4aecc0631197aa966d8158dc5f9a",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "b93cc06f1e5b48045d2367ac18de5fa4683e11f466679e2c8c83e6cb12918700",
+      "loss": 5.498554229736328,
+      "generation_sha256": "f9849b2e2ff26fff4b2dd4c99b5416b8b2208663d76c025b7abf1152da207228",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed29_geometry_frozen",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:e79a212c60f72891a85834f5fc44271daae8fb1d8451a1879e741d93f281ceb8",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "fa3b2b6321ce293906fe2f70a9f952ce89f520878dea1209850653e78039fa3e",
+      "loss": 5.498645305633545,
+      "generation_sha256": "47d891e41315b702547524e18ca5a2e26a612cd0027904074e1868b27fb3d9d3",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed47_ordinary",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:f781dcae7fad7485458308dac0020d829def3584390581283d836dda827225fd",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "c1d39bfef2bf44e5dd1900eeb1df2a3e60782a9fe8f4e357148dcda908c0df9f",
+      "loss": 5.454854965209961,
+      "generation_sha256": "654f0249b0f0ac6360224b2f818af86d35bf8375c9d5bfc039a49b731f610917",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed47_geometry",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:4ea94db03f774ea0fef3bd65bb6fc8730a4fd6806f835c0e66547acd2f1071f2",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "15be7b0f572d93c3a8c3bf2e9701fb57133606437d98656944d0a7fa886cd7b4",
+      "loss": 5.453627586364746,
+      "generation_sha256": "9bdab5e5ad910905fbe3d266d94bad89cdccb801a845751d09180f7236ccd93c",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    },
+    {
+      "case_name": "seed47_geometry_frozen",
+      "candidate_index": 3,
+      "completed_updates": 12,
+      "artifact_id": "sha256:9a3be466494580ef01fed2d8ecf49f836efccf5a58a7a872da97dd2018164a52",
+      "exact_saved_artifact": true,
+      "exact_python_selection": true,
+      "logits_f32le_sha256": "688f2b3dfbb2a118646fd554ddb650ce463ae0e5e02bedc741e0e1bb60186b56",
+      "loss": 5.453662872314453,
+      "generation_sha256": "063224d6b641099ed7efa95d9e0d9ab24d09803379b2c05846ec8c269a256368",
+      "exact_direct_inference": true,
+      "exact_direct_generation": true
+    }
+  ],
+  "adapter_requests": 1,
+  "selection_adapter_requests": 0,
+  "new_training_updates": 0,
+  "quality_claim": false,
+  "physical_adapter_verified": false
+}

@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SpiralTorch saved checkpoint selection</title>
+<style>
+body { max-width: 62rem; margin: 3rem auto; padding: 0 1rem; background: #f4f1e8; color: #173936; font: 17px Georgia, serif; }
+pre { white-space: pre-wrap; font: 13px ui-monospace, monospace; }
+</style>
+<h1>Saved Geometry, Executable Models</h1>
+<p>Rust-owned checkpoint selection followed by actual WebGPU inference. This is a runtime check, not evidence of language-quality improvement.</p>
+<pre id="result" data-status="running">Running...</pre>
+<script type="module">
+import * as M from '/package/spiraltorch_wasm.js';
+// Staged under the existing qualification server's frozen, allowlisted routes.
+import {selectionChecks} from '/tests/byte_lm_browser.mjs';
+import {assert} from '/tests/byte_lm_boundaries.mjs';
+const target = document.querySelector('#result');
+const digest = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
+  x => x.toString(16).padStart(2, '0')).join('');
+const logitsHash = values => {
+  const bytes = new ArrayBuffer(values.length * 4), view = new DataView(bytes);
+  values.forEach((value, index) => view.setFloat32(index * 4, value, true));
+  return digest(bytes);
+};
+async function save(name, value) {
+  const response = await fetch('/results/' + name + '.json', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(value)});
+  if (!response.ok) throw Error('exclusive result write failed: ' + response.status);
+}
+try {
+  await M.default();
+  assert(navigator.gpu, 'WebGPU required for selected-model inference');
+  let requests = 0;
+  const requestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
+  navigator.gpu.requestAdapter = (...args) => { requests++; return requestAdapter(...args); };
+  const response = await fetch('/fixtures/input.json', {cache: 'no-store'});
+  assert(response.ok, 'selection fixture unavailable');
+  const fixture = (await response.json()).selection;
+  assert(fixture.source === 'retained_learning', 'real retained models required');
+  const selection = await selectionChecks(M, fixture);
+  assert(requests === 0, 'selection acquired a GPU');
+  const study = M.ByteCorpusStudy.fromJson(fixture.request_json);
+  const candidates = study.checkpointCandidates();
+  for (const raw of fixture.checkpoint_jsons) {
+    candidates.appendJson(raw);
+  }
+  study.free();
+  const config = JSON.parse(fixture.request_json).config;
+  const windows = Uint8Array.from(fixture.windows), prompts = [];
+  for (let row = 0; row < config.batch; row++) {
+    prompts.push(...windows.subarray(row * (config.steps + 1), row * (config.steps + 1) + config.steps));
+  }
+  const models = [];
+  for (const choice of selection.models) {
+    const selected = candidates.selectCheckpoint(choice.case_name, 'fixed_window_frozen.v1');
+    const artifact = selected.artifact; selected.free();
+    const directArtifact = M.ByteCorpusModelArtifact.fromJson(
+      fixture.expected[choice.case_name].artifact_json, choice.artifact_id);
+    const pending = artifact.restoreWebGpu(); artifact.free();
+    const owner = await pending;
+    const direct = await directArtifact.restoreWebGpu(); directArtifact.free();
+    const actual = JSON.parse(await owner.forward(windows));
+    const expected = JSON.parse(await direct.forward(windows));
+    assert(actual.logits.length === config.batch * config.steps * 256
+      && actual.logits.every(Number.isFinite) && Number.isFinite(actual.loss), 'incomplete selected inference');
+    const hash = await logitsHash(actual.logits);
+    assert(hash === await logitsHash(expected.logits) && actual.loss === expected.loss,
+      'selected and direct inference differ');
+    assert(actual.artifact_id === choice.artifact_id
+      && actual.revision === String(choice.completed_updates), 'selected model identity changed');
+    const generating = owner.generateGreedy(Uint8Array.from(prompts), 4); owner.free();
+    const generation = JSON.parse(await generating);
+    const reference = JSON.parse(await direct.generateGreedy(Uint8Array.from(prompts), 4)); direct.free();
+    assert(JSON.stringify(generation) === JSON.stringify(reference), 'selected and direct generation differ');
+    assert(generation.generated_bytes.length === config.batch
+      && generation.generated_bytes.every(row => row.length === 4
+        && row.every(value => Number.isInteger(value) && value >= 0 && value < 256)),
+    'incomplete selected generation');
+    models.push({...choice, logits_f32le_sha256: hash, loss: actual.loss,
+      generation_sha256: await digest(new TextEncoder().encode(JSON.stringify(generation))),
+      exact_direct_inference: true, exact_direct_generation: true});
+  }
+  candidates.free();
+  assert(new Set(models.map(model => model.logits_f32le_sha256)).size === models.length,
+    'ordinary, learned and frozen model outputs unexpectedly collapsed');
+  const receipt = {schema: 'spiraltorch.wasm_checkpoint_selection.browser.v1',
+    passed: true, selection, models, adapter_requests: requests, selection_adapter_requests: 0,
+    new_training_updates: 0, quality_claim: false, physical_adapter_verified: false};
+  await save('main', receipt);
+  target.textContent = JSON.stringify(receipt, null, 2); target.dataset.status = 'passed';
+} catch (error) {
+  const failure = {passed: false, error: String(error)};
+  target.textContent = JSON.stringify(failure, null, 2); target.dataset.status = 'failed';
+  try { await save('failure-main', failure); } catch {}
+}
+</script>

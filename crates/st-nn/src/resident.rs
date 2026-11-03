@@ -46,7 +46,8 @@ pub use byte_study::{
     ByteCorpusInferencePolicy, ByteCorpusMixtureControls, ByteCorpusModelArtifact,
     ByteCorpusPreparedBiasStudy, ByteCorpusQueryMixtureControls, ByteCorpusStudy,
     ByteCorpusStudyCheckpoint, ByteCorpusStudyResult, ByteCorpusStudySegment, ByteEmbeddingProbe,
-    ByteEmbeddingSelection, BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
+    ByteEmbeddingSelection, BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES,
+    BYTE_CORPUS_MODEL_ARTIFACT_SCHEMA, BYTE_CORPUS_STUDY_MAX_BYTES,
 };
 #[cfg(feature = "wgpu")]
 pub use byte_study::{

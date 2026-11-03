@@ -5,9 +5,9 @@ use pyo3::types::{PyBytes, PyInt, PyString};
 #[cfg(feature = "wgpu")]
 use st_nn::resident::ByteCorpusStudySegment;
 use st_nn::resident::{
-    ByteCorpusStudy, ByteCorpusStudyCheckpoint, BYTE_CORPUS_STUDY_MAX_BYTES,
-    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS,
-    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES,
+    ByteCorpusStudy, ByteCorpusStudyCheckpoint, BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES,
+    BYTE_CORPUS_STUDY_MAX_BYTES, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES,
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES,
 };
 use std::sync::Arc;
 
@@ -202,7 +202,7 @@ impl PyByteCorpusStudy {
             .try_iter()?
             // Bound extraction before allocating from an untrusted sequence
             // length; Rust owns rejection of the first excess candidate.
-            .take(33)
+            .take(BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES + 1)
             .map(|item| {
                 let item = item?;
                 let checkpoint: PyRef<'_, PyByteCorpusStudyCheckpoint> = item.extract()?;

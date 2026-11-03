@@ -1,6 +1,9 @@
 //! Development-loss selection of actual saved models, never implicit promotion.
 use super::*;
 
+/// Shared ingress bound for native, Python and WASM saved-model selection.
+pub const BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES: usize = 32;
+
 /// A selected immutable artifact and its bounded, weight-free decision record.
 /// The artifact keeps the original model/geometry/optimizer and source binding.
 pub struct ByteCorpusCheckpointSelection {
@@ -40,7 +43,7 @@ impl ByteCorpusStudy {
         case_name: &str,
         policy: ByteCorpusInferencePolicy,
     ) -> Result<ByteCorpusCheckpointSelection> {
-        if !(1..=32).contains(&checkpoints.len()) {
+        if !(1..=BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES).contains(&checkpoints.len()) {
             return Err("selection requires 1..32 saved checkpoints".into());
         }
         let case_index = self
