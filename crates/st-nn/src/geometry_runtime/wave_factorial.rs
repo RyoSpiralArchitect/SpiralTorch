@@ -315,13 +315,18 @@ mod tests {
     fn undefined_affine_alternative_does_not_invalidate_the_factual_wave() {
         let runtime = NativeGeometryRuntime::new(artifact("both", &[2., 1., 1.], &[0.; 3]));
         let pinned = runtime.artifact().artifact_id().to_owned();
-        let batch = runtime.forward("site", &[f32::MAX * 0.8, 0., 0.], 1).unwrap();
+        let batch = runtime
+            .forward("site", &[f32::MAX * 0.8, 0., 0.], 1)
+            .unwrap();
         let dy = Tensor::from_vec(1, 3, vec![0.5, -0.25, 0.125]).unwrap();
         let before = batch.vjp(dy.data()).unwrap();
         assert!(batch.wave_factorial(cfg(), &dy, &before.input).is_err());
         assert_eq!(runtime.artifact().artifact_id(), pinned);
         assert_eq!(batch.vjp(dy.data()).unwrap().parameters, before.parameters);
-        assert_eq!(batch.vjp_input(dy.data()).unwrap().data(), before.input.data());
+        assert_eq!(
+            batch.vjp_input(dy.data()).unwrap().data(),
+            before.input.data()
+        );
     }
 
     #[test]

@@ -294,8 +294,15 @@ impl NativeGeometryRuntime {
                         features,
                     )?))
                 }
-                GeometryAdapterRecipe::WaveStage { max_values, stage, .. } => Pullback::WaveStage(Box::new(
-                    stage.forward(input, tensor(placement, "gate"), tensor(placement, "bias"), [rows, features], *max_values)?)),
+                GeometryAdapterRecipe::WaveStage {
+                    max_values, stage, ..
+                } => Pullback::WaveStage(Box::new(stage.forward(
+                    input,
+                    tensor(placement, "gate"),
+                    tensor(placement, "bias"),
+                    [rows, features],
+                    *max_values,
+                )?)),
                 GeometryAdapterRecipe::Topos { kernel, .. } => Pullback::Topos(Box::new(
                     topos::ToposRuntimeBatch::forward(placement, kernel, &input_tensor)?,
                 )),
@@ -351,7 +358,9 @@ impl NativeGeometryRuntime {
         let residual = match &pullback {
             Pullback::Identity => None,
             Pullback::Affine(batch) => Some(batch.output()),
-            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => Some(batch.output()),
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
+                Some(batch.output())
+            }
             Pullback::Elliptic(batch) => Some(batch.output()),
             Pullback::Topos(batch) => Some(batch.output()),
             Pullback::Fractional(batch) => Some(batch.output()),
@@ -571,7 +580,9 @@ impl NativeGeometryBatch {
         let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
         let branch = match &self.pullback {
             Pullback::Affine(batch) => batch.vjp_input(&scaled)?,
-            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
+                batch.vjp_input(&scaled)?
+            }
             Pullback::Topos(batch) => batch.vjp_input(&scaled)?,
             Pullback::Fractional(batch) => batch.vjp_input(&scaled)?,
             Pullback::Elliptic(batch) => batch.vjp_input(&scaled)?,

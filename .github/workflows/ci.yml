@@ -562,6 +562,7 @@ jobs:
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/geometry_artifact.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/causal_document_windows.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/greedy_token_decoding.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/channel_affine.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/residual_attention_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           python3 -I -S -B bindings/st-wasm/tests/byte_lm_fixture.py > "$RUNNER_TEMP/byte-corpus-transport.json"
@@ -731,6 +732,9 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
           python -I -B bindings/st-py/tests/test_native_causal_supervision.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_completion.py -v
+          python -I -B bindings/st-py/tests/test_native_wave_factorial.py -v
+          python -I -B bindings/st-py/tests/test_native_training_prefix_cache.py -v
           python -I -B bindings/st-py/tests/test_native_answer_comparison.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py -v
