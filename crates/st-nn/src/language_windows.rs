@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 
 /// Clients must check this bound before eagerly converting document lengths.
 pub const MAX_DOCUMENTS: usize = 1_048_576;
-const MAX_WINDOWS: u64 = 1_048_576;
+pub(crate) const MAX_WINDOWS: u64 = 1_048_576;
 const MAX_RECIPE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Deserialize)]
@@ -19,6 +19,41 @@ pub struct CausalDocumentWindow {
     pub document: u32,
     pub start: u32,
     pub length: u32,
+}
+
+/// Batch adjacent equal-width windows without padding or reordering.
+pub(crate) fn equal_width_groups(
+    windows: &[CausalDocumentWindow],
+    maximum: usize,
+) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+    assert!(maximum > 0);
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        let width = windows.get(start)?.length;
+        let count = windows[start..]
+            .iter()
+            .take(maximum)
+            .take_while(|w| w.length == width)
+            .count();
+        let range = start..start + count;
+        start += count;
+        Some(range)
+    })
+}
+
+pub(crate) fn unique_group_shapes(
+    windows: &[CausalDocumentWindow],
+    maximum: usize,
+) -> impl Iterator<Item = [usize; 2]> + '_ {
+    let mut seen = std::collections::HashSet::new();
+    let mut previous = None;
+    equal_width_groups(windows, maximum).filter_map(move |g| {
+        let shape = [g.len(), windows[g.start].length as usize];
+        if previous.replace(shape) == Some(shape) {
+            return None;
+        }
+        seen.insert(shape).then_some(shape)
+    })
 }
 
 /// No concatenation, padding, tokenizer, EOS insertion or content authentication.

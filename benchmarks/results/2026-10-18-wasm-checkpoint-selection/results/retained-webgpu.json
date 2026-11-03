@@ -1,0 +1,149 @@
+{
+  "schema": "spiraltorch.packaged_byte_mlops.cpu.v2",
+  "features": "webgpu",
+  "feature_matrix_passed": true,
+  "checks": [
+    "non-string study",
+    "non-string study",
+    "non-string study",
+    "non-string study",
+    "non-string study",
+    "non-string study",
+    "ASCII ingress budget",
+    "UTF8 ingress budget",
+    "unpaired surrogate",
+    "unpaired surrogate",
+    "unpaired surrogate",
+    "foreign checkpoint request",
+    "opaque artifact roundtrip",
+    "request/checkpoint binding",
+    "artifact whitespace tampering",
+    "artifact wrong pin",
+    "coercible pin",
+    "unknown policy",
+    "unknown case",
+    "gate JSON object",
+    "strict study cursor",
+    "strict study cursor",
+    "strict study cursor",
+    "strict study cursor",
+    "strict study cursor",
+    "strict study cursor",
+    "strict study cursor",
+    "strict study cursor",
+    "cursor beyond total",
+    "foreign typed resume"
+  ],
+  "count": 30,
+  "selection": {
+    "source": "retained_learning",
+    "checks": [
+      "empty selection",
+      "saved artifact and owned selection result: seed11_ordinary",
+      "saved artifact and owned selection result: seed11_geometry",
+      "saved artifact and owned selection result: seed11_geometry_frozen",
+      "saved artifact and owned selection result: seed29_ordinary",
+      "saved artifact and owned selection result: seed29_geometry",
+      "saved artifact and owned selection result: seed29_geometry_frozen",
+      "saved artifact and owned selection result: seed47_ordinary",
+      "saved artifact and owned selection result: seed47_geometry",
+      "saved artifact and owned selection result: seed47_geometry_frozen",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "primitive case name only",
+      "opaque checkpoint JSON only",
+      "case coercion",
+      "policy coercion",
+      "unknown case",
+      "unknown policy",
+      "foreign request import",
+      "chronology rejection",
+      "chronology rejection",
+      "bounded append",
+      "unselected case history fork",
+      "disposed handle is not JSON",
+      "disposed collection",
+      "intrinsic string validation avoids reentrant borrow",
+      "request and artifact independent ownership"
+    ],
+    "count": 31,
+    "models": [
+      {
+        "case_name": "seed11_ordinary",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:0369df00f4d7e613fcced8e0758d58fd85f0d711e8ca10405608ccb814917020",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed11_geometry",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:4c6a5160deae178521253f9bc54a445ff910947e70116a7fda5fbcc683b2e340",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed11_geometry_frozen",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:53b9d4605f5e0025437f640bff0f7eb18a8efff2f83e979aa55d3213ff5b2e65",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed29_ordinary",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:6359a7a864c5a629d970d51e883868729173226ae5819709235259712d67ca77",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed29_geometry",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:cfe0cf00cbbc98b304f84392ea367ffb3b0b4aecc0631197aa966d8158dc5f9a",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed29_geometry_frozen",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:e79a212c60f72891a85834f5fc44271daae8fb1d8451a1879e741d93f281ceb8",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed47_ordinary",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:f781dcae7fad7485458308dac0020d829def3584390581283d836dda827225fd",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed47_geometry",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:4ea94db03f774ea0fef3bd65bb6fc8730a4fd6806f835c0e66547acd2f1071f2",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      },
+      {
+        "case_name": "seed47_geometry_frozen",
+        "candidate_index": 3,
+        "completed_updates": 12,
+        "artifact_id": "sha256:9a3be466494580ef01fed2d8ecf49f836efccf5a58a7a872da97dd2018164a52",
+        "exact_saved_artifact": true,
+        "exact_python_selection": true
+      }
+    ]
+  }
+}

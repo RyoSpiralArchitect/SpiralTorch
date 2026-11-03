@@ -5,16 +5,18 @@ use pyo3::types::{PyBytes, PyInt, PyString};
 #[cfg(feature = "wgpu")]
 use st_nn::resident::ByteCorpusStudySegment;
 use st_nn::resident::{
-    ByteCorpusStudy, ByteCorpusStudyCheckpoint, BYTE_CORPUS_STUDY_MAX_BYTES,
-    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS,
-    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES,
+    ByteCorpusStudy, ByteCorpusStudyCheckpoint, BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES,
+    BYTE_CORPUS_STUDY_MAX_BYTES, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_BYTES,
+    BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_GRAPHS, BYTE_DECODER_GRAPH_DIAGNOSTIC_MAX_JSON_BYTES,
 };
 use std::sync::Arc;
 
 mod boundary;
+mod embedding_probe;
 mod forward_diagnostic;
 mod preparation;
 use boundary::PyByteCorpusBoundaryObservation;
+use embedding_probe::PyByteEmbeddingObservation;
 use forward_diagnostic::PyByteCorpusForwardDiagnosticObservation;
 
 fn value_error(error: impl std::fmt::Display) -> PyErr {
@@ -200,7 +202,7 @@ impl PyByteCorpusStudy {
             .try_iter()?
             // Bound extraction before allocating from an untrusted sequence
             // length; Rust owns rejection of the first excess candidate.
-            .take(33)
+            .take(BYTE_CORPUS_CHECKPOINT_SELECTION_MAX_CANDIDATES + 1)
             .map(|item| {
                 let item = item?;
                 let checkpoint: PyRef<'_, PyByteCorpusStudyCheckpoint> = item.extract()?;
@@ -297,6 +299,43 @@ impl PyByteCorpusStudy {
         }
         #[cfg(not(feature = "wgpu"))]
         {
+            requires_wgpu()
+        }
+    }
+
+    /// Validate a unique input position in an unclipped SGD run without a GPU.
+    fn embedding_update_selection_json(
+        &self,
+        py: Python<'_>,
+        case_name: &str,
+        update: &Bound<'_, PyAny>,
+        token: &Bound<'_, PyAny>,
+        feature: &Bound<'_, PyAny>,
+    ) -> PyResult<String> {
+        let probe = embedding_probe::select(&self.inner, py, case_name, update, token, feature)?;
+        serde_json::to_string(probe.selection()).map_err(value_error)
+    }
+
+    /// Observe an uninterrupted study. Save run_outcome_json before reading bits.
+    fn run_wgpu_with_embedding_probe(
+        &self,
+        py: Python<'_>,
+        case_name: &str,
+        update: &Bound<'_, PyAny>,
+        token: &Bound<'_, PyAny>,
+        feature: &Bound<'_, PyAny>,
+    ) -> PyResult<PyByteEmbeddingObservation> {
+        let probe = embedding_probe::select(&self.inner, py, case_name, update, token, feature)?;
+        #[cfg(feature = "wgpu")]
+        {
+            on_gpu(py, |runtime| {
+                let observed = pollster::block_on(probe.run(runtime)).map_err(value_error)?;
+                PyByteEmbeddingObservation::from_observation(observed)
+            })
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            let _ = probe;
             requires_wgpu()
         }
     }
@@ -468,6 +507,7 @@ pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyByteCorpusStudyCheckpoint>()?;
     module.add_class::<PyByteCorpusStudySegment>()?;
     module.add_class::<PyByteCorpusBoundaryObservation>()?;
+    module.add_class::<PyByteEmbeddingObservation>()?;
     module.add_class::<PyByteCorpusForwardDiagnosticObservation>()?;
     module.add("BYTE_CORPUS_STUDY_MAX_BYTES", BYTE_CORPUS_STUDY_MAX_BYTES)?;
     module.add(

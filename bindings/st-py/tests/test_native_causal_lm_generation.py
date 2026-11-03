@@ -61,6 +61,36 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
         for name in ("NativeCausalLmGenerator", "NativeCausalLmGenerationStep"):
             self.assertIn(name, st.__all__)
 
+    def test_id_only_generation_interleaves_with_reports_and_restore_for_every_policy(self):
+        for execution in ({"kind":"full_prefix"},{"kind":"kv_cache","max_values":1024}):
+            for selection in ("greedy","sample"):
+                for dist in ({"kind":"softmax","temperature":.75},{"kind":"zspace","config":{"curvature":-1.}}):
+                    with self.subTest(execution=execution,selection=selection,distribution=dist["kind"]):
+                        kw=dict(execution=execution,seed=37,decoding=dict(selection=selection,distribution=dist,top_k=6,top_p=.8))
+                        full,ids=self.generator(**kw),self.generator(**kw)
+                        self.assertEqual(ids.step_token_id(),full.step().token_id)
+                        self.assertEqual(ids.checkpoint_id,full.checkpoint_id)
+                        ids=st.NativeCausalLmGenerator.from_json(self.model,ids.to_json(),ids.checkpoint_id)
+                        self.assertEqual(ids.advance_ids(2),[full.step().token_id for _ in range(2)])
+                        self.assertEqual(ids.step().to_json(),full.step().to_json())
+                        self.assertEqual(ids.advance_ids(1024),[full.step().token_id])
+                        self.assertEqual(ids.generated_ids,full.generated_ids)
+                        self.assertEqual(ids.to_json(),full.to_json())
+                        self.assertIsNone(ids.step_token_id())
+                        self.assertEqual(ids.advance_ids(1),[])
+
+    def test_id_chunk_validation_and_eos_preserve_cursor(self):
+        token=self.generator().step().token_id
+        ids=self.generator(eos_token_ids=[token])
+        before=ids.to_json()
+        for count in (0,-1,True,1025):
+            with self.assertRaises((ValueError,TypeError,OverflowError)):
+                ids.advance_ids(count)
+            self.assertEqual(ids.to_json(),before)
+        self.assertEqual(ids.advance_ids(4),[token])
+        self.assertEqual(ids.finish_reason,"eos")
+        self.assertEqual(ids.advance_ids(3),[])
+
     def test_sampled_zspace_exact_resume_and_control_does_not_disappear(self):
         generator = self.generator(seed=132, decoding={"selection": "sample", "top_k": 6, "top_p": .8,
                                   "distribution": {"kind": "zspace", "config": {"curvature": -1.}}})
@@ -196,6 +226,31 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
                 result = json.loads((root / run / "result.json").read_text())
                 self.assertEqual(result["execution"], execution or {"kind": "full_prefix"})
                 self.assertNotIn("no KV cache", result["scope"])
+            from spiraltorch.native_corpus_runs import step_and_save_observation
+            base = st.NativeCausalLm.from_gpt2(self.config, st.SafeTensorArchive(root / "model.safetensors"))
+            initial = fixtures["artifact"](base, trainable=True)
+            trainer = st.NativeCausalLmTrainer(base.with_geometry(initial), st.NativeGeometryAdamW(initial),
+                                               [[1,2,3,4]], 4, learning_rate=.01)
+            training = root / "training"
+            training.mkdir(mode=0o700)
+            _, entry = step_and_save_observation(trainer, training)
+            boundary = ["--observed-run", str(training), "--observed-update", "1", "--observation-id", entry["observation_id"]]
+            with contextlib.redirect_stdout(io.StringIO()):
+                example["main"]([*fresh, *boundary, "--output", str(root / "observed")])
+                example["main"]([*fresh, "--training-checkpoint", str(training / entry["file"]), "--training-checkpoint-id",
+                                 entry["checkpoint_id"], "--output", str(root / "direct")])
+                example["main"]([*fresh, *boundary, "--stop-after", "2", "--output", str(root / "observed-part")])
+                saved = root / "observed-part/generation.json"
+                example["main"](["--model-dir", str(root), *boundary, "--resume", str(saved), "--resume-id", pin(saved.read_text()),
+                                 "--output", str(root / "observed-resumed")])
+            self.assertEqual((root / "observed/steps.jsonl").read_bytes(), (root / "direct/steps.jsonl").read_bytes())
+            self.assertEqual((root / "observed/generation.json").read_bytes(), (root / "direct/generation.json").read_bytes())
+            self.assertEqual((root / "observed/generation.json").read_bytes(), (root / "observed-resumed/generation.json").read_bytes())
+            self.assertEqual((root / "observed/steps.jsonl").read_bytes(), (root / "observed-part/steps.jsonl").read_bytes()
+                             + (root / "observed-resumed/steps.jsonl").read_bytes())
+            source = json.loads((root / "observed/result.json").read_bytes())["observed_training_boundary"]
+            self.assertEqual(source, {"update":1,"observation_id":entry["observation_id"],"training_documents_verified":False})
+            self.assertFalse((training / "result.json").exists())
             if os.name == "posix":
                 self.assertEqual((root / "full").stat().st_mode & 0o777, 0o700)
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
@@ -206,6 +261,9 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             common = ["--model-dir", directory + "/missing", "--output", directory + "/run"]
             for extra in ([], ["--resume", "saved"], ["--training-checkpoint", "saved"],
+                          ["--observed-run","run"], ["--observation-id","pin","--observed-update","1"],
+                          ["--observed-run","run","--observed-update","0","--observation-id","pin"],
+                          ["--observed-run","run","--observed-update","1","--observation-id","pin","--artifact","x","--artifact-id","p"],
                           ["--resume", "saved", "--resume-id", "pin", "--prompt-json", "prompt"],
                           ["--artifact", "a", "--artifact-id", "pin", "--training-checkpoint", "b", "--training-checkpoint-id", "pin"]):
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:

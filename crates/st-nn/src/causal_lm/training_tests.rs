@@ -2,6 +2,9 @@ use super::*;
 use crate::geometry_runtime::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
 use sha2::{Digest, Sha256};
 
+#[path = "observation_tests.rs"]
+mod observation_tests;
+
 fn config() -> CausalLmTrainingConfig {
     CausalLmTrainingConfig {
         context_length: 4,
@@ -27,6 +30,156 @@ fn create(config: CausalLmTrainingConfig) -> NativeCausalLmTrainer {
     create_with_readout(config, CausalLmReadoutAccumulator::F32)
 }
 
+fn private_directory() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn file_segments_preserve_warm_adamw_moments_clocks_labels_and_step_reports() {
+    let mut warm = create(config());
+    warm.step().unwrap().unwrap();
+    let mut labels: Vec<Vec<i64>> = documents()
+        .into_iter()
+        .map(|v| v.into_iter().map(|id| id as i64).collect())
+        .collect();
+    labels[1][1] = -100;
+    for rate in [0.0, 0.001] {
+        let dir = private_directory();
+        let mut trainer = NativeCausalLmTrainer::new(
+            warm.model().clone(),
+            warm.optimizer().clone(),
+            documents(),
+            Some(labels.clone()),
+            CausalLmTrainingConfig {
+                learning_rate: rate,
+                ..config()
+            },
+        )
+        .unwrap();
+        let mut reference = trainer.clone();
+        assert!(std::ptr::eq(trainer.optimizer(), reference.optimizer()));
+        let path = dir.path().join("first.json");
+        let (ordinary, first) = trainer.advance_to_checkpoint_new(1, &path).unwrap();
+        assert!(!std::ptr::eq(trainer.optimizer(), reference.optimizer()));
+        assert_eq!(
+            reference.optimizer().to_json().unwrap(),
+            warm.optimizer().to_json().unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&ordinary[0]).unwrap(),
+            serde_json::to_string(&reference.step().unwrap().unwrap()).unwrap()
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(first, reference.checkpoint_id().unwrap());
+        assert_eq!(bytes, reference.to_json().unwrap().as_bytes());
+        let mut restored = NativeCausalLmTrainer::from_json(
+            load(),
+            documents(),
+            Some(labels.clone()),
+            &bytes,
+            &first,
+        )
+        .unwrap();
+        let (steps, files) = restored
+            .advance_to_observed_checkpoint_new(3, dir.path())
+            .unwrap();
+        let ordinary = reference.step().unwrap().unwrap();
+        let observed = reference.step_observed().unwrap().unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(
+            serde_json::to_string(&steps[0]).unwrap(),
+            serde_json::to_string(&ordinary).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&steps[1]).unwrap(),
+            serde_json::to_string(&observed.step).unwrap()
+        );
+        let receipt = std::fs::read(dir.path().join(&files.observation_file)).unwrap();
+        assert_eq!(
+            files.observation_id,
+            format!("sha256:{:x}", Sha256::digest(&receipt))
+        );
+        let receipt: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+        assert_eq!(
+            receipt["observation"],
+            serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&observed).unwrap())
+                .unwrap()
+        );
+        let payload = std::fs::read(dir.path().join(&files.file)).unwrap();
+        assert_eq!(payload, reference.to_json().unwrap().as_bytes());
+        assert_eq!(files.checkpoint_id, reference.checkpoint_id().unwrap());
+        assert_eq!(
+            restored.optimizer().revision(),
+            if rate == 0. { 1 } else { 4 }
+        );
+        let mut final_cut = NativeCausalLmTrainer::from_json(
+            load(),
+            documents(),
+            Some(labels.clone()),
+            &payload,
+            &files.checkpoint_id,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_string(&final_cut.step().unwrap()).unwrap(),
+            serde_json::to_string(&reference.step().unwrap()).unwrap()
+        );
+        assert_eq!(
+            final_cut.checkpoint_with_id().unwrap(),
+            reference.checkpoint_with_id().unwrap()
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn observation_receipt_failure_keeps_live_optimizer_and_does_not_adopt_an_orphan() {
+    for after_receipt_install in [false, true] {
+        let dir = private_directory();
+        let mut trainer = create(config());
+        let old = dir.path().join("old");
+        trainer.step().unwrap();
+        let (payload, pin) = trainer.checkpoint_with_id().unwrap();
+        assert_eq!(trainer.save_checkpoint_new(&old).unwrap(), pin);
+        let mut writes = 0;
+        let error = trainer
+            .observed_with(3, dir.path(), |path, bytes| {
+                writes += 1;
+                if writes == 1 || after_receipt_install {
+                    st_core::runtime::atomic_create_new(path, bytes)?;
+                }
+                if writes == 2 {
+                    return Err(std::io::ErrorKind::StorageFull.into());
+                }
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::StorageFull
+        );
+        assert_eq!(writes, 2);
+        assert_eq!(trainer.completed_updates(), 1);
+        assert_eq!(trainer.to_json().unwrap(), payload);
+        assert_eq!(std::fs::read(old).unwrap(), payload.as_bytes());
+        assert!(dir.path().join("checkpoint-000003.json").is_file());
+        assert_eq!(
+            dir.path().join("observation-000003.json").exists(),
+            after_receipt_install
+        );
+        assert!(trainer
+            .advance_to_observed_checkpoint_new(3, dir.path())
+            .is_err());
+        assert_eq!(trainer.checkpoint_id().unwrap(), pin);
+    }
+}
+
 fn create_with_readout(
     config: CausalLmTrainingConfig,
     accumulator: CausalLmReadoutAccumulator,
@@ -47,6 +200,115 @@ fn create_with_readout(
         config,
     )
     .unwrap()
+}
+
+#[test]
+fn geometry_checkpoint_cannot_restore_unrecorded_lora() {
+    let mut trainer = create(config());
+    trainer.step_observed().unwrap();
+    let (json, id) = trainer.checkpoint_with_id().unwrap();
+    let base = load();
+    let restored =
+        NativeCausalLm::from_training_checkpoint(base.clone(), json.as_bytes(), &id).unwrap();
+    assert_eq!(
+        restored.geometry_artifact_id(),
+        trainer.model().geometry_artifact_id()
+    );
+    let external = base.with_lora(0, 2, 4.).unwrap();
+    let err = NativeCausalLm::from_training_checkpoint(external.clone(), json.as_bytes(), &id)
+        .unwrap_err();
+    assert!(err.to_string().contains("does not own LoRA"));
+    let err = NativeCausalLm::from_training_checkpoint_at(
+        external,
+        json.as_bytes(),
+        &id,
+        trainer.completed_updates(),
+        trainer.data_id(),
+        restored.geometry_artifact_id().unwrap(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("does not own LoRA"));
+}
+
+#[test]
+fn inference_boundary_binds_recorded_cursor_data_and_post_geometry_without_a_corpus() {
+    let mut trainer = create(config());
+    let step = trainer.step().unwrap().unwrap();
+    let (payload, pin) = trainer.checkpoint_with_id().unwrap();
+    let load_at = |u, data: &str, post: &str| {
+        NativeCausalLm::from_training_checkpoint_at(load(), payload.as_bytes(), &pin, u, data, post)
+    };
+    let model = load_at(
+        step.update,
+        trainer.data_id(),
+        &step.post_geometry_artifact_id,
+    )
+    .unwrap();
+    assert_eq!(
+        model.geometry_artifact().unwrap().to_json(),
+        trainer.model().geometry_artifact().unwrap().to_json()
+    );
+    assert!(load_at(
+        step.update + 1,
+        trainer.data_id(),
+        &step.post_geometry_artifact_id
+    )
+    .is_err());
+    let unrelated = format!("sha256:{}", "0".repeat(64));
+    assert!(load_at(step.update, &unrelated, &step.post_geometry_artifact_id).is_err());
+    assert!(load_at(
+        step.update,
+        trainer.data_id(),
+        &step.pre_geometry_artifact_id
+    )
+    .is_err());
+    let mut forged: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    forged["data_id"] = serde_json::json!("invalid");
+    let bytes = serde_json::to_vec(&forged).unwrap();
+    let id = format!("sha256:{:x}", Sha256::digest(&bytes));
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        &bytes,
+        &id,
+        step.update,
+        "invalid",
+        &step.post_geometry_artifact_id
+    )
+    .is_err());
+}
+
+#[test]
+fn inference_cannot_substitute_another_cursor_even_when_the_weights_are_identical() {
+    let mut trainer = create(CausalLmTrainingConfig {
+        learning_rate: 0.,
+        ..config()
+    });
+    let first = trainer.step().unwrap().unwrap();
+    let second = trainer.step().unwrap().unwrap();
+    assert_eq!(
+        first.post_geometry_artifact_id,
+        second.post_geometry_artifact_id
+    );
+    assert_eq!(trainer.optimizer().revision(), 0);
+    let (bytes, pin) = trainer.checkpoint_with_id().unwrap();
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        bytes.as_bytes(),
+        &pin,
+        first.update,
+        trainer.data_id(),
+        &first.post_geometry_artifact_id
+    )
+    .is_err());
+    assert!(NativeCausalLm::from_training_checkpoint_at(
+        load(),
+        bytes.as_bytes(),
+        &pin,
+        second.update,
+        trainer.data_id(),
+        &second.post_geometry_artifact_id
+    )
+    .is_ok());
 }
 
 #[test]

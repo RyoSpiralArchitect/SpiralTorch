@@ -327,6 +327,26 @@ impl PyNativeGeometryBatch {
         ))
     }
 
+    fn vjp_input(&self, py: Python<'_>, upstream: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
+        let count = self.inner.output().data().len();
+        let upstream = sequence(upstream, count, count)?;
+        py.detach(|| self.inner.vjp_input(&upstream).map(|t| t.data().to_vec()))
+            .map_err(error)
+    }
+
+    fn vjp_input_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyByteArray>> {
+        let count = self.inner.output().data().len();
+        let upstream = read_f32(upstream, count, Some(count))?;
+        let result = py
+            .detach(|| self.inner.vjp_input(&upstream))
+            .map_err(error)?;
+        write_f32(py, result.data().iter().copied())
+    }
+
     fn vjp_parameters(
         &self,
         py: Python<'_>,

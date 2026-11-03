@@ -48,7 +48,11 @@ impl NativeCausalLm {
         steps: usize,
     ) -> CausalLmResult<(Tensor, Option<Tensor>)> {
         if !self.geometry_needs_history(path)? {
-            return Ok((self.geometry_output(path, row, [1, 1], false)?.0, None));
+            return Ok((
+                self.geometry_output(path, row, [1, 1], &mut decoder::BlockPass::Forward)?
+                    .0,
+                None,
+            ));
         }
         let previous = previous.ok_or("missing causal geometry history")?;
         if previous.shape() != (steps - 1, self.config.width) {
@@ -60,7 +64,12 @@ impl NativeCausalLm {
         values.extend_from_slice(row.data());
         let input = Tensor::from_vec(steps, self.config.width, values)?;
         let output = self
-            .geometry_output(path, input.clone(), [1, steps], false)?
+            .geometry_output(
+                path,
+                input.clone(),
+                [1, steps],
+                &mut decoder::BlockPass::Forward,
+            )?
             .0;
         Ok((output.gather_rows(&[steps - 1])?, Some(input)))
     }
@@ -173,7 +182,12 @@ impl NativeCausalLmContext {
         let mut hidden = model.embed(&prompt, [1, prompt.len()])?;
         let mut blocks = Vec::with_capacity(model.config.layers);
         for index in 0..model.config.layers {
-            let result = model.prefill_block(index, hidden, prompt.len())?;
+            let result = model.run_block(
+                index,
+                hidden,
+                [1, prompt.len()],
+                decoder::BlockPass::Prefill,
+            )?;
             hidden = result.output;
             blocks.push(Arc::new(
                 result.inference_cache.ok_or("missing prefill KV state")?,

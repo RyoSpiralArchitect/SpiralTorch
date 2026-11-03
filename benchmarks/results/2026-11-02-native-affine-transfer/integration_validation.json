@@ -1,0 +1,26 @@
+{
+  "schema": "spiraltorch.native_lm.transfer_integration_validation.v1",
+  "public_release": false,
+  "core_source": "c10b315cdf20ef99b2be04ff7e6f6e9a2eea903b",
+  "binding_source": "6cafc0a34c25238f28274f4cbb79cffdf04219df",
+  "local_validation": {
+    "rust": {"package":"st-nn","suite":"cargo test --locked -p st-nn --lib","passed":1065,"failed":0,"ignored":0},
+    "wasm": {"command":"cargo check --locked --target wasm32-unknown-unknown -p spiraltorch-wasm --features nn","compiled":true,"browser_execution":false},
+    "installed_python": {
+      "wheel_sha256":"2d115415bd884c41f19cd44048a7f695610b4c666876b15bf09de798ec677ccb",
+      "extension_sha256":"64a3cf1645990ec00e0794cba59d972011e23d5c6938a36944c60d94f00c9a48",
+      "implementation":"CPython 3.12, macOS arm64",
+      "features":"logic,kdsl with repository defaults",
+      "passed":105,"failed":0,"skipped":0,
+      "external_ml_loaded":false,
+      "session_handoff":"Python to Rust to Python",
+      "unittest_modules":["test_native_causal_lm","test_native_causal_lm_session","test_native_causal_lm_lora","test_native_causal_lm_training","test_native_causal_lm_accumulation","test_native_causal_lm_evaluation","test_native_causal_lm_generation","test_native_causal_lm_context","test_native_causal_lm_readout","test_native_causal_lm_repetition","test_native_causal_lm_objective","test_native_geometry_runtime","test_native_geometry_adamw"]
+    }
+  },
+  "negative_checks": [
+    "Before the ownership fix a geometry-only checkpoint accepted an external trained LoRA under the same pin.",
+    "Before streaming token admission an over-budget first row still caused the next lazy row to be fetched.",
+    "Before pairing row references, a two-thread same-length outer replacement produced a different data identity. The fixed scalar/shared admission captures both row owners without reading scalar values on rejection."
+  ],
+  "limits": "The 270-score parity check and mixed-length real-model probe bind the distinct source and wheel hashes in their own receipts. The final Python transport changes did not modify the Rust core. In-place foreign row mutation is not supported; no wall-time, PyTorch or browser GPT-2 capability claim."
+}

@@ -12,6 +12,7 @@ use st_tensor::{
 use std::sync::{Arc, OnceLock};
 
 mod adaptation;
+mod checkpoint;
 mod context;
 mod decoder;
 mod evaluation;
@@ -20,12 +21,17 @@ mod gpt2;
 mod learning;
 mod lora;
 mod objective;
+mod observation;
 mod repetition;
 mod session;
 mod training;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use context::NativeCausalLmContext;
-pub use evaluation::{CausalLmEvaluation, CausalLmEvaluationConfig, MAX_EVALUATION_TOKENS};
+pub use evaluation::{
+    CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
+    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmScoredAnswer,
+    MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
+};
 pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,
     NativeCausalLmGenerator,
@@ -34,13 +40,19 @@ pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use lora::NativeCausalLmLoraGradients;
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
+pub use observation::{
+    CausalLmAdaptationObservation, CausalLmAdaptationSite, CausalLmObservedTrainingStep,
+    CausalLmSiteObservation, CausalLmSitePullback,
+};
 pub use repetition::CausalLmRepetition;
 pub use session::{
-    CausalLmTrainingSessionConfig, CausalLmTrainingSessionResume, CausalLmTrainingSessionStep,
-    NativeCausalLmTrainingSession,
+    CausalLmMatchedTrainingStep, CausalLmPrefixCacheAction, CausalLmPrefixCacheStats,
+    CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig, CausalLmTrainingSessionResume,
+    CausalLmTrainingSessionStep, NativeCausalLmTrainingPrefixCache, NativeCausalLmTrainingSession,
 };
 pub use training::{
-    CausalLmTrainingConfig, CausalLmTrainingResume, CausalLmTrainingStep, NativeCausalLmTrainer,
+    CausalLmObservedCheckpointFiles, CausalLmTrainingConfig, CausalLmTrainingResume,
+    CausalLmTrainingStep, NativeCausalLmTrainer,
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
@@ -379,9 +391,19 @@ impl NativeCausalLm {
     }
 
     fn decode_hidden(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {
-        let mut hidden = self.embed(ids, shape)?;
-        for index in 0..self.blocks.len() {
-            hidden = self.run_block(index, hidden, shape, false)?.output;
+        self.forward_blocks(self.embed(ids, shape)?, shape, 0..self.blocks.len())
+    }
+
+    fn forward_blocks(
+        &self,
+        mut hidden: Tensor,
+        shape: [usize; 2],
+        blocks: std::ops::Range<usize>,
+    ) -> CausalLmResult<Tensor> {
+        for index in blocks {
+            hidden = self
+                .run_block(index, hidden, shape, decoder::BlockPass::Forward)?
+                .output;
         }
         Ok(hidden)
     }

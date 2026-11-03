@@ -364,6 +364,21 @@ impl ToposResonatorLearningBatch {
             .map(|(backward, _)| backward.grad_gate)
     }
 
+    /// Input-only pullback. Both elementwise and shared gates use row-major
+    /// order; do not form the unrequested drive * input gate derivative.
+    pub fn vjp_input(&self, grad_output: &[f32]) -> Result<Vec<f32>, ToposResonatorError> {
+        validate_length("grad_output", grad_output, self.input.len())?;
+        grad_output
+            .iter()
+            .zip(&self.drive_sensitivity)
+            .zip(self.gate.iter().cycle())
+            .map(|((&dy, &sensitivity), &gate)| {
+                let drive = require_derived_finite("grad_drive", dy * sensitivity)?;
+                require_derived_finite("grad_input", drive * gate)
+            })
+            .collect()
+    }
+
     fn vjp_with_gate_statistics<const ELEMENTWISE_RMS: bool, const INPUT: bool>(
         &self,
         grad_output: &[f32],
@@ -1115,6 +1130,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn frozen_gate_overflow_is_not_an_input_derivative() {
+        let op =
+            ToposResonatorOperator::new(ToposResonatorConfig::new(0., 1).unwrap(), topos(1., 0.05))
+                .unwrap();
+        let capture = op.capture_shared_rows(&[2.], &[0.], 1, 1).unwrap();
+        assert!(capture.vjp(&[2e38]).is_err());
+        assert_eq!(capture.vjp_input(&[2e38]).unwrap(), vec![0.]);
+        assert!(capture.vjp_input(&[]).is_err());
+        assert!(capture.vjp_input(&[f32::NAN]).is_err());
+    }
+
+    #[test]
     fn gate_only_vjp_preserves_bits_and_omits_unused_input_overflow() {
         let operator =
             ToposResonatorOperator::new(ToposResonatorConfig::new(0., 1).unwrap(), topos(1., 0.05))
@@ -1129,6 +1156,10 @@ mod tests {
             .unwrap();
             let dy = [0.3, -0.2, 0.5, 0.1];
             let bits = |values: Vec<f32>| values.into_iter().map(f32::to_bits).collect::<Vec<_>>();
+            assert_eq!(
+                bits(capture.vjp_input(&dy).unwrap()),
+                bits(capture.vjp(&dy).unwrap().grad_input)
+            );
             assert_eq!(
                 bits(capture.vjp_gate(&dy).unwrap()),
                 bits(capture.vjp(&dy).unwrap().grad_gate)

@@ -28,6 +28,46 @@ pub struct WaveRecipe {
     pub max_values: usize,
 }
 
+/// Single-stage controls. Only knobs that the selected operator uses are accepted.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WaveStageRecipe {
+    Saturation { saturation: f32, porosity: f32 },
+    Projection { curvature: f32, log_radius: f32 },
+}
+
+impl WaveStageRecipe {
+    pub(crate) fn forward(
+        self,
+        x: &[f32],
+        gate: &[f32],
+        bias: &[f32],
+        shape: [usize; 2],
+        max: usize,
+    ) -> crate::PureResult<crate::WaveGateLearningBatch> {
+        use crate::layers::wave_gate::WaveStages;
+        let (kernel, log_radius, stages) = match self {
+            Self::Saturation {
+                saturation,
+                porosity,
+            } => (
+                WaveGateKernel::new(-1., saturation, porosity, max)?,
+                0.,
+                WaveStages::Saturation,
+            ),
+            Self::Projection {
+                curvature,
+                log_radius,
+            } => (
+                WaveGateKernel::new(curvature, 1., 0., max)?,
+                log_radius,
+                WaveStages::Projection,
+            ),
+        };
+        kernel.forward_stage(x, gate, bias, shape, log_radius, stages)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToposRecipe {
@@ -76,6 +116,13 @@ pub enum GeometryAdapterRecipe {
         strength: f64,
         kernel: WaveRecipe,
         learnable_radius: bool,
+    },
+    #[serde(rename = "spiraltorch.wave_stage_adapter.v1")]
+    WaveStage {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        stage: WaveStageRecipe,
     },
     #[serde(rename = "spiraltorch.topos_resonator_adapter.v1")]
     Topos {
@@ -198,7 +245,7 @@ pub struct GeometryAdapterArtifact {
     artifact_id: String,
 }
 
-fn identity(value: &str) -> bool {
+pub(crate) fn is_sha256_id(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|v| {
         v.len() == 64
             && v.bytes()
@@ -232,7 +279,9 @@ impl GeometryAdapterArtifact {
         if input.len() > GEOMETRY_ADAPTER_MAX_BYTES {
             return Err("geometry artifact exceeds byte budget".into());
         }
-        if !identity(expected_id) || format!("sha256:{:x}", Sha256::digest(input)) != expected_id {
+        if !is_sha256_id(expected_id)
+            || format!("sha256:{:x}", Sha256::digest(input)) != expected_id
+        {
             return Err("geometry artifact differs from the pinned identity".into());
         }
         Self::decode(input, expected_base_model_identity)
@@ -303,7 +352,9 @@ impl GeometryAdapterRecord {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.schema != GEOMETRY_ADAPTER_ARTIFACT_SCHEMA || !identity(&self.base_model_identity) {
+        if self.schema != GEOMETRY_ADAPTER_ARTIFACT_SCHEMA
+            || !is_sha256_id(&self.base_model_identity)
+        {
             return Err("invalid geometry artifact schema or base model identity".into());
         }
         if self.placements.is_empty() || self.placements.len() > 128 {
@@ -372,6 +423,9 @@ impl GeometryAdapterPlacement {
             | WaveRadius {
                 features, strength, ..
             }
+            | WaveStage {
+                features, strength, ..
+            }
             | Topos {
                 features, strength, ..
             }
@@ -411,7 +465,7 @@ impl GeometryAdapterPlacement {
         }
         let mut shapes = BTreeMap::new();
         match &self.recipe {
-            ChannelAffine { .. } | Wave { .. } | WaveRadius { .. } => {
+            ChannelAffine { .. } | Wave { .. } | WaveRadius { .. } | WaveStage { .. } => {
                 shapes.insert("gate", vec![features]);
                 shapes.insert("bias", vec![features]);
             }
@@ -498,6 +552,18 @@ impl GeometryAdapterPlacement {
             return Err("missing geometry tensors".into());
         }
         match &self.recipe {
+            WaveStage {
+                max_values, stage, ..
+            } => {
+                u32::try_from(*max_values).map_err(|_| "wave stage budget exceeds portable u32")?;
+                stage.forward(
+                    &[],
+                    self.tensor("gate"),
+                    self.tensor("bias"),
+                    [0, features],
+                    *max_values,
+                )?;
+            }
             ChannelAffine { max_values, .. } => {
                 crate::ChannelAffineKernel::new(*max_values)?.forward(
                     &[],

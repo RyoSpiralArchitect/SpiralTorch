@@ -74,9 +74,7 @@ impl EllipticAnchoredLearningBatch {
         &self,
         upstream: &[f32],
     ) -> Result<EllipticAnchoredGradients, EllipticLearningError> {
-        if upstream.len() != self.features.len() || upstream.iter().any(|v| !v.is_finite()) {
-            return Err(EllipticLearningError::InvalidUpstream);
-        }
+        let orientations = self.vjp_orientations(upstream)?;
         let raw_mix = upstream
             .iter()
             .zip(self.local.features())
@@ -84,19 +82,26 @@ impl EllipticAnchoredLearningBatch {
             .map(|((&u, &local), &anchor)| f64::from(u) * (f64::from(anchor) - f64::from(local)))
             .sum::<f64>()
             * (1.0 - self.mix * self.mix);
-        let orientations = if self.mix == 0.0 {
-            self.local.vjp(upstream)?
+        Ok(EllipticAnchoredGradients {
+            orientations,
+            raw_mix: checked_gradient(raw_mix)?,
+        })
+    }
+
+    /// Pull back into orientations with the shared mixing weight held fixed.
+    pub fn vjp_orientations(&self, upstream: &[f32]) -> Result<Vec<f32>, EllipticLearningError> {
+        if upstream.len() != self.features.len() || upstream.iter().any(|v| !v.is_finite()) {
+            return Err(EllipticLearningError::InvalidUpstream);
+        }
+        if self.mix == 0.0 {
+            self.local.vjp(upstream)
         } else {
             let scaled = upstream
                 .iter()
                 .map(|&u| checked_gradient((1.0 - self.mix) * f64::from(u)))
                 .collect::<Result<Vec<_>, _>>()?;
-            self.local.vjp(&scaled)?
-        };
-        Ok(EllipticAnchoredGradients {
-            orientations,
-            raw_mix: checked_gradient(raw_mix)?,
-        })
+            self.local.vjp(&scaled)
+        }
     }
 }
 

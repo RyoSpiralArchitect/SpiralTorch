@@ -1,6 +1,7 @@
 """Whole-corpus native scoring; foreign ML imports forbidden, including during FT."""
 import ast
 import contextlib
+import hashlib
 import importlib
 import importlib.abc
 import io
@@ -11,6 +12,7 @@ import runpy
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 
 
@@ -31,6 +33,100 @@ SPANS = [(2, 0, 2), (3, 0, 4), (3, 3, 7), (3, 6, 8), (4, 0, 4)]
 
 
 class NativeCausalLmEvaluationTests(unittest.TestCase):
+    def test_shared_evaluator_is_exact_and_preserves_variant_order(self):
+        late = self.base.with_geometry(fixtures["artifact"](self.base, path="transformer.h.1.mlp"))
+        lora = self.base.with_lora(1, 2, 4.)
+        fitted = lora.step_lora_sgd(lora.lora_loss_gradients([1,2,3,4], [1,4]), .2)
+        variants = [late, self.base, fitted, late]
+        masks = [[-100] * len(d) for d in DOCS]
+        masks[3][-1], masks[4][-2] = 2, 7
+        for labels in (None, masks):
+            r = st.NativeCausalLm.evaluate_variants(variants, DOCS, 4, microbatch_windows=2, labels=labels)
+            self.assertIsInstance(r, st.NativeCausalLmEvaluationComparison)
+            self.assertEqual(r.shared_prefix_layers, 1)
+            expected = [m.evaluate_documents(DOCS, 4, microbatch_windows=2, labels=labels).to_json() for m in variants]
+            self.assertEqual([s.to_json() for s in r.evaluations], expected)
+            self.assertEqual(json.loads(r.to_json())["evaluations"], [json.loads(s) for s in expected])
+        for module in (st, st._rs):
+            self.assertIn("NativeCausalLmEvaluationComparison", module.__all__)
+
+    def test_comparison_bounds_foreign_extraction(self):
+        class Poison:
+            def __len__(self): return 17
+            def __getitem__(self, index): raise AssertionError("variants extracted before admission")
+        with self.assertRaisesRegex(ValueError, "variants"):
+            st.NativeCausalLm.evaluate_variants(Poison(), [], 4)
+        class Corpus:
+            def __len__(self): raise AssertionError("documents inspected before variant ownership")
+        wide = self.base.with_readout_accumulator("f64")
+        with self.assertRaisesRegex(ValueError, "readout"):
+            st.NativeCausalLm.evaluate_variants([self.base, wide], Corpus(), 4)
+
+    def test_token_budget_stops_lazy_row_access_at_first_excess(self):
+        class LazyCorpus:
+            def __init__(self, first): self.first = first
+            def __len__(self): return 2
+            def __getitem__(self, index):
+                if index:
+                    raise AssertionError("fetched a row after budget exhaustion")
+                return range(self.first)
+        with self.assertRaisesRegex(ValueError, "token count exceeds budget"):
+            st.NativeCausalLm.evaluate_variants([self.base, self.base], LazyCorpus(8_388_609), 4)
+        with self.assertRaisesRegex(ValueError, "token count exceeds budget"):
+            self.base.evaluate_documents(LazyCorpus(16_777_217), 4)
+
+    def test_both_row_owners_are_captured_before_native_admission(self):
+        seen = []
+        class Row:
+            def __len__(self): return 4
+            def __getitem__(self, index): raise AssertionError("copied a value before admission")
+        class Outer:
+            def __init__(self, name): self.name = name
+            def __len__(self): return 1
+            def __getitem__(self, index):
+                seen.append(self.name)
+                return Row()
+        limited = st.NativeCausalLm.from_gpt2(self.config, self.weights, max_activation_elements=20)
+        for models in (None, [self.base, limited]):
+            seen.clear()
+            with self.assertRaisesRegex(ValueError, "budget"):
+                if models is None:
+                    limited.evaluate_documents(Outer("tokens"), 4, labels=Outer("labels"))
+                else:
+                    st.NativeCausalLm.evaluate_variants(models, Outer("tokens"), 4, labels=Outer("labels"))
+            self.assertEqual(seen, ["tokens", "labels"])
+
+    def test_outer_replacement_cannot_mix_old_tokens_and_new_labels(self):
+        ready, swapped = threading.Event(), threading.Event()
+        class LastRow:
+            def __len__(self):
+                ready.set()
+                return 0
+        docs = [[1, 2, 3, 4], LastRow()]
+        targets = [[-100, 2, 3, 4], []]
+        original = self.base.evaluate_documents([docs[0], []], 4, labels=list(targets)).data_id
+        mixed = self.base.evaluate_documents([docs[0], []], 4, labels=[[-100, 8, 7, 6], []]).data_id
+        self.assertNotEqual(original, mixed)
+        class Labels:
+            def __len__(self): return 2
+            def __getitem__(self, index):
+                if index == 0 and ready.is_set() and not swapped.wait(5):
+                    raise AssertionError("reader and writer did not hand off")
+                return targets[index]
+        def replace():
+            if ready.wait(5):
+                docs[0], targets[0] = [5, 6, 7, 8], [-100, 8, 7, 6]
+                swapped.set()
+        thread = threading.Thread(target=replace)
+        thread.start()
+        try:
+            reports = st.NativeCausalLm.evaluate_variants([self.base, self.model], docs, 4, labels=Labels()).evaluations
+        finally:
+            thread.join(5)
+        self.assertTrue(swapped.is_set())
+        self.assertNotIn(mixed, [row.data_id for row in reports])
+        self.assertEqual([row.data_id for row in reports], [original, original])
+
     def setUp(self):
         self.config, self.weights = fixtures["fixture"]()
         self.base = st.NativeCausalLm.from_gpt2(self.config, self.weights)
@@ -232,8 +328,10 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
         for objective in (None, repetition):
             with self.subTest(repetition=objective is not None):
                 self._check_packaged_periodic_evaluation(objective)
+        with self.subTest(bounded_wave_radius=True):
+            self._check_packaged_periodic_evaluation(None, bounded=True)
 
-    def _check_packaged_periodic_evaluation(self, repetition):
+    def _check_packaged_periodic_evaluation(self, repetition, *, bounded=False):
         example = importlib.import_module("examples.native_geometry_corpus_training")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -252,6 +350,15 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             (model_dir / "config.json").write_text(self.config)
             base = st.NativeCausalLm.from_gpt2(self.config, st.SafeTensorArchive(model_path))
             artifact = fixtures["artifact"](base, trainable=True)
+            if bounded:
+                state = json.loads(artifact.state_json())
+                site = state["placements"][0]
+                site["recipe"] = {"schema":"spiraltorch.wave_gate_adapter.v2","features":4,"strength":.5,
+                                  "learnable_radius":True,
+                                  "kernel":{"curvature":-1.,"saturation":1.,"porosity":.05,"max_values":1024}}
+                site["tensors"].append({"name":"log_radius","shape":[],"values":[0.],
+                                        "role":"parameter","requires_grad":True})
+                artifact = st.GeometryAdapterArtifact.create_json(json.dumps(state))
             geometry = root / "geometry.json"
             geometry.write_text(artifact.to_json())
             data = root / "data.json"
@@ -263,15 +370,19 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
                 epochs=2, learning_rate=.01, weight_decay=0., label_smoothing=.2, max_gradient_norm=.1)
             if repetition is not None:
                 settings["repetition"] = repetition
+            if bounded:
+                settings["max_log_radius_drift"] = .0001
             recipe.write_text(json.dumps(settings))
             common = ["--model-dir", str(model_dir), "--data-json", str(data), "--save-every", "1"]
             fresh = ["--recipe-json", str(recipe), "--artifact", str(geometry), "--artifact-id", artifact.artifact_id]
             evaluation = ["--eval-data-json", str(heldout), "--eval-every", "1"]
+            observed = [*evaluation, "--observe-every", "2", "--save-every", "3"]
             runs = (("plain", []), ("scored", evaluation),
                     ("interval", [*evaluation, "--eval-every", "3"]),
                     ("default", ["--eval-data-json", str(heldout), "--save-every", "2"]),
                     ("zero", [*evaluation, "--stop-after", "0"]),
-                    ("part", [*evaluation, "--stop-after", "2"]))
+                    ("part", [*evaluation, "--stop-after", "2"]),
+                    ("observed", observed), ("before-first-observation", [*observed, "--stop-after", "1"]))
             for name, extra in runs:
                 with contextlib.redirect_stdout(io.StringIO()):
                     example.main([*common, *fresh, *extra, "--output", str(root / name)])
@@ -280,14 +391,45 @@ class NativeCausalLmEvaluationTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 example.main([*common, *evaluation, "--resume", str(root / "part/checkpoint-000002.json"),
                               "--checkpoint-id", pin, "--eval-every", "3", "--output", str(root / "resumed")])
+                early = json.loads((root / "before-first-observation/result.json").read_text())
+                example.main([*common, *observed, "--resume", str(root / "before-first-observation/checkpoint-000001.json"),
+                              "--checkpoint-id", early["checkpoints"][-1]["checkpoint_id"],
+                              "--output", str(root / "observed-resumed")])
             expected = (root / "plain/checkpoint-000004.json").read_bytes()
+            if bounded:
+                optimizer = json.loads(json.loads(expected)["optimizer_json"])
+                self.assertEqual(optimizer["schema"], "spiraltorch.native_geometry_adamw.v2")
+                self.assertGreater(optimizer["radius_drift"]["sites"][0]["projections"], 0)
             if repetition is not None:
                 training = [json.loads(row) for row in (root / "plain/steps.jsonl").read_text().splitlines()]
                 self.assertEqual(len(training), 4)
                 self.assertTrue(all(row["repetition_positions"] > 0 and row["repetition_loss"] > 0.
                                     for row in training))
-            for name in ("scored", "interval", "default", "resumed"):
+            for name in ("scored", "interval", "default", "resumed", "observed", "observed-resumed"):
                 self.assertEqual((root / name / "checkpoint-000004.json").read_bytes(), expected)
+            plain_steps = (root / "plain/steps.jsonl").read_bytes()
+            self.assertEqual((root / "observed/steps.jsonl").read_bytes(), plain_steps)
+            self.assertEqual((root / "before-first-observation/steps.jsonl").read_bytes()
+                             + (root / "observed-resumed/steps.jsonl").read_bytes(), plain_steps)
+            self.assertFalse((root / "plain/observed-checkpoints.jsonl").exists())
+            self.assertEqual((root / "before-first-observation/observed-checkpoints.jsonl").read_bytes(), b"")
+            index = (root / "observed/observed-checkpoints.jsonl").read_bytes()
+            self.assertEqual((root / "observed-resumed/observed-checkpoints.jsonl").read_bytes(), index)
+            entries = [json.loads(line) for line in index.splitlines()]
+            self.assertEqual([e["updates"] for e in entries], [2, 4])
+            summary = json.loads((root / "observed/result.json").read_text())
+            for name in ("plain", "zero", "observed", "before-first-observation", "observed-resumed"):
+                run = root / name
+                saved = json.loads((run / "result.json").read_bytes())
+                indexed = [json.loads(line) for line in (run / saved["checkpoint_index"]).read_bytes().splitlines()]
+                self.assertEqual(indexed, saved["checkpoints"])
+                self.assertTrue(all(hashlib.sha256((run / e["file"]).read_bytes()).hexdigest() == e["checkpoint_id"][7:]
+                                    for e in indexed))
+            self.assertEqual(summary["observations"]["count"], 2)
+            self.assertEqual([c["updates"] for c in summary["checkpoints"]], [0, 2, 3, 4])
+            for entry in entries:
+                for path in (entry["file"], entry["observation_file"]):
+                    self.assertEqual((root / "observed" / path).read_bytes(), (root / "observed-resumed" / path).read_bytes())
             for name, steps in (("scored", [0, 1, 2, 3, 4]), ("interval", [0, 3, 4]),
                                 ("default", [0, 2, 4]), ("resumed", [2, 3, 4]), ("zero", [0])):
                 rows = [json.loads(line) for line in (root / name / "evaluation.jsonl").read_text().splitlines()]

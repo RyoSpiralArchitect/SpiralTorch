@@ -1,0 +1,114 @@
+{
+  "schema": "spiraltorch.pr2301.hosted_embedding_trio.v1",
+  "run": {
+    "id": 41470149544,
+    "run_attempt": 1,
+    "event": "workflow_dispatch",
+    "head_sha": "45e333d920faa6743f69a19ea809186b23325f6f",
+    "head_branch": "spiralreality/embedding-trio-hosted-20261103",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-11-02T15:17:36Z",
+    "updated_at": "2026-11-02T15:18:56Z",
+    "html_url": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/41470149544"
+  },
+  "artifact_id": 13154358870,
+  "provider_artifact_digest": "sha256:9d047b380c6e33841a786f11357701cece00cd03c8b8705c9e23fd20b7e7a8ff",
+  "ciphertext_sha256": "93132f79e2cec932588deacd0451f57ef3aec61e5db065ce00976a256bc678dd",
+  "recovered_tar_sha256": "035c4c3adbed6ab2220528309db512582a430aebf92f4cc97039c92d00627f31",
+  "environment": {
+    "repository": "RyoSpiralArchitect/SpiralTorch",
+    "event": "workflow_dispatch",
+    "ref": "refs/heads/spiralreality/embedding-trio-hosted-20261103",
+    "run_id": "41470149544",
+    "run_attempt": "1",
+    "runner": "github-hosted",
+    "runner_os": "macOS",
+    "runner_arch": "ARM64",
+    "image_os": "macos26",
+    "image_version": "20261026.0455.2",
+    "dispatch_sha": "45e333d920faa6743f69a19ea809186b23325f6f",
+    "github_sha": "45e333d920faa6743f69a19ea809186b23325f6f",
+    "machine": "arm64",
+    "macos": "26.6.2",
+    "os_build": "25G83",
+    "python": "3.12.10",
+    "checkout_sha": "45e333d920faa6743f69a19ea809186b23325f6f"
+  },
+  "wheel_sha256": "d37b225ca991e6782d180f044dfbb44de9fc82fb45d9b0fbf6d6b077c7540f68",
+  "native_sha256": "022f6e4e057dba9b74d62406b6784aaf8dac8b12d131675ec8824d1cc413b56c",
+  "request_sha256": "b18f2e92fa1b87c5254ad865e07102b26a9df7df870ef342eb73d0b3a5bfdd8f",
+  "archive_transferred": false,
+  "status": "no_difference_in_this_instrumented_trio",
+  "native_calls": 3,
+  "retries": 0,
+  "worker_host_overlap_ns": 13701256375,
+  "complete_report_sha256": {
+    "serial": "a0f4e3573aa2b3ed1eaa4c920aeb44a565d407774b296f17cee0078cbaa0f96d",
+    "worker0": "a0f4e3573aa2b3ed1eaa4c920aeb44a565d407774b296f17cee0078cbaa0f96d",
+    "worker1": "a0f4e3573aa2b3ed1eaa4c920aeb44a565d407774b296f17cee0078cbaa0f96d"
+  },
+  "hosted_coordinate_hex": {
+    "embedding_output_gradient": "b5ab005d",
+    "token_parameter_gradient": "b5ab005d",
+    "weight_after": "3bcd8e6e",
+    "weight_before": "3bcd8de5"
+  },
+  "local_coordinate_hex": {
+    "embedding_output_gradient": "b5ab005e",
+    "token_parameter_gradient": "b5ab005e",
+    "weight_after": "3bcd8e6e",
+    "weight_before": "3bcd8de5"
+  },
+  "comparisons": {
+    "historical_expected": {
+      "raw_equal": true,
+      "final_word": "3bcd8e6e",
+      "differing_fields": {
+        "final_parameters": 0,
+        "other": 0
+      }
+    },
+    "historical_actual-0": {
+      "raw_equal": false,
+      "final_word": "3bcd8e6a",
+      "differing_fields": {
+        "final_parameters": 7,
+        "other": 0
+      }
+    },
+    "historical_actual-1": {
+      "raw_equal": true,
+      "final_word": "3bcd8e6e",
+      "differing_fields": {
+        "final_parameters": 0,
+        "other": 0
+      }
+    },
+    "local_M4_serial": {
+      "raw_equal": false,
+      "final_word": "3bcd8e6e",
+      "differing_fields": {
+        "final_parameters": 226,
+        "other": 9
+      }
+    }
+  },
+  "conditional_gradient_for_historical_outlier_if_only_sgd_input_changed": {
+    "single_rounding": {
+      "nearest_to_zero_hex": "b5a5a000",
+      "farthest_from_zero_hex": "b5a6dfff",
+      "minimum_f32_steps_from_measured": 270430,
+      "minimum_relative_change": 0.024130994635464753
+    },
+    "rounded_f32_product": {
+      "nearest_to_zero_hex": "b5a5a000",
+      "farthest_from_zero_hex": "b5a6e000",
+      "minimum_f32_steps_from_measured": 270429,
+      "minimum_relative_change": 0.024130905403520683
+    }
+  },
+  "historical_intermediate_values": "not recorded",
+  "cause": "not established",
+  "release_ready": false
+}

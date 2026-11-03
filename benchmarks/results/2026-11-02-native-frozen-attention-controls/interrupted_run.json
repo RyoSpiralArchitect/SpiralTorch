@@ -1,0 +1,33 @@
+{
+  "claim_sha256": "2498f3b846850956c13c73865e94dd367952e0f3c7e6ed3b352a9aa4d59317bd",
+  "completed_terminal_checkpoints": {
+    "131-affine": "sha256:2a568507b4a1a936d77ea179a416eba0d8c5ed85c80b920d5bade6a088a0638a",
+    "131-wave": "sha256:22bab17b295a68ebcc09494c569f028bc82a134827828f37c7cbc6a8c4f1b416",
+    "137-affine": "sha256:39c017ce232015729207026787defdf6bca70de5437334e8245a75e683f03ff7",
+    "137-wave": "sha256:7601138c8e8d1d4c85847aa66db0d19ee26e0779ba7abdb4652d3931960af240"
+  },
+  "executed_but_unlogged_updates": "unknown",
+  "held_out_scores": 0,
+  "never_started": [
+    "139-wave"
+  ],
+  "partial_case": {
+    "case": "139-affine",
+    "last_checkpoint_id": "sha256:db8459db91d486bab56dbc817b18eb545697cc2123dfdb4b769da1e1aedbb686",
+    "last_checkpoint_update": 256,
+    "last_complete_logged_update": 304,
+    "log_sha256": "54ce03ca71a04709e66e2667fb5e78d665bc7b9af3673cbdc8341595a4d475b8",
+    "stderr_sha256": "83c608223671c543eac35393de8f13f42682d0ec4d53f85b2494887a296fb24b",
+    "uncommitted_tail_bytes": 0,
+    "uncommitted_tail_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "plan_sha256": "0f97c980fe86fd2bfb15cf4bf149639e8c678d9674771684ce3190b06635943c",
+  "primary_quality_result": null,
+  "primary_result_sha256": "3343e45654f20cc1547c4d2757dddc4acd5cd660984f6274deb2e64864f72fa8",
+  "private_file_count": 69,
+  "private_inventory_sha256": "a989e312aef73ee953314523f50e4507ba0120e66fcc2ac803658cc98e86824f",
+  "schema": "spiraltorch.native_lm.fixed_control_interrupted.v1",
+  "status": "incomplete_no_scores",
+  "supervisor_first_error_file_present": false,
+  "verified_complete_step_records": 2352
+}

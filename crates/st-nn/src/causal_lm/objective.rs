@@ -161,17 +161,7 @@ impl NativeCausalLm {
     ) -> CausalLmResult<f32> {
         let prepared = self.prepare_objective(windows, shape, labels, objective)?;
         let hidden = self.decode_hidden(&prepared.input, prepared.shape)?;
-        let selected = match &prepared.selected_rows {
-            Some(rows) => hidden.gather_rows(rows)?,
-            None => hidden,
-        };
-        let normalized = self
-            .final_norm
-            .forward(&selected, self.config.norm_epsilon)?;
-        let logits = self.project_readout(&normalized)?;
-        let causal = logits
-            .cross_entropy_with_logits(&prepared.labels, objective.kernel_config())?
-            .data()[0];
+        let (logits, causal) = self.causal_readout(hidden, &prepared)?;
         if let Some(repetition) = prepared.repetition {
             let (loss, _, _) = repetition.loss_gradient(
                 &logits,
@@ -187,5 +177,32 @@ impl NativeCausalLm {
             return Ok(combined);
         }
         Ok(causal)
+    }
+
+    pub(super) fn causal_readout(
+        &self,
+        hidden: Tensor,
+        prepared: &PreparedCausalWindow,
+    ) -> CausalLmResult<(Tensor, f32)> {
+        let logits = self.causal_logits(hidden, prepared)?;
+        let loss = logits
+            .cross_entropy_with_logits(&prepared.labels, prepared.objective.kernel_config())?
+            .data()[0];
+        Ok((logits, loss))
+    }
+
+    pub(super) fn causal_logits(
+        &self,
+        hidden: Tensor,
+        prepared: &PreparedCausalWindow,
+    ) -> CausalLmResult<Tensor> {
+        let selected = match &prepared.selected_rows {
+            Some(rows) => hidden.gather_rows(rows)?,
+            None => hidden,
+        };
+        let normalized = self
+            .final_norm
+            .forward(&selected, self.config.norm_epsilon)?;
+        self.project_readout(&normalized)
     }
 }

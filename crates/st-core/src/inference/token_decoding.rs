@@ -120,8 +120,8 @@ pub struct TokenDecision {
 #[derive(Clone, Debug)]
 pub struct TokenCandidates {
     // Private to preserve the validated, sorted and normalized distribution.
-    ids: Vec<usize>,
-    probabilities: Vec<f64>,
+    ids: Box<[usize]>,
+    probabilities: Box<[f64]>,
     report: TokenDecision,
 }
 
@@ -157,9 +157,76 @@ impl TokenCandidates {
     }
 }
 
-fn rank(a: usize, b: usize, scores: &[f64]) -> Ordering {
+fn rank<T: PartialOrd>(a: usize, b: usize, scores: &[T]) -> Ordering {
     // Numeric comparison intentionally treats -0 and +0 as equal.
     scores[b].partial_cmp(&scores[a]).unwrap().then(a.cmp(&b))
+}
+
+fn best_id<T: PartialOrd>(scores: &[T]) -> usize {
+    let mut best = 0;
+    for id in 1..scores.len() {
+        if scores[id] > scores[best] {
+            best = id;
+        }
+    }
+    best
+}
+
+fn raw_top_k<T: PartialOrd>(scores: &[T], k: usize) -> Vec<usize> {
+    if k == 1 {
+        return vec![best_id(scores)];
+    }
+    let mut ids: Vec<_> = (0..scores.len()).collect();
+    if k < ids.len() {
+        // The token ID completes the total order, including at a tied cutoff.
+        ids.select_nth_unstable_by(k - 1, |&a, &b| rank(a, b, scores));
+        ids.truncate(k);
+    }
+    ids.sort_unstable_by(|&a, &b| rank(a, b, scores));
+    ids
+}
+
+fn validate_inputs<T: Into<f64> + Copy>(
+    logits: &[T],
+    history: &[usize],
+    config: &TokenDecodingConfig,
+) -> DecodingResult<()> {
+    config.validate(logits.len(), history.len())?;
+    if logits.iter().any(|&v| !v.into().is_finite()) || history.iter().any(|&id| id >= logits.len())
+    {
+        return Err("token decoding requires finite logits and in-vocabulary history".into());
+    }
+    Ok(())
+}
+
+/// Select only the ID. Ordinary greedy softmax keeps its raw maximum for every
+/// admitted temperature/top-k/top-p. Controlled logits must still run the real policy.
+pub fn greedy_token_id_f32(
+    logits: &[f32],
+    history: &[usize],
+    config: &TokenDecodingConfig,
+) -> DecodingResult<usize> {
+    if config.selection != TokenSelection::Greedy {
+        return Err("greedy token ID requires greedy selection".into());
+    }
+    if matches!(config.distribution, TokenDistribution::Softmax { .. }) {
+        validate_inputs(logits, history, config)?;
+        Ok(best_id(logits))
+    } else {
+        Ok(prepare_token_candidates_f32(logits, history, config)?
+            .greedy()
+            .token_id)
+    }
+}
+
+/// Native model logits need not be copied into a vocabulary-sized f64 vector.
+/// Probability arithmetic still uses f64 and the same ranked reduction order.
+pub fn prepare_token_candidates_f32(
+    logits: &[f32],
+    history: &[usize],
+    config: &TokenDecodingConfig,
+) -> DecodingResult<TokenCandidates> {
+    prepare(logits, history, config)
 }
 
 pub fn prepare_token_candidates(
@@ -167,22 +234,25 @@ pub fn prepare_token_candidates(
     history: &[usize],
     config: &TokenDecodingConfig,
 ) -> DecodingResult<TokenCandidates> {
-    config.validate(logits.len(), history.len())?;
-    if logits.iter().any(|v| !v.is_finite()) || history.iter().any(|&id| id >= logits.len()) {
-        return Err("token decoding requires finite logits and in-vocabulary history".into());
-    }
-    let mut ids: Vec<_> = (0..logits.len()).collect();
-    ids.sort_unstable_by(|&a, &b| rank(a, b, logits));
-    ids.truncate(config.top_k.unwrap_or(logits.len()));
+    prepare(logits, history, config)
+}
+
+fn prepare<T: Into<f64> + Copy + PartialOrd>(
+    logits: &[T],
+    history: &[usize],
+    config: &TokenDecodingConfig,
+) -> DecodingResult<TokenCandidates> {
+    validate_inputs(logits, history, config)?;
+    let mut ids = raw_top_k(logits, config.top_k.unwrap_or(logits.len()));
     let raw_top_token = ids[0];
-    let scores: Vec<_> = ids.iter().map(|&id| logits[id]).collect();
-    let (adjusted, probabilities, effective_temperature, zspace_contract) =
+    let (adjusted, mut probabilities, effective_temperature, zspace_contract) =
         match &config.distribution {
             TokenDistribution::Softmax { temperature } => {
-                let maximum = scores[0];
-                let mut weights: Vec<_> = scores
+                let maximum = logits[raw_top_token].into();
+                let mut weights: Vec<_> = ids
                     .iter()
-                    .map(|&v| {
+                    .map(|&id| {
+                        let v = logits[id].into();
                         let delta = v - maximum;
                         let scaled = if delta.is_infinite() && *temperature >= 1.0 {
                             v / temperature - maximum / temperature
@@ -196,17 +266,17 @@ pub fn prepare_token_candidates(
                 for value in &mut weights {
                     *value /= total;
                 }
-                (scores, weights, *temperature, None)
+                (None, weights, *temperature, None)
             }
             TokenDistribution::ZSpace { config } => {
                 let controlled = apply_zspace_generation_control(ZSpaceGenerationControlRequest {
-                    logits: scores,
+                    logits: ids.iter().map(|&id| logits[id].into()).collect(),
                     token_ids: ids.iter().map(|&id| id as u64).collect(),
                     recent_tokens: history.iter().map(|&id| id as u64).collect(),
                     config: config.clone(),
                 })?;
                 (
-                    controlled.adjusted_logits,
+                    Some(controlled.adjusted_logits),
                     controlled.probabilities,
                     controlled.effective_temperature,
                     Some(ZSPACE_GENERATION_CONTROL_CONTRACT_VERSION),
@@ -218,24 +288,28 @@ pub fn prepare_token_candidates(
     }
     let control_entropy = zspace_entropy(&probabilities)?;
     let pre_nucleus_candidates = ids.len();
-    let mut order: Vec<_> = (0..ids.len()).collect();
-    order.sort_unstable_by(|&a, &b| {
-        adjusted[b]
-            .partial_cmp(&adjusted[a])
-            .unwrap()
-            .then(ids[a].cmp(&ids[b]))
-    });
-    let controlled_top_token = ids[order[0]];
-    let mut kept_ids = Vec::new();
-    let mut kept_probs = Vec::new();
+    if let Some(adjusted) = adjusted {
+        let mut order: Vec<_> = (0..ids.len()).collect();
+        order.sort_unstable_by(|&a, &b| {
+            adjusted[b]
+                .partial_cmp(&adjusted[a])
+                .unwrap()
+                .then(ids[a].cmp(&ids[b]))
+        });
+        ids = order.iter().map(|&i| ids[i]).collect();
+        probabilities = order.iter().map(|&i| probabilities[i]).collect();
+    }
+    let controlled_top_token = ids[0];
+    let mut kept = 0;
     let mut mass = 0.0;
-    for i in order {
+    for i in 0..ids.len() {
         if probabilities[i] == 0.0 {
             continue;
         }
-        kept_ids.push(ids[i]);
-        kept_probs.push(probabilities[i]);
         mass += probabilities[i];
+        ids[kept] = ids[i];
+        probabilities[kept] = probabilities[i];
+        kept += 1;
         if config.top_p < 1.0 && mass >= config.top_p {
             break;
         }
@@ -243,24 +317,26 @@ pub fn prepare_token_candidates(
     if !mass.is_finite() || mass <= 0.0 {
         return Err("token distribution has no positive finite mass".into());
     }
-    for p in &mut kept_probs {
+    ids.truncate(kept);
+    probabilities.truncate(kept);
+    for p in &mut probabilities {
         *p /= mass;
     }
     let report = TokenDecision {
-        token_id: kept_ids[0],
-        probability: kept_probs[0],
-        entropy: zspace_entropy(&kept_probs)?,
+        token_id: ids[0],
+        probability: probabilities[0],
+        entropy: zspace_entropy(&probabilities)?,
         control_entropy,
         effective_temperature,
         raw_top_token,
         controlled_top_token,
         pre_nucleus_candidates,
-        candidates: kept_ids.len(),
+        candidates: kept,
         zspace_contract,
     };
     Ok(TokenCandidates {
-        ids: kept_ids,
-        probabilities: kept_probs,
+        ids: ids.into_boxed_slice(),
+        probabilities: probabilities.into_boxed_slice(),
         report,
     })
 }

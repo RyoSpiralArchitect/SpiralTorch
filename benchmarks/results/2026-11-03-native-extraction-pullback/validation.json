@@ -1,0 +1,20 @@
+{
+  "schema": "spiraltorch.native_adaptation_observation_validation.v1",
+  "scope": "local macOS arm64 CPU, release development wheel, no GPU, CI or publication",
+  "core_commit": "03bb3eda3138a0fb747f84b860fbbc970f198e79",
+  "freeze_commit": "89778f7680a0c21e844843a30e3377e6dcb697cf",
+  "wheel_sha256": "f2b12c91971fe270344f826ee07531e2f4d20260d42adcfa193f442e0bdb40d2",
+  "native_sha256": "2a44caf73fcd9135f91081bd62f7b98224323beacb93b4ddeef587a0a8d618f4",
+  "rust_cpu_libs": {"st-nn": 1095, "st-tensor": 475, "failures": 0, "log_sha256": "da6efa4ea42242715f689942bc5db58203afac7a1a5a23784b4eb81763cb40d1"},
+  "installed_python": {"tests": 138, "failures": 0, "skips": 0, "final_log_sha256": "bd8c5697cd23c0951f306fcadc2eadfe4e4a2974fae3531080134533408ba608"},
+  "study_tests": {"synthetic_receipt_and_pooling": 2, "file_only_export_and_tampering": 2},
+  "first_fixture_failure": {
+    "before_any_pretrained_execution": true,
+    "description": "JSON shortest f32 and widened Python float compared as decimal f64; fixed test checks original f32 bits, no model or arithmetic change",
+    "log_sha256": "ab8287822f3cb346d846dda23f728165344e996d9caee6aac227840ee5045503"
+  },
+  "old_new_wheel_synthetic_loss_gradients_owners_sha256": "9f55410dea64eabf29e4c1bcf81bc3f6e4f1cb2f9adf4234c8cf2db6620c4ac1",
+  "real_execution": {"attempts": 1, "forward_backward_windows": 864, "endpoints": 9, "distinct_train_records": 96, "updates": 0, "heldout_records": 0},
+  "individual_result_sha256": "c05221c92baef932e78cef9c31d864af4399316237da2b67757609ac95cef919",
+  "exported_gzip_sha256": "aa9c76c81602c693c358269b973b5679ce7c31a1a26905f8b8c87658e220d65a"
+}

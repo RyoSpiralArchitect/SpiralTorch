@@ -40,7 +40,9 @@ struct VjpParams {
 @group(0) @binding(3) var<storage, read> z_bias: array<f32>;
 @group(0) @binding(4) var<storage, read> pair_bias: array<f32>;
 @group(0) @binding(5) var<storage, read> upstream: array<f32>;
-@group(0) @binding(6) var<storage, read_write> output: array<f32>;
+// The prefix mixes float components, signed exponents and key indices. Keep
+// metadata in integer storage; the public gradient slices still contain f32 bits.
+@group(0) @binding(6) var<storage, read_write> packed_words: array<u32>;
 @group(0) @binding(7) var<storage, read_write> flags: array<atomic<u32>>;
 @group(0) @binding(8) var<uniform> params: VjpParams;
 
@@ -73,15 +75,23 @@ fn visible_keys(query: u32) -> u32 {
     return params.keys;
 }
 
+fn store_f32(offset: u32, value: f32) {
+    packed_words[offset] = bitcast<u32>(value);
+}
+
+fn load_f32(offset: u32) -> f32 {
+    return bitcast<f32>(packed_words[offset]);
+}
+
 fn store_wide(offset: u32, value: Wide) {
-    output[offset] = value.hi;
-    output[offset + 1u] = value.lo;
-    output[offset + 2u] = bitcast<f32>(value.exponent);
-    output[offset + 3u] = value.tail;
+    store_f32(offset, value.hi);
+    store_f32(offset + 1u, value.lo);
+    packed_words[offset + 2u] = bitcast<u32>(value.exponent);
+    store_f32(offset + 3u, value.tail);
 }
 
 fn load_wide(offset: u32) -> Wide {
-    return Wide(output[offset], output[offset + 1u], bitcast<i32>(output[offset + 2u]), output[offset + 3u]);
+    return Wide(load_f32(offset), load_f32(offset + 1u), bitcast<i32>(packed_words[offset + 2u]), load_f32(offset + 3u));
 }
 
 // All callers enter with a uniform context/query/key and all 64 lanes.
@@ -172,19 +182,19 @@ fn statistics(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation
     }
     if (lane == 0u) {
         let offset = params.stats_offset + row * 14u;
-        output[offset] = row_maximum;
+        store_f32(offset, row_maximum);
         let denominator = wide_sum_value(row_sum);
         store_wide(offset + 1u, denominator);
         store_wide(offset + 5u, wide_div(row_center.value, denominator));
         store_wide(offset + 9u, wide_div(row_center.correction, denominator));
-        output[offset + 13u] = bitcast<f32>(reference_key);
+        packed_words[offset + 13u] = reference_key;
     }
 }
 
 fn compute_derivatives(row: u32, lane: u32) {
     if (lane == 0u) {
         let offset = params.stats_offset + row * 14u;
-        probability = wide_div(score_weight(pair_score, output[offset]), load_wide(offset + 1u));
+        probability = wide_div(score_weight(pair_score, load_f32(offset)), load_wide(offset + 1u));
         let centered = wide_sum_add(wide_sum_add(pair_dp, wide_neg(load_wide(offset + 5u))), wide_neg(load_wide(offset + 9u)));
         score_gradient = wide_mul(probability, wide_sum_value(centered));
     }
@@ -199,7 +209,7 @@ fn query_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
     let query = row % params.queries;
     var gradient: array<WideSum, 4>;
     for (var i = 0u; i < 4u; i += 1u) { gradient[i] = wide_sum_zero(); }
-    let reference = bitcast<u32>(output[params.stats_offset + row * 14u + 13u]);
+    let reference = packed_words[params.stats_offset + row * 14u + 13u];
     for (var key = 0u; key < visible_keys(query); key += 1u) {
         compute_pair(context, query, key, lane, true, reference);
         compute_derivatives(row, lane);
@@ -209,17 +219,17 @@ fn query_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
             gradient[i / 64u] = wide_sum_add(gradient[i / 64u], wide_mul(scaled, parts(keys[kb + i * params.key.strides.w])));
         }
         if (lane == 0u && (params.flags & 2u) != 0u) {
-            output[params.pair_offset_out + row * params.keys + key] = checked(wide_float(score_gradient));
+            store_f32(params.pair_offset_out + row * params.keys + key, checked(wide_float(score_gradient)));
         }
         workgroupBarrier();
     }
     if ((params.flags & 2u) != 0u) {
         for (var key = visible_keys(query) + lane; key < params.keys; key += 64u) {
-            output[params.pair_offset_out + row * params.keys + key] = 0.0;
+            packed_words[params.pair_offset_out + row * params.keys + key] = 0u;
         }
     }
     for (var i = lane; i < params.head_dim; i += 64u) {
-        output[params.query_offset_out + row * params.head_dim + i] = checked(wide_float(wide_sum_value(gradient[i / 64u])));
+        store_f32(params.query_offset_out + row * params.head_dim + i, checked(wide_float(wide_sum_value(gradient[i / 64u]))));
     }
 }
 
@@ -238,7 +248,7 @@ fn key_value_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_in
     }
     for (var query = 0u; query < params.queries; query += 1u) {
         if (key >= visible_keys(query)) { continue; }
-        let reference = bitcast<u32>(output[params.stats_offset + (context * params.queries + query) * 14u + 13u]);
+        let reference = packed_words[params.stats_offset + (context * params.queries + query) * 14u + 13u];
         compute_pair(context, query, key, lane, true, reference);
         compute_derivatives(context * params.queries + query, lane);
         let scaled = wide_mul(parts(params.scale), score_gradient);
@@ -252,10 +262,10 @@ fn key_value_pullback(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_in
         workgroupBarrier();
     }
     for (var i = lane; i < params.head_dim; i += 64u) {
-        output[params.key_offset_out + row * params.head_dim + i] = checked(wide_float(wide_sum_value(gradient_a[i / 64u])));
-        output[params.value_offset_out + row * params.head_dim + i] = checked(wide_float(wide_sum_value(gradient_b[i / 64u])));
+        store_f32(params.key_offset_out + row * params.head_dim + i, checked(wide_float(wide_sum_value(gradient_a[i / 64u]))));
+        store_f32(params.value_offset_out + row * params.head_dim + i, checked(wide_float(wide_sum_value(gradient_b[i / 64u]))));
     }
     if (lane == 0u && (params.flags & 1u) != 0u) {
-        output[params.z_offset_out + row] = checked(wide_float(wide_sum_value(z_gradient)));
+        store_f32(params.z_offset_out + row, checked(wide_float(wide_sum_value(z_gradient))));
     }
 }

@@ -1,0 +1,87 @@
+{
+  "baseline_source": "f05bbac270c5a5523a74ede1fa628ecaa361735a",
+  "check_installed_sha256": "a07b93e0c5060d4cfbce8394e9f0f36eec2e9c3fd744c3ebf496340b8efd1cfe",
+  "evidence_sha256": {
+    "build.log": "ebadeb8e91c698eb9ac023fb2654f906f257c65b8a8a13136c74bb1e86275c6a",
+    "node-wasm.log": "00f50bbbac4889d9822c585d70a3f4bbe54f75e952fccc5dc94de2fc6a77fb7e",
+    "old-manual.log": "b52bbf558ce9afcd94daa14d5451ded9e5997c5af8fd6a2e384693019f6ebe30",
+    "python.log": "9bc98f1fccd8d7ee54c28a12d559ce5e0dc653b91d22578ec30af5b00465f88e",
+    "rust-libs.log": "6bb15bf88d0a2c13ddca2d87da6930870cf0508bdf17f4345ab12e3257ca3bbd",
+    "wasm-build.log": "7ed044f67a7e22c0d2290ff5ac597f8b538030aa81a6d36bb80a75309455d535"
+  },
+  "fixture_sha256": "03a09de7949e1154682a18d289b7cb345801a425299087269c0b11e3aece94b5",
+  "gpu": false,
+  "host": "macOS arm64, local CPU; Node WASM",
+  "installed": {
+    "new": {
+      "all_original_files_match": true,
+      "native_sha256": "6158ba8b2a77432b302c209b7feebf5966a9c41a099a1165c748c973049b8c6e",
+      "package_files": 207,
+      "python_bytecode_absent": true,
+      "version": "0.4.33",
+      "wheel_sha256": "9be66ece468e11f1c47109ff510712d91da26a4f7bb47494f79c4b37365eb04c"
+    },
+    "old": {
+      "all_original_files_match": true,
+      "native_sha256": "b65b20a612310b4531f45ddd36adfe679668e89ea9dc4ba2f3f2ec432bbb6166",
+      "package_files": 207,
+      "python_bytecode_absent": true,
+      "version": "0.4.33",
+      "wheel_sha256": "31367cb85d79bdfe00d96f3b67fcd8f47ebe700db6521e4e650de53ca25040c8"
+    }
+  },
+  "installed_python": {
+    "failures": 0,
+    "includes_real_optional_local_bpe": true,
+    "skips": 0,
+    "tests": 151
+  },
+  "matched_signature": {
+    "checkpoint": "sha256:726a130e6be842178ff83d8d3340c1bf530e4006ae5b2d3153f982cf1384ffa3",
+    "cursor": "sha256:e65cc29fc0987868bd1a3b4bf1c93796180a9d4fb974353e2857496297138848",
+    "data_id": "sha256:55d67d697fdc2559f0086a5b6b0625c8dd90c6e645c4d224ea1c5539e7de3dba",
+    "decisions": "2148a29a427e823883765fc1f6db8688d1def8e269eaa4d71d08ecf45ae4f001",
+    "evaluation": "492cbd2ef71a70ab6d1883b3de37917ccfef33025856c2a8612154579166eb85",
+    "generated_ids": [
+      6,
+      8,
+      9
+    ],
+    "prompt": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "step_reports": "d286dc6c1f0248ce9f25978a016d5dd10e150a07a41890e530a0bae1b18dfc85"
+  },
+  "per_signature": {
+    "content_targets_per_model": 4,
+    "generated_tokens": 3,
+    "synthetic_updates": 2,
+    "targets_per_update": 5
+  },
+  "preflight_issue": "The first synthetic oracle requested one variant from a comparison requiring two; kept the failure and corrected the caller to score origin and trained model. No model kernel change.",
+  "pretrained_model_executions": 0,
+  "published": false,
+  "python_tests_sha256": "10a0ae802fdd1e589aed25f7fecddf858031e84fe06107165e6bf53808e7b159",
+  "rust_libs": {
+    "failures": 0,
+    "ignored": 0,
+    "st_core": 1048,
+    "st_nn": 1108,
+    "st_tensor": 475
+  },
+  "schema": "spiraltorch.native_completion_views_qualification.v1",
+  "source": "5e6b297bf2a3947d2a07dbf08bf66f6442ef798f",
+  "wasm": {
+    "artifact_sha256": "695179333709d4969ba5877fe47d0314c0603dc3b05bb1b264f2a1850251c50c",
+    "browser_execution": false,
+    "features": [
+      "nn"
+    ],
+    "node": "24.14.0",
+    "rust": "1.97.0",
+    "wasm_bindgen": "0.2.129"
+  }
+}

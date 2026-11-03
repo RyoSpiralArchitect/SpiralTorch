@@ -1,0 +1,70 @@
+{
+  "failures": 0,
+  "fixture_sha256": "ac11a4fa9e39bafd0f9e8b2f524ce0b5c0a67dabb3295adf78e77609a7ea30fc",
+  "installed": {
+    "all_original_files_match": true,
+    "native_sha256": "58cbfe5243cda67cd4c0059dced539db098df464a013b629e0507eb3b74a4e73",
+    "package_files": 207,
+    "python_bytecode_absent": true,
+    "version": "0.4.33",
+    "wheel_sha256": "62c686ee0f0286bedac757f63196c297a1c873219172f0cc2dfa14c86df03fc3"
+  },
+  "original_protocol_sources_match": true,
+  "schema": "spiraltorch.factorial_endpoint_verifier_rehearsal.v1",
+  "scope": {
+    "gpu": false,
+    "published": false,
+    "real_corpus_files_opened": false,
+    "real_model_executions": 0
+  },
+  "scoring_fixture": {
+    "aggregate_nll": [
+      2.5476417541503906,
+      2.5476417541503906,
+      2.5476417541503906,
+      2.5476417541503906
+    ],
+    "base": "sha256:190e9ef67fc415ac98472f1d49d497a95c31a34e78fc3caf7499050210b7bfdc",
+    "compared_aggregate_scores": 8,
+    "data": "sha256:0095f87b6ae738617ce4210f8867bb88415ece075f3baecef30a1297d977fe79",
+    "documents": 5,
+    "groups": [
+      [
+        0,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        5
+      ]
+    ],
+    "ignored_targets": 11,
+    "native_synthetic_updates": 24,
+    "plan": "sha256:8aa05b50a503c9703133f8c38457f3976cf601daaddc798cb8eab45652a869f3",
+    "prompt_only_streams": 40,
+    "reopened_endpoints": 4,
+    "target_tokens": 11
+  },
+  "skips": 0,
+  "tests": 31,
+  "validation_source_sha256": {
+    "endpoint_check.py": "4702822021b45ad03351d8947e8be9cf52d98ae97c32f6300049c0db9116109e",
+    "test_endpoints.py": "8f265792b6ac42899770fd95960e7a9b1146dce169905b9dcfa6bc71db943c12",
+    "verify.py": "c7afd5bc06f61eb0927be9f8b12d0000103af2bc0ee111d3f9abc93e00960aea"
+  },
+  "protocol_commit": "ab63b0e3f64412b72814b8c32c89aebda9891964",
+  "input_manifest_pin": "72151805040cddbaa9d2149abc90ba5d424da8513eaa62fe2ca240363c7843c9",
+  "suite_log_sha256": "73c31e886aae11326a37bb8da3b1492984b50d2b65fe3f5ea6efd8b7f208c508",
+  "prior_readback_probe": {
+    "source": "eaaa6b08390a32f42594b011e32dcf506909d4ee",
+    "synthetic_records": 3,
+    "token_nll_before": 2.522679567337036,
+    "token_nll_after": 3.522679567337036,
+    "old_description_unchanged": true,
+    "first_probe_log_sha256": "6ef1fd58893d074b4b3a4f48259f9cc1bdbd61b9a72fcfb32209dc31253638c6"
+  }
+}

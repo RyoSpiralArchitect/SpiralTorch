@@ -19,9 +19,9 @@ if __name__ == "__main__":
 import spiraltorch as st  # noqa: E402
 
 
-def fixture(*, width=4, heads=2, positions=8, raw_weights=False):
-    config = {"model_type": "gpt2", "vocab_size": 11, "n_positions": positions,
-              "n_embd": width, "n_head": heads, "n_layer": 2}
+def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weights=False):
+    config = {"model_type": "gpt2", "vocab_size": vocabulary, "n_positions": positions,
+              "n_embd": width, "n_head": heads, "n_layer": layers}
     header, payload = {}, bytearray()
 
     def add(name, shape):
@@ -32,9 +32,9 @@ def fixture(*, width=4, heads=2, positions=8, raw_weights=False):
         payload.extend(struct.pack("<" + "f" * count, *values))
         header[name] = {"dtype": "F32", "shape": shape, "data_offsets": [start, len(payload)]}
 
-    add("wte.weight", [11, width])
+    add("wte.weight", [vocabulary, width])
     add("wpe.weight", [positions, width])
-    for layer in range(2):
+    for layer in range(layers):
         for norm in ("ln_1", "ln_2"):
             for suffix in ("weight", "bias"):
                 add(f"h.{layer}.{norm}.{suffix}", [width])

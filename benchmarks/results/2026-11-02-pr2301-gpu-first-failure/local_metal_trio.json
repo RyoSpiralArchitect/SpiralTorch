@@ -1,0 +1,84 @@
+{
+  "schema": "spiraltorch.pr2301.local_embedding_trio.v1",
+  "status": "no_difference_in_this_instrumented_trio",
+  "request_sha256": "b18f2e92fa1b87c5254ad865e07102b26a9df7df870ef342eb73d0b3a5bfdd8f",
+  "wheel_sha256": "d37b225ca991e6782d180f044dfbb44de9fc82fb45d9b0fbf6d6b077c7540f68",
+  "native_sha256": "022f6e4e057dba9b74d62406b6784aaf8dac8b12d131675ec8824d1cc413b56c",
+  "archive_sha256": "d259725a7b22b3a37e5b0a8e02062d84c29cc45c33ac60bed827d495b10750d5",
+  "harness_sha256": "fb93ba4dd168df3e43253da8608df301c64c27886f7f0d484fb4d0658605bfc1",
+  "comparator_sha256": "2899983ad11582f74aa59dd08d11ea5171b8b520c238d40e85cc3429bd9afbbc",
+  "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "native_calls": 3,
+  "retries": 0,
+  "worker_host_overlap_ns": 155866083,
+  "local_complete_report_sha256": {
+    "serial": "5372f2c85c7b40872394981eb97d5be3688cdaa035af111fc62f919142e57b4e",
+    "worker0": "5372f2c85c7b40872394981eb97d5be3688cdaa035af111fc62f919142e57b4e",
+    "worker1": "5372f2c85c7b40872394981eb97d5be3688cdaa035af111fc62f919142e57b4e"
+  },
+  "request_initial_word": "3bcd8de5",
+  "local_coordinate_f32_hex": {
+    "embedding_output_gradient": "b5ab005e",
+    "token_parameter_gradient": "b5ab005e",
+    "weight_after": "3bcd8e6e",
+    "weight_before": "3bcd8de5"
+  },
+  "local_final_word": "3bcd8e6e",
+  "local_sgd_inside_observed_rounding_cell": {
+    "exact_product_then_subtract": true,
+    "rounded_f32_product_then_subtract": true
+  },
+  "hosted_vs_local_serial": [
+    {
+      "archive_member": "expected",
+      "hosted_final_word": "3bcd8e6e",
+      "full_report_byte_equal": false,
+      "differing_fields": {
+        "final_parameters": 226,
+        "other": 9
+      }
+    },
+    {
+      "archive_member": "actual-0",
+      "hosted_final_word": "3bcd8e6a",
+      "full_report_byte_equal": false,
+      "differing_fields": {
+        "final_parameters": 232,
+        "other": 9
+      }
+    },
+    {
+      "archive_member": "actual-1",
+      "hosted_final_word": "3bcd8e6e",
+      "full_report_byte_equal": false,
+      "differing_fields": {
+        "final_parameters": 226,
+        "other": 9
+      }
+    }
+  ],
+  "private_file_sha256": {
+    "exit.json": "35067ea9778192e319c1b9f1c11334b49e3ca6edf7571601f3f6e9bcf8b1af4e",
+    "full-reports.json": "c62cb444ff9b7ab7e10937b3b8ed449c288bed22ea8033cd457ce86fba45444b",
+    "preflight.json": "be7b9006d152bc36b7b0c38b050dbc29d54e6c99c00c27634ee844935df4ef14",
+    "protocol.json": "adff537d496db06e7845807c73a7c9f05dab5383f9e5533e6a06fc10d5f39c2f",
+    "result.json": "58e806b0274dbd0092a15e3c944e92ca2691ee11dd18f0779c5baa01fcc8b887",
+    "serial/bits.json": "3420996ed998ab548f929c3eaecb8c051f31ef034755d7060764657dcb089573",
+    "serial/entered.json": "afc3d6ab75ac65293a086e895381b08f51a870150246bfd46890f4a66e2b26d1",
+    "serial/host-call.json": "41f69c7e54d538b0549103df24451a3af52c61cfd068d56bf06c4be5dbfe9968",
+    "serial/run-outcome.json": "21b346fae956b7cd71e616314841e90d68a52f5c0d4192adb2f999c8c457957b",
+    "worker-started.json": "198ac142ed3e15f0786bf2d516f82be98816abb7cd6e986d70b2f31d147d7c38",
+    "worker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "worker0/bits.json": "3420996ed998ab548f929c3eaecb8c051f31ef034755d7060764657dcb089573",
+    "worker0/entered.json": "a2c4b4cada666ba37d18101b43046ae443a41078be21c2ccce94f90691256e4e",
+    "worker0/host-call.json": "a49083477b11458647400f7d3056ffc62639f3d12f741e11ae7d125bf6669898",
+    "worker0/run-outcome.json": "21b346fae956b7cd71e616314841e90d68a52f5c0d4192adb2f999c8c457957b",
+    "worker1/bits.json": "3420996ed998ab548f929c3eaecb8c051f31ef034755d7060764657dcb089573",
+    "worker1/entered.json": "79b21fe85d60d83328b6eafa15c5e8c0f3c4e434809e27aae2ea60024eb51ba0",
+    "worker1/host-call.json": "fad5a5131d483d73619131a3deb86fa2afaefb50d7002ebf06546e423b9133db",
+    "worker1/run-outcome.json": "21b346fae956b7cd71e616314841e90d68a52f5c0d4192adb2f999c8c457957b"
+  },
+  "historical_intermediate_values": "not recorded",
+  "cause": "not established",
+  "release_ready": false
+}

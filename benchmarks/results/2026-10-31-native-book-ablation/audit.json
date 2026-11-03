@@ -1,0 +1,23 @@
+{
+  "chapter_scores_verified": 330,
+  "checkpoints_verified": 9,
+  "reserve_read_by_audit": false,
+  "native_process_receipts_verified": 11,
+  "private_results_sha256": "08ed61e5e7baea20c2cc2a97019428fb2313941164183d96c597ba4d689712ba",
+  "public_results_sha256": "2654ade227263d6afa3af75628ce9d87f5e80dd32b6a88ce48eabc931acd5b99",
+  "schema": "spiraltorch.native_book_ablation.audit.v1",
+  "scored_variants": 11,
+  "trainable_per_case": {
+    "101-affine": 6144,
+    "101-fixed4": 6144,
+    "101-learned4": 6148,
+    "103-affine": 6144,
+    "103-fixed4": 6144,
+    "103-learned4": 6148,
+    "107-affine": 6144,
+    "107-fixed4": 6144,
+    "107-learned4": 6148
+  },
+  "trained_or_scored_by_audit": false,
+  "updates_verified": 2304
+}

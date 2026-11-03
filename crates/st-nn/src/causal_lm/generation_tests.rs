@@ -94,6 +94,138 @@ fn greedy_matches_manual_decoder_and_finished_session_is_immutable() {
 }
 
 #[test]
+fn id_only_chunk_and_reported_paths_share_exact_rng_cache_and_checkpoint() {
+    for execution in [
+        CausalLmGenerationExecution::FullPrefix,
+        CausalLmGenerationExecution::KvCache { max_values: 1024 },
+    ] {
+        for selection in [TokenSelection::Greedy, TokenSelection::Sample] {
+            for distribution in [
+                TokenDistribution::Softmax { temperature: 0.7 },
+                TokenDistribution::ZSpace {
+                    config: ZSpaceGenerationControlConfig::default(),
+                },
+            ] {
+                for readout in [
+                    CausalLmReadoutAccumulator::F32,
+                    CausalLmReadoutAccumulator::F64,
+                ] {
+                    let base = load().with_readout_accumulator(readout);
+                    let model = base
+                        .with_lora(1, 2, 3.)
+                        .unwrap()
+                        .with_geometry(artifact(&base, "transformer.h.1.attn", 0.2))
+                        .unwrap();
+                    let cfg = CausalLmGenerationConfig {
+                        decoding: TokenDecodingConfig {
+                            selection,
+                            distribution: distribution.clone(),
+                            top_k: Some(6),
+                            top_p: 0.8,
+                        },
+                        execution: execution.clone(),
+                        ..policy()
+                    };
+                    let mut full =
+                        NativeCausalLmGenerator::new(model.clone(), vec![1, 2], cfg).unwrap();
+                    let mut other = full.clone();
+                    assert_eq!(
+                        other.step_token_id().unwrap(),
+                        Some(full.step().unwrap().unwrap().decision.token_id)
+                    );
+                    assert_eq!(other.to_json().unwrap(), full.to_json().unwrap());
+                    let bytes = other.to_json().unwrap().into_bytes();
+                    other =
+                        NativeCausalLmGenerator::from_json(model, &bytes, &pin(&bytes)).unwrap();
+                    let ids = other.advance_ids(2).unwrap();
+                    assert_eq!(
+                        ids,
+                        (0..2)
+                            .map(|_| full.step().unwrap().unwrap().decision.token_id)
+                            .collect::<Vec<_>>()
+                    );
+                    assert_eq!(other.to_json().unwrap(), full.to_json().unwrap());
+                    assert_eq!(other.step().unwrap(), full.step().unwrap());
+                    let last = other.advance_ids(1024).unwrap();
+                    assert_eq!(last, vec![full.step().unwrap().unwrap().decision.token_id]);
+                    assert_eq!(other.to_json().unwrap(), full.to_json().unwrap());
+                    assert!(other.advance_ids(1).unwrap().is_empty());
+                    assert!(other.step_token_id().unwrap().is_none());
+                    assert!(other.advance_ids(0).is_err());
+                    assert!(other.advance_ids(1025).is_err());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn late_control_error_rolls_back_the_entire_id_chunk_including_kv_and_rng() {
+    let mut cfg = config();
+    cfg["tie_word_embeddings"] = json!(false);
+    let mut w = parameters();
+    w.insert("lm_head.weight".into(), (vec![11, 4], vec![0.; 44]));
+    let model = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&cfg).unwrap(),
+        &archive(&w),
+        Default::default(),
+    )
+    .unwrap();
+    for execution in [
+        CausalLmGenerationExecution::FullPrefix,
+        CausalLmGenerationExecution::KvCache { max_values: 1024 },
+    ] {
+        for selection in [TokenSelection::Greedy, TokenSelection::Sample] {
+            let cfg = CausalLmGenerationConfig {
+                execution: execution.clone(),
+                decoding: TokenDecodingConfig {
+                    selection,
+                    top_k: Some(1),
+                    distribution: TokenDistribution::ZSpace {
+                        config: ZSpaceGenerationControlConfig {
+                            repression_strength: f64::MAX,
+                            last_token_repression: f64::MAX,
+                            ..Default::default()
+                        },
+                    },
+                    ..Default::default()
+                },
+                ..policy()
+            };
+            let mut g = NativeCausalLmGenerator::new(model.clone(), vec![1], cfg).unwrap();
+            let initial = g.to_json().unwrap();
+            let mut proof = g.clone();
+            assert_eq!(proof.step().unwrap().unwrap().decision.token_id, 0);
+            assert!(proof.step().is_err()); // The newly generated zero is now the last, one-occurrence token.
+            assert!(g.advance_ids(2).is_err());
+            assert_eq!(g.to_json().unwrap(), initial);
+            assert_eq!(g.step_token_id().unwrap(), Some(0));
+            assert_eq!(g.to_json().unwrap(), proof.to_json().unwrap());
+        }
+    }
+}
+
+#[test]
+fn id_chunk_stops_at_generated_eos_and_never_reemits_prior_ids() {
+    let model = load();
+    let id = model.next_token_ids(&[1, 2], [1, 2]).unwrap()[0];
+    let mut g = NativeCausalLmGenerator::new(
+        model,
+        vec![1, 2],
+        CausalLmGenerationConfig {
+            eos_token_ids: vec![id],
+            ..policy()
+        },
+    )
+    .unwrap();
+    assert_eq!(g.advance_ids(5).unwrap(), vec![id]);
+    assert_eq!(g.finish_reason(), Some("eos"));
+    let saved = g.to_json().unwrap();
+    assert!(g.advance_ids(4).unwrap().is_empty());
+    assert_eq!(g.to_json().unwrap(), saved);
+}
+
+#[test]
 fn sampled_control_continuation_matches_sequential_rng_and_exact_checkpoint() {
     let base = load();
     let model = base

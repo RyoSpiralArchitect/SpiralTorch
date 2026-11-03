@@ -6,6 +6,56 @@ fn scalar(value: f32) -> Tensor {
     Tensor::from_vec(1, 1, vec![value]).unwrap()
 }
 
+#[test]
+fn grouped_scores_preserve_mean_ties_and_tiny_tails_in_one_partition() {
+    let logits = Tensor::from_vec(
+        5,
+        3,
+        vec![
+            7., 7., 7., 9., 2., -1., 1., 1., 1., 0., -60., -60., 0., -60., -60.,
+        ],
+    )
+    .unwrap();
+    let labels = [2, -100, 0, 0, 2];
+    for layout in [Layout::RowMajor, Layout::ColMajor] {
+        let logits = logits.to_layout(layout).unwrap();
+        let (mean, g) = logits
+            .grouped_class_scores(&labels, &[1, 1, 1, 1, 1])
+            .unwrap();
+        assert_eq!(
+            mean,
+            logits
+                .cross_entropy_with_logits(&labels, Default::default())
+                .unwrap()
+                .data()[0]
+        );
+        assert_eq!(
+            g.iter()
+                .map(|g| (g.active, g.top1_correct))
+                .collect::<Vec<_>>(),
+            [(1, 0), (0, 0), (1, 1), (1, 1), (1, 0)]
+        );
+        assert_eq!(g[1].nll_sum, 0.);
+        assert!((g[0].nll_sum - 3f64.ln()).abs() < 1e-15);
+        assert_eq!(g[3].nll_sum, (2. * (-60f64).exp()).ln_1p());
+        assert_eq!(g[4].nll_sum, 60.);
+        let (other, merged) = logits.grouped_class_scores(&labels, &[2, 3]).unwrap();
+        assert_eq!(mean, other);
+        assert_eq!((merged[1].active, merged[1].top1_correct), (3, 2));
+        assert_eq!(
+            merged[1].nll_sum,
+            g[2].nll_sum + g[3].nll_sum + g[4].nll_sum
+        );
+    }
+    for lengths in [&[][..], &[5, 0], &[4], &[6], &[usize::MAX, 6]] {
+        assert!(logits.grouped_class_scores(&labels, lengths).is_err());
+    }
+    assert!(logits.grouped_class_scores(&[-100; 5], &[5]).is_err());
+    assert!(logits
+        .grouped_class_scores(&[0, 0, 10, 0, 0], &[5])
+        .is_err());
+}
+
 fn close(actual: &[f32], expected: &[f32], tolerance: f32) {
     assert_eq!(actual.len(), expected.len());
     for (&a, &b) in actual.iter().zip(expected) {

@@ -1,0 +1,8 @@
+{
+  "schema":"spiraltorch.native_lm.attention_group_interchange_plan.v1",
+  "role":"Secondary inference experiment declared while training was in progress, before any held-out score or generated continuation. Does not modify the primary protocol.",
+  "design":"For each of the three order seeds independently, cross the final LoRA weights from joint-affine or joint-wave training with the final affine or wave geometry from that same seed. Reconstruct all four snapshots from a clean base; do not train a hybrid. Require the two diagonal snapshots to reproduce primary owner IDs and all original chapter NLLs exactly.",
+  "evaluation":"Use the same immutable study wheel, 18 held-out sections, 4536 targets per book and ordered shared-prefix evaluation. The two off-diagonal states are new interventions, not fresh test data. Report each work and seed separately; no effect-size threshold or arm selection.",
+  "contrast":"Use L,G in {A,W} for LoRA and geometry source. Report WW-AA, the symmetric LoRA contribution ((WA-AA)+(WW-AW))/2, the symmetric geometry contribution ((AW-AA)+(WW-WA))/2, and interaction (WW-WA)-(AW-AA). The first two contributions sum to the observed diagonal contrast. These are end-state substitutions, not a decomposition of the training gradients or an identification of the log-radius scalar alone.",
+  "limits":{"cpu_only":true,"per_worker_seconds":2400,"rayon_threads":4,"new_training_updates":0,"retries":0,"stop_on_first_error":true}
+}

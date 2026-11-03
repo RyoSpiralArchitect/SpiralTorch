@@ -8,6 +8,7 @@ type Documents = (Vec<Vec<usize>>, Option<Vec<Vec<i64>>>);
 pub(super) fn documents(
     value: &Bound<'_, PyAny>,
     labels: Option<&Bound<'_, PyAny>>,
+    max_tokens: usize,
     admit: impl FnOnce(&[usize], bool) -> PyResult<()>,
 ) -> PyResult<Documents> {
     let count = value.len()?;
@@ -22,23 +23,28 @@ pub(super) fn documents(
         return Err(error("document and label counts differ"));
     }
     let mut rows = Vec::with_capacity(count);
+    let mut target_rows = labels.map(|_| Vec::with_capacity(count));
     let mut lengths = Vec::with_capacity(count);
+    let mut remaining = max_tokens;
     for index in 0..count {
         let row = value.get_item(index)?;
-        lengths.push(row.len()?);
-        rows.push(row);
-    }
-    admit(&lengths, labels.is_some())?;
-    let mut target_rows = labels.map(|_| Vec::with_capacity(count));
-    if let (Some(value), Some(rows)) = (labels, &mut target_rows) {
-        for (index, &length) in lengths.iter().enumerate() {
-            let row = value.get_item(index)?;
-            if row.len()? != length {
+        let length = row.len()?;
+        remaining = remaining
+            .checked_sub(length)
+            .ok_or_else(|| error("document token count exceeds budget"))?;
+        if let (Some(value), Some(targets)) = (labels, &mut target_rows) {
+            let label_row = value.get_item(index)?;
+            if label_row.len()? != length {
                 return Err(error("document label length differs"));
             }
-            rows.push(row);
+            targets.push(label_row);
         }
+        lengths.push(length);
+        rows.push(row);
     }
+    // Admission may detach from Python. Keep both sides of each row pair pinned;
+    // only read their scalar values once the common Rust plan has been admitted.
+    admit(&lengths, labels.is_some())?;
     let ids = rows
         .iter()
         .zip(&lengths)

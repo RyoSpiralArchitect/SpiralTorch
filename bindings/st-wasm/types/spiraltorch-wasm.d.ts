@@ -9,6 +9,14 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Native greedy ID, using the configured Z-Space policy when present. No GPU required. */
+    export function greedyTokenIdF32(logits: Float32Array, history: Uint32Array, configJson: string): number;
+    /** Full Rust TokenDecision, including exact final filtered probability and entropy. */
+    export function greedyTokenDecisionJsonF32(logits: Float32Array, history: Uint32Array, configJson: string): string;
+    /** Requires nn. Compile aligned source spans into unshifted causal labels (no tokenizer or GPU). */
+    export function alignCausalTargetsJson(input: string): string;
+    /** Requires nn. Bind independently encoded prompt, content and training IDs; optional source offsets. */
+    export function prepareCausalCompletionJson(input: string): string;
     /** Requires nn; GPU methods additionally require webgpu. Rust owns all study semantics. */
     export class ByteCorpusStudy {
         private constructor();
@@ -21,6 +29,7 @@ declare module "spiraltorch-wasm" {
         checkpointSizeBound(): number;
         checkpointFromJson(input: string): ByteCorpusStudyCheckpoint;
         caseArtifact(checkpoint: ByteCorpusStudyCheckpoint, case_name: string, inference_policy: string): ByteCorpusModelArtifact;
+        checkpointCandidates(): ByteCorpusCheckpointCandidates;
         validateArtifact(checkpoint: ByteCorpusStudyCheckpoint, artifact: ByteCorpusModelArtifact): void;
         advanceWebGpu(stop_after: number): Promise<ByteCorpusStudySegment>;
         resumeWebGpu(checkpoint: ByteCorpusStudyCheckpoint, stop_after: number): Promise<ByteCorpusStudySegment>;
@@ -32,6 +41,24 @@ declare module "spiraltorch-wasm" {
         readonly completedUpdates: number;
         readonly requestSha256: string;
         toJson(): string;
+        free(): void;
+    }
+
+    /** Requires nn. Imports exact checkpoint JSON; owns its originating study. */
+    export class ByteCorpusCheckpointCandidates {
+        private constructor();
+        readonly length: number;
+        readonly capacity: number;
+        appendJson(input: string): void;
+        selectCheckpoint(case_name: string, inference_policy: string): ByteCorpusCheckpointSelection;
+        free(): void;
+    }
+
+    /** Development selection, not a serving permit. The artifact getter owns a new handle. */
+    export class ByteCorpusCheckpointSelection {
+        private constructor();
+        readonly artifact: ByteCorpusModelArtifact;
+        readonly reportJson: string;
         free(): void;
     }
 

@@ -1,0 +1,10 @@
+{
+  "schema":"spiraltorch.native_lm.shared_prefix_check_plan.v1",
+  "role":"Post-study implementation check, not a second quality study, threshold change or timing comparison.",
+  "primary_protocol":"719e4f878824aa377139d9b863a303185153dfec",
+  "comparison_engine_source":"205f350a2acb3ea1b94cf3f88d114da4bd236da1",
+  "comparison_wheel_sha256":"035552f2d88f60d0fe50200c433d3684d6746544111c3fbb4d4dd5a405947261",
+  "comparison_native_sha256":"7bb1bd3a2891475840a1c28e4837097b1158bb5dc943c092101ef955071432a3",
+  "condition":"After the primary study is sealed, restore its 15 exact states on the integrated Rust development wheel. Compare all 18 section batches against the separately preserved scalar wheel scores, expect 8 of 12 shared layers, exact f64 NLL, target count and data identity for all 270. Any discrepancy is an error, not an allowed tolerance.",
+  "resources":{"cpu_only":true,"rayon_threads":4,"max_seconds":2400,"automatic_retries":0,"training_updates":0}
+}

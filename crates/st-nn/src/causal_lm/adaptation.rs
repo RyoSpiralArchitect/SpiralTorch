@@ -24,9 +24,14 @@ pub struct NativeCausalLmAdaptationGradients {
     target_tokens: usize,
     shape: [usize; 2],
     parameters: BTreeMap<String, BTreeMap<String, Vec<f32>>>,
+    pub(super) observation: Option<Box<CausalLmAdaptationObservation>>,
 }
 
 impl NativeCausalLmAdaptationGradients {
+    pub fn observation(&self) -> Option<&CausalLmAdaptationObservation> {
+        self.observation.as_deref()
+    }
+
     pub fn loss(&self) -> f32 {
         self.loss
     }
@@ -50,6 +55,10 @@ impl NativeCausalLmAdaptationGradients {
     }
     pub fn parameters(&self) -> &BTreeMap<String, BTreeMap<String, Vec<f32>>> {
         &self.parameters
+    }
+
+    pub(super) fn into_parameters(self) -> BTreeMap<String, BTreeMap<String, Vec<f32>>> {
+        self.parameters
     }
 }
 
@@ -96,11 +105,19 @@ impl NativeCausalLm {
     }
 
     pub fn adaptation_gradient_input_count(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        self.adaptation_labeled_input_count(shape, false)
+    }
+
+    pub fn adaptation_labeled_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
         self.validate_adaptation_placement()?;
         if self.lora.is_some() {
-            self.lora_gradient_input_count(shape)
+            self.lora_pullback_input_count(shape, has_labels)
         } else {
-            self.geometry_gradient_input_count(shape)
+            self.geometry_objective_input_count(shape, has_labels)
         }
     }
 
@@ -111,80 +128,163 @@ impl NativeCausalLm {
         windows: &[usize],
         shape: [usize; 2],
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        self.adaptation_gradient_input_count(shape)?;
-        let (loss, target_tokens, parameters) = match (&self.lora, &self.geometry) {
-            (None, Some(_)) => {
-                let grads = self.geometry_loss_gradients(windows, shape)?;
-                (
-                    grads.loss(),
-                    grads.target_tokens(),
-                    grads.parameters().clone(),
-                )
-            }
-            (Some(adapter), None) => {
-                let grads = self.lora_loss_gradients(windows, shape)?;
-                (
-                    grads.loss(),
-                    grads.target_tokens(),
-                    BTreeMap::from([(
-                        adapter.path(),
-                        BTreeMap::from([
-                            ("a".into(), grads.a().to_vec()),
-                            ("b".into(), grads.b().to_vec()),
-                        ]),
-                    )]),
-                )
-            }
-            (Some(adapter), Some(_)) => {
-                let prepared =
-                    self.prepare_objective(windows, shape, None, CausalLmObjective::default())?;
-                let mut hidden = self.embed(&prepared.input, prepared.shape)?;
-                let mut checkpoints = Vec::with_capacity(self.config.layers - adapter.layer() + 1);
-                for index in 0..self.config.layers {
-                    if index >= adapter.layer() {
-                        checkpoints.push(hidden.clone());
-                    }
-                    hidden = self.run_block(index, hidden, prepared.shape, false)?.output;
-                }
-                checkpoints.push(hidden.clone());
-                let normalized = self.final_norm.forward(&hidden, self.config.norm_epsilon)?;
-                let logits = self.project_readout(&normalized)?;
-                let config = prepared.objective.kernel_config();
-                let loss = logits
-                    .cross_entropy_with_logits(&prepared.labels, config)?
-                    .data()[0];
-                let seed = Tensor::from_vec(1, 1, vec![1.])?;
-                let d_logits =
-                    logits.cross_entropy_with_logits_backward(&prepared.labels, config, &seed)?;
-                let d_normalized = learning::frozen_pullback(
-                    &self.head,
-                    &self.backward_head,
-                    &d_logits,
-                    self.readout_accumulator,
-                )?;
-                // Empty first geometry site forces its input VJP, then the
-                // terminal LoRA parameter VJP stops before the frozen base.
-                let parameters = self.decoder_parameter_pullback(
-                    checkpoints,
-                    hidden.shape().0,
-                    hidden,
-                    prepared.shape,
-                    None,
-                    d_normalized,
-                    adapter.layer(),
-                    "",
-                    true,
-                )?;
-                if parameters.len() != 2
-                    || !parameters.contains_key(&adapter.path())
-                    || !parameters.contains_key(&format!("transformer.h.{}.attn", adapter.layer()))
-                {
-                    return Err("incomplete composed adaptation gradients".into());
-                }
-                (loss, prepared.target_tokens, parameters)
-            }
-            (None, None) => return Err("native LM has no adaptation parameters".into()),
+        self.adaptation_loss_gradients_with_labels(windows, shape, None, None)
+    }
+
+    /// Differentiate only the selected group(s), without removing unselected
+    /// adapters from the forward or the pullback into earlier trainable weights.
+    pub fn adaptation_loss_gradients_for(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        mode: CausalLmAdaptationMode,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.adaptation_loss_gradients_with_labels(windows, shape, None, Some(mode))
+    }
+
+    /// Mean CE of the selected shifted labels. Ignored positions remain in
+    /// causal attention; only the readout and its reverse seed are selected.
+    pub fn adaptation_loss_gradients_with_labels(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        mode: Option<CausalLmAdaptationMode>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.adaptation_window_gradients(windows, shape, labels, mode, false)
+    }
+
+    /// Optionally measure the actual residual and adjoint while computing the same sealed gradients.
+    pub fn adaptation_window_gradients(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        mode: Option<CausalLmAdaptationMode>,
+        observe_geometry: bool,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        if let Some(mode) = mode {
+            self.validate_adaptation_mode(mode)?;
+        }
+        self.adaptation_labeled_input_count(shape, labels.is_some())?;
+        let prepared =
+            self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        self.adaptation_gradients_from_prefix(
+            &prepared,
+            hidden,
+            0,
+            mode,
+            observe_geometry.then(observation::AdaptationTrace::default),
+        )
+    }
+
+    pub fn admit_wave_factorial(
+        &self,
+        config: crate::geometry_runtime::WaveFactorConfig,
+    ) -> CausalLmResult<()> {
+        self.validate_adaptation_mode(CausalLmAdaptationMode::Joint)?;
+        let site = &self
+            .geometry_artifact()
+            .ok_or("missing factorial geometry")?
+            .record()
+            .placements[0];
+        config.admit(site)?;
+        Ok(())
+    }
+
+    /// Hold the input, gate, bias, residual strength and arriving CE gradient fixed.
+    /// Only the factual map participates in the decoder; alternatives are local VJPs.
+    pub fn wave_factorial_observation(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        config: crate::geometry_runtime::WaveFactorConfig,
+    ) -> CausalLmResult<Box<CausalLmAdaptationObservation>> {
+        self.admit_wave_factorial(config)?;
+        self.adaptation_labeled_input_count(shape, labels.is_some())?;
+        let prepared =
+            self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        self.adaptation_gradients_from_prefix(
+            &prepared,
+            hidden,
+            0,
+            Some(CausalLmAdaptationMode::Joint),
+            Some(observation::AdaptationTrace::factorial(config)),
+        )?
+        .observation
+        .ok_or_else(|| "missing wave factorial receipt".into())
+    }
+
+    /// Caller has admitted this owner, selected mode, complete context and
+    /// selected logits. Hidden is the boundary before any participating adapter.
+    pub(super) fn adaptation_gradients_from_prefix(
+        &self,
+        prepared: &PreparedCausalWindow,
+        hidden: Tensor,
+        depth: usize,
+        mode: Option<CausalLmAdaptationMode>,
+        mut trace: Option<observation::AdaptationTrace>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        let (first, site) = match &self.lora {
+            Some(a) => (a.layer(), format!("transformer.h.{}.attn", a.layer())),
+            None => self.first_geometry_site()?,
         };
+        let mode = mode.unwrap_or(match (&self.lora, &self.geometry) {
+            (Some(_), Some(_)) => CausalLmAdaptationMode::Joint,
+            (Some(_), None) => CausalLmAdaptationMode::Lora,
+            (None, Some(_)) => CausalLmAdaptationMode::Geometry,
+            (None, None) => return Err("native LM has no adaptation parameters".into()),
+        });
+        let target = match mode {
+            CausalLmAdaptationMode::Lora => learning::DecoderTarget::Lora,
+            CausalLmAdaptationMode::Geometry => learning::DecoderTarget::GeometryFrom(&site),
+            CausalLmAdaptationMode::Joint => learning::DecoderTarget::Joint,
+        };
+        let learning::TrainingReadout {
+            checkpoints,
+            hidden_rows,
+            selected,
+            d_normalized,
+            loss,
+            ..
+        } = self.training_readout(
+            prepared,
+            hidden,
+            depth,
+            first,
+            trace.as_mut().map(|t| &mut t.forward),
+        )?;
+        let parameters = self.decoder_parameter_pullback(
+            checkpoints,
+            hidden_rows,
+            selected,
+            prepared.shape,
+            prepared.selected_rows.as_deref(),
+            d_normalized,
+            first,
+            target,
+            trace.as_mut(),
+        )?;
+        let want_lora = mode != CausalLmAdaptationMode::Geometry;
+        let placements = self
+            .geometry
+            .as_ref()
+            .filter(|_| mode != CausalLmAdaptationMode::Lora)
+            .map_or(&[][..], |g| g.artifact().record().placements.as_slice());
+        if parameters.len() != usize::from(want_lora) + placements.len()
+            || self
+                .lora
+                .as_ref()
+                .is_some_and(|a| parameters.contains_key(&a.path()) != want_lora)
+            || placements.iter().any(|p| !parameters.contains_key(&p.path))
+        {
+            return Err("incorrect selected adaptation gradient groups".into());
+        }
+        let target_tokens = prepared.target_tokens;
+        let shape = prepared.window_shape;
         if !loss.is_finite()
             || parameters
                 .values()
@@ -194,7 +294,7 @@ impl NativeCausalLm {
         {
             return Err("nonfinite adaptation loss or gradient".into());
         }
-        Ok(NativeCausalLmAdaptationGradients {
+        let mut gradients = NativeCausalLmAdaptationGradients {
             base_id: self.base_id.clone(),
             lora_id: self.lora_artifact_id().map(str::to_owned),
             geometry_id: self.geometry_artifact_id().map(str::to_owned),
@@ -203,7 +303,12 @@ impl NativeCausalLm {
             target_tokens,
             shape,
             parameters,
-        })
+            observation: None,
+        };
+        if let Some(trace) = trace {
+            gradients.observation = Some(Box::new(trace.finish(self, mode, &gradients)?));
+        }
+        Ok(gradients)
     }
 
     /// Construct both updates from the same immutable source, committing only
@@ -243,17 +348,21 @@ impl NativeCausalLm {
             CausalLmAdaptationMode::Geometry | CausalLmAdaptationMode::Joint
         ) {
             let runtime = self.geometry.as_ref().unwrap();
-            // Geometry runtime requires exactly its placement set, not LoRA's
-            // separate parameter path. Keep both groups' source identity sealed.
-            let mut parameters = gradients.parameters.clone();
-            if let Some(lora) = &self.lora {
-                parameters.remove(&lora.path());
-            }
-            next.geometry = Some(Arc::new(runtime.with_gradients_sgd(
-                self.geometry_artifact_id().unwrap(),
-                &parameters,
-                learning_rate,
-            )?));
+            let id = runtime.artifact().artifact_id();
+            let candidate = if let Some(lora) = &self.lora {
+                // Pass geometry's placement map by reference without copying LoRA A/B or any channel vectors.
+                let external = lora.path();
+                let view = gradients
+                    .parameters
+                    .iter()
+                    .filter(|(path, _)| *path != &external)
+                    .map(|(path, g)| (path.clone(), g))
+                    .collect();
+                runtime.with_gradients_sgd(id, &view, learning_rate)?
+            } else {
+                runtime.with_gradients_sgd(id, &gradients.parameters, learning_rate)?
+            };
+            next.geometry = Some(Arc::new(candidate));
         }
         Ok(next)
     }

@@ -22,7 +22,8 @@ pub struct PyNativeGeometryAdamW {
 #[pymethods]
 impl PyNativeGeometryAdamW {
     #[new]
-    #[pyo3(signature = (artifact, *, beta1=None, beta2=None, epsilon=None, max_gradient_norm=None))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (artifact, *, beta1=None, beta2=None, epsilon=None, max_gradient_norm=None, max_log_radius_drift=None))]
     fn new(
         py: Python<'_>,
         artifact: &PyGeometryAdapterArtifact,
@@ -30,6 +31,7 @@ impl PyNativeGeometryAdamW {
         beta2: Option<&Bound<'_, PyAny>>,
         epsilon: Option<&Bound<'_, PyAny>>,
         max_gradient_norm: Option<&Bound<'_, PyAny>>,
+        max_log_radius_drift: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let defaults = AdamWConfig::default();
         let config = AdamWConfig::new(
@@ -44,9 +46,15 @@ impl PyNativeGeometryAdamW {
             .map(GlobalNormClip::new)
             .transpose()
             .map_err(error)?;
-        py.detach(|| NativeGeometryAdamW::new(&artifact.inner, config, clip))
-            .map(|inner| Self { inner })
-            .map_err(error)
+        let drift = max_log_radius_drift.map(rate).transpose()?;
+        py.detach(|| match drift {
+            Some(delta) => {
+                NativeGeometryAdamW::new_with_log_radius_drift(&artifact.inner, config, clip, delta)
+            }
+            None => NativeGeometryAdamW::new(&artifact.inner, config, clip),
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
     }
 
     #[staticmethod]
@@ -85,5 +93,15 @@ impl PyNativeGeometryAdamW {
     #[getter]
     fn max_gradient_norm(&self) -> Option<f32> {
         self.inner.max_gradient_norm()
+    }
+
+    #[getter]
+    fn max_log_radius_drift(&self) -> Option<f32> {
+        self.inner.max_log_radius_drift()
+    }
+
+    #[getter]
+    fn log_radius_projection_count(&self) -> Option<u64> {
+        self.inner.log_radius_projection_count()
     }
 }

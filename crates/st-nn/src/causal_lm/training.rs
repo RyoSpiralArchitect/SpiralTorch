@@ -3,6 +3,9 @@ use super::*;
 use crate::geometry_runtime::{AdamWStep, NativeGeometryAdamW};
 use crate::language_windows::{CausalDocumentWindow, CausalDocumentWindows, MAX_DOCUMENTS};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+mod checkpoint_files;
+pub use checkpoint_files::CausalLmObservedCheckpointFiles;
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_trainer.v1";
 const MAX_CHECKPOINT_BYTES: usize = 128 * 1024 * 1024;
@@ -60,6 +63,43 @@ pub(super) struct Corpus {
 }
 
 impl Corpus {
+    pub(super) fn validate_labels(
+        documents: &[Vec<usize>],
+        labels: &[Vec<i64>],
+        vocabulary: usize,
+    ) -> CausalLmResult<()> {
+        if labels.len() != documents.len()
+            || labels
+                .iter()
+                .zip(documents)
+                .any(|(a, b)| a.len() != b.len())
+            || labels
+                .iter()
+                .flatten()
+                .any(|&v| v != -100 && (v < 0 || v as u64 >= vocabulary as u64))
+        {
+            return Err("invalid training document labels".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn active_targets(&self, windows: &[CausalDocumentWindow]) -> usize {
+        windows
+            .iter()
+            .map(|w| {
+                self.labels
+                    .as_ref()
+                    .map_or(w.length as usize - 1, |labels| {
+                        labels[w.document as usize]
+                            [w.start as usize + 1..(w.start + w.length) as usize]
+                            .iter()
+                            .filter(|&&v| v != -100)
+                            .count()
+                    })
+            })
+            .sum()
+    }
+
     /// Shared identity and batching storage for admitted native training corpora.
     pub(super) fn new(
         documents: Vec<Vec<usize>>,
@@ -127,7 +167,8 @@ pub struct CausalLmTrainingStep {
 #[derive(Clone, Debug)]
 pub struct NativeCausalLmTrainer {
     model: NativeCausalLm,
-    optimizer: NativeGeometryAdamW,
+    // Segment snapshots share the old moments. Updates replace the entire owner.
+    optimizer: Arc<NativeGeometryAdamW>,
     corpus: Arc<Corpus>,
     config: CausalLmTrainingConfig,
     updates: u64,
@@ -161,6 +202,28 @@ pub struct CausalLmTrainingResume {
 }
 
 impl CausalLmTrainingResume {
+    pub(super) fn into_model(self) -> NativeCausalLm {
+        self.model
+    }
+
+    pub(super) fn into_model_at(
+        self,
+        update: u64,
+        recorded_data_id: &str,
+        geometry_id: &str,
+    ) -> CausalLmResult<NativeCausalLm> {
+        if !crate::geometry_artifact::is_sha256_id(recorded_data_id)
+            || self.saved.updates != update
+            || self.saved.data_id != recorded_data_id
+            || self.saved.geometry_id != geometry_id
+        {
+            return Err(
+                "training checkpoint does not match the requested inference boundary".into(),
+            );
+        }
+        Ok(self.model)
+    }
+
     pub fn config(&self) -> CausalLmTrainingConfig {
         self.saved.config
     }
@@ -201,11 +264,19 @@ fn identity(bytes: &[u8]) -> String {
 impl NativeCausalLmTrainer {
     pub const MAX_TOKENS: usize = MAX_TRAINING_TOKENS;
 
+    fn require_geometry_only(model: &NativeCausalLm) -> CausalLmResult<()> {
+        if model.lora_artifact_id().is_some() {
+            return Err("geometry AdamW does not own LoRA weights; use a joint training session for composition".into());
+        }
+        Ok(())
+    }
+
     pub fn validate_owners(
         model: &NativeCausalLm,
         optimizer: &NativeGeometryAdamW,
         config: CausalLmTrainingConfig,
     ) -> CausalLmResult<()> {
+        Self::require_geometry_only(model)?;
         config.validate()?;
         if let Some(recipe) = config.repetition {
             recipe.admit_shape([1, config.context_length as usize], model.config.vocabulary)?;
@@ -279,15 +350,7 @@ impl NativeCausalLmTrainer {
             return Err("invalid training document token ID".into());
         }
         if let Some(labels) = &labels {
-            if labels.len() != documents.len()
-                || labels.iter().zip(&lengths).any(|(row, &n)| row.len() != n)
-                || labels
-                    .iter()
-                    .flatten()
-                    .any(|&v| v != -100 && (v < 0 || v as u64 >= model.config.vocabulary as u64))
-            {
-                return Err("invalid training document labels".into());
-            }
+            Corpus::validate_labels(&documents, labels, model.config.vocabulary)?;
             if config.repetition.is_some_and(|r| r.config().strength > 0.)
                 && labels
                     .iter()
@@ -303,7 +366,7 @@ impl NativeCausalLmTrainer {
             initial_optimizer_revision: optimizer.revision(),
             initial_optimizer_steps: optimizer.state().slots.iter().map(|s| s.steps).collect(),
             model,
-            optimizer,
+            optimizer: Arc::new(optimizer),
             corpus,
             config,
             updates: 0,
@@ -315,22 +378,7 @@ impl NativeCausalLmTrainer {
             .windows()
             .chunks(config.microbatch_windows)
         {
-            let active = windows
-                .iter()
-                .map(|w| {
-                    result
-                        .corpus
-                        .labels
-                        .as_ref()
-                        .map_or(w.length as usize - 1, |labels| {
-                            labels[w.document as usize]
-                                [w.start as usize + 1..(w.start + w.length) as usize]
-                                .iter()
-                                .filter(|&&v| v != -100)
-                                .count()
-                        })
-                })
-                .sum();
+            let active = result.corpus.active_targets(windows);
             if active == 0 {
                 return Err("training microbatch has no selected targets".into());
             }
@@ -392,6 +440,28 @@ impl NativeCausalLmTrainer {
     }
 
     pub fn step(&mut self) -> CausalLmResult<Option<CausalLmTrainingStep>> {
+        self.advance(None)
+    }
+
+    /// Perform the same update, observing only the primary forward and the
+    /// final reduced gradient actually passed to AdamW. Nothing is checkpointed.
+    pub fn step_observed(&mut self) -> CausalLmResult<Option<CausalLmObservedTrainingStep>> {
+        let mut sites = BTreeMap::new();
+        Ok(self
+            .advance(Some(&mut sites))?
+            .map(|step| CausalLmObservedTrainingStep {
+                schema: "spiraltorch.native_lm.observed_training_step.v1",
+                base_model_identity: self.model.base_model_identity().to_owned(),
+                data_id: self.data_id().to_owned(),
+                step,
+                sites,
+            }))
+    }
+
+    fn advance(
+        &mut self,
+        sites: Option<&mut BTreeMap<String, CausalLmSiteObservation>>,
+    ) -> CausalLmResult<Option<CausalLmTrainingStep>> {
         if self.exhausted() {
             return Ok(None);
         }
@@ -402,19 +472,27 @@ impl NativeCausalLmTrainer {
             repetition: self.config.repetition,
         };
         let mut accumulator = self.model.geometry_accumulator_with_objective(objective)?;
+        let mut observation = sites.map(|output| (observation::ResidualSums::default(), output));
         for windows in self.plan().windows()[start..end].chunks(self.config.microbatch_windows) {
             let (ids, labels) = self.corpus.batch(windows);
-            accumulator.accumulate_loss_with_labels(
+            accumulator.accumulate_observing(
                 &self.model,
                 &ids,
                 [windows.len(), self.config.context_length as usize],
                 labels.as_deref(),
+                observation.as_mut().map(|(sums, _)| sums),
             )?;
         }
-        let (model, optimizer) = accumulator.step_adamw(
+        let (model, optimizer) = accumulator.step_adamw_inspecting(
             &self.model,
             &self.optimizer,
             AdamWStep::new(self.config.learning_rate, self.config.weight_decay)?,
+            |gradients| {
+                if let Some((sums, output)) = observation {
+                    *output = sums.finish(self.model.geometry_artifact().unwrap(), gradients)?;
+                }
+                Ok(())
+            },
         )?;
         let report = CausalLmTrainingStep {
             update: self.updates + 1,
@@ -436,13 +514,14 @@ impl NativeCausalLmTrainer {
             post_geometry_artifact_id: model.geometry_artifact_id().unwrap().into(),
         };
         self.model = model;
-        self.optimizer = optimizer;
+        self.optimizer = Arc::new(optimizer);
         self.updates += 1;
         Ok(Some(report))
     }
 
     pub fn to_json(&self) -> CausalLmResult<String> {
         let geometry = self.model.geometry_artifact().unwrap();
+        let (optimizer_json, optimizer_id) = self.optimizer.checkpoint_with_id()?;
         let checkpoint = Checkpoint {
             schema: SCHEMA.into(),
             base_model_identity: self.model.base_id.clone(),
@@ -453,8 +532,8 @@ impl NativeCausalLmTrainer {
             initial_optimizer_steps: self.initial_optimizer_steps.clone(),
             geometry_json: geometry.to_json().into(),
             geometry_id: geometry.artifact_id().into(),
-            optimizer_json: self.optimizer.to_json()?,
-            optimizer_id: self.optimizer.checkpoint_id()?,
+            optimizer_json,
+            optimizer_id,
             readout_accumulator: self.model.readout_accumulator,
         };
         let json = serde_json::to_string(&checkpoint)?;
@@ -465,7 +544,14 @@ impl NativeCausalLmTrainer {
     }
 
     pub fn checkpoint_id(&self) -> CausalLmResult<String> {
-        Ok(identity(self.to_json()?.as_bytes()))
+        Ok(self.checkpoint_with_id()?.1)
+    }
+
+    /// Serialize once and return the pin for exactly these checkpoint bytes.
+    pub fn checkpoint_with_id(&self) -> CausalLmResult<(String, String)> {
+        let json = self.to_json()?;
+        let id = identity(json.as_bytes());
+        Ok((json, id))
     }
 
     fn checkpoint(
@@ -497,6 +583,7 @@ impl NativeCausalLmTrainer {
         expected_id: &str,
     ) -> CausalLmResult<CausalLmTrainingResume> {
         let saved = Self::checkpoint(bytes, expected_id, &base)?;
+        Self::require_geometry_only(&base)?;
         let geometry = GeometryAdapterArtifact::from_json(
             saved.geometry_json.as_bytes(),
             &saved.geometry_id,

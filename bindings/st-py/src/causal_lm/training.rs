@@ -4,8 +4,13 @@ use super::{
     PyNativeGeometryAdamW,
 };
 use pyo3::prelude::*;
-use st_nn::causal_lm::{CausalLmTrainingConfig, CausalLmTrainingStep, NativeCausalLmTrainer};
+use pyo3::types::PyDict;
+use st_nn::causal_lm::{
+    CausalLmObservedTrainingStep, CausalLmTrainingConfig, CausalLmTrainingStep,
+    NativeCausalLmTrainer,
+};
 use st_nn::language_windows::MAX_DOCUMENTS;
+use std::path::PathBuf;
 
 #[pyclass(name = "NativeCausalLmTrainer", module = "spiraltorch")]
 pub struct PyNativeCausalLmTrainer {
@@ -15,6 +20,28 @@ pub struct PyNativeCausalLmTrainer {
 #[pyclass(name = "NativeCausalLmTrainingStep", module = "spiraltorch", frozen)]
 pub struct PyNativeCausalLmTrainingStep {
     inner: CausalLmTrainingStep,
+}
+
+#[pyclass(
+    name = "NativeCausalLmObservedTrainingStep",
+    module = "spiraltorch",
+    frozen
+)]
+pub struct PyNativeCausalLmObservedTrainingStep {
+    inner: CausalLmObservedTrainingStep,
+}
+
+#[pymethods]
+impl PyNativeCausalLmObservedTrainingStep {
+    #[getter]
+    fn step(&self) -> PyNativeCausalLmTrainingStep {
+        PyNativeCausalLmTrainingStep {
+            inner: self.inner.step.clone(),
+        }
+    }
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner).map_err(error)
+    }
 }
 
 #[pymethods]
@@ -71,6 +98,10 @@ impl PyNativeCausalLmTrainingStep {
 #[pymethods]
 impl PyNativeCausalLmTrainer {
     #[classattr]
+    const MAX_CHECKPOINT_BYTES: usize = NativeCausalLmTrainer::MAX_PAYLOAD_BYTES;
+    #[classattr]
+    const MAX_CHECKPOINT_INTERVAL: u64 = NativeCausalLmTrainer::MAX_CHECKPOINT_INTERVAL;
+    #[classattr]
     const MAX_TOKENS: usize = NativeCausalLmTrainer::MAX_TOKENS;
     #[classattr]
     const MAX_DOCUMENTS: usize = MAX_DOCUMENTS;
@@ -107,11 +138,16 @@ impl PyNativeCausalLmTrainer {
         };
         NativeCausalLmTrainer::validate_owners(&model.inner, &optimizer.inner, config)
             .map_err(error)?;
-        let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
-            NativeCausalLmTrainer::document_plan(&model.inner, config, lengths, has_labels)
-                .map(|_| ())
-                .map_err(error)
-        })?;
+        let (docs, labels) = documents(
+            token_documents,
+            labels,
+            NativeCausalLmTrainer::MAX_TOKENS,
+            |lengths, has_labels| {
+                NativeCausalLmTrainer::document_plan(&model.inner, config, lengths, has_labels)
+                    .map(|_| ())
+                    .map_err(error)
+            },
+        )?;
         py.detach(|| {
             NativeCausalLmTrainer::new(
                 model.inner.clone(),
@@ -131,29 +167,34 @@ impl PyNativeCausalLmTrainer {
         py: Python<'_>,
         base: &PyNativeCausalLm,
         token_documents: &Bound<'_, PyAny>,
-        payload: &str,
-        expected_id: &str,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let pin = super::session_input::pin(expected_id)?;
+        let payload = super::session_input::payload_with_limit(
+            payload,
+            NativeCausalLmTrainer::MAX_PAYLOAD_BYTES,
+        )?;
+        let bytes = payload.as_bytes();
         let resume = py
-            .detach(|| {
-                NativeCausalLmTrainer::prepare_restore(
-                    base.inner.clone(),
-                    payload.as_bytes(),
-                    expected_id,
-                )
-            })
+            .detach(|| NativeCausalLmTrainer::prepare_restore(base.inner.clone(), bytes, &pin))
             .map_err(error)?;
-        let (docs, labels) = documents(token_documents, labels, |lengths, has_labels| {
-            NativeCausalLmTrainer::document_plan(
-                resume.model(),
-                resume.config(),
-                lengths,
-                has_labels,
-            )
-            .map(|_| ())
-            .map_err(error)
-        })?;
+        let (docs, labels) = documents(
+            token_documents,
+            labels,
+            NativeCausalLmTrainer::MAX_TOKENS,
+            |lengths, has_labels| {
+                NativeCausalLmTrainer::document_plan(
+                    resume.model(),
+                    resume.config(),
+                    lengths,
+                    has_labels,
+                )
+                .map(|_| ())
+                .map_err(error)
+            },
+        )?;
         py.detach(|| resume.resume(docs, labels))
             .map(|inner| Self { inner })
             .map_err(error)
@@ -162,6 +203,14 @@ impl PyNativeCausalLmTrainer {
     fn step(&mut self, py: Python<'_>) -> PyResult<Option<PyNativeCausalLmTrainingStep>> {
         py.detach(|| self.inner.step())
             .map(|v| v.map(|inner| PyNativeCausalLmTrainingStep { inner }))
+            .map_err(error)
+    }
+    fn step_observed(
+        &mut self,
+        py: Python<'_>,
+    ) -> PyResult<Option<PyNativeCausalLmObservedTrainingStep>> {
+        py.detach(|| self.inner.step_observed())
+            .map(|v| v.map(|inner| PyNativeCausalLmObservedTrainingStep { inner }))
             .map_err(error)
     }
     #[getter]
@@ -206,6 +255,60 @@ impl PyNativeCausalLmTrainer {
     fn plan_json(&self) -> PyResult<String> {
         self.inner.plan().to_json().map_err(error)
     }
+    fn checkpoint_with_id(&self, py: Python<'_>) -> PyResult<(String, String)> {
+        py.detach(|| self.inner.checkpoint_with_id()).map_err(error)
+    }
+    fn save_checkpoint_new(&self, py: Python<'_>, path: PathBuf) -> PyResult<String> {
+        py.detach(|| self.inner.save_checkpoint_new(path))
+            .map_err(super::checkpoint_error)
+    }
+    fn advance_to_checkpoint_new(
+        &mut self,
+        py: Python<'_>,
+        stop_after: &Bound<'_, PyAny>,
+        path: PathBuf,
+    ) -> PyResult<(Vec<PyNativeCausalLmTrainingStep>, String)> {
+        super::reject_bool(stop_after)?;
+        let stop = stop_after.extract::<u64>()?;
+        let (steps, pin) = py
+            .detach(|| self.inner.advance_to_checkpoint_new(stop, path))
+            .map_err(super::checkpoint_error)?;
+        Ok((
+            steps
+                .into_iter()
+                .map(|inner| PyNativeCausalLmTrainingStep { inner })
+                .collect(),
+            pin,
+        ))
+    }
+    fn advance_to_observed_checkpoint_new(
+        &mut self,
+        py: Python<'_>,
+        stop_after: &Bound<'_, PyAny>,
+        directory: PathBuf,
+    ) -> PyResult<(Vec<PyNativeCausalLmTrainingStep>, Py<PyDict>)> {
+        super::reject_bool(stop_after)?;
+        let stop = stop_after.extract::<u64>()?;
+        let (steps, files) = py
+            .detach(|| {
+                self.inner
+                    .advance_to_observed_checkpoint_new(stop, directory)
+            })
+            .map_err(super::checkpoint_error)?;
+        let entry = PyDict::new(py);
+        entry.set_item("file", files.file)?;
+        entry.set_item("checkpoint_id", files.checkpoint_id)?;
+        entry.set_item("updates", files.updates)?;
+        entry.set_item("observation_file", files.observation_file)?;
+        entry.set_item("observation_id", files.observation_id)?;
+        Ok((
+            steps
+                .into_iter()
+                .map(|inner| PyNativeCausalLmTrainingStep { inner })
+                .collect(),
+            entry.unbind(),
+        ))
+    }
     fn to_json(&self, py: Python<'_>) -> PyResult<String> {
         py.detach(|| self.inner.to_json()).map_err(error)
     }
@@ -217,5 +320,6 @@ impl PyNativeCausalLmTrainer {
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLmTrainer>()?;
+    module.add_class::<PyNativeCausalLmObservedTrainingStep>()?;
     module.add_class::<PyNativeCausalLmTrainingStep>()
 }

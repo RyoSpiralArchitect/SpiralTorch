@@ -1,0 +1,17 @@
+{
+  "schema": "spiraltorch.native_book_execution.v1",
+  "declared": "after train-only initial equality checks; before any optimizer update or held-out score",
+  "protocol_commit": "4add5ef284ca098866fe495745fd98f724f3a35a",
+  "plan_sha256": "5a2aa2ef90c3f3e938012806bedb8d30b439884a421aadcb30a2e1923e41a8f6",
+  "data_manifest_sha256": "a5e7e355722191de528def65959f40bf6bb0f03847bb8bf5e6df3b2d403791c9",
+  "preflight_sha256": "c252e6242df508d3c1b8c75b23147209be88a387f5a38a95018ceb52afc76a9c",
+  "train_windows_sha256": "36a659f2cec5f642d09bb02428b2ba09dd10152152b38dc9098e99f49c043abb",
+  "evaluation_windows_sha256": "0609ddff65baca7bad6ab15c581bcbf9867f431b51cf299824df24ca8188715a",
+  "source": "published 0.4.33 macOS wheel with matching package file inventory",
+  "matched_initial_site_outputs": 4,
+  "matched_initial_train_logit_probes": 4,
+  "evaluation_scored": false,
+  "updates": 0,
+  "cases": 9,
+  "reserve_read": false
+}

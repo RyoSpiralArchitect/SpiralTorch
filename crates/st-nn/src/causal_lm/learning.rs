@@ -2,11 +2,9 @@
 //! Checkpoint block boundaries; replay only one block's internal tape at a time.
 use super::*;
 use crate::geometry_artifact::GeometryAdapterTensorRole;
-use crate::geometry_runtime::NativeGeometryBatch;
+use crate::geometry_runtime::{NativeGeometryBatch, ParameterGradients as Parameters};
 use st_kernel_contracts::attention::attention_vjp_reference;
 use std::collections::BTreeMap;
-
-type Parameters = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
 
 mod accumulation;
 pub use accumulation::NativeCausalLmAccumulator;
@@ -70,6 +68,17 @@ impl NativeCausalLmGradients {
     }
 }
 
+/// Primal checkpoints and the native CE seed. Only an auxiliary objective
+/// needs to retain logits after this point.
+pub(super) struct TrainingReadout {
+    pub checkpoints: Vec<Tensor>,
+    pub hidden_rows: usize,
+    pub selected: Tensor,
+    pub logits: Tensor,
+    pub d_normalized: Tensor,
+    pub loss: f32,
+}
+
 pub(super) fn frozen_pullback(
     weight: &PackedB,
     cache: &OnceLock<Result<PackedB, String>>,
@@ -102,20 +111,39 @@ impl Dense {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum DecoderTarget<'a> {
+    GeometryFrom(&'a str),
+    Lora,
+    Joint,
+}
+
 fn geometry_pullback(
     path: String,
     batch: Option<NativeGeometryBatch>,
     upstream: Tensor,
     parameters: &mut Parameters,
-    first_site: &str,
+    target: DecoderTarget<'_>,
+    trace: Option<&mut observation::AdaptationTrace>,
 ) -> CausalLmResult<Option<Tensor>> {
     if let Some(batch) = batch {
-        let (input, gradient) = if path == first_site {
+        if matches!(target, DecoderTarget::Lora) {
+            let input = batch.vjp_input(upstream.data())?;
+            if let Some(t) = trace {
+                t.pullback(&path, &batch, &upstream, Some(&input))?;
+            }
+            return Ok(Some(input));
+        }
+        let (input, gradient) = if matches!(target, DecoderTarget::GeometryFrom(first) if path == first)
+        {
             (None, batch.vjp_parameters(upstream.data())?)
         } else {
             let gradient = batch.vjp(upstream.data())?;
             (Some(gradient.input), gradient.parameters)
         };
+        if let Some(t) = trace {
+            t.pullback(&path, &batch, &upstream, input.as_ref())?;
+        }
         if parameters.insert(path, gradient).is_some() {
             return Err("duplicate geometry gradient placement".into());
         }
@@ -125,7 +153,7 @@ fn geometry_pullback(
 }
 
 impl NativeCausalLm {
-    fn first_geometry_site(&self) -> CausalLmResult<(usize, String)> {
+    pub(super) fn first_geometry_site(&self) -> CausalLmResult<(usize, String)> {
         let runtime = self
             .geometry
             .as_ref()
@@ -215,54 +243,34 @@ impl NativeCausalLm {
         objective.validate()?;
         self.geometry_objective_input_count(window_shape, labels.is_some())?;
         let prepared = self.prepare_objective(windows, window_shape, labels, objective)?;
-        self.geometry_loss_gradients_prepared(prepared)
+        self.geometry_loss_gradients_prepared(prepared, None)
     }
 
     fn geometry_loss_gradients_prepared(
         &self,
         prepared: PreparedCausalWindow,
+        observations: Option<&mut observation::ResidualSums>,
     ) -> CausalLmResult<NativeCausalLmGradients> {
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        let (first, _) = self.first_geometry_site()?;
+        let TrainingReadout {
+            checkpoints,
+            hidden_rows,
+            selected,
+            logits,
+            d_normalized,
+            loss: causal_loss,
+        } = self.training_readout(&prepared, hidden, 0, first, observations)?;
         let PreparedCausalWindow {
-            input: ids,
-            labels,
             shape,
             window_shape,
             target_tokens,
             selected_rows,
             objective,
             repetition,
+            ..
         } = prepared;
         let runtime = self.geometry.as_ref().unwrap();
-        let c = &self.config;
-        let (first_layer, _) = self.first_geometry_site()?;
-        let mut checkpoints = Vec::with_capacity(c.layers - first_layer + 1);
-        let mut hidden = self.embed(&ids, shape)?;
-        for index in 0..c.layers {
-            if index >= first_layer {
-                checkpoints.push(hidden.clone());
-            }
-            hidden = self.run_block(index, hidden, shape, false)?.output;
-        }
-        checkpoints.push(hidden.clone());
-        let selected = match &selected_rows {
-            Some(rows) => hidden.gather_rows(rows)?,
-            None => hidden.clone(),
-        };
-        let normalized = self.final_norm.forward(&selected, c.norm_epsilon)?;
-        let logits = self.project_readout(&normalized)?;
-        let causal_loss = logits
-            .cross_entropy_with_logits(&labels, objective.kernel_config())?
-            .data()[0];
-        let seed = Tensor::from_vec(1, 1, vec![1.])?;
-        let d_logits =
-            logits.cross_entropy_with_logits_backward(&labels, objective.kernel_config(), &seed)?;
-        let d_normalized = frozen_pullback(
-            &self.head,
-            &self.backward_head,
-            &d_logits,
-            self.readout_accumulator,
-        )?;
-        drop(d_logits);
         let repetition = match repetition {
             Some(window) => {
                 let (loss, gradient, active_positions) =
@@ -281,8 +289,7 @@ impl NativeCausalLm {
             }
             None => None,
         };
-        let hidden_rows = hidden.shape().0;
-        drop((logits, normalized, hidden));
+        drop(logits);
         let auxiliary_checkpoints = repetition.as_ref().map(|_| checkpoints.clone());
         let auxiliary_selected = repetition.as_ref().map(|_| selected.clone());
         let causal_parameters = self.parameter_pullback(
@@ -344,6 +351,60 @@ impl NativeCausalLm {
         })
     }
 
+    pub(super) fn training_readout(
+        &self,
+        prepared: &PreparedCausalWindow,
+        mut hidden: Tensor,
+        start_layer: usize,
+        first_trainable: usize,
+        mut observations: Option<&mut observation::ResidualSums>,
+    ) -> CausalLmResult<TrainingReadout> {
+        if start_layer > first_trainable || first_trainable >= self.config.layers {
+            return Err("training prefix crosses an adaptation site".into());
+        }
+        let mut checkpoints = Vec::with_capacity(self.config.layers - first_trainable);
+        for index in start_layer..self.config.layers {
+            if index >= first_trainable {
+                checkpoints.push(hidden.clone());
+            }
+            let pass = match observations.as_deref_mut() {
+                Some(sums) => decoder::BlockPass::Observe(sums),
+                None => decoder::BlockPass::Forward,
+            };
+            hidden = self.run_block(index, hidden, prepared.shape, pass)?.output;
+        }
+        let hidden_rows = hidden.shape().0;
+        let selected = match &prepared.selected_rows {
+            Some(rows) => hidden.gather_rows(rows)?,
+            None => hidden,
+        };
+        let normalized = self
+            .final_norm
+            .forward(&selected, self.config.norm_epsilon)?;
+        let logits = self.project_readout(&normalized)?;
+        let config = prepared.objective.kernel_config();
+        let loss = logits
+            .cross_entropy_with_logits(&prepared.labels, config)?
+            .data()[0];
+        let seed = Tensor::from_vec(1, 1, vec![1.])?;
+        let d_logits =
+            logits.cross_entropy_with_logits_backward(&prepared.labels, config, &seed)?;
+        let d_normalized = frozen_pullback(
+            &self.head,
+            &self.backward_head,
+            &d_logits,
+            self.readout_accumulator,
+        )?;
+        Ok(TrainingReadout {
+            checkpoints,
+            hidden_rows,
+            selected,
+            logits,
+            d_normalized,
+            loss,
+        })
+    }
+
     fn parameter_pullback(
         &self,
         checkpoints: Vec<Tensor>,
@@ -362,8 +423,8 @@ impl NativeCausalLm {
             selected_rows,
             d_normalized,
             first_layer,
-            &first_site,
-            false,
+            DecoderTarget::GeometryFrom(&first_site),
+            None,
         )?;
         if parameters.len()
             != self
@@ -390,8 +451,8 @@ impl NativeCausalLm {
         selected_rows: Option<&[usize]>,
         d_normalized: Tensor,
         first_layer: usize,
-        first_site: &str,
-        lora: bool,
+        target: DecoderTarget<'_>,
+        mut trace: Option<&mut observation::AdaptationTrace>,
     ) -> CausalLmResult<Parameters> {
         let c = &self.config;
         let d_selected = selected.layer_norm_input_backward(
@@ -404,12 +465,16 @@ impl NativeCausalLm {
             Some(rows) => d_selected.scatter_add_rows(rows, hidden_rows)?,
             None => d_selected,
         };
-        checkpoints.pop();
         let mut parameters = BTreeMap::new();
         for index in (first_layer..c.layers).rev() {
             let input = checkpoints.pop().unwrap();
             let cache = self
-                .run_block(index, input.clone(), shape, true)?
+                .run_block(
+                    index,
+                    input.clone(),
+                    shape,
+                    decoder::BlockPass::BackwardReplay,
+                )?
                 .cache
                 .unwrap();
             let block = &self.blocks[index];
@@ -419,7 +484,8 @@ impl NativeCausalLm {
                 cache.block_geometry,
                 gradient,
                 &mut parameters,
-                first_site,
+                target,
+                trace.as_deref_mut(),
             )?
             else {
                 break;
@@ -429,7 +495,8 @@ impl NativeCausalLm {
                 cache.mlp_geometry,
                 residual.clone(),
                 &mut parameters,
-                first_site,
+                target,
+                trace.as_deref_mut(),
             )?
             else {
                 break;
@@ -450,12 +517,14 @@ impl NativeCausalLm {
                 cache.attention_geometry,
                 residual.clone(),
                 &mut parameters,
-                first_site,
+                target,
+                trace.as_deref_mut(),
             )?
             else {
                 break;
             };
-            if lora && index == first_layer {
+            if matches!(target, DecoderTarget::Lora | DecoderTarget::Joint) && index == first_layer
+            {
                 let adapter = self.lora.as_ref().ok_or("missing native LoRA adapter")?;
                 let (a, b) = adapter.vjp_parameters(&cache.attention_input, &attention)?;
                 parameters.insert(

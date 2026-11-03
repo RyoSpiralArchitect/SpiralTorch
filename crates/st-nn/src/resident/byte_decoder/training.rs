@@ -95,6 +95,10 @@ impl ResidentByteDecoderForward {
     pub fn parameter_revision(&self) -> u64 {
         self.parameters.revision()
     }
+    /// The immutable weights used by this forward, even after its owner's next update.
+    pub fn parameter_snapshot(&self) -> &ResidentParameterSnapshot {
+        &self.parameters
+    }
     /// This forward's internal geometry scores `[batch,heads,time,time]`, before
     /// external biases or QK content. No readback or normalization is implicit.
     /// Ordinary models and out-of-range blocks return None.

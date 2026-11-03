@@ -15,10 +15,13 @@ use crate::{
 };
 use st_core::backend::device_caps::DeviceCaps;
 use st_tensor::{Tensor, TensorUtilBackend};
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 
 mod elliptic;
 mod fractional;
+mod wave_factorial;
+pub use wave_factorial::{WaveFactorConfig, WaveFactorEnergies, WaveFactorObservation};
 mod optimizer;
 pub use optimizer::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
 
@@ -36,7 +39,8 @@ mod sequence_tests;
 mod topos;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-type ParameterGradients = BTreeMap<String, BTreeMap<String, Vec<f32>>>;
+type PlacementGradients = BTreeMap<String, Vec<f32>>;
+pub(crate) type ParameterGradients = BTreeMap<String, PlacementGradients>;
 
 #[derive(Debug)]
 enum Pullback {
@@ -44,6 +48,7 @@ enum Pullback {
     Affine(Box<ChannelAffineLearningBatch>),
     Wave(Box<WaveGateLearningBatch>),
     WaveRadius(Box<WaveGateLearningBatch>),
+    WaveStage(Box<WaveGateLearningBatch>),
     Elliptic(Box<elliptic::EllipticRuntimeBatch>),
     Topos(Box<topos::ToposRuntimeBatch>),
     Fractional(Box<fractional::FractionalRuntimeBatch>),
@@ -126,6 +131,7 @@ impl NativeGeometryRuntime {
             GeometryAdapterRecipe::ChannelAffine { .. }
             | GeometryAdapterRecipe::Wave { .. }
             | GeometryAdapterRecipe::WaveRadius { .. }
+            | GeometryAdapterRecipe::WaveStage { .. }
             | GeometryAdapterRecipe::Topos { .. }
             | GeometryAdapterRecipe::Elliptic { .. }
             | GeometryAdapterRecipe::EllipticAnchored { .. } => RowLocal,
@@ -143,6 +149,7 @@ impl NativeGeometryRuntime {
     pub fn dimensions(&self, path: &str) -> Result<(usize, usize)> {
         match &self.placement(path)?.recipe {
             GeometryAdapterRecipe::ChannelAffine { features, max_values, .. } => Ok((*features, *max_values)),
+            GeometryAdapterRecipe::WaveStage { features, max_values, .. } => Ok((*features, *max_values)),
             GeometryAdapterRecipe::Wave { features, kernel, .. }
             | GeometryAdapterRecipe::WaveRadius { features, kernel, .. } => Ok((*features, kernel.max_values)),
             GeometryAdapterRecipe::Topos { features, kernel, .. } => Ok((*features, kernel.max_values)),
@@ -266,6 +273,7 @@ impl NativeGeometryRuntime {
             GeometryAdapterRecipe::ChannelAffine { strength, .. }
             | GeometryAdapterRecipe::Wave { strength, .. }
             | GeometryAdapterRecipe::WaveRadius { strength, .. }
+            | GeometryAdapterRecipe::WaveStage { strength, .. }
             | GeometryAdapterRecipe::Topos { strength, .. }
             | GeometryAdapterRecipe::Elliptic { strength, .. }
             | GeometryAdapterRecipe::EllipticAnchored { strength, .. } => strength as f32,
@@ -286,6 +294,15 @@ impl NativeGeometryRuntime {
                         features,
                     )?))
                 }
+                GeometryAdapterRecipe::WaveStage {
+                    max_values, stage, ..
+                } => Pullback::WaveStage(Box::new(stage.forward(
+                    input,
+                    tensor(placement, "gate"),
+                    tensor(placement, "bias"),
+                    [rows, features],
+                    *max_values,
+                )?)),
                 GeometryAdapterRecipe::Topos { kernel, .. } => Pullback::Topos(Box::new(
                     topos::ToposRuntimeBatch::forward(placement, kernel, &input_tensor)?,
                 )),
@@ -341,7 +358,9 @@ impl NativeGeometryRuntime {
         let residual = match &pullback {
             Pullback::Identity => None,
             Pullback::Affine(batch) => Some(batch.output()),
-            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => Some(batch.output()),
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
+                Some(batch.output())
+            }
             Pullback::Elliptic(batch) => Some(batch.output()),
             Pullback::Topos(batch) => Some(batch.output()),
             Pullback::Fractional(batch) => Some(batch.output()),
@@ -389,10 +408,10 @@ impl NativeGeometryRuntime {
 
     /// Shared atomic update for gradients obtained from the same frozen artifact.
     /// Kept crate-private: clients submit sealed learning batches, not arbitrary maps.
-    pub(crate) fn with_gradients_sgd(
+    pub(crate) fn with_gradients_sgd<V: Borrow<PlacementGradients>>(
         &self,
         source_id: &str,
-        gradients: &ParameterGradients,
+        gradients: &BTreeMap<String, V>,
         learning_rate: f32,
     ) -> Result<Self> {
         self.validate_gradients(source_id, gradients)?;
@@ -404,6 +423,7 @@ impl NativeGeometryRuntime {
             let Some(values) = gradients.get(&placement.path) else {
                 continue;
             };
+            let values = values.borrow();
             for parameter in &mut placement.tensors {
                 if parameter.role != GeometryAdapterTensorRole::Parameter
                     || !parameter.requires_grad
@@ -424,12 +444,17 @@ impl NativeGeometryRuntime {
         Ok(Self::new(GeometryAdapterArtifact::create(record)?))
     }
 
-    fn validate_gradients(&self, source_id: &str, gradients: &ParameterGradients) -> Result<()> {
+    fn validate_gradients<V: Borrow<PlacementGradients>>(
+        &self,
+        source_id: &str,
+        gradients: &BTreeMap<String, V>,
+    ) -> Result<()> {
         if source_id != self.artifact.artifact_id() {
             return Err("geometry snapshot is stale or belongs to another artifact".into());
         }
         let mut trainable = false;
         for (path, values) in gradients {
+            let values = values.borrow();
             let placement = self.placement(path)?;
             let parameters = placement
                 .tensors
@@ -504,6 +529,14 @@ impl NativeGeometryRuntime {
 }
 
 impl NativeGeometryBatch {
+    /// Inspect the captured Wave map only when requested. Identity bypasses have no projection.
+    pub fn wave_conditioning(&self) -> Option<crate::WaveGateConditioning> {
+        match &self.pullback {
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => Some(batch.conditioning()),
+            _ => None,
+        }
+    }
+
     pub fn output(&self) -> &Tensor {
         &self.output
     }
@@ -530,12 +563,36 @@ impl NativeGeometryBatch {
         Ok(self.pullback(upstream, false)?.parameters)
     }
 
-    fn pullback(&self, upstream: &[f32], need_input: bool) -> Result<NativeGeometryPullback> {
-        let (rows, features) = self.output.shape();
+    fn direction(&self, upstream: &[f32]) -> Result<Tensor> {
+        let (rows, cols) = self.output.shape();
         if upstream.len() != self.output.data().len() || upstream.iter().any(|v| !v.is_finite()) {
             return Err("invalid native geometry upstream shape or values".into());
         }
-        let direction = Tensor::from_vec(rows, features, upstream.to_vec())?;
+        Ok(Tensor::from_vec(rows, cols, upstream.to_vec())?)
+    }
+
+    /// Input adjoint of a frozen residual branch; no parameter reductions.
+    pub fn vjp_input(&self, upstream: &[f32]) -> Result<Tensor> {
+        let direction = self.direction(upstream)?;
+        if matches!(&self.pullback, Pullback::Identity) {
+            return Ok(direction);
+        }
+        let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
+        let branch = match &self.pullback {
+            Pullback::Affine(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
+                batch.vjp_input(&scaled)?
+            }
+            Pullback::Topos(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Fractional(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Elliptic(batch) => batch.vjp_input(&scaled)?,
+            Pullback::Identity => unreachable!(),
+        };
+        Ok(direction.add_with_backend(&branch, TensorUtilBackend::Cpu)?)
+    }
+
+    fn pullback(&self, upstream: &[f32], need_input: bool) -> Result<NativeGeometryPullback> {
+        let direction = self.direction(upstream)?;
         let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
         let mut gradient = match &self.pullback {
             Pullback::Identity => {
@@ -554,7 +611,7 @@ impl NativeGeometryBatch {
                 let (input, gate, bias) = batch.vjp_requested(scaled.data(), need_input)?;
                 channel_pullback(input, gate, bias, None)
             }
-            Pullback::Wave(batch) | Pullback::WaveRadius(batch) => {
+            Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
                 let need_radius = self.placement.tensors.iter().any(|t| {
                     t.name == "log_radius" && t.role == GeometryAdapterTensorRole::Parameter
                 });
@@ -841,6 +898,9 @@ mod tests {
         let runtime = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(record).unwrap());
         let batch = runtime.forward("site", &[f32::MAX; 3], 1).unwrap();
         assert!(batch.vjp_parameters(&[4.; 3]).is_err());
+        assert_eq!(batch.vjp_input(&[4.; 3]).unwrap().data(), &[3.8; 3]);
+        assert!(batch.vjp_input(&[]).is_err());
+        assert!(batch.vjp_input(&[f32::NAN; 3]).is_err());
     }
 
     #[test]
@@ -856,6 +916,7 @@ mod tests {
             let runtime = NativeGeometryRuntime::new(artifact(wave, radius, 0.4));
             let batch = runtime.forward("site", &x, 2).unwrap();
             let gradient = batch.vjp(&upstream).unwrap();
+            assert_eq!(batch.vjp_input(&upstream).unwrap(), gradient.input);
             assert_eq!(
                 batch.vjp_parameters(&upstream).unwrap(),
                 gradient.parameters

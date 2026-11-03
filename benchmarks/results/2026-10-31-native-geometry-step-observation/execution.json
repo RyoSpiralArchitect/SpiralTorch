@@ -1,0 +1,17 @@
+{
+  "schema": "spiraltorch.native_book.trajectory_execution.v1",
+  "declared_before_replay": true,
+  "native_source": "2dc57d8536e8ee5e3284cae000f7d44228ee5a8f",
+  "harness": "d5fd3c64b7a1fdb7cb87550e7e81c396441e02fd",
+  "plan_sha256": "db9bccb39e0d3d7c7334082d8dd27f6f2e9abc62d6b29b76580cba98cf4a44c0",
+  "wheel_sha256": "a3d2164667e70305732f8f8af3f143237391ab1a3b1a469699019de12e18b8ca",
+  "native_sha256": "897dcaaad3b4482531a10323f06c81dff77f64d47ed560c1993bcf88db0c82f4",
+  "package_metadata_version": "0.4.33",
+  "development_only": true,
+  "release_candidate": false,
+  "toolchain": "rustc 1.99.1; maturin 1.15.0; aarch64-apple-darwin; macOS deployment 14.0; default + logic,kdsl",
+  "rust_causal_lm_tests": 66,
+  "python_native_tests": 46,
+  "offline_protocol_tests": 3,
+  "replay_updates_started": 0
+}

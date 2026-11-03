@@ -21,6 +21,9 @@ jobs:
           python3 -I -B scripts/security/generate_repo_manifest.py --check-only
       - name: Test workspace inventory resolver
         run: python3 -m unittest tests/test_list_workspace_crates.py
+      - name: Verify archived matched GPT-2 results without training or model weights
+        working-directory: benchmarks/results/2026-11-03-native-factorial-answer-training
+        run: python3 -I -S -B verify.py receipts.zip
       - name: Check WASM build profiles and locked CLI schema
         run: python3 -I -B tests/test_build_wasm_web.py
       - name: Test resident benchmark admission
@@ -562,11 +565,12 @@ jobs:
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/geometry_artifact.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/causal_document_windows.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/greedy_token_decoding.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/channel_affine.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/residual_attention_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           python3 -I -S -B bindings/st-wasm/tests/byte_lm_fixture.py > "$RUNNER_TEMP/byte-corpus-transport.json"
           node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js" \
-            "$RUNNER_TEMP/byte-corpus-transport.json" nn
+            "$RUNNER_TEMP/byte-corpus-transport.json" nn selection
       - name: Host NN forward tapes compiled to scalar WASM
         run: |
           cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --example sequential_forward_tape_contract
@@ -580,6 +584,7 @@ jobs:
           echo "$RUNNER_TEMP/typescript/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Browser WebGPU binding build
         run: |
+          node bindings/st-wasm/tests/byte_lm_selection_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
           cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example resident_embedding_browser
           cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example causal_zspace_wave_browser
           cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example poincare_bias_browser
@@ -595,11 +600,12 @@ jobs:
           node bindings/st-wasm/tests/attention_training_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/residual_attention_training_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/byte_lm_selection_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
           node bindings/st-wasm/tests/topos_graph_contract.cjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/byte_lm_node.mjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
-            "$RUNNER_TEMP/byte-corpus-transport.json" webgpu
+            "$RUNNER_TEMP/byte-corpus-transport.json" webgpu selection
       - name: Share the public WebGPU client for browser validation
         uses: actions/upload-artifact@v7
         with:
@@ -728,6 +734,11 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_supervision.py -v
+          python -I -B bindings/st-py/tests/test_native_causal_completion.py -v
+          python -I -B bindings/st-py/tests/test_native_wave_factorial.py -v
+          python -I -B bindings/st-py/tests/test_native_training_prefix_cache.py -v
+          python -I -B bindings/st-py/tests/test_native_answer_comparison.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_accumulation.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_objective.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm_training.py -v

@@ -42,6 +42,15 @@ impl ToposRuntimeBatch {
         &self.output
     }
 
+    pub(super) fn vjp_input(&self, upstream: &Tensor) -> Result<Tensor> {
+        let (rows, features) = self.output.shape();
+        Ok(Tensor::from_vec(
+            rows,
+            features,
+            self.native.vjp_input(upstream.data())?,
+        )?)
+    }
+
     pub(super) fn vjp(
         &self,
         upstream: &Tensor,

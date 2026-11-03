@@ -1,0 +1,15 @@
+{
+  "schema": "spiraltorch.native_prefix_cache_qualification.v1",
+  "source_commit": "0720c527ec0f9955f196a8efb12243d2c35e68a1",
+  "scope": "local macOS arm64 CPU synthetic updates only",
+  "development_wheel_sha256": "5ee25cb65e43c29648391aaa9f951da911f67c8ae1502fca4ed257309b5c813a",
+  "native_sha256": "77551824a86c4a10b94ccc4039e847803c2c3dd9abe17db73cf23d25ec01ca5a",
+  "rust_cpu_libs": {"st_nn": 1103, "st_tensor": 475, "failures": 0, "log_sha256": "3547150560c5e0af0cde5cd0cd04b537554da5e995a377d7d710e624670680d2"},
+  "installed_python": {"tests": 144, "failures": 0, "skips": 0, "log_sha256": "785e11e7c16f068fef4a64e7cecfa2bd0e1d8a9c70dc9927baac6429d85130b7"},
+  "cross_wheel_default_synthetic_steps_observations_checkpoints_sha256": "cd6d10808288cdc95ec91b1668cbb171dd699ebfa367c1bf3fb1fd9ecb63b597",
+  "wasm_nn": {"target": "wasm32-unknown-unknown", "compile_check": true, "browser_execution": false, "log_sha256": "64f37eeb7020e2a1ad2d41df3f557d86d1f57cb0977811bd0e4f658958dc549f"},
+  "benchmark_result_sha256": "a8408301df15948c03902b5fd0e5d92d1dd32c1cb757fef3263264bd85dd81f1",
+  "pretrained_model_executions": 0,
+  "gpu": false,
+  "publication": false
+}

@@ -1,0 +1,25 @@
+{
+  "schema": "spiraltorch.exact_native_decoding_qualification.v1",
+  "host_scope": "local macOS arm64; synthetic CPU model; Node executes standalone WASM decoding",
+  "python_native_source": "f05bbac270c5a5523a74ede1fa628ecaa361735a",
+  "wasm_typed_source": "0d23887454fcf4e903e343df31a546163eb4a187",
+  "baseline_wheel_source": "0720c527ec0f9955f196a8efb12243d2c35e68a1",
+  "wheel_rust": "1.99.1",
+  "cpu_build_flags": "--release --locked --offline --no-default-features --features python-default",
+  "development_wheel_sha256": "31367cb85d79bdfe00d96f3b67fcd8f47ebe700db6521e4e650de53ca25040c8",
+  "native_sha256": "b65b20a612310b4531f45ddd36adfe679668e89ea9dc4ba2f3f2ec432bbb6166",
+  "build_log_sha256": "722281984688ec64748f711cdd7d896717a919dfb941b86c3fe44cb4d9609660",
+  "rust_cpu_libs": {"st_core": 1048, "st_nn": 1106, "st_tensor": 475, "failures": 0, "ignored": 0, "log_sha256": "dc4f1c0376420ab8d524c2785708d26fa0f7ecf6eab4f625697135f50686f4fe"},
+  "installed_python": {"tests": 146, "failures": 0, "skips": 0, "log_sha256": "c361353b85c0395776fc2a114105b6c14bcfa2cc7218bd7f4405368f9253b68a"},
+  "wasm": {
+    "rust": "1.97.0", "target": "wasm32-unknown-unknown", "wasm_bindgen": "0.2.129", "node": "24.14.0",
+    "artifact_sha256": "67fcc77b4c45e12198cec2351e5fd701779a1380e71565298ade9ac08c5b50ea",
+    "type_declarations_sha256": "6caa7abde3f95991ae1969446e6e1e3c0c6e9e01e8f093aef5e0b903da6f8d91",
+    "build_log_sha256": "368093ab96eacceb7c63caaaca15df9904d62f619f696146c9f4dfd6ccdff53a",
+    "test_log_sha256": "9a1b0212ea6b4705fc1d1fd556a2939216bce078d22dd4b20c6bbef6ccf0cdbd",
+    "node_parity_bounds_and_types": true, "browser_execution": false
+  },
+  "receipts": {"tests": 2, "rejected_resealed_mutations": 5, "timed_workers": 32, "timed_policy_cells": 96,
+               "result_sha256": "84f7cdaa468a719ccecaf233dd0a945473e7ea3b10341a1910f9654890b82c25"},
+  "pretrained_model_executions": 0, "model_weight_updates": 0, "gpu": false, "published": false
+}

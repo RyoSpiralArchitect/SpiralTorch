@@ -4,10 +4,12 @@ import json
 import os
 from pathlib import Path
 import runpy
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class NoForeignML(importlib.abc.MetaPathFinder):
@@ -46,6 +48,511 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_multi_site_observation_preserves_early_stop_and_non_wave_pullbacks(self):
+        geo = runpy.run_path(str(Path(__file__).with_name("test_native_geometry_runtime.py")))
+        config, weights = fixtures["fixture"](width=3, heads=1)
+        base = st.NativeCausalLm.from_gpt2(config, weights)
+        for kind in ("affine", "fixed", "learned", "topos", "elliptic", "anchored", "causal", "gated", *geo["FRACTIONAL_KINDS"]):
+            with self.subTest(kind=kind):
+                record = json.loads(geo["artifact"](kind).state_json())
+                record["base_model_identity"] = base.base_model_identity
+                last = record["placements"][0]
+                last["path"] = "transformer.h.1.mlp"
+                if kind == "affine":
+                    last["recipe"]["max_values"] = 64
+                first = json.loads(geo["artifact"]("learned").state_json())["placements"][0]
+                first["path"] = "transformer.h.0.attn"
+                first["recipe"]["strength"] = 0.
+                record["placements"].insert(0, first)
+                model = base.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(record)))
+                def grad(tap):
+                    return model.adaptation_loss_gradients(WINDOW, [1, 4], mode="geometry", observe_geometry=tap)
+                plain, actual = grad(False), grad(True)
+                self.assertEqual(actual.parameter_gradients(), plain.parameter_gradients())
+                sites = json.loads(actual.observation_json())["sites"]
+                self.assertEqual(set(sites), {first["path"], last["path"]})
+                stopped, continued = sites[first["path"]], sites[last["path"]]
+                self.assertIsNone(stopped["pullback"]["correction_rms"])
+                self.assertIsNone(stopped["wave"])  # zero-strength bypass did not project
+                self.assertEqual(stopped["residual_rms"], 0.)
+                self.assertEqual(stopped["log_radius_gradient"], 0.)
+                self.assertIsNotNone(continued["pullback"]["input_adjoint_rms"])
+                self.assertEqual(continued["wave"] is not None, kind in ("learned", "fixed"))
+                self.assertEqual(continued["log_radius_gradient"] is not None, kind == "learned")
+
+    def test_opt_in_joint_observation_matches_normal_updates_and_binds_pre_update_owners(self):
+        base, seed = owners()
+        record = json.loads(seed.geometry_artifact().state_json())
+        site = record["placements"][0]
+        site["recipe"] = dict(schema="spiraltorch.wave_gate_adapter.v2", features=4, strength=.25,
+                              learnable_radius=True, kernel=dict(curvature=-1., saturation=1., porosity=.05, max_values=1024))
+        for t in site["tensors"]:
+            t.update(values=[0.] * 4, requires_grad=True)
+        site["tensors"].append(dict(name="log_radius", shape=[], values=[0.], role="parameter", requires_grad=True))
+        model = base.with_lora(0, 2, 4.).with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(record)))
+        ids, mask = [1, 2, 3, 4], [-100, -100, 3, 4]
+        initial = model.adaptation_loss_gradients(ids, [1, 4], labels=mask, observe_geometry=True)
+        plain = model.adaptation_loss_gradients(ids, [1, 4], labels=mask)
+        self.assertIsNone(plain.observation_json())
+        self.assertEqual(initial.parameter_gradients(), plain.parameter_gradients())
+        obs = json.loads(initial.observation_json())
+        self.assertEqual(struct.pack("<f", obs["loss"]), struct.pack("<f", plain.loss))
+        self.assertEqual((obs["target_tokens"], obs["window_shape"]), (2, [1, 4]))
+        self.assertEqual(obs["geometry_artifact_id"], model.geometry_artifact_id)
+        s = obs["sites"][site["path"]]
+        self.assertEqual((s["elements"], s["residual_rms"], s["pullback"]["correction_rms"]), (12, 0., 0.))
+        self.assertEqual((s["wave"]["rows"], s["wave"]["relative_radial_gain_min"], s["log_radius_gradient"]), (3, 1., 0.))
+        self.assertEqual(set(s["parameter_gradient_l2"]), {"gate", "bias", "log_radius"})
+        Session = st.NativeCausalLmTrainingSession
+        def new():
+            return Session(model, [ids, ids], 4, labels=[mask, mask], mode="joint", learning_rate=.1)
+        normal, single, cohort = new(), new(), [new(), new()]
+        for i in range(2):
+            bare = normal.step()
+            step = single.step(observe_geometry=True)
+            _, matched = Session.step_matched(cohort, observe_geometry=True)
+            self.assertIsNone(bare.observation_json())
+            self.assertNotIn("observation", json.loads(step.to_json()))
+            for r in [step, *matched]:
+                self.assertEqual(r.to_json(), bare.to_json())
+                self.assertEqual(r.observation_json(), step.observation_json())
+                receipt = json.loads(r.observation_json())
+                self.assertEqual(receipt["lora_artifact_id"], r.pre_lora_artifact_id)
+                self.assertEqual(receipt["geometry_artifact_id"], r.pre_geometry_artifact_id)
+                if i == 0:
+                    self.assertEqual(receipt, obs)
+            self.assertTrue(all(item.checkpoint_id == normal.checkpoint_id for item in [single, *cohort]))
+        self.assertIsNone(Session.step_matched(cohort, observe_geometry=True))
+        self.assertGreater(receipt["sites"][site["path"]]["residual_rms"], 0.)
+        self.assertLess(receipt["sites"][site["path"]]["wave"]["relative_radial_gain_min"], 1.)
+
+    def test_mask_excludes_targets_but_not_their_prompt(self):
+        base, both = owners()
+        labels = [-100, -100, 7, -100]
+        lora = base.with_lora(0, 2, 4.)
+        for model, compute in ((both, both.adaptation_loss_gradients), (lora, lora.lora_loss_gradients)):
+            gradient = compute(WINDOW, [1, 4], labels=labels)
+            self.assertEqual(gradient.target_tokens, 1)
+            self.assertEqual(gradient.loss, model.next_token_loss(WINDOW, [1, 4], labels=labels))
+            self.assertNotEqual(gradient.loss, compute([8, *WINDOW[1:]], [1, 4], labels=labels).loss)
+            future = compute([1, 2, 6, 8], [1, 4], labels=labels)
+            self.assertEqual(gradient.loss, future.loss)
+            self.assertEqual(compute(WINDOW, [1, 4]).loss, compute(WINDOW, [1, 4], labels=WINDOW).loss)
+            for bad in ([-100]*4, [-100, -100, 11, 1], [True, 1, 2, 3], [1, 2]):
+                with self.assertRaises((TypeError, ValueError)):
+                    compute(WINDOW, [1, 4], labels=bad)
+        native = lora.lora_loss_gradients(WINDOW, [1, 4], labels=labels)
+        shared = lora.adaptation_loss_gradients(WINDOW, [1, 4], labels=labels)
+        self.assertEqual(lora.step_lora_sgd(native, .2).lora_artifact_id,
+                         lora.step_adaptation_sgd(shared, "lora", .2).lora_artifact_id)
+
+    def test_explicit_labels_match_implicit_updates_under_each_window_policy(self):
+        for readout in ("f32", "f64"):
+            base, model = owners(readout)
+            for policy in ("disjoint", "covering_targets"):
+                for mode in ("geometry", "lora", "joint"):
+                    kw = dict(learning_rate=.2, mode=mode, epochs=2, batch_windows=2, window_policy=policy)
+                    bare = st.NativeCausalLmTrainingSession(model, DOCS, 4, **kw)
+                    labeled = st.NativeCausalLmTrainingSession(model, DOCS, 4, labels=DOCS, **kw)
+                    self.assertEqual((bare.has_labels, labeled.has_labels, labeled.window_policy), (False, True, policy))
+                    self.assertNotEqual(bare.data_id, labeled.data_id)
+                    self.assertEqual(finish(bare), finish(labeled))
+                    for s, labels in ((bare, None), (labeled, DOCS)):
+                        payload, pin = s.checkpoint_with_id()
+                        restored = st.NativeCausalLmTrainingSession.from_json(base, DOCS, payload, pin, labels=labels)
+                        self.assertEqual(restored.checkpoint_with_id(), (payload, pin))
+                        inference = st.NativeCausalLm.from_session_checkpoint_at(
+                            base, payload, pin, update=s.completed_updates, recorded_data_id=s.data_id,
+                            post_lora_id=s.model.lora_artifact_id, post_geometry_id=s.model.geometry_artifact_id)
+                        self.assertEqual(inference.lora_artifact_id, s.model.lora_artifact_id)
+
+    def test_sparse_shape_admission_and_restore_before_foreign_values(self):
+        class Unread:
+            def __len__(self):
+                return 4
+
+            def __getitem__(self, key):
+                raise AssertionError("inadmissible row was read")
+
+        config, weights = fixtures["fixture"]()
+        base = st.NativeCausalLm.from_gpt2(config, weights, max_logit_elements=11)
+        model = base.with_lora(0, 2, 4.)
+        kw = dict(learning_rate=.2, mode="lora", window_policy="covering_targets")
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmTrainingSession(model, [Unread()], 4, **kw)
+        for bad in (([True, 1, 2, 3],), ([-100, -100, 1, 2],)):
+            with self.assertRaises((TypeError, ValueError)):
+                st.NativeCausalLmTrainingSession(model, [WINDOW], 4, labels=bad, **kw)
+        s = st.NativeCausalLmTrainingSession(model, [WINDOW], 4, labels=[[-100, -100, -100, 4]], **kw)
+        payload, pin = s.checkpoint_with_id()
+        with self.assertRaisesRegex(ValueError, "label presence"):
+            st.NativeCausalLmTrainingSession.from_json(base, Unread(), payload, pin)
+        tight = st.NativeCausalLm.from_gpt2(config, weights, max_training_checkpoint_elements=1).with_lora(0, 2, 4.)
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmTrainingSession(tight, [Unread()], 4, labels=[Unread()], **kw)
+
+    def test_committed_reports_resume_and_do_not_clobber_a_boundary(self):
+        base, model = owners()
+        s = session(model)
+        baseline = session(model)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "segment.json"
+            for invalid in (0, s.total_updates + 1, s.MAX_CHECKPOINT_INTERVAL + 1):
+                with self.assertRaises(ValueError):
+                    s.advance_to_checkpoint_new(invalid, path)
+            with self.assertRaises(TypeError):
+                s.advance_to_checkpoint_new(True, path)
+            self.assertFalse(path.exists())
+            reports, pin = s.advance_to_checkpoint_new(2, path)
+            self.assertEqual([r.to_json() for r in reports], [baseline.step().to_json() for _ in range(2)])
+            old = path.read_bytes()
+            self.assertEqual((old.decode(), pin), baseline.checkpoint_with_id())
+            with self.assertRaises(FileExistsError):
+                s.advance_to_checkpoint_new(3, path)
+            self.assertEqual(s.completed_updates, 2)
+            self.assertEqual(s.checkpoint_id, pin)
+            self.assertEqual(path.read_bytes(), old)
+            restored = st.NativeCausalLmTrainingSession.from_json(base, DOCS, old, pin)
+            self.assertEqual(finish(restored), finish(baseline))
+
+    @unittest.skipUnless(os.name == "posix", "requires a child-local file size limit")
+    def test_real_short_write_during_segment_keeps_cursor_and_previous_bytes(self):
+        script = r"""
+import errno, os, resource, runpy, signal, sys
+from pathlib import Path
+source = runpy.run_path(sys.argv[1])
+_, model = source["owners"]()
+s = source["session"](model)
+root = Path(sys.argv[2])
+old, target = root / "previous", root / "next"
+pin = s.save_checkpoint_new(old)
+before = old.read_bytes()
+limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (32, limits[1]))
+try:
+    s.advance_to_checkpoint_new(2, target)
+except OSError as exc:
+    assert exc.errno == errno.EFBIG, exc
+else:
+    raise AssertionError("32-byte cap did not reject the checkpoint")
+finally:
+    resource.setrlimit(resource.RLIMIT_FSIZE, limits)
+assert s.completed_updates == 0 and s.checkpoint_id == pin
+assert old.read_bytes() == before and list(root.iterdir()) == [old]
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            child = subprocess.run([sys.executable, "-I", "-B", "-c", script, __file__, tmp],
+                                   capture_output=True, text=True, timeout=60)
+            self.assertEqual(child.returncode, 0, child.stderr)
+
+    def test_periodic_cli_stops_at_collision_and_resumes_last_indexed_checkpoint(self):
+        example = Path(__file__).parents[1] / "examples" / "native_training_session.py"
+        config, weights = fixtures["fixture"](raw_weights=True)
+        _, both = owners()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/"config.json").write_text(config)
+            (root/"model.safetensors").write_bytes(weights)
+            (root/"geometry.json").write_text(both.geometry_artifact().to_json())
+            (root/"docs.json").write_text("[[1,2,3,4],[4,3,2,1],[5,6,7,8]]")
+            command = [sys.executable, "-I", "-B", str(example), "--config", str(root/"config.json"),
+                       "--weights", str(root/"model.safetensors"), "--documents", str(root/"docs.json")]
+            fresh = ["--geometry", str(root/"geometry.json"), "--epochs", "3", "--context", "4",
+                     "--batch-windows", "2", "--mode", "joint", "--learning-rate", ".2"]
+            def run(*args, check=True):
+                return subprocess.run([*command, *args], check=check, capture_output=True, text=True, timeout=60)
+            def index(name):
+                return [json.loads(line) for line in (root/(name+".progress.jsonl")).read_bytes().splitlines()]
+            reference = json.loads(run(*fresh, "--updates", "5", "--output", str(root/"reference")).stdout)
+            collision = root/"part.u000000004.json"
+            collision.write_bytes(b"older evidence")
+            aborted = run(*fresh, "--updates", "5", "--checkpoint-every", "2", "--output", str(root/"part"), check=False)
+            self.assertNotEqual(aborted.returncode, 0)
+            self.assertFalse((root/"part").exists())
+            self.assertEqual(collision.read_bytes(), b"older evidence")
+            prefix = index("part")
+            self.assertEqual([p["completed_updates"] for p in prefix], [0, 2])
+            saved = prefix[-1]
+            resume = ["--resume", str(root/saved["checkpoint_file"]), "--expected-id", saved["checkpoint_id"]]
+            final = json.loads(run(*resume, "--updates", "3", "--checkpoint-every", "3", "--output", str(root/"end")).stdout)
+            tail = index("end")
+            self.assertEqual([p["completed_updates"] for p in tail], [2, 3, 5])
+            self.assertEqual((tail[0]["source"], tail[0]["checkpoint_file"]), ("pinned_resume_input", None))
+            self.assertEqual([r for p in prefix + tail for r in p["reports"]], reference["reports"])
+            self.assertEqual((final["checkpoint_id"], final["reports_count"]), (reference["checkpoint_id"], 3))
+            self.assertEqual((root/"end").read_bytes(), (root/"reference").read_bytes())
+            self.assertEqual(json.loads(run(*resume, "--updates", "0", "--checkpoint-every", "1",
+                                           "--output", str(root/"noop")).stdout)["checkpoint_id"], saved["checkpoint_id"])
+
+    def test_supervised_cli_binds_mask_and_reopens_short_document(self):
+        example = Path(__file__).parents[1] / "examples" / "native_training_session.py"
+        config, weights = fixtures["fixture"](raw_weights=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/"config").write_text(config)
+            (root/"weights").write_bytes(weights)
+            (root/"docs").write_text(json.dumps({"token_documents": [WINDOW], "labels": [[-100, -100, -100, 8]]}))
+            cmd = [sys.executable, "-I", "-B", str(example), "--config", str(root/"config"), "--weights",
+                   str(root/"weights"), "--documents", str(root/"docs")]
+            def run(*args, check=True):
+                return subprocess.run([*cmd, *args], check=check, capture_output=True, text=True, timeout=60)
+            result = json.loads(run("--mode", "lora", "--context", "7", "--window-policy", "covering_targets",
+                                    "--output", str(root/"first")).stdout)
+            self.assertEqual([s["target_tokens"] for s in result["reports"]], [1])
+            resume = ["--resume", str(root/"first"), "--expected-id", result["checkpoint_id"],
+                      "--updates", "0", "--output", str(root/"second")]
+            refused = run(*resume, "--window-policy", "disjoint", check=False)
+            self.assertIn("resumed sessions own their window policy", refused.stderr)
+            self.assertFalse((root/"second").exists())
+            self.assertEqual(json.loads(run(*resume).stdout)["checkpoint_id"], result["checkpoint_id"])
+            self.assertEqual((root/"second").read_bytes(), (root/"first").read_bytes())
+
+    def test_progress_sync_error_stops_before_another_segment(self):
+        import errno
+        example = Path(__file__).parents[1] / "examples" / "native_training_session.py"
+        run = runpy.run_path(str(example))["checkpointed"]
+        _, model = owners()
+        s = session(model)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "end"
+            failure = OSError(errno.ENOSPC, "injected journal sync failure")
+            with patch("os.fsync", side_effect=[None, failure]), self.assertRaises(OSError) as caught:
+                run(s, out, 4, 2, None)
+            self.assertEqual(caught.exception.errno, errno.ENOSPC)
+            self.assertEqual(s.completed_updates, 2)  # Rust saved this file before the journal failed.
+            self.assertEqual((Path(tmp) / "end.u000000002.json").read_bytes(), s.to_json().encode())
+            self.assertFalse(out.exists())
+
+    def test_checkpoint_file_uses_native_bytes_and_refuses_existing_names(self):
+        base, model = owners()
+        with tempfile.TemporaryDirectory() as tmp:
+            for batch in (1, 2):
+                path = Path(tmp) / f"batch-{batch}.json"
+                trainer = st.NativeCausalLmTrainingSession(model, DOCS, 4, learning_rate=.2, epochs=2, batch_windows=batch)
+                trainer.step()
+                payload, pin = trainer.checkpoint_with_id()
+                self.assertEqual(trainer.save_checkpoint_new(path), pin)
+                self.assertEqual(path.read_bytes(), payload.encode())
+                recovered = st.NativeCausalLmTrainingSession.from_json(base, DOCS, path.read_bytes(), pin)
+                self.assertEqual(recovered.step().to_json(), trainer.step().to_json())
+                cursor = trainer.completed_updates
+                with self.assertRaises(FileExistsError):
+                    trainer.save_checkpoint_new(path)
+                self.assertEqual(trainer.completed_updates, cursor)
+                self.assertEqual(path.read_bytes(), payload.encode())
+
+    def test_masked_backward_keeps_the_other_owner_in_the_forward(self):
+        _, model = owners()
+        full = model.adaptation_loss_gradients(WINDOW, [1, 4])
+        all_groups = full.parameter_gradients()
+        for mode in ("lora", "geometry", "joint"):
+            selected = model.adaptation_loss_gradients(WINDOW, [1, 4], mode=mode)
+            self.assertEqual(selected.loss, full.loss)
+            self.assertEqual(selected.lora_artifact_id, full.lora_artifact_id)
+            self.assertEqual(selected.geometry_artifact_id, full.geometry_artifact_id)
+            actual = selected.parameter_gradients()
+            self.assertEqual(len(actual), 2 if mode == "joint" else 1)
+            self.assertEqual(actual, {k: all_groups[k] for k in actual})
+            expected = model.step_adaptation_sgd(full, mode, .2)
+            updated = model.step_adaptation_sgd(selected, mode, .2)
+            self.assertEqual((updated.lora_artifact_id, updated.geometry_artifact_id),
+                             (expected.lora_artifact_id, expected.geometry_artifact_id))
+            if mode != "joint":
+                with self.assertRaises(ValueError):
+                    model.step_adaptation_sgd(selected, "joint", .2)
+        with self.assertRaises(ValueError):
+            model.adaptation_loss_gradients(WINDOW, [1, 4], mode="both-ish")
+
+    @unittest.skipUnless(sys.implementation.name == "cpython", "CPython allocation guard")
+    def test_mixed_unicode_input_and_tiny_file_do_not_allocate_the_worst_case_budget(self):
+        probe = Path(__file__).with_name("probe_session_input_allocations.py")
+        child = subprocess.run([sys.executable,"-I","-B","-X","tracemalloc=1",str(probe)],
+                               capture_output=True,text=True,check=True,timeout=30)
+        peaks = json.loads(child.stdout)
+        self.assertLess(peaks["unicode_peak"], 2*1024*1024+262144)
+        self.assertEqual(len(peaks["file_peaks"]),2)
+        self.assertTrue(all(p < 262144 for p in peaks["file_peaks"]))
+
+    @unittest.skipUnless(os.name == "posix", "directory descriptor on POSIX")
+    def test_both_example_readers_close_rejected_directory_descriptors(self):
+        examples = Path(__file__).parents[1] / "examples"
+        with tempfile.TemporaryDirectory() as tmp:
+            for filename, helper in (("native_training_session.py","read_limited"),("native_geometry_generation.py","read_bytes")):
+                read = runpy.run_path(str(examples/filename))[helper]
+                real, opened = os.open, []
+                def track(path, flags):
+                    fd = real(path, flags)
+                    opened.append(fd)
+                    return fd
+                with patch("os.open", side_effect=track), self.assertRaisesRegex(ValueError,"regular file"):
+                    read(Path(tmp),256*1024*1024)
+                self.assertEqual(len(opened),1)
+                with self.assertRaises(OSError):
+                    os.fstat(opened[0])
+
+    def test_batched_joint_steps_do_not_cross_rows_or_drop_epoch_tails(self):
+        base, model = owners()
+        docs = [[1,2,3,4],[8,7,6,5],[5,4,3,2]]
+        def fresh():
+            return st.NativeCausalLmTrainingSession(model, docs, 4, learning_rate=.2, epochs=2, batch_windows=2)
+        batch = fresh()
+        self.assertEqual((batch.batch_windows,batch.updates_per_epoch,batch.total_updates), (2,2,4))
+        self.assertEqual(json.loads(batch.config_json())["batch_windows"],2)
+        expected = model.adaptation_loss_gradients(docs[0]+docs[1],[2,4])
+        update = batch.step()
+        self.assertEqual((update.loss,update.target_tokens), (expected.loss,6))
+        manual = model.step_adaptation_sgd(expected, "joint", .2)
+        self.assertEqual((manual.lora_artifact_id,manual.geometry_artifact_id),
+                         (batch.model.lora_artifact_id,batch.model.geometry_artifact_id))
+        payload,pin = batch.checkpoint_with_id()
+        cut = st.NativeCausalLmTrainingSession.from_json(base, docs, payload, pin)
+        self.assertEqual(cut.next_window,2)
+        remaining = [json.loads(s) for s in finish(cut)]
+        self.assertEqual([(r["epoch"],r["window_start"],r["window_end"],r["target_tokens"]) for r in remaining],
+                         [(0,2,3,3),(1,0,2,6),(1,2,3,3)])
+        uninterrupted = fresh()
+        finish(uninterrupted)
+        self.assertEqual(cut.checkpoint_with_id(), uninterrupted.checkpoint_with_id())
+        restored = st.NativeCausalLm.from_session_checkpoint_at(base, payload, pin, update=1,
+            recorded_data_id=batch.data_id, post_lora_id=manual.lora_artifact_id, post_geometry_id=manual.geometry_artifact_id)
+        self.assertEqual(restored.forward(WINDOW,[1,4]).values(), manual.forward(WINDOW,[1,4]).values())
+
+    def test_batch_admission_precedes_token_access(self):
+        class Unreadable:
+            def __len__(self): raise AssertionError("read a corpus with an invalid policy")
+        class Row:
+            def __len__(self): return 4
+            def __getitem__(self, i): raise AssertionError("read IDs of an inadmissible batch")
+        config, weights = fixtures["fixture"]()
+        limited = st.NativeCausalLm.from_gpt2(config,weights,max_training_checkpoint_elements=40).with_lora(0,2,4.)
+        for value in (0, True, 1_048_577):
+            with self.assertRaises((TypeError,ValueError)):
+                st.NativeCausalLmTrainingSession(limited, Unreadable(), 4, learning_rate=.1, mode="lora", batch_windows=value)
+        with self.assertRaisesRegex(ValueError,"budget"):
+            st.NativeCausalLmTrainingSession(limited,[Row(),Row()],4,learning_rate=.1,mode="lora",batch_windows=2)
+        within = st.NativeCausalLmTrainingSession(limited,[WINDOW],4,learning_rate=.1,mode="lora",batch_windows=2)
+        self.assertEqual(within.step().target_tokens,3)
+
+    def test_joint_session_snapshot_reopens_for_inference_without_documents(self):
+        base, model = owners("f64")
+        trained = session(model)
+        report = trained.step()
+        payload, pin = trained.checkpoint_with_id()
+        self.assertEqual((payload, pin), (trained.to_json(), trained.checkpoint_id))
+        options = dict(update=report.update, recorded_data_id=trained.data_id,
+                       post_geometry_id=trained.model.geometry_artifact_id, post_lora_id=trained.model.lora_artifact_id)
+        restored = st.NativeCausalLm.from_session_checkpoint_at(base, payload, pin, **options)
+        self.assertEqual(restored.readout_accumulator, "f64")
+        self.assertEqual(restored.forward(WINDOW, [1,4]).values(), trained.model.forward(WINDOW, [1,4]).values())
+        for key, wrong in (("update", 0), ("recorded_data_id", pin), ("post_geometry_id", None), ("post_lora_id", None)):
+            with self.assertRaises(ValueError):
+                st.NativeCausalLm.from_session_checkpoint_at(base, payload, pin, **{**options, key:wrong})
+        with self.assertRaises(TypeError):
+            st.NativeCausalLm.from_session_checkpoint_at(base, payload, pin, **{**options,"update":True})
+        for key, wrong in (("post_lora_id", model.lora_artifact_id), ("post_geometry_id", model.geometry_artifact_id)):
+            self.assertNotEqual(options[key], wrong)
+            with self.assertRaises(ValueError):
+                st.NativeCausalLm.from_session_checkpoint_at(base, payload.encode(), pin, **{**options,key:wrong})
+        self.assertEqual(st.NativeCausalLmTrainingSession.from_json(base, DOCS, payload.encode(), pin).checkpoint_with_id(), (payload,pin))
+        class OpaqueStr(str):
+            def __len__(self): raise AssertionError("called overridden length")
+            def __getitem__(self, i): raise AssertionError("called overridden slice")
+            def isascii(self): raise AssertionError("called overridden ASCII query")
+            def encode(self, *args): raise AssertionError("called overridden encoding")
+        actual = st.NativeCausalLm.from_session_checkpoint_at(base, OpaqueStr(payload), OpaqueStr(pin), **options)
+        self.assertEqual(actual.geometry_artifact_id, options["post_geometry_id"])
+        with self.assertRaisesRegex(ValueError, "byte budget"):
+            st.NativeCausalLm.from_session_checkpoint_at(base, payload, OpaqueStr("\U0001f600"*20), **options)
+        with self.assertRaises(UnicodeEncodeError):
+            st.NativeCausalLm.from_session_checkpoint_at(base, "\ud800", pin, **options)
+        with self.assertRaises(TypeError):
+            st.NativeCausalLm.from_session_checkpoint_at(base, bytearray(payload.encode()), pin, **options)
+
+    def test_resume_example_checks_pin_before_loading_model_or_corpus(self):
+        cmd = [sys.executable, "-I", "-B", str(Path(__file__).parents[1] / "examples" / "native_training_session.py")]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint = root / "session.json"
+            checkpoint.write_bytes(b"{}")
+            cmd.extend(["--config", str(root/"absent.cfg"), "--weights", str(root/"absent.weights"),
+                        "--documents", str(root/"absent.docs"), "--resume", str(checkpoint), "--output", str(root/"result")])
+            missing = subprocess.run(cmd, capture_output=True,text=True,timeout=30)
+            self.assertNotEqual(missing.returncode,0)
+            self.assertIn("separately retained --expected-id",missing.stderr)
+            wrong = subprocess.run([*cmd,"--expected-id","sha256:"+"0"*64],capture_output=True,text=True,timeout=30)
+            self.assertNotEqual(wrong.returncode,0)
+            self.assertIn("differs from pinned identity",wrong.stderr)
+            self.assertFalse((root/"result").exists())
+            pin = "sha256:"+"0"*64
+            (root/"boundary").write_text(json.dumps(dict(checkpoint_id=pin,completed_updates=1,
+                recorded_data_id=pin,post_lora_id=pin,post_geometry_id=None)))
+            wrong = subprocess.run([sys.executable,"-I","-B",str(Path(__file__).parents[1]/"examples"/"native_geometry_generation.py"),
+                "--model-dir",str(root/"absent-model"),"--output",str(root/"not-created"),"--session-checkpoint",str(checkpoint),
+                "--session-checkpoint-id",pin,"--session-boundary",str(root/"boundary"),"--prompt-json",str(root/"absent-prompt"),
+                "--recipe-json",str(root/"absent-recipe")],capture_output=True,text=True,timeout=30)
+            self.assertNotEqual(wrong.returncode,0)
+            self.assertIn("session checkpoint differs from pinned identity",wrong.stderr)
+            self.assertFalse((root/"not-created").exists())
+
+    def test_file_examples_generate_from_a_joint_minibatch_without_the_training_file(self):
+        examples = Path(__file__).parents[1] / "examples"
+        config, weights = fixtures["fixture"](raw_weights=True)
+        base, joint = owners()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/"config.json").write_text(config)
+            (root/"model.safetensors").write_bytes(weights)
+            (root/"geometry.json").write_text(joint.geometry_artifact().to_json())
+            docs = root/"docs.json"
+            docs.write_text(json.dumps(DOCS))
+            ck = root/"checkpoint.json"
+            command = [sys.executable,"-I","-B",str(examples/"native_training_session.py"),"--config",str(root/"config.json"),
+                       "--weights",str(root/"model.safetensors"),"--documents",str(docs),"--geometry",str(root/"geometry.json"),
+                       "--context","4","--mode","joint","--batch-windows","2","--output",str(ck)]
+            record = json.loads(subprocess.run(command,check=True,capture_output=True,text=True,timeout=60).stdout)
+            docs.unlink()
+            boundary = root/"boundary.json"
+            boundary.write_text(json.dumps(record))
+            (root/"prompt.json").write_text("[1,2]")
+            recipe = '{"max_new_tokens":3}'
+            (root/"recipe.json").write_text(recipe)
+            run = [sys.executable,"-I","-B",str(examples/"native_geometry_generation.py"),"--model-dir",str(root),
+                   "--prompt-json",str(root/"prompt.json"),"--recipe-json",str(root/"recipe.json"),
+                   "--session-checkpoint",str(ck),"--session-checkpoint-id",record["checkpoint_id"],"--session-boundary",str(boundary)]
+            result = json.loads(subprocess.run([*run,"--output",str(root/"gen")],check=True,capture_output=True,text=True,timeout=60).stdout)
+            restored = st.NativeCausalLm.from_session_checkpoint_at(base,ck.read_bytes(),record["checkpoint_id"],
+                update=record["completed_updates"],**{k:record[k] for k in ("recorded_data_id","post_lora_id","post_geometry_id")})
+            gen = st.NativeCausalLmGenerator(restored,[1,2],recipe)
+            while not gen.finished:
+                gen.step()
+            self.assertEqual(result["checkpoint_id"], gen.checkpoint_id)
+            self.assertFalse(result["session_boundary"]["training_documents_verified"])
+            self.assertEqual(result["lora_artifact_id"], restored.lora_artifact_id)
+            record["post_lora_id"] = None
+            boundary.write_text(json.dumps(record))
+            bad = subprocess.run([*run,"--output",str(root/"wrong")],capture_output=True,text=True,timeout=60)
+            self.assertNotEqual(bad.returncode,0)
+            self.assertFalse((root/"wrong").exists())
+
+    def test_geometry_checkpoint_does_not_inherit_external_lora(self):
+        base, joint = owners()
+        geometry = joint.geometry_artifact()
+        trainer = st.NativeCausalLmTrainer(
+            base.with_geometry(geometry), st.NativeGeometryAdamW(geometry), DOCS, 4,
+            learning_rate=.01,
+        )
+        trainer.step_observed()
+        payload, pin = trainer.to_json(), trainer.checkpoint_id
+        restored = st.NativeCausalLm.from_training_checkpoint(base, payload, pin)
+        self.assertEqual(restored.geometry_artifact_id, trainer.model.geometry_artifact_id)
+        lora = base.with_lora(0, 2, 4.)
+        changed = lora.step_lora_sgd(lora.lora_loss_gradients(WINDOW, [1, 4]), .2)
+        self.assertNotEqual(base.forward(WINDOW, [1, 4]).values(), changed.forward(WINDOW, [1, 4]).values())
+        for external in (lora, changed):
+            with self.subTest(adapter=external.lora_artifact_id), self.assertRaisesRegex(ValueError, "LoRA"):
+                st.NativeCausalLm.from_training_checkpoint(external, payload, pin)
+
     def test_groups_update_atomically_from_one_snapshot(self):
         base, model = owners()
         initial = model.adaptation_loss_gradients(WINDOW, [1, 4])
@@ -98,6 +605,7 @@ class NativeCausalLmSessionTests(unittest.TestCase):
     def test_fresh_process_restores_both_groups_and_readout(self):
         script = r'''
 import importlib.abc, json, runpy, sys
+from pathlib import Path
 class NoForeign(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in {'torch','numpy','transformers','accelerate','safetensors'}:
@@ -105,6 +613,8 @@ class NoForeign(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, NoForeign())
 import spiraltorch as st
 request=json.load(sys.stdin)
+assert sys.flags.isolated and sys.dont_write_bytecode
+assert [str(Path(m.__file__).resolve()) for m in (st,st._rs)] == request['origins']
 config, weights=runpy.run_path(request['fixture'])['fixture']()
 base=st.NativeCausalLm.from_gpt2(config,weights)
 trainer=st.NativeCausalLmTrainingSession.from_json(base,request['docs'],request['checkpoint'],request['id'])
@@ -118,9 +628,10 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
             base, model = owners(readout)
             trainer = session(model)
             trainer.step()
-            payload = {"fixture": FIXTURE, "docs": DOCS, "checkpoint": trainer.to_json(), "id": trainer.checkpoint_id}
+            payload = {"fixture": FIXTURE, "docs": DOCS, "checkpoint": trainer.to_json(), "id": trainer.checkpoint_id,
+                       "origins": [str(Path(m.__file__).resolve()) for m in (st, st._rs)]}
             reports = finish(trainer)
-            child = subprocess.run([sys.executable, "-c", script], input=json.dumps(payload), text=True,
+            child = subprocess.run([sys.executable, "-I", "-B", "-c", script], input=json.dumps(payload), text=True,
                                    capture_output=True, timeout=60, cwd=tempfile.gettempdir())
             self.assertEqual(child.returncode, 0, child.stderr)
             result = json.loads(child.stdout)
@@ -134,16 +645,23 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
     @unittest.skipUnless(os.environ.get("ST_NATIVE_SESSION_EXAMPLE"),
                          "set ST_NATIVE_SESSION_EXAMPLE to the built Rust native_training_session example")
     def test_python_rust_python_checkpoint_handoff(self):
-        for readout in ("f32", "f64"):
+        cases = [(r, b, None) for r in ("f32", "f64") for b in (1, 2)]
+        cases.append(("f32", 2, "covering_targets"))
+        for readout, batch_windows, policy in cases:
             base, model = owners(readout)
-            trainer = session(model)
+            docs = DOCS if batch_windows == 1 else DOCS + [WINDOW]
+            labels = [[-100] * (len(doc) - 1) + doc[-1:] for doc in docs] if policy else None
+            trainer = st.NativeCausalLmTrainingSession(model, docs, 4, learning_rate=.2,
+                                                      epochs=2, batch_windows=batch_windows,
+                                                      labels=labels, window_policy=policy or "disjoint")
             trainer.step()
             config, weights = fixtures["fixture"](raw_weights=True)
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / "config.json").write_text(config)
                 (root / "weights.safetensors").write_bytes(weights)
-                (root / "docs.json").write_text(json.dumps(DOCS))
+                data = docs if labels is None else {"token_documents": docs, "labels": labels}
+                (root / "docs.json").write_text(json.dumps(data))
                 (root / "input.json").write_text(trainer.to_json())
                 command = [os.environ["ST_NATIVE_SESSION_EXAMPLE"], str(root / "config.json"),
                            str(root / "weights.safetensors"), str(root / "docs.json"),
@@ -160,9 +678,17 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
                 self.assertEqual(checkpoint, trainer.to_json())
                 self.assertEqual(receipt["checkpoint_id"], trainer.checkpoint_id)
                 resumed = st.NativeCausalLmTrainingSession.from_json(
-                    base.with_readout_accumulator("f32"), DOCS, checkpoint, receipt["checkpoint_id"])
-                self.assertEqual(finish(resumed), finish(trainer))
+                    base.with_readout_accumulator("f32"), docs, checkpoint, receipt["checkpoint_id"], labels=labels)
+                remaining = finish(trainer)
+                self.assertEqual(finish(resumed), remaining)
                 self.assertEqual(resumed.to_json(), trainer.to_json())
+                segment_out = root / "segment.json"
+                multi = subprocess.run([*command[:-1], str(segment_out), str(trainer.total_updates)],
+                                       capture_output=True, text=True, check=True, timeout=60)
+                full = json.loads(multi.stdout)
+                self.assertEqual(full["steps"], [json.loads(expected.to_json()), *map(json.loads, remaining)])
+                self.assertEqual(full["checkpoint_id"], trainer.checkpoint_id)
+                self.assertEqual(segment_out.read_bytes(), trainer.to_json().encode())
 
     def test_admission_and_restore_fail_without_mutation(self):
         base, model = owners()
@@ -176,7 +702,7 @@ print(json.dumps({'reports':reports,'checkpoint':trainer.to_json(),'tokens':gene
         with self.assertRaises(ValueError):
             st.NativeCausalLmTrainingSession(base, DOCS, 4, learning_rate=.2)
         for kw in ({"mode":"unknown"}, {"epochs": True}, {"learning_rate": True}):
-            options={"learning_rate":.2}; options.update(kw)
+            options = {"learning_rate": .2, **kw}
             with self.assertRaises((ValueError,TypeError)):
                 st.NativeCausalLmTrainingSession(model, DOCS, 4, **options)
         class Poison:

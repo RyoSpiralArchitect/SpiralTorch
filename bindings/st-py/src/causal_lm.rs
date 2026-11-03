@@ -16,13 +16,32 @@ mod context;
 mod documents;
 mod evaluation;
 mod generation;
+mod prefix_cache;
 mod session;
+mod session_input;
+mod supervision;
 mod training;
 use accumulation::PyNativeCausalLmAccumulator;
 use session::PyNativeCausalLmAdaptationGradients;
 
 fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
+}
+
+fn checkpoint_error(e: Box<dyn std::error::Error + Send + Sync>) -> PyErr {
+    match e.downcast::<std::io::Error>() {
+        Ok(io) => match io.raw_os_error() {
+            // Preserve errno; on Windows the fourth argument carries the Win32 error.
+            #[cfg(windows)]
+            Some(code) => {
+                pyo3::exceptions::PyOSError::new_err((0, io.to_string(), None::<String>, code))
+            }
+            #[cfg(not(windows))]
+            Some(code) => pyo3::exceptions::PyOSError::new_err((code, io.to_string())),
+            None => PyErr::from(*io),
+        },
+        Err(other) => error(other),
+    }
 }
 
 fn shape(value: &Bound<'_, PyAny>) -> PyResult<[usize; 2]> {
@@ -200,22 +219,109 @@ impl PyNativeCausalLmLoraGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
-    /// Shared Rust-owned gradient operation, including composed adapter snapshots.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(base, payload, expected_id, *, update, recorded_data_id, post_lora_id, post_geometry_id))]
+    fn from_session_checkpoint_at(
+        py: Python<'_>,
+        base: &Self,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
+        update: &Bound<'_, PyAny>,
+        recorded_data_id: &Bound<'_, PyAny>,
+        post_lora_id: Option<&Bound<'_, PyAny>>,
+        post_geometry_id: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        reject_bool(update)?;
+        let update = update.extract::<u64>()?;
+        let expected_id = session_input::pin(expected_id)?;
+        let data = session_input::pin(recorded_data_id)?;
+        let lora = post_lora_id.map(session_input::pin).transpose()?;
+        let geometry = post_geometry_id.map(session_input::pin).transpose()?;
+        let payload = session_input::payload(payload)?;
+        let bytes = payload.as_bytes();
+        py.detach(|| {
+            NativeCausalLm::from_session_checkpoint_at(
+                base.inner.clone(),
+                bytes,
+                &expected_id,
+                update,
+                &data,
+                lora.as_deref(),
+                geometry.as_deref(),
+            )
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
+    }
+    /// With no mode, expose all attached gradients. Otherwise retain the full
+    /// forward function but return only the Rust-selected parameter groups.
+    #[pyo3(signature=(windows, shape, *, mode=None, labels=None, observe_geometry=false))]
     fn adaptation_loss_gradients(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        mode: Option<&str>,
+        labels: Option<&Bound<'_, PyAny>>,
+        observe_geometry: bool,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let mode = mode.map(session::mode).transpose()?;
+        if let Some(mode) = mode {
+            self.inner.validate_adaptation_mode(mode).map_err(error)?;
+        }
         let shape = self::shape(shape)?;
         let count = self
             .inner
-            .adaptation_gradient_input_count(shape)
+            .adaptation_labeled_input_count(shape, labels.is_some())
             .map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.adaptation_loss_gradients(&windows, shape))
-            .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner.adaptation_window_gradients(
+                &windows,
+                shape,
+                labels.as_deref(),
+                mode,
+                observe_geometry,
+            )
+        })
+        .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+        .map_err(error)
+    }
+
+    /// Four local channel maps on a single factual decoder forward and CE pullback.
+    #[pyo3(signature=(windows, shape, config, *, labels=None))]
+    fn wave_factorial_observation_json(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        config: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<String> {
+        let config = serde_json::from_value(crate::json::py_to_json_bounded(
+            config,
+            2048,
+            16,
+            3,
+            "wave factorial",
+        )?)
+        .map_err(error)?;
+        self.inner.admit_wave_factorial(config).map_err(error)?;
+        let shape = self::shape(shape)?;
+        let count = self
+            .inner
+            .adaptation_labeled_input_count(shape, labels.is_some())
+            .map_err(error)?;
+        let ids = tokens(windows, count)?;
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner
+                .wave_factorial_observation(&ids, shape, labels.as_deref(), config)
+                .and_then(|r| Ok(serde_json::to_string(&r)?))
+        })
+        .map_err(error)
     }
 
     #[pyo3(signature=(gradients, mode, learning_rate))]
@@ -269,18 +375,27 @@ impl PyNativeCausalLm {
             .map_err(error)
     }
 
+    #[pyo3(signature=(windows, shape, *, labels=None))]
     fn lora_loss_gradients(
         &self,
         py: Python<'_>,
         windows: &Bound<'_, PyAny>,
         shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmLoraGradients> {
         let shape = self::shape(shape)?;
-        let count = self.inner.lora_gradient_input_count(shape).map_err(error)?;
+        let count = self
+            .inner
+            .lora_labeled_input_count(shape, labels.is_some())
+            .map_err(error)?;
         let windows = tokens(windows, count)?;
-        py.detach(|| self.inner.lora_loss_gradients(&windows, shape))
-            .map(|inner| PyNativeCausalLmLoraGradients { inner })
-            .map_err(error)
+        let labels = loss_labels(labels, count)?;
+        py.detach(|| {
+            self.inner
+                .lora_loss_gradients_with_labels(&windows, shape, labels.as_deref())
+        })
+        .map(|inner| PyNativeCausalLmLoraGradients { inner })
+        .map_err(error)
     }
 
     fn step_lora_sgd(
@@ -296,6 +411,26 @@ impl PyNativeCausalLm {
             .map_err(error)
     }
 
+    #[staticmethod]
+    #[pyo3(signature=(variants, token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_variants(
+        py: Python<'_>,
+        variants: &Bound<'_, PyAny>,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<evaluation::PyNativeCausalLmEvaluationComparison> {
+        evaluation::compare(
+            py,
+            variants,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
     #[pyo3(signature=(token_documents, context_length, *, microbatch_windows=None, labels=None))]
     fn evaluate_documents(
         &self,
@@ -308,6 +443,26 @@ impl PyNativeCausalLm {
         evaluation::evaluate(
             self,
             py,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
+    #[staticmethod]
+    #[pyo3(signature=(variants, token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_variants_by_answer(
+        py: Python<'_>,
+        variants: &Bound<'_, PyAny>,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<evaluation::PyNativeCausalLmAnswerComparison> {
+        evaluation::compare_answers(
+            py,
+            variants,
             token_documents,
             context_length,
             microbatch_windows,
@@ -332,21 +487,54 @@ impl PyNativeCausalLm {
     }
 
     #[staticmethod]
-    fn from_training_checkpoint(
+    #[pyo3(signature = (base, payload, expected_id, *, update, recorded_data_id, post_geometry_id))]
+    fn from_training_checkpoint_at(
         py: Python<'_>,
         base: &Self,
-        payload: &str,
-        expected_id: &str,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
+        update: &Bound<'_, PyAny>,
+        recorded_data_id: &str,
+        post_geometry_id: &str,
     ) -> PyResult<Self> {
+        reject_bool(update)?;
+        let update = update.extract::<u64>()?;
+        let pin = session_input::pin(expected_id)?;
+        let payload = session_input::payload_with_limit(
+            payload,
+            st_nn::causal_lm::NativeCausalLmTrainer::MAX_PAYLOAD_BYTES,
+        )?;
+        let bytes = payload.as_bytes();
         py.detach(|| {
-            NativeCausalLm::from_training_checkpoint(
+            NativeCausalLm::from_training_checkpoint_at(
                 base.inner.clone(),
-                payload.as_bytes(),
-                expected_id,
+                bytes,
+                &pin,
+                update,
+                recorded_data_id,
+                post_geometry_id,
             )
         })
         .map(|inner| Self { inner })
         .map_err(error)
+    }
+
+    #[staticmethod]
+    fn from_training_checkpoint(
+        py: Python<'_>,
+        base: &Self,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        let pin = session_input::pin(expected_id)?;
+        let payload = session_input::payload_with_limit(
+            payload,
+            st_nn::causal_lm::NativeCausalLmTrainer::MAX_PAYLOAD_BYTES,
+        )?;
+        let bytes = payload.as_bytes();
+        py.detach(|| NativeCausalLm::from_training_checkpoint(base.inner.clone(), bytes, &pin))
+            .map(|inner| Self { inner })
+            .map_err(error)
     }
 
     #[staticmethod]
@@ -555,6 +743,8 @@ impl PyNativeCausalLm {
 }
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<supervision::PyCausalTargetAlignment>()?;
+    module.add_class::<supervision::PyCausalCompletion>()?;
     module.add_class::<PyNativeCausalLm>()?;
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;

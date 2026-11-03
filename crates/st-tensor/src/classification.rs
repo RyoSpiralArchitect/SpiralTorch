@@ -54,6 +54,14 @@ pub struct CrossEntropyConfig {
     pub label_smoothing: f64,
 }
 
+/// Unsmoothed integer-label scores for one contiguous group of rows.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClassScoreGroup {
+    pub active: usize,
+    pub nll_sum: f64,
+    pub top1_correct: usize,
+}
+
 impl Default for CrossEntropyConfig {
     fn default() -> Self {
         Self {
@@ -320,6 +328,51 @@ impl Tensor {
         labels: &[i64],
         config: CrossEntropyConfig,
     ) -> PureResult<Tensor> {
+        self.cross_entropy_visit(labels, config, |_, _, _| {})
+    }
+
+    /// Ordinary mean CE plus f64 NLL sums and greedy hits per group, using
+    /// the same row partitions once. Ties choose the lowest class ID and -100
+    /// is ignored. Group lengths cover all input rows, including ignored rows.
+    pub fn grouped_class_scores(
+        &self,
+        labels: &[i64],
+        lengths: &[usize],
+    ) -> PureResult<(f32, Vec<ClassScoreGroup>)> {
+        let rows = self.shape().0;
+        if lengths.is_empty()
+            || lengths.len() > rows
+            || lengths.contains(&0)
+            || lengths.iter().try_fold(0usize, |n, &v| n.checked_add(v)) != Some(rows)
+        {
+            return Err(TensorError::InvalidValue {
+                label: "classification groups must partition all rows into nonempty intervals",
+            });
+        }
+        let mut groups = vec![ClassScoreGroup::default(); lengths.len()];
+        let (mut group, mut end) = (0, lengths[0]);
+        let mean =
+            self.cross_entropy_visit(labels, CrossEntropyConfig::default(), |i, loss, hit| {
+                if i == end {
+                    group += 1;
+                    end += lengths[group];
+                }
+                if let Some(correct) = hit {
+                    let score = &mut groups[group];
+                    score.active += 1;
+                    score.nll_sum += loss;
+                    score.top1_correct += usize::from(correct);
+                }
+            })?;
+        Ok((mean.data()[0], groups))
+    }
+
+    fn cross_entropy_visit(
+        &self,
+        labels: &[i64],
+        config: CrossEntropyConfig,
+        mut visit: impl FnMut(usize, f64, Option<bool>),
+    ) -> PureResult<Tensor> {
         let active = validate_labels(self, labels, config)?;
         let input = finite_row_major(self, "cross_entropy_logits")?;
         let (_, classes) = input.shape();
@@ -329,9 +382,9 @@ impl Tensor {
             1
         });
         let mut total = 0.0;
-        for (row, &label) in input.data().chunks_exact(classes).zip(labels) {
-            let loss = if label == config.ignore_index {
-                0.0
+        for (i, (row, &label)) in input.data().chunks_exact(classes).zip(labels).enumerate() {
+            let (loss, hit) = if label == config.ignore_index {
+                (0.0, None)
             } else {
                 let partition = RowPartition::new(row);
                 let nll = partition.maximum - f64::from(row[label as usize]);
@@ -343,10 +396,12 @@ impl Tensor {
                         .sum::<f64>()
                         / classes as f64
                 };
-                (1.0 - config.label_smoothing) * nll
+                let loss = (1.0 - config.label_smoothing) * nll
                     + config.label_smoothing * uniform
-                    + partition.log_partition()
+                    + partition.log_partition();
+                (loss, Some(partition.maximum_index == label as usize))
             };
+            visit(i, loss, hit);
             if config.reduction == LossReduction::None {
                 values.push(checked_f32(loss, "cross_entropy_output")?);
             } else {

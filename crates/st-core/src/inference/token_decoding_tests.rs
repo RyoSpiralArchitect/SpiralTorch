@@ -161,3 +161,230 @@ fn invalid_inputs_and_excessive_ngram_work_fail_closed() {
     assert!(config.validate(10, 1000).is_ok());
     assert!(config.validate(10, MAX_HISTORY + 1).is_err());
 }
+
+// Independent full-sort oracle with the original summation chronology. No partial selector,
+// in-place compaction, or optimized ID path is used to produce expected values.
+fn full_sort_reference(
+    logits: &[f64],
+    history: &[usize],
+    cfg: &TokenDecodingConfig,
+) -> TokenCandidates {
+    let mut ids: Vec<_> = (0..logits.len()).collect();
+    ids.sort_by(|&a, &b| {
+        logits[b]
+            .partial_cmp(&logits[a])
+            .unwrap()
+            .then_with(|| a.cmp(&b))
+    });
+    ids.truncate(cfg.top_k.unwrap_or(ids.len()));
+    let raw_top_token = ids[0];
+    let scores: Vec<_> = ids.iter().map(|&i| logits[i]).collect();
+    let (adjusted, p, temperature, contract) = match &cfg.distribution {
+        TokenDistribution::Softmax { temperature } => {
+            let top = scores[0];
+            let mut w: Vec<_> = scores
+                .iter()
+                .map(|&v| {
+                    let d = v - top;
+                    (if d.is_infinite() && *temperature >= 1. {
+                        v / temperature - top / temperature
+                    } else {
+                        d / temperature
+                    })
+                    .exp()
+                })
+                .collect();
+            let sum = w.iter().sum::<f64>();
+            for v in &mut w {
+                *v /= sum;
+            }
+            (scores, w, *temperature, None)
+        }
+        TokenDistribution::ZSpace { config } => {
+            let c = apply_zspace_generation_control(ZSpaceGenerationControlRequest {
+                logits: scores,
+                token_ids: ids.iter().map(|&id| id as u64).collect(),
+                recent_tokens: history.iter().map(|&id| id as u64).collect(),
+                config: config.clone(),
+            })
+            .unwrap();
+            (
+                c.adjusted_logits,
+                c.probabilities,
+                c.effective_temperature,
+                Some(ZSPACE_GENERATION_CONTROL_CONTRACT_VERSION),
+            )
+        }
+    };
+    let control_entropy = zspace_entropy(&p).unwrap();
+    let mut ranked: Vec<_> = (0..ids.len()).collect();
+    ranked.sort_by(|&a, &b| {
+        adjusted[b]
+            .partial_cmp(&adjusted[a])
+            .unwrap()
+            .then_with(|| ids[a].cmp(&ids[b]))
+    });
+    let controlled_top_token = ids[ranked[0]];
+    let mut kept = Vec::new();
+    let mut probs = Vec::new();
+    let mut mass = 0.;
+    for i in ranked {
+        if p[i] == 0. {
+            continue;
+        }
+        kept.push(ids[i]);
+        probs.push(p[i]);
+        mass += p[i];
+        if cfg.top_p < 1. && mass >= cfg.top_p {
+            break;
+        }
+    }
+    for x in &mut probs {
+        *x /= mass;
+    }
+    let report = TokenDecision {
+        token_id: kept[0],
+        probability: probs[0],
+        entropy: zspace_entropy(&probs).unwrap(),
+        control_entropy,
+        effective_temperature: temperature,
+        raw_top_token,
+        controlled_top_token,
+        pre_nucleus_candidates: ids.len(),
+        candidates: kept.len(),
+        zspace_contract: contract,
+    };
+    TokenCandidates {
+        ids: kept.into_boxed_slice(),
+        probabilities: probs.into_boxed_slice(),
+        report,
+    }
+}
+
+fn same_reports(a: &TokenCandidates, b: &TokenCandidates) {
+    assert_eq!(a.token_ids(), b.token_ids());
+    assert_eq!(
+        a.probabilities()
+            .iter()
+            .map(|p| p.to_bits())
+            .collect::<Vec<_>>(),
+        b.probabilities()
+            .iter()
+            .map(|p| p.to_bits())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        serde_json::to_vec(&a.greedy()).unwrap(),
+        serde_json::to_vec(&b.greedy()).unwrap()
+    );
+    for u in [
+        0.,
+        0.37,
+        b.probabilities()[0].min(1. - f64::EPSILON),
+        1. - f64::EPSILON,
+    ] {
+        assert_eq!(a.sample(u).unwrap(), b.sample(u).unwrap());
+    }
+}
+
+#[test]
+fn f32_and_f64_candidates_are_bit_identical_to_full_sort_at_cutoffs_and_underflow() {
+    let x: Vec<f32> = (0..257)
+        .map(|i| match i % 11 {
+            0 => -0.,
+            1 => 0.,
+            2 => -15000.,
+            3 => 3.,
+            _ => ((i * 131 % 47) as f32 - 23.) / 3.,
+        })
+        .collect();
+    let y: Vec<_> = x.iter().map(|&v| f64::from(v)).collect();
+    let history = [7, 3, 1, 7, 3, 1];
+    for distribution in [
+        TokenDistribution::Softmax {
+            temperature: f64::MIN_POSITIVE,
+        },
+        TokenDistribution::Softmax { temperature: 0.7 },
+        TokenDistribution::Softmax {
+            temperature: f64::MAX,
+        },
+        TokenDistribution::ZSpace {
+            config: ZSpaceGenerationControlConfig {
+                repression_strength: 2.,
+                ngram_size: 2,
+                ngram_window: 8,
+                ngram_repression_strength: 4.,
+                ..Default::default()
+            },
+        },
+    ] {
+        for k in [None, Some(1), Some(2), Some(23), Some(256), Some(257)] {
+            for p in [f64::MIN_POSITIVE, 0.35, 0.99, 1.] {
+                let cfg = TokenDecodingConfig {
+                    distribution: distribution.clone(),
+                    top_k: k,
+                    top_p: p,
+                    ..Default::default()
+                };
+                let expected = full_sort_reference(&y, &history, &cfg);
+                same_reports(
+                    &prepare_token_candidates(&y, &history, &cfg).unwrap(),
+                    &expected,
+                );
+                same_reports(
+                    &prepare_token_candidates_f32(&x, &history, &cfg).unwrap(),
+                    &expected,
+                );
+                assert_eq!(
+                    greedy_token_id_f32(&x, &history, &cfg).unwrap(),
+                    expected.greedy().token_id
+                );
+            }
+        }
+    }
+    for t in [0.5, 1., f64::MAX] {
+        let extreme = [-f64::MAX, 0., f64::MAX, -0., f64::MIN_POSITIVE, 1., 1.];
+        let cfg = TokenDecodingConfig {
+            distribution: TokenDistribution::Softmax { temperature: t },
+            ..Default::default()
+        };
+        same_reports(
+            &prepare_token_candidates(&extreme, &[], &cfg).unwrap(),
+            &full_sort_reference(&extreme, &[], &cfg),
+        );
+    }
+}
+
+#[test]
+fn id_only_greedy_validates_and_respects_real_control_and_lowest_id_ties() {
+    let cfg = TokenDecodingConfig {
+        top_k: Some(1),
+        top_p: f64::MIN_POSITIVE,
+        ..Default::default()
+    };
+    assert_eq!(greedy_token_id_f32(&[-0., 0., -1.], &[], &cfg).unwrap(), 0);
+    assert!(greedy_token_id_f32(&[1., f32::NAN], &[], &cfg).is_err());
+    assert!(greedy_token_id_f32(&[0., 1.], &[2], &cfg).is_err());
+    assert!(greedy_token_id_f32(&[], &[], &cfg).is_err());
+    assert!(greedy_token_id_f32(
+        &[0.],
+        &[],
+        &TokenDecodingConfig {
+            selection: TokenSelection::Sample,
+            ..cfg
+        }
+    )
+    .is_err());
+    let c = TokenDecodingConfig {
+        distribution: TokenDistribution::ZSpace {
+            config: ZSpaceGenerationControlConfig {
+                repression_strength: 10.,
+                last_token_repression: 0.,
+                ..Default::default()
+            },
+        },
+        top_k: Some(2),
+        ..Default::default()
+    };
+    assert_eq!(greedy_token_id_f32(&[3., 2., 1.], &[0], &c).unwrap(), 1);
+}

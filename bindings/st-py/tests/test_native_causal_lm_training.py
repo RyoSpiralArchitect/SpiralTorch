@@ -7,9 +7,11 @@ import json
 import os
 from pathlib import Path
 import runpy
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 class NoForeignML(importlib.abc.MetaPathFinder):
@@ -22,6 +24,7 @@ if __name__ == "__main__":
     sys.meta_path.insert(0, NoForeignML())
 
 import spiraltorch as st  # noqa: E402
+from spiraltorch import native_corpus_runs as runs  # noqa: E402
 
 fixtures = runpy.run_path(str(Path(__file__).with_name("test_native_causal_lm.py")))
 DOCS = [[1, 2, 3], [4, 5, 6, 7, 8, 9, 10, 0, 1], [2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 1, 2]]
@@ -39,6 +42,34 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
     def trainer(self, *, docs=DOCS, labels=None, **overrides):
         return st.NativeCausalLmTrainer(self.model, self.optimizer, docs, 4,
                                        labels=labels, **{**POLICY, **overrides})
+
+    def test_opt_in_site_observations_share_the_exact_training_trajectory(self):
+        plain, measured = self.trainer(), self.trainer()
+        self.assertIn("NativeCausalLmObservedTrainingStep", st.__all__)
+        self.assertIn("NativeCausalLmObservedTrainingStep", st._rs.__all__)
+        for windows in (4, 1, 4, 1):
+            expected, observed = plain.step(), measured.step_observed()
+            self.assertIsInstance(observed, st.NativeCausalLmObservedTrainingStep)
+            self.assertEqual(observed.step.to_json(), expected.to_json())
+            payload = json.loads(observed.to_json())
+            self.assertEqual(payload["schema"], "spiraltorch.native_lm.observed_training_step.v1")
+            self.assertEqual(payload["step"], json.loads(expected.to_json()))
+            self.assertEqual(payload["data_id"], plain.data_id)
+            self.assertEqual(payload["base_model_identity"], self.base.base_model_identity)
+            self.assertEqual(set(payload["sites"]), {"transformer.h.0.mlp"})
+            site = payload["sites"]["transformer.h.0.mlp"]
+            self.assertEqual(site["elements"], windows * 3 * 4)
+            self.assertGreater(site["input_rms"], 0.)
+            self.assertGreater(site["relative_residual_rms"], 0.)
+            self.assertIsNone(site["pre_log_radius"])
+            self.assertIsNone(site["log_radius_gradient"])
+            self.assertEqual(measured.to_json(), plain.to_json())
+        self.assertIsNone(measured.step_observed())
+        bad = self.trainer(learning_rate=3.4e38, weight_decay=3.4e38)
+        before = bad.to_json()
+        with self.assertRaises(ValueError):
+            bad.step_observed()
+        self.assertEqual(bad.to_json(), before)
 
     def test_fixed_order_partial_groups_and_epoch_resume_match_manual_updates(self):
         trainer = self.trainer()
@@ -64,6 +95,192 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
         self.assertIsNone(trainer.step())
         self.assertEqual(trainer.to_json(), saved)
         self.assertEqual((trainer.epoch, trainer.next_window), (2, 5))
+
+    def test_observed_checkpoint_restores_exact_next_steps_without_a_run_summary(self):
+        plain, tracked = self.trainer(), self.trainer()
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            self.assertEqual(tracked.step().to_json(), plain.step().to_json())
+            report, entry = runs.step_and_save_observation(tracked, directory)
+            self.assertEqual(report.to_json(), plain.step().to_json())
+            raw = (directory / entry["observation_file"]).read_bytes()
+            pin = "sha256:" + hashlib.sha256(raw).hexdigest()
+            self.assertEqual(pin, entry["observation_id"])
+            receipt = json.loads(raw)
+            self.assertEqual(receipt["observation"]["step"], json.loads(report.to_json()))
+            self.assertEqual(receipt["checkpoint"]["updates"], 2)
+            checkpoint = (directory / entry["file"]).read_bytes()
+            self.assertEqual((checkpoint.decode(), entry["checkpoint_id"]), plain.checkpoint_with_id())
+            self.assertEqual(entry["checkpoint_id"], "sha256:" + hashlib.sha256(checkpoint).hexdigest())
+            self.assertFalse((directory / "result.json").exists())
+            inference = runs.load_observed_model(directory, 2, expected_observation_id=pin, base=self.base)
+            cfg = json.dumps({"max_new_tokens": 3, "execution": {"kind":"kv_cache","max_values":10000}})
+            a = st.NativeCausalLmGenerator(inference, [1,2], cfg)
+            b = st.NativeCausalLmGenerator(plain.model, [1,2], cfg)
+            while not a.finished:
+                self.assertEqual(a.step().to_json(), b.step().to_json())
+            self.assertEqual(a.to_json(), b.to_json())
+            with self.assertRaises((ValueError, TypeError)):
+                st.NativeCausalLm.from_training_checkpoint_at(self.base, checkpoint.decode(), entry["checkpoint_id"],
+                    update=True, recorded_data_id=plain.data_id, post_geometry_id=plain.model.geometry_artifact_id)
+            def restore(**kw):
+                return runs.restore_observed_checkpoint(directory, 2, **{
+                    "expected_observation_id": pin, "base": self.base, "token_documents": DOCS, **kw})
+            restored = restore()
+            while not plain.exhausted:
+                self.assertEqual(restored.step().to_json(), plain.step().to_json())
+                self.assertEqual(restored.checkpoint_with_id(), plain.checkpoint_with_id())
+            self.assertIsNone(runs.step_and_save_observation(restored, directory))
+            with self.assertRaisesRegex(ValueError, "pin"):
+                restore(expected_observation_id="wrong")
+            with self.assertRaises(ValueError):
+                restore(token_documents=[list(reversed(d)) for d in DOCS])
+            with self.assertRaisesRegex(ValueError, "positive"):
+                runs.restore_observed_checkpoint(directory, True, expected_observation_id=pin,
+                                                 base=self.base, token_documents=DOCS)
+            receipt["observation"]["data_id"] = "different"
+            mispaired = json.dumps(receipt).encode()
+            (directory / entry["observation_file"]).write_bytes(mispaired)
+            with self.assertRaisesRegex(ValueError, "do not agree"):
+                restore(expected_observation_id="sha256:" + hashlib.sha256(mispaired).hexdigest())
+            with self.assertRaisesRegex(ValueError, "inference boundary"):
+                runs.load_observed_model(directory,2,expected_observation_id="sha256:" + hashlib.sha256(mispaired).hexdigest(),
+                                         base=self.base)
+            (directory / entry["observation_file"]).write_bytes(raw)
+            (directory / entry["file"]).write_bytes(checkpoint + b" ")
+            with self.assertRaisesRegex(ValueError, "pinned"):
+                restore()
+
+    def test_unsealed_observation_is_not_a_resume_point_or_overwritten(self):
+        trainer = self.trainer()
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            _, first = runs.step_and_save_observation(trainer, directory)
+            # A process can die between checkpoint and receipt publication.
+            plain = self.trainer()
+            plain.step()
+            expected = plain.step().to_json()
+            orphan = directory / "checkpoint-000002.json"
+            orphan.write_bytes(plain.to_json().encode())
+            with self.assertRaises(FileExistsError):
+                runs.step_and_save_observation(trainer, directory)
+            self.assertEqual(trainer.completed_updates, 1)
+            self.assertEqual(orphan.read_bytes(), plain.to_json().encode())
+            self.assertFalse((directory / "observation-000002.json").exists())
+            with self.assertRaises(FileNotFoundError):
+                runs.restore_observed_checkpoint(directory, 2, expected_observation_id=first["observation_id"],
+                                                 base=self.base, token_documents=DOCS)
+            prior = runs.restore_observed_checkpoint(directory, 1, expected_observation_id=first["observation_id"],
+                                                     base=self.base, token_documents=DOCS)
+            with self.assertRaises(FileExistsError):
+                runs.step_and_save_observation(prior, directory)
+            self.assertEqual(prior.completed_updates, 1)
+            self.assertEqual(prior.to_json(), trainer.to_json())
+            self.assertEqual(prior.step().to_json(), expected)
+            self.assertEqual(prior.to_json(), plain.to_json())
+
+    def test_segment_file_bytes_and_legacy_observation_are_interoperable(self):
+        expected, trainer = self.trainer(), self.trainer()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for stop in (0, trainer.MAX_CHECKPOINT_INTERVAL + 1, trainer.total_updates + 1):
+                with self.assertRaises(ValueError):
+                    trainer.advance_to_checkpoint_new(stop, root/"unused")
+            with self.assertRaises(TypeError):
+                trainer.advance_to_observed_checkpoint_new(True, root)
+            reports, pin = trainer.advance_to_checkpoint_new(2, root/"two")
+            self.assertEqual([r.to_json() for r in reports], [expected.step().to_json() for _ in range(2)])
+            state = (root/"two").read_bytes()
+            self.assertEqual((state.decode(), pin), expected.checkpoint_with_id())
+            base = self.base
+            restored = st.NativeCausalLmTrainer.from_json(base, DOCS, state, pin)
+            self.assertEqual(st.NativeCausalLm.from_training_checkpoint(base, state, pin).geometry_artifact_id,
+                             restored.model.geometry_artifact_id)
+            step = expected.step_observed()
+            filename = "checkpoint-000003.json"
+            cp, cid = expected.checkpoint_with_id()
+            (root/filename).write_bytes(cp.encode())
+            # Older clients wrote this receipt using Python's JSON float formatting.
+            record = {"schema": "spiraltorch.native_corpus.observed_checkpoint.v1",
+                      "checkpoint": {"file": filename, "checkpoint_id": cid, "updates": 3},
+                      "observation": json.loads(step.to_json())}
+            receipt = (json.dumps(record, separators=(",", ":"), allow_nan=False) + "\n").encode()
+            (root/"observation-000003.json").write_bytes(receipt)
+            restored = runs.restore_observed_checkpoint(root, 3,
+                expected_observation_id="sha256:" + hashlib.sha256(receipt).hexdigest(), base=base, token_documents=DOCS)
+            self.assertEqual(restored.optimizer.to_json(), expected.optimizer.to_json())
+            self.assertEqual(restored.step().to_json(), expected.step().to_json())
+
+    @unittest.skipUnless(sys.implementation.name == "cpython", "CPython allocation regression")
+    def test_tiny_recovery_inputs_do_not_allocate_the_checkpoint_budget(self):
+        import tracemalloc
+        example = runpy.run_path(str(Path(__file__).resolve().parents[1] / "examples/native_geometry_corpus_training.py"))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tiny"
+            data = b"x" * 2048
+            path.write_bytes(data)
+            for read in (example["read"], runs._read):
+                with self.subTest(read=read.__name__):
+                    was_tracing = tracemalloc.is_tracing()
+                    if not was_tracing:
+                        tracemalloc.start()
+                    try:
+                        tracemalloc.reset_peak()
+                        before = tracemalloc.get_traced_memory()[0]
+                        self.assertEqual(read(path, st.NativeCausalLmTrainer.MAX_CHECKPOINT_BYTES), data)
+                        self.assertLess(tracemalloc.get_traced_memory()[1] - before, 512 * 1024)
+                    finally:
+                        if not was_tracing:
+                            tracemalloc.stop()
+
+    @unittest.skipUnless(os.name == "posix", "requires a child-local file size limit")
+    def test_os_write_failure_keeps_adamw_moments_and_cursor_for_both_segment_kinds(self):
+        script = r"""
+import errno, resource, runpy, signal, sys
+from pathlib import Path
+source = runpy.run_path(sys.argv[1])
+case = source["NativeCausalLmTrainingTests"]()
+case.setUp()
+trainer = case.trainer()
+trainer.step()
+before = trainer.checkpoint_with_id()
+moments = trainer.optimizer.to_json()
+root = Path(sys.argv[2])
+pin = trainer.save_checkpoint_new(root/"one")
+assert pin == before[1]
+limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (32, limits[1]))
+try:
+    for advance, path in [(trainer.advance_to_checkpoint_new, root/"three"), (trainer.advance_to_observed_checkpoint_new, root)]:
+        try:
+            advance(3, path)
+        except OSError as e:
+            assert e.errno == errno.EFBIG, e
+        else:
+            raise AssertionError("oversize checkpoint was accepted")
+finally:
+    resource.setrlimit(resource.RLIMIT_FSIZE, limits)
+assert trainer.completed_updates == 1 and trainer.checkpoint_with_id() == before
+assert trainer.optimizer.to_json() == moments and (root/"one").read_bytes() == before[0].encode()
+assert list(root.iterdir()) == [root/"one"]
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            child = subprocess.run([sys.executable, "-I", "-B", "-c", script, __file__, tmp],
+                                   capture_output=True, text=True, timeout=60)
+            self.assertEqual(child.returncode, 0, child.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permission bits")
+    def test_observed_saves_reject_nonprivate_outputs_before_training(self):
+        trainer = self.trainer()
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "shared"
+            directory.mkdir()
+            directory.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, "private"):
+                runs.step_and_save_observation(trainer, directory)
+            self.assertEqual(trainer.completed_updates, 0)
+            self.assertEqual(list(directory.iterdir()), [])
 
     def test_owned_inputs_snapshots_and_checkpoint_continuation(self):
         docs = [list(d) for d in DOCS]
@@ -201,10 +418,16 @@ class NativeCausalLmTrainingTests(unittest.TestCase):
             fresh = ["--recipe-json", "recipe", "--artifact", "geometry", "--artifact-id", "pin"]
             for extra in ([], ["--resume", "checkpoint"], ["--resume", "checkpoint", "--checkpoint-id", "pin", *fresh],
                           [*fresh, "--save-every", "0"], [*fresh, "--stop-after", "-1"],
+                          [*fresh, "--observe-every", "0"], [*fresh, "--observe-every", "-1"],
                           [*fresh, "--output", str(path)]):
                 with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
                     example["main"]([*common, *extra])
                 self.assertEqual(error.exception.code, 2)
+                self.assertEqual(list(path.iterdir()), [])
+            with mock.patch.object(st, "NativeCausalLmTrainer", object), contextlib.redirect_stderr(io.StringIO()) as msg:
+                with self.assertRaises(SystemExit):
+                    example["main"]([*common, *fresh, "--observe-every", "1"])
+                self.assertIn("after 0.4.33", msg.getvalue())
                 self.assertEqual(list(path.iterdir()), [])
             bounded = path / "bounded.json"
             bounded.write_bytes(b"abc")

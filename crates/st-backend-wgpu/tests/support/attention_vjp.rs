@@ -88,7 +88,10 @@ fn compare(label: &str, actual: &[f32], expected: &[f32]) -> Result<f64> {
     for (i, (&a, &e)) in actual.iter().zip(expected).enumerate() {
         let error = (f64::from(a) - f64::from(e)).abs();
         if !a.is_finite() || !e.is_finite() || error > 3e-6 + 5e-5 * f64::from(e).abs() {
-            return Err(format!("{label}[{i}]: {a} != {e}").into());
+            let actual_zero = actual.iter().filter(|&&v| v == 0.0).count();
+            let expected_zero = expected.iter().filter(|&&v| v == 0.0).count();
+            return Err(format!("{label}[{i}]: {a} != {e}; bits {:08x}/{:08x}, zeros {actual_zero}/{expected_zero} over {}",
+                               a.to_bits(), e.to_bits(), actual.len()).into());
         }
         maximum = maximum.max(error);
     }
@@ -232,14 +235,7 @@ async fn edge_checks(device: &TensorDevice) -> Result<Value> {
     )
 }
 
-pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
-    if runtime.adapter_info().device_type == wgpu::DeviceType::Cpu {
-        return Err("CPU adapter is not GPU evidence".into());
-    }
-    let device = TensorDevice::new(runtime.clone())?;
-    let edges = edge_checks(&device).await?;
-    let shifts = attention_shift::run(&device).await?;
-    let ranges = attention_range::run(&device).await?;
+fn torch_fixture() -> Result<Value> {
     let fixture: Value = serde_json::from_str(include_str!(
         "../fixtures/resident_attention_vjp_torch.json"
     ))?;
@@ -248,20 +244,28 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     {
         return Err("unexpected fixture".into());
     }
+    Ok(fixture)
+}
+
+async fn check_cases(
+    device: &TensorDevice,
+    runtime: &WgpuRuntime,
+    cases: &[Value],
+) -> Result<Vec<Value>> {
     let mut checks = Vec::new();
-    for case in fixture["cases"].as_array().unwrap() {
+    for case in cases {
         let spec = spec(case)?;
         for strided in [false, true] {
             let q = upload(
-                &device,
+                device,
                 &spec.query_shape(),
                 &floats(&case["query"]),
                 strided,
             )?;
-            let k = upload(&device, &spec.key_shape(), &floats(&case["key"]), strided)?;
-            let v = upload(&device, &spec.key_shape(), &floats(&case["value"]), strided)?;
+            let k = upload(device, &spec.key_shape(), &floats(&case["key"]), strided)?;
+            let v = upload(device, &spec.key_shape(), &floats(&case["value"]), strided)?;
             let u = upload(
-                &device,
+                device,
                 &spec.query_shape(),
                 &floats(&case["upstream"]),
                 strided,
@@ -270,7 +274,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 None
             } else {
                 Some(upload(
-                    &device,
+                    device,
                     &spec.z_bias_shape(),
                     &floats(&case["z_bias"]),
                     strided,
@@ -280,7 +284,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 None
             } else {
                 Some(upload(
-                    &device,
+                    device,
                     &spec.pair_bias_shape(),
                     &floats(&case["pair_bias"]),
                     strided,
@@ -314,11 +318,10 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             let mut errors = serde_json::Map::new();
             errors.insert(
                 "forward".into(),
-                json!(compare(
-                    "forward",
-                    &read(&output).await?,
-                    &floats(&case["expected"])
-                )?),
+                json!(
+                    compare("forward", &read(&output).await?, &floats(&case["expected"]))
+                        .map_err(|e| format!("case={} strided={strided}: {e}", case["name"]))?
+                ),
             );
             for (name, tensor, shape) in [
                 ("query", Some(gradients.query), spec.query_shape().to_vec()),
@@ -344,13 +347,95 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                             name,
                             &read(&tensor).await?,
                             &floats(&case["gradients"][name])
-                        )?),
+                        )
+                        .map_err(|e| format!("case={} strided={strided}: {e}", case["name"]))?),
                     );
                 }
             }
             checks.push(json!({"name": case["name"], "strided": strided, "max_abs_error": errors}));
         }
     }
+    Ok(checks)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn incident_case() -> Result<Value> {
+    let fixture = torch_fixture()?;
+    fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "mask_2_bias_2")
+        .cloned()
+        .ok_or_else(|| "missing incident fixture".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn incident_cpu_reference() -> Result<Value> {
+    let case = incident_case()?;
+    let q = floats(&case["query"]);
+    let k = floats(&case["key"]);
+    let v = floats(&case["value"]);
+    let u = floats(&case["upstream"]);
+    let pair = floats(&case["pair_bias"]);
+    let spec = spec(&case)?;
+    let forward =
+        st_kernel_contracts::attention::attention_reference(spec, &q, &k, &v, None, Some(&pair))?;
+    let g = st_kernel_contracts::attention::attention_vjp_reference(
+        spec,
+        &q,
+        &k,
+        &v,
+        None,
+        Some(&pair),
+        &u,
+    )?;
+    let mut errors = serde_json::Map::new();
+    errors.insert(
+        "forward".into(),
+        json!(compare("forward", &forward, &floats(&case["expected"]))?),
+    );
+    for (name, x) in [
+        ("query", &g.query),
+        ("key", &g.key),
+        ("value", &g.value),
+        ("pair_bias", g.pair_bias.as_ref().unwrap()),
+    ] {
+        errors.insert(
+            name.into(),
+            json!(compare(name, x, &floats(&case["gradients"][name]))?),
+        );
+    }
+    Ok(
+        json!({"case":case["name"],"reference_query0":g.query[0],"reference_query0_bits":g.query[0].to_bits(),
+              "torch_query0":case["gradients"]["query"][0],"max_abs_error":errors}),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn incident_layouts(runtime: WgpuRuntime) -> Result<Value> {
+    if runtime.adapter_info().backend != wgpu::Backend::Metal
+        || runtime.adapter_info().device_type == wgpu::DeviceType::Cpu
+    {
+        return Err("this diagnostic requires a non-CPU Metal adapter".into());
+    }
+    let device = TensorDevice::new(runtime.clone())?;
+    let checks = check_cases(&device, &runtime, &[incident_case()?]).await?;
+    Ok(
+        json!({"adapter":format!("{:?}",runtime.adapter_info()),"checks":checks,"new_training_updates":0}),
+    )
+}
+
+pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
+    if runtime.adapter_info().device_type == wgpu::DeviceType::Cpu {
+        return Err("CPU adapter is not GPU evidence".into());
+    }
+    let device = TensorDevice::new(runtime.clone())?;
+    let edges = edge_checks(&device).await?;
+    let shifts = attention_shift::run(&device).await?;
+    let ranges = attention_range::run(&device).await?;
+    let fixture = torch_fixture()?;
+    let checks = check_cases(&device, &runtime, fixture["cases"].as_array().unwrap()).await?;
     let learning = &fixture["learning"];
     let spec = spec(learning)?;
     let names = ["query", "key", "value", "z_bias", "pair_bias"];

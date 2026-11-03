@@ -137,6 +137,35 @@ fn normalization_keeps_the_aggregate_of_tiny_denominator_weights() {
 }
 
 #[test]
+fn packed_stats_keep_integer_metadata_in_word_storage() {
+    let module = naga::front::wgsl::parse_str(&shader_source()).unwrap();
+    let output = module
+        .global_variables
+        .iter()
+        .map(|(_, v)| v)
+        .find(|v| {
+            v.binding
+                .as_ref()
+                .is_some_and(|b| b.group == 0 && b.binding == 6)
+        })
+        .unwrap();
+    let naga::TypeInner::Array { base, stride, .. } = module.types[output.ty].inner else {
+        panic!("packed gradients and statistics must be an array");
+    };
+    assert_eq!(stride, 4);
+    assert!(
+        matches!(
+            module.types[base].inner,
+            naga::TypeInner::Scalar(naga::Scalar {
+                kind: naga::ScalarKind::Uint,
+                width: 4
+            })
+        ),
+        "signed exponents and key indices must never pass through float storage"
+    );
+}
+
+#[test]
 fn shader_abi_and_workgroup_storage_validate_without_an_adapter() {
     let source = shader_source();
     let module = naga::front::wgsl::parse_str(&source)
