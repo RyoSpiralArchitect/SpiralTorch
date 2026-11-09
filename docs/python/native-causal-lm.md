@@ -229,6 +229,48 @@ tests passed. The new methods were exercised in a freshly built CPU extension,
 including sampled Z-Space continuation. This is local source-build verification,
 not a published-wheel, GPU or pretrained-model quality guarantee.
 
+### File-Based QKV Generation
+
+`bindings/st-py/examples/native_geometry_generation.py` can load a saved QKV
+checkpoint over the selected frozen model and adapters. The example only
+orchestrates file input/output; native Rust still owns checkpoint validation,
+sampling, cache execution and random continuation.
+
+```sh
+python bindings/st-py/examples/native_geometry_generation.py \
+  --model-dir "$MODEL_DIR" \
+  --artifact "$GEOMETRY_JSON" --artifact-id "$GEOMETRY_ID" \
+  --qkv-checkpoint "$QKV_CHECKPOINT" --qkv-checkpoint-id "$QKV_ID" \
+  --readout-accumulator f32_wide_backward \
+  --prompt-json prompt.json --recipe-json generation-recipe.json \
+  --stop-after 2 --output generation-part
+```
+
+Use the checkpoint's original arithmetic policy and frozen adapter source.
+Omit the geometry arguments if there was no geometry. For a model with trained
+LoRA/geometry, use the existing `--session-checkpoint`, `--session-checkpoint-id`
+and `--session-boundary` source instead of `--artifact`; then overlay the QKV
+checkpoint. Do not select two different frozen adapter sources at once.
+
+To resume, keep those same model/QKV/source arguments, replace the prompt and
+recipe arguments with `--resume generation-part/generation.json --resume-id
+"$GENERATION_ID"`, and select a new output directory. `GENERATION_ID` is the
+separately retained `checkpoint_id` in the partial run's `result.json`. Omit
+`--stop-after` to continue to the recipe's original end. A resumed run cannot
+replace its prompt or decoding recipe.
+
+The QKV input needs both a bounded binary file and its expected ID. Its digest
+is checked before model loading, then Rust verifies the frozen model/adapters,
+readout and serving ownership. Missing flags, wrong owners and mismatched
+generation state refuse before creating the output directory. Input files are
+never rewritten. `result.json` records `qkv_snapshot` (checkpoint/serving IDs,
+layer and optimizer counter), actual readout policy and frozen adapter IDs.
+It explicitly does **not** claim to verify the training documents.
+
+The [69-test handoff verification](../../benchmarks/paired-prompt-contrast/QKV-GENERATION.md#file-based-handoff)
+includes the earlier 66 tests, not 69 additional independent tests. It uses
+synthetic fixtures and the same preserved CPU extension, without a rebuild.
+
 ## Explicit Readout Arithmetic
 
 The default is still f32, with unchanged checkpoint serialization. The

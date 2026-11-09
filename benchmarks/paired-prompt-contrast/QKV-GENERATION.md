@@ -1,7 +1,8 @@
 # Native Generation From Trained QKV Snapshots
 
 Status: source implementation, 215 native CPU decoder tests, CPU binding
-compilation, and 66 isolated Python runtime tests passed. The CPU extension was
+compilation, and isolated Python runtime checks passed (66 initially, then 69
+including file-handoff regressions). The CPU extension was
 subsequently built once into a private source-package overlay; the saved previous
 extension and wheels were preserved. No new pretrained-model study, historical
 evaluation scoring, installed wheel, or publication was performed.
@@ -88,6 +89,37 @@ The declarations now include QKV `generator`/`restore_generator` and generator
 argument names, return annotations and property declaration against the new
 native interface. This is not a full static-type-checker audit.
 
+## File-Based Handoff
+
+The public `native_geometry_generation.py` example now accepts
+`--qkv-checkpoint` with its separately retained `--qkv-checkpoint-id`, and an
+explicit `--readout-accumulator`. QKV is an overlay after the selected frozen
+model/adapter source, not a competing implementation of generation. The example
+restores through the native QKV API and records the actual serving identity,
+optimizer counter, layer, arithmetic and adapter identities in `result.json`.
+No checkpoint tensor math or decoding rule was added to Python.
+
+The same preserved CPU library passed one further 69-test run: the previous
+66 methods plus three file-handoff methods. The positive test crosses two
+adapter sources (geometry artifact or learned joint LoRA/geometry session),
+ordinary/key-lag attention, three readout policies and full-prefix/KV-cache
+execution: **24 combinations**. For each it compares uninterrupted and split
+generation reports/checkpoint bytes to each other and to the direct native API,
+using the same sampled Z-Space policy. It also checks unchanged original input
+files and private output-directory permissions on POSIX.
+
+Negative checks reject unpaired flags and bad QKV digests before model I/O,
+and reject wrong arithmetic, omitted adapters, a later QKV snapshot or ordinary
+model restoration of QKV generation state before creating output. Earlier
+ordinary-generation regressions continue to pass.
+
+This second invocation took 1.02 seconds in the bounded runner, with 0.320
+seconds of test-body time, no errors/skips, no foreign ML import attempts and
+an unchanged package. It reused the exact 83-file overlay and library from the
+first invocation. No rebuild, new wheel, historical study input, pretrained
+model, GPU execution or deletion was involved. Synthetic session/QKV updates
+are test fixture setup, not an additional research training run.
+
 Local evidence: `2026-11-10-qkv-generation-v1` in the SpiralTorch validation store.
 
 | Evidence | SHA-256 |
@@ -100,8 +132,11 @@ Local evidence: `2026-11-10-qkv-generation-v1` in the SpiralTorch validation sto
 | Frozen package manifest | `c5b024e4d356bb9977a96a32a3f8377a473b6da00283aa955d9f66a7618ea92e` |
 | Python runtime source inventory | `eb78abaf172975f04bf73d1c36dece9ba0e1092ea9f77d08ccd59f082f8f9218` |
 | Python 66-test log | `f4a8efdd66e8c413f3930f751a40ad9b25a0c224a824414cc8d16fb6d6b63fcb` |
+| File-handoff source inventory | `110543f7702a9c053c6b0af456fb8b923e4f0e7250ffb77bfa71382c5ada468c` |
+| Python 69-test log | `f25215e598cd4fc9342f5a8636a177cb55aa19923ffeeaa5d1a04ccb6f591d1c` |
 
 The native Rust implementation did not change after the initial Rust checks.
-Python tests and type declarations were extended before the Python runtime
-invocation; only documentation changed after that invocation.
+Python tests and type declarations were extended before the first Python runtime
+invocation; the example and its tests were added before the file-handoff run.
+Only documentation changed after that final invocation.
 See the [usage guide](../../docs/python/native-causal-lm.md#generation-after-qkv-updates).

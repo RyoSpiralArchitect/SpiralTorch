@@ -1,4 +1,4 @@
-"""Offline native GPT-2 generation with optional learned geometry, without Torch."""
+"""Offline native GPT-2 generation with learned adapters and optional QKV, without Torch."""
 import argparse
 import hashlib
 import json
@@ -42,6 +42,10 @@ def main(argv=None):
     parser.add_argument("--session-boundary", type=Path, help="bounded metadata from the native training session example")
     parser.add_argument("--artifact", type=Path)
     parser.add_argument("--artifact-id")
+    parser.add_argument("--qkv-checkpoint", type=Path, help="QKV optimizer snapshot over the selected frozen model/adapters")
+    parser.add_argument("--qkv-checkpoint-id", help="separately retained QKV checkpoint SHA-256 identity")
+    parser.add_argument("--readout-accumulator", choices=("f32", "f32_wide_backward", "f64"),
+                        help="original model arithmetic policy; must match the saved QKV owner")
     parser.add_argument("--observed-run", type=Path, help="private source run with an explicitly selected observed pair")
     parser.add_argument("--observed-update", type=int)
     parser.add_argument("--observation-id")
@@ -51,6 +55,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if bool(args.training_checkpoint) != bool(args.training_checkpoint_id) or bool(args.artifact) != bool(args.artifact_id):
         parser.error("every training checkpoint or geometry artifact needs its pinned identity")
+    qkv = (args.qkv_checkpoint is not None, args.qkv_checkpoint_id is not None)
+    if any(qkv) and (not all(qkv) or not args.qkv_checkpoint_id):
+        parser.error("QKV inference needs qkv-checkpoint and its pinned qkv-checkpoint-id")
+    if all(qkv) and (not hasattr(st, "NativeCausalLmQkvAdamW")
+                     or not hasattr(st.NativeCausalLmQkvAdamW, "generator")):
+        parser.error("QKV generation needs a matching source build after 0.4.33")
     observed = (args.observed_run is not None, args.observed_update is not None, args.observation_id is not None)
     if any(observed) and (not all(observed) or not args.observation_id or not 0 < args.observed_update < 2**64):
         parser.error("observed inference needs observed-run, a positive observed-update and observation-id")
@@ -82,9 +92,16 @@ def main(argv=None):
         parser.error("fresh generation needs prompt-json and recipe-json")
     if args.output.exists():
         parser.error("output must be a new private directory")
+    qkv_payload = None
+    if all(qkv):
+        qkv_payload = read_bytes(args.qkv_checkpoint, st.NativeCausalLmQkvAdamW.MAX_CHECKPOINT_BYTES)
+        if "sha256:" + hashlib.sha256(qkv_payload).hexdigest() != args.qkv_checkpoint_id:
+            raise ValueError("QKV checkpoint differs from pinned identity")
     weights = st.SafeTensorArchive(args.model_dir / "model.safetensors")
     model = st.NativeCausalLm.from_gpt2(read(args.model_dir / "config.json", 1_048_576), weights)
     del weights
+    if args.readout_accumulator is not None:
+        model = model.with_readout_accumulator(args.readout_accumulator)
     if args.training_checkpoint:
         model = st.NativeCausalLm.from_training_checkpoint(model, read(args.training_checkpoint, 128 * 1024 * 1024),
                                                           args.training_checkpoint_id)
@@ -99,11 +116,19 @@ def main(argv=None):
         from spiraltorch.native_corpus_runs import load_observed_model
         model = load_observed_model(args.observed_run, args.observed_update,
                                     expected_observation_id=args.observation_id, base=model)
+    projection = None
+    if qkv_payload is not None:
+        projection = st.NativeCausalLmQkvAdamW.from_bytes(model, qkv_payload, args.qkv_checkpoint_id)
+        del qkv_payload
     if args.resume:
-        generator = st.NativeCausalLmGenerator.from_json(model, read(args.resume, 1_048_576), args.resume_id)
+        payload = read(args.resume, 1_048_576)
+        generator = (projection.restore_generator(payload, args.resume_id) if projection is not None
+                     else st.NativeCausalLmGenerator.from_json(model, payload, args.resume_id))
     else:
-        generator = st.NativeCausalLmGenerator(model, json.loads(read(args.prompt_json, 1_048_576)),
-                                               read(args.recipe_json, 65_536))
+        prompt = json.loads(read(args.prompt_json, 1_048_576))
+        config = read(args.recipe_json, 65_536)
+        generator = (projection.generator(prompt, config) if projection is not None
+                     else st.NativeCausalLmGenerator(model, prompt, config))
     recipe = json.loads(generator.config_json())
     stop = recipe["max_new_tokens"] if args.stop_after is None else args.stop_after
     if not len(generator.generated_ids) <= stop <= recipe["max_new_tokens"]:
@@ -121,6 +146,7 @@ def main(argv=None):
         stream.write(payload)
     result = {"schema": "spiraltorch.native_generation_example.v1", "base_model_identity": model.base_model_identity,
               "geometry_artifact_id": model.geometry_artifact_id, "config": recipe, "initial_id": initial_id,
+              "readout_accumulator": model.readout_accumulator,
               "execution": recipe.get("execution", {"kind": "full_prefix"}),
               "checkpoint_id": generator.checkpoint_id, "generated_tokens": len(generator.generated_ids),
               "finished": generator.finished, "finish_reason": generator.finish_reason,
@@ -132,6 +158,12 @@ def main(argv=None):
         result["lora_artifact_id"] = model.lora_artifact_id
         result["session_boundary"] = {**boundary, "checkpoint_id":args.session_checkpoint_id,
                                       "training_documents_verified":False}
+    if projection is not None:
+        result["lora_artifact_id"] = model.lora_artifact_id
+        result["qkv_snapshot"] = {"checkpoint_id": args.qkv_checkpoint_id,
+                                  "projection_id": projection.serving_id,
+                                  "layer": projection.layer, "optimizer_steps": projection.steps,
+                                  "training_documents_verified": False}
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")
