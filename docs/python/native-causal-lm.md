@@ -172,6 +172,10 @@ API is not a zero-copy, GPU or speedup claim.
 The [cache verification](../../benchmarks/paired-prompt-contrast/PYTHON-QKV-CACHE.md)
 covers ordinary/key-lag attention with frozen LoRA and geometry, all three
 readout policies, exact full-prefix agreement and snapshot isolation.
+The [saved-model comparison](../../benchmarks/paired-prompt-contrast/PYTHON-QKV-RESTORE.md)
+also restores four historical, 256-update synthetic-model endpoints and matches
+all 6,144 previously recorded rows. This is artifact/runtime compatibility,
+not a new language-quality result or a published-wheel guarantee.
 
 ## Explicit Readout Arithmetic
 

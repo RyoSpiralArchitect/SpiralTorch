@@ -80,3 +80,7 @@ not deleted or overwritten. `cleanup-receipt.json` records the exact scope.
 
 There was no second library build, GPU run, pretrained-model update, new quality
 evaluation, full CI run, push, version bump, tag or publication in this stage.
+
+A subsequent [saved-model comparison](PYTHON-QKV-RESTORE.md) restores all four
+historical synthetic-study endpoints through Python and matches all 6,144
+original rows, without additional learning or quality scoring.
