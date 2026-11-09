@@ -184,3 +184,141 @@ fn ragged_qkv_checks_each_real_group_against_geometry_budget() {
     a.step_answer_sequences(&qs, &labels, 2, step).unwrap();
     assert_eq!(a.steps(), 1);
 }
+
+fn smoothed_reference(m: &NativeCausalLm, qs: &[&[usize]], gold: &[usize], epsilon: f64) -> f64 {
+    qs.iter()
+        .zip(gold)
+        .map(|(q, &label)| {
+            let logits = m.logits(q, [1, q.len()], true).unwrap();
+            let row = logits.data();
+            let high = row.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+            let logz = high
+                + row
+                    .iter()
+                    .map(|&v| (f64::from(v) - high).exp())
+                    .sum::<f64>()
+                    .ln();
+            logz - (1. - epsilon) * f64::from(row[label])
+                - epsilon * row.iter().map(|&v| f64::from(v)).sum::<f64>() / row.len() as f64
+        })
+        .sum::<f64>()
+        / qs.len() as f64
+}
+
+#[test]
+fn smoothed_qkv_uses_shared_full_vocabulary_loss_and_answer_weights() {
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    for lag in [0, 1] {
+        let m = adapted(lag);
+        let train = NativeCausalLmQkvAdamW::new(&m, 0, AdamWConfig::default()).unwrap();
+        for epsilon in [0., 0.1, 1.] {
+            let expected = smoothed_reference(&m, &qs, &labels, epsilon);
+            for cap in [1, 2, 32] {
+                let (loss, g) = train
+                    .answer_sequence_gradients_with_label_smoothing(&qs, &labels, cap, epsilon)
+                    .unwrap();
+                assert!((f64::from(loss) - expected).abs() < 2e-6);
+                let mut mean = vec![0.; g.data().len()];
+                for (q, y) in qs.iter().zip(&labels) {
+                    let (_, part) = train
+                        .answer_sequence_gradients_with_label_smoothing(&[*q], &[*y], 1, epsilon)
+                        .unwrap();
+                    for (v, &x) in mean.iter_mut().zip(part.data()) {
+                        *v += f64::from(x) / qs.len() as f64;
+                    }
+                }
+                assert!(g
+                    .data()
+                    .iter()
+                    .zip(mean)
+                    .all(|(&x, y)| (f64::from(x) - y).abs() < 2e-6));
+            }
+        }
+    }
+}
+
+#[test]
+fn smoothed_qkv_derivative_matches_physical_parameter_edits() {
+    let owned = [vec![1, 2], vec![3, 7, 4, 8]];
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let gold = [6, 2];
+    for lag in [0, 1] {
+        let make = |p: &BTreeMap<String, (Vec<usize>, Vec<f32>)>| {
+            let m = NativeCausalLm::from_gpt2_json(
+                &serde_json::to_vec(&config()).unwrap(),
+                &archive(p),
+                Default::default(),
+            )
+            .unwrap();
+            if lag == 0 {
+                m
+            } else {
+                m.with_key_lag(CausalLmKeyLag { layer: 0, lag }).unwrap()
+            }
+        };
+        let m = make(&parameters());
+        let a = NativeCausalLmQkvAdamW::new(&m, 0, AdamWConfig::default()).unwrap();
+        let (_, g) = a
+            .answer_sequence_gradients_with_label_smoothing(&qs, &gold, 2, 0.2)
+            .unwrap();
+        for output in 0..12 {
+            for input in 0..4 {
+                let loss = |sign: f32| {
+                    let mut p = parameters();
+                    p.get_mut("h.0.attn.c_attn.weight").unwrap().1[input * 12 + output] +=
+                        sign * 0.002;
+                    smoothed_reference(&make(&p), &qs, &gold, 0.2)
+                };
+                let numerical = (loss(1.) - loss(-1.)) / 0.004;
+                assert!((numerical - f64::from(g.data()[output * 4 + input])).abs() < 1e-4);
+            }
+        }
+    }
+}
+
+#[test]
+fn smoothing_is_opt_in_atomic_and_reported_without_mislabeling_nll() {
+    let m = adapted(1);
+    let mut a = NativeCausalLmQkvAdamW::new(&m, 0, AdamWConfig::default()).unwrap();
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let origin = a.checkpoint().unwrap();
+    let step = AdamWStep::new(0.01, 0.).unwrap();
+    for epsilon in [-0.1, 1.01, f64::NAN, f64::INFINITY] {
+        assert!(a
+            .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, epsilon, step)
+            .is_err());
+        assert_eq!(a.checkpoint().unwrap(), origin);
+    }
+    a.step_answer_sequences_with_label_smoothing(
+        &qs,
+        &labels,
+        2,
+        0.1,
+        AdamWStep::new(0., 0.).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(a.checkpoint().unwrap(), origin);
+    let mut old = a.clone();
+    let plain = old.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+    let explicit = a
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0., step)
+        .unwrap();
+    assert_eq!(plain.gold_nll.to_bits(), explicit.objective_loss.to_bits());
+    assert_eq!(a.checkpoint().unwrap(), old.checkpoint().unwrap());
+    let report = a
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    let value = serde_json::to_value(report).unwrap();
+    assert_eq!(value["label_smoothing"], json!(0.1));
+    assert!(value.get("gold_nll").is_none());
+    let (bytes, pin) = a.checkpoint().unwrap();
+    let mut restored = NativeCausalLmQkvAdamW::restore(&m, &bytes, &pin).unwrap();
+    a.step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    restored
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    assert_eq!(a.checkpoint().unwrap(), restored.checkpoint().unwrap());
+}

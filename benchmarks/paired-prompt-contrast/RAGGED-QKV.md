@@ -108,3 +108,7 @@ cargo test --locked --offline -p st-nn --example native_key_lag_fit
 Next scientific step: preregister matched length/position-varied training and
 new evaluation conditions before running it. The already-inspected transfer
 questions cannot be relabeled as fresh holdout after this design change.
+
+The [matched layout comparison](LENGTH-POSITION.md) has now completed. Its
+remaining high-loss wrong answers motivate an opt-in [native smoothed objective](QKV-SMOOTHING.md),
+implemented and checked separately without rewriting that experiment's results.

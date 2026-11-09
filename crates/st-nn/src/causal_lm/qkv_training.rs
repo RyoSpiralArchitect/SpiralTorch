@@ -27,6 +27,15 @@ pub struct CausalLmQkvStep {
     pub gradient_l2: [f64; 3],
 }
 
+/// Smoothed training CE is not the gold-token NLL used in evaluation.
+#[derive(Clone, Debug, Serialize)]
+pub struct CausalLmQkvSmoothedStep {
+    pub steps: u32,
+    pub objective_loss: f32,
+    pub label_smoothing: f64,
+    pub gradient_l2: [f64; 3],
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Header {
@@ -130,6 +139,21 @@ impl NativeCausalLmQkvAdamW {
         shape: [usize; 2],
         gold: &[usize],
     ) -> CausalLmResult<(f32, Tensor)> {
+        self.answer_gradients_smoothed(ids, shape, gold, 0.)
+    }
+
+    fn answer_gradients_smoothed(
+        &self,
+        ids: &[usize],
+        shape: [usize; 2],
+        gold: &[usize],
+        label_smoothing: f64,
+    ) -> CausalLmResult<(f32, Tensor)> {
+        let config = CrossEntropyConfig {
+            label_smoothing,
+            ..CrossEntropyConfig::default()
+        };
+        config.validate()?;
         let m = &self.model;
         let c = &m.config;
         let [batch, steps] = shape;
@@ -143,8 +167,7 @@ impl NativeCausalLmQkvAdamW {
         let selected = hidden.gather_rows(&last)?;
         let logits = m.project_readout(&m.final_norm.forward(&selected, c.norm_epsilon)?)?;
         let labels = gold.iter().map(|&t| t as i64).collect::<Vec<_>>();
-        let (loss, seed) =
-            learning::ordinary_loss_seed(&logits, &labels, CrossEntropyConfig::default())?;
+        let (loss, seed) = learning::ordinary_loss_seed(&logits, &labels, config)?;
         let mut gradient = None;
         m.decoder_parameter_pullback(
             checkpoints,
@@ -267,6 +290,19 @@ impl NativeCausalLmQkvAdamW {
         gradient: Tensor,
         step: AdamWStep,
     ) -> CausalLmResult<CausalLmQkvStep> {
+        let (steps, gradient_l2) = self.apply_gradient(gradient, step)?;
+        Ok(CausalLmQkvStep {
+            steps,
+            gold_nll: loss,
+            gradient_l2,
+        })
+    }
+
+    fn apply_gradient(
+        &mut self,
+        gradient: Tensor,
+        step: AdamWStep,
+    ) -> CausalLmResult<(u32, [f64; 3])> {
         let w = self.model.config.width;
         let gradient_l2 = std::array::from_fn(|part| {
             gradient.data()[part * w * w..(part + 1) * w * w]
@@ -304,11 +340,7 @@ impl NativeCausalLmQkvAdamW {
             self.second = second;
             self.steps = clock;
         }
-        Ok(CausalLmQkvStep {
-            steps: self.steps,
-            gold_nll: loss,
-            gradient_l2,
-        })
+        Ok((self.steps, gradient_l2))
     }
 
     /// Bounded little-endian weights and moments with a source-bound header and separately pinned digest.

@@ -63,6 +63,24 @@ impl NativeCausalLmQkvAdamW {
         gold: &[usize],
         max_rows: usize,
     ) -> CausalLmResult<(f32, Tensor)> {
+        self.answer_sequence_gradients_with_label_smoothing(prompts, gold, max_rows, 0.)
+    }
+
+    /// Full-vocabulary smoothed CE, with one answer-weighted contribution per prefix.
+    /// Uses the shared tensor CE/VJP contract: target=(1-epsilon)*one_hot+epsilon/V.
+    /// The returned scalar is the training objective, not unsmoothed gold NLL.
+    pub fn answer_sequence_gradients_with_label_smoothing(
+        &self,
+        prompts: &[&[usize]],
+        gold: &[usize],
+        max_rows: usize,
+        label_smoothing: f64,
+    ) -> CausalLmResult<(f32, Tensor)> {
+        CrossEntropyConfig {
+            label_smoothing,
+            ..CrossEntropyConfig::default()
+        }
+        .validate()?;
         if prompts.is_empty()
             || prompts.len() > Self::MAX_ANSWER_SEQUENCES
             || prompts.len() != gold.len()
@@ -106,7 +124,8 @@ impl NativeCausalLmQkvAdamW {
         for group in groups {
             let shape = [group.len(), windows[group.start].length as usize];
             let ids = prompts[group.clone()].concat();
-            let (loss, gradient) = self.answer_gradients(&ids, shape, &gold[group.clone()])?;
+            let (loss, gradient) =
+                self.answer_gradients_smoothed(&ids, shape, &gold[group.clone()], label_smoothing)?;
             mean.add(loss, &gradient, group.len());
         }
         mean.finish()
@@ -122,5 +141,32 @@ impl NativeCausalLmQkvAdamW {
     ) -> CausalLmResult<CausalLmQkvStep> {
         let (loss, gradient) = self.answer_sequence_gradients(prompts, gold, max_rows)?;
         self.apply_answer_gradient(loss, gradient, step)
+    }
+
+    /// Opt-in smoothed learning, with unchanged atomic optimizer/checkpoint semantics.
+    /// Record epsilon with the caller's batch schedule for exact continuation;
+    /// optimizer checkpoints do not own the next objective, batch or learning rate.
+    /// Evaluate plain gold NLL separately; no smoothing is applied to inference.
+    pub fn step_answer_sequences_with_label_smoothing(
+        &mut self,
+        prompts: &[&[usize]],
+        gold: &[usize],
+        max_rows: usize,
+        label_smoothing: f64,
+        step: AdamWStep,
+    ) -> CausalLmResult<CausalLmQkvSmoothedStep> {
+        let (objective_loss, gradient) = self.answer_sequence_gradients_with_label_smoothing(
+            prompts,
+            gold,
+            max_rows,
+            label_smoothing,
+        )?;
+        let (steps, gradient_l2) = self.apply_gradient(gradient, step)?;
+        Ok(CausalLmQkvSmoothedStep {
+            steps,
+            objective_loss,
+            label_smoothing,
+            gradient_l2,
+        })
     }
 }
