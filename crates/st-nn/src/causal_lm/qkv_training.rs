@@ -78,6 +78,11 @@ struct Header {
 
 impl NativeCausalLmQkvAdamW {
     pub const MAX_CHECKPOINT_BYTES: usize = 4 + MAX_HEADER + 12 * MAX_VALUES;
+    /// Publish a new optimizer snapshot without overwriting an existing name.
+    pub fn save_checkpoint_new(&self, path: impl AsRef<std::path::Path>) -> CausalLmResult<String> {
+        super::checkpoint::admit_new(path.as_ref())?;
+        super::checkpoint::save(path.as_ref(), self.checkpoint()?)
+    }
     fn size(model: &NativeCausalLm, layer: usize) -> CausalLmResult<usize> {
         let w = model.config.width;
         let n = product(

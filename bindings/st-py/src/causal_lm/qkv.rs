@@ -435,6 +435,11 @@ impl PyQkv {
         crate::json::json_to_py(py, &report)
     }
 
+    fn save_checkpoint_new(&self, py: Python<'_>, path: std::path::PathBuf) -> PyResult<String> {
+        py.detach(|| self.inner.save_checkpoint_new(path))
+            .map_err(error)
+    }
+
     fn checkpoint_with_id<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyBytes>, String)> {
         let (raw, pin) = py.detach(|| self.inner.checkpoint()).map_err(error)?;
         Ok((PyBytes::new(py, &raw), pin))

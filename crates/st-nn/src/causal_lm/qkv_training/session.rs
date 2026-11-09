@@ -124,6 +124,28 @@ fn identity(bytes: &[u8]) -> String {
 
 impl NativeCausalLmQkvTrainer {
     pub const MAX_TOKENS: usize = MAX_TRAINING_TOKENS;
+    pub const MAX_CHECKPOINT_INTERVAL: u64 = super::super::checkpoint::MAX_INTERVAL;
+
+    pub fn save_checkpoint_new(&self, path: impl AsRef<std::path::Path>) -> CausalLmResult<String> {
+        super::super::checkpoint::admit_new(path.as_ref())?;
+        super::super::checkpoint::save(path.as_ref(), self.checkpoint()?)
+    }
+
+    /// Commit the live owner only after the complete segment has been published.
+    pub fn advance_to_checkpoint_new(
+        &mut self,
+        stop: u64,
+        path: impl AsRef<std::path::Path>,
+    ) -> CausalLmResult<(Vec<CausalLmQkvTrainingStep>, String)> {
+        let count = super::super::checkpoint::count(self.updates(), self.total_updates(), stop)?;
+        super::super::checkpoint::advance_new(
+            self,
+            count,
+            path.as_ref(),
+            Self::step,
+            Self::checkpoint,
+        )
+    }
     pub const MAX_CHECKPOINT_BYTES: usize =
         4 + HEADER_LIMIT + NativeCausalLmQkvAdamW::MAX_CHECKPOINT_BYTES;
 

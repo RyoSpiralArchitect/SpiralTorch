@@ -249,3 +249,104 @@ fn qkv_session_failed_optimizer_candidate_preserves_cursor_weights_and_checkpoin
     assert_eq!(trainer.optimizer().steps(), 0);
     assert_eq!(trainer.checkpoint().unwrap(), before);
 }
+
+#[test]
+fn qkv_binary_file_segments_match_memory_and_never_clobber_existing_paths() {
+    let model = load();
+    let (docs, labels) = corpus();
+    let mut a =
+        NativeCausalLmQkvTrainer::new(optimizer(&model), docs.clone(), Some(labels.clone()), cfg())
+            .unwrap();
+    let mut direct = a.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let initial = dir.path().join("initial.bin");
+    let before = a.checkpoint().unwrap();
+    assert_eq!(a.save_checkpoint_new(&initial).unwrap(), before.1);
+    assert_eq!(std::fs::read(&initial).unwrap(), before.0);
+    assert!(a.advance_to_checkpoint_new(2, &initial).is_err());
+    assert_eq!(a.checkpoint().unwrap(), before);
+    assert_eq!(std::fs::read(&initial).unwrap(), before.0);
+    let path = dir.path().join("next.bin");
+    let (reports, pin) = a.advance_to_checkpoint_new(2, &path).unwrap();
+    for report in reports {
+        assert_eq!(
+            serde_json::to_value(report).unwrap(),
+            serde_json::to_value(direct.step().unwrap().unwrap()).unwrap()
+        );
+    }
+    assert_eq!(a.checkpoint().unwrap(), direct.checkpoint().unwrap());
+    assert_eq!(std::fs::read(&path).unwrap(), a.checkpoint().unwrap().0);
+    let restored =
+        NativeCausalLmQkvTrainer::prepare_resume(&model, &std::fs::read(&path).unwrap(), &pin)
+            .unwrap()
+            .resume(docs, Some(labels))
+            .unwrap();
+    assert_eq!(restored.checkpoint().unwrap(), a.checkpoint().unwrap());
+    let projection = dir.path().join("qkv.bin");
+    let saved = a.optimizer().checkpoint().unwrap();
+    assert_eq!(
+        a.optimizer().save_checkpoint_new(&projection).unwrap(),
+        saved.1
+    );
+    assert_eq!(std::fs::read(&projection).unwrap(), saved.0);
+    for stop in [0, 2, 5, 1027, u64::MAX] {
+        let state = a.checkpoint().unwrap();
+        assert!(a
+            .advance_to_checkpoint_new(stop, dir.path().join("invalid.bin"))
+            .is_err());
+        assert_eq!(a.checkpoint().unwrap(), state);
+        assert!(!dir.path().join("invalid.bin").exists());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let link = dir.path().join("dangling");
+        symlink(dir.path().join("missing"), &link).unwrap();
+        assert!(a.advance_to_checkpoint_new(3, &link).is_err());
+        assert!(a.optimizer().save_checkpoint_new(&link).is_err());
+        assert!(!dir.path().join("missing").exists());
+    }
+}
+
+#[test]
+fn qkv_shared_publication_failure_after_work_keeps_live_session_unchanged() {
+    let model = load();
+    let (docs, labels) = corpus();
+    let mut a =
+        NativeCausalLmQkvTrainer::new(optimizer(&model), docs, Some(labels), cfg()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let occupied = dir.path().join("occupied");
+    std::fs::write(&occupied, b"keep").unwrap();
+    let before = a.checkpoint().unwrap();
+    // Exercise the same transaction with a late real publication error, after
+    // a candidate has updated, rather than only advisory path admission failure.
+    let result: CausalLmResult<String> =
+        crate::causal_lm::checkpoint::transaction(&mut a, |next| {
+            next.step()?.unwrap();
+            assert_eq!(next.updates(), 1);
+            crate::causal_lm::checkpoint::save(&occupied, next.checkpoint()?)
+        });
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(occupied).unwrap(), b"keep");
+    assert_eq!(a.checkpoint().unwrap(), before);
+    let mut bad = NativeCausalLmQkvTrainer::new(
+        optimizer(&model),
+        vec![vec![1, 2, 3]],
+        None,
+        CausalLmQkvTrainingConfig {
+            learning_rate: f32::MAX,
+            weight_decay: f32::MAX,
+            ..cfg()
+        },
+    )
+    .unwrap();
+    let initial = bad.checkpoint().unwrap();
+    let path = dir.path().join("no-result.bin");
+    assert!(bad.advance_to_checkpoint_new(1, &path).is_err());
+    assert!(!path.exists());
+    assert_eq!(bad.checkpoint().unwrap(), initial);
+}

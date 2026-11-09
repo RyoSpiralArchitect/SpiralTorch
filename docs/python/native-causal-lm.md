@@ -287,6 +287,10 @@ clone optimizer ownership, so independent edits cannot alter the session.
 230 Rust tests and 77 isolated Python tests. This verifies synthetic CPU
 continuation, not long-run model quality or a published wheel.
 
+For a complete local-file training/resume entry point and handoff to Z-Space
+generation, see [native QKV corpus runs](native-qkv-run.md). It uses the same
+Rust session and no-clobber checkpoint publication, not a Python optimizer.
+
 ### Optional QKV Gradient Clipping
 
 Choose a positive, finite f32 `max_gradient_norm` when creating the optimizer

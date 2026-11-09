@@ -14,6 +14,8 @@ impl PyQkvTrainer {
     const MAX_TOKENS: usize = NativeCausalLmQkvTrainer::MAX_TOKENS;
     #[classattr]
     const MAX_CHECKPOINT_BYTES: usize = NativeCausalLmQkvTrainer::MAX_CHECKPOINT_BYTES;
+    #[classattr]
+    const MAX_CHECKPOINT_INTERVAL: u64 = NativeCausalLmQkvTrainer::MAX_CHECKPOINT_INTERVAL;
 
     #[new]
     #[allow(clippy::too_many_arguments)]
@@ -131,6 +133,26 @@ impl PyQkvTrainer {
             inner: py.detach(|| self.inner.optimizer().clone()),
         }
     }
+    fn save_checkpoint_new(&self, py: Python<'_>, path: std::path::PathBuf) -> PyResult<String> {
+        py.detach(|| self.inner.save_checkpoint_new(path))
+            .map_err(error)
+    }
+
+    fn advance_to_checkpoint_new(
+        &mut self,
+        py: Python<'_>,
+        stop: &Bound<'_, PyAny>,
+        path: std::path::PathBuf,
+    ) -> PyResult<(Py<PyAny>, String)> {
+        reject_bool(stop)?;
+        let stop = stop.extract::<u64>()?;
+        let (reports, pin) = py
+            .detach(|| self.inner.advance_to_checkpoint_new(stop, path))
+            .map_err(error)?;
+        let value = serde_json::to_value(reports).map_err(error)?;
+        Ok((crate::json::json_to_py(py, &value)?, pin))
+    }
+
     fn checkpoint_with_id<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyBytes>, String)> {
         let (raw, pin) = py.detach(|| self.inner.checkpoint()).map_err(error)?;
         Ok((PyBytes::new(py, &raw), pin))
