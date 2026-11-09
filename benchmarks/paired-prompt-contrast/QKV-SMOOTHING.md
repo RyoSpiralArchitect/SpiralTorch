@@ -1,6 +1,9 @@
 # Native Answer-QKV Label Smoothing
 
-Status: implemented and CPU-tested; **no smoothing quality comparison yet**.
+Status: implemented and CPU-tested. A subsequent
+[fixed-coefficient comparison](QKV-SMOOTHING-COMPARISON.md) now records relative
+improvement and remaining competence failures; the evidence below concerns
+the original implementation and diagnostic readback.
 This does not change the previously sealed [layout experiment](LENGTH-POSITION.md)
 or turn its failed competence gate into a pass.
 
@@ -71,6 +74,6 @@ restore reproduces the full checkpoint exactly. Serialization checks ensure
 the new report cannot silently label the objective as gold NLL.
 
 Evidence: `2026-11-10-native-qkv-smoothing-v1/decoder-tests-receipt.json`.
-No saved-model retraining, GPU, wheel rebuild, Python/WASM exposure, push or
-release is claimed by this change. The next quality test must freeze its
-coefficient, matched CE control and evaluation boundary before execution.
+This implementation-only stage did not retrain the saved model or perform GPU,
+wheel, Python/WASM binding, push or release work. The linked follow-up froze
+its coefficient, matched CE control and evaluation boundary before execution.
