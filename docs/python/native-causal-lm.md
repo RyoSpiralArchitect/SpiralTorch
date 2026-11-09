@@ -139,6 +139,44 @@ generator for sampling and EOS handling, as described below.
 The [binding verification](../../benchmarks/paired-prompt-contrast/PYTHON-QKV.md)
 separates local API checks from wheel publication and language-quality evidence.
 
+### Optional QKV Gradient Clipping
+
+Choose a positive, finite f32 `max_gradient_norm` when creating the optimizer
+to use the same Rust `GlobalNormClip` contract as the geometry optimizer:
+
+```python
+trainer = st.NativeCausalLmQkvAdamW(model, 0, max_gradient_norm=1.0)
+report = trainer.step_answers(prompts, answers, learning_rate=1e-4, max_rows=2)
+print(report["gradient_clip"])  # max_norm, before_l2, after_l2, ordered factors
+```
+
+The value above illustrates the API, not a recommended universal threshold.
+The norm covers the entire Q/K/V weight derivative **after** the logical batch
+mean, not each microbatch, prefix, head, or Q/K/V partition separately. Rust
+scales that effective gradient before AdamW updates its moments. Weight decay
+and AdamW's adaptive normalization are not clipped: this is not a direct bound
+on parameter displacement. `answer_gradients` still returns the raw derivative,
+and the existing `gradient_l2` report stays the raw Q/K/V norms.
+
+The shared rule intentionally leaves norms at or below `f32::EPSILON` unchanged,
+and skips factors within `f32::EPSILON` of one. Thus a very small configured
+limit is not an unconditional exact projection bound, and this is not a claim
+of PyTorch clipping equivalence. Ordered f32 scale factors follow the common
+contract rather than a separate Python normalization. Nonfinite gradients are
+not repaired by clipping.
+
+`max_gradient_norm` defaults to `None`; that path keeps the previous serialized
+reports and native checkpoint bytes. With clipping enabled, the optimizer
+checkpoint retains the limit's f32 bits and restore inherits it without an
+override. The getter `trainer.max_gradient_norm` exposes that policy. The
+inference `serving_id` still identifies serving weights/adapters/arithmetic,
+not clipping policy or moments. Zero learning rate leaves optimizer state
+unchanged while still computing gradient diagnostics.
+
+[Verification](../../benchmarks/paired-prompt-contrast/QKV-GRADIENT-CLIP.md):
+218 native CPU tests and 70 isolated Python tests pass. This verifies the
+update/restart contract, not improved convergence or language quality.
+
 ### Cached Inference After QKV Updates
 
 `trainer.prefill(ids, max_cache_values=...)` creates an immutable

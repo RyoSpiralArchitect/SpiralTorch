@@ -75,6 +75,36 @@ class NativeQkvTests(unittest.TestCase):
         self.assertEqual(a.checkpoint_with_id(), b.checkpoint_with_id())
         self.assertEqual((a.steps, a.layer), (1, 0))
 
+    def test_global_gradient_clipping_is_opt_in_native_and_checkpointed(self):
+        plain = self.new()
+        self.assertIsNone(plain.max_gradient_norm)
+        explicit = st.NativeCausalLmQkvAdamW(self.model, 0, max_gradient_norm=None)
+        self.assertEqual(plain.checkpoint_with_id(), explicit.checkpoint_with_id())
+        g = plain.answer_gradients(self.qs, self.ys, max_rows=2, label_smoothing=.1)
+        values = struct.unpack("<48f", g["gradient_f32le"])
+        norm = sum(x*x for x in values)**.5
+        self.assertGreater(norm, 1e-6)
+        a = st.NativeCausalLmQkvAdamW(self.model, 0, epsilon=.1, max_gradient_norm=norm/4)
+        self.assertEqual(a.serving_id, plain.serving_id)
+        self.assertEqual(a.answer_gradients(self.qs, self.ys, max_rows=2, label_smoothing=.1), g)
+        kw = dict(max_rows=2, learning_rate=.03, label_smoothing=.1)
+        report = a.step_answers(self.qs, self.ys, **kw)
+        clip = report["gradient_clip"]
+        self.assertAlmostEqual(clip["before_l2"], norm)
+        self.assertLessEqual(clip["after_l2"], a.max_gradient_norm * (1+1e-6))
+        self.assertTrue(clip["factors"])
+        b = st.NativeCausalLmQkvAdamW.from_bytes(self.model, *a.checkpoint_with_id())
+        self.assertEqual(a.max_gradient_norm, b.max_gradient_norm)
+        self.assertEqual(a.step_answers(self.qs, self.ys, **kw), b.step_answers(self.qs, self.ys, **kw))
+        self.assertEqual(a.checkpoint_with_id(), b.checkpoint_with_id())
+        before = a.checkpoint_with_id()
+        a.step_answers(self.qs, self.ys, learning_rate=0.)
+        self.assertEqual(a.checkpoint_with_id(), before)
+        self.assertNotIn("gradient_clip", plain.step_answers(self.qs, self.ys, learning_rate=.01))
+        for invalid in (True, 0., -1., float("nan"), float("inf")):
+            with self.assertRaises((TypeError, ValueError)):
+                st.NativeCausalLmQkvAdamW(self.model, 0, max_gradient_norm=invalid)
+
     def test_smoothed_step_and_resume_are_exact(self):
         a = self.new()
         initial = a.last_logits_f32le(self.qs[1])

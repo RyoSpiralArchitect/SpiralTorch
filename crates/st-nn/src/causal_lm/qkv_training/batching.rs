@@ -186,12 +186,13 @@ impl NativeCausalLmQkvAdamW {
             max_rows,
             label_smoothing,
         )?;
-        let (steps, gradient_l2) = self.apply_gradient(gradient, step)?;
+        let (steps, gradient_l2, gradient_clip) = self.apply_gradient(gradient, step)?;
         Ok(CausalLmQkvSmoothedStep {
             steps,
             objective_loss,
             label_smoothing,
             gradient_l2,
+            gradient_clip,
         })
     }
 }

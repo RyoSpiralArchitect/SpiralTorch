@@ -99,7 +99,8 @@ impl PyQkv {
     const MAX_ANSWER_SEQUENCES: usize = NativeCausalLmQkvAdamW::MAX_ANSWER_SEQUENCES;
 
     #[new]
-    #[pyo3(signature=(model, layer, *, beta1=None, beta2=None, epsilon=None))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(model, layer, *, beta1=None, beta2=None, epsilon=None, max_gradient_norm=None))]
     fn new(
         py: Python<'_>,
         model: &PyNativeCausalLm,
@@ -107,6 +108,7 @@ impl PyQkv {
         beta1: Option<&Bound<'_, PyAny>>,
         beta2: Option<&Bound<'_, PyAny>>,
         epsilon: Option<&Bound<'_, PyAny>>,
+        max_gradient_norm: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let layer = dimension(layer)?;
         let defaults = AdamWConfig::default();
@@ -116,9 +118,17 @@ impl PyQkv {
             scalar(epsilon, defaults.epsilon())?,
         )
         .map_err(error)?;
-        py.detach(|| NativeCausalLmQkvAdamW::new(&model.inner, layer, config))
-            .map(|inner| Self { inner })
-            .map_err(error)
+        let clip = max_gradient_norm
+            .map(|value| {
+                st_nn::geometry_runtime::GlobalNormClip::new(scalar(Some(value), 0.)?)
+                    .map_err(error)
+            })
+            .transpose()?;
+        py.detach(|| {
+            NativeCausalLmQkvAdamW::new_with_gradient_clip(&model.inner, layer, config, clip)
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
     }
 
     #[getter]
@@ -128,6 +138,10 @@ impl PyQkv {
     #[getter]
     fn layer(&self) -> usize {
         self.inner.layer()
+    }
+    #[getter]
+    fn max_gradient_norm(&self) -> Option<f32> {
+        self.inner.max_gradient_norm()
     }
     #[getter]
     fn serving_id(&self, py: Python<'_>) -> String {

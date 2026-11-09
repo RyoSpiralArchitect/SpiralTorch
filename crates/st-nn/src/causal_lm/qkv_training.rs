@@ -2,6 +2,7 @@
 use super::*;
 use sha2::{Digest, Sha256};
 use st_kernel_contracts::adamw::{AdamWConfig, AdamWStep};
+use st_kernel_contracts::gradient_clip::GlobalNormClip;
 use st_tensor::PackedLayout;
 
 mod batching;
@@ -14,6 +15,7 @@ pub struct NativeCausalLmQkvAdamW {
     model: NativeCausalLm,
     layer: usize,
     config: AdamWConfig,
+    clip: Option<GlobalNormClip>,
     steps: u32,
     first: Vec<f32>,
     second: Vec<f32>,
@@ -25,6 +27,17 @@ pub struct CausalLmQkvStep {
     pub gold_nll: f32,
     /// Q, K, V weight-gradient norms, in that order.
     pub gradient_l2: [f64; 3],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gradient_clip: Option<CausalLmQkvGradientClip>,
+}
+
+/// Effective gradient before AdamW, not a bound on the final parameter update.
+#[derive(Clone, Debug, Serialize)]
+pub struct CausalLmQkvGradientClip {
+    pub max_norm: f32,
+    pub before_l2: f64,
+    pub after_l2: f64,
+    pub factors: Vec<f32>,
 }
 
 /// Smoothed training CE is not the gold-token NLL used in evaluation.
@@ -34,6 +47,8 @@ pub struct CausalLmQkvSmoothedStep {
     pub objective_loss: f32,
     pub label_smoothing: f64,
     pub gradient_l2: [f64; 3],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gradient_clip: Option<CausalLmQkvGradientClip>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -48,6 +63,8 @@ struct Header {
     width: usize,
     steps: u32,
     adam_bits: [u32; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_gradient_norm_bits: Option<u32>,
 }
 
 impl NativeCausalLmQkvAdamW {
@@ -74,11 +91,22 @@ impl NativeCausalLmQkvAdamW {
         Ok(n)
     }
     pub fn new(base: &NativeCausalLm, layer: usize, config: AdamWConfig) -> CausalLmResult<Self> {
+        Self::new_with_gradient_clip(base, layer, config, None)
+    }
+
+    /// Apply the shared global norm rule once, after the logical batch mean.
+    pub fn new_with_gradient_clip(
+        base: &NativeCausalLm,
+        layer: usize,
+        config: AdamWConfig,
+        clip: Option<GlobalNormClip>,
+    ) -> CausalLmResult<Self> {
         let n = Self::size(base, layer)?;
         Ok(Self {
             model: base.clone(),
             layer,
             config,
+            clip,
             steps: 0,
             first: vec![0.; n],
             second: vec![0.; n],
@@ -89,6 +117,9 @@ impl NativeCausalLmQkvAdamW {
     }
     pub fn layer(&self) -> usize {
         self.layer
+    }
+    pub fn max_gradient_norm(&self) -> Option<f32> {
+        self.clip.map(GlobalNormClip::max_norm)
     }
     /// Output-major [3 * width, width], not the transposed HF Conv1D archive orientation.
     pub fn weights(&self) -> &[f32] {
@@ -343,11 +374,12 @@ impl NativeCausalLmQkvAdamW {
         gradient: Tensor,
         step: AdamWStep,
     ) -> CausalLmResult<CausalLmQkvStep> {
-        let (steps, gradient_l2) = self.apply_gradient(gradient, step)?;
+        let (steps, gradient_l2, gradient_clip) = self.apply_gradient(gradient, step)?;
         Ok(CausalLmQkvStep {
             steps,
             gold_nll: loss,
             gradient_l2,
+            gradient_clip,
         })
     }
 
@@ -355,7 +387,7 @@ impl NativeCausalLmQkvAdamW {
         &mut self,
         gradient: Tensor,
         step: AdamWStep,
-    ) -> CausalLmResult<(u32, [f64; 3])> {
+    ) -> CausalLmResult<(u32, [f64; 3], Option<CausalLmQkvGradientClip>)> {
         let w = self.model.config.width;
         let gradient_l2 = std::array::from_fn(|part| {
             gradient.data()[part * w * w..(part + 1) * w * w]
@@ -364,6 +396,36 @@ impl NativeCausalLmQkvAdamW {
                 .sum::<f64>()
                 .sqrt()
         });
+        let mut clipped = None;
+        let gradient_clip = self
+            .clip
+            .map(|clip| -> CausalLmResult<_> {
+                let squared = gradient.data().iter().map(|&g| f64::from(g).powi(2)).sum();
+                let factors = clip.factors(squared)?;
+                let mut after_l2 = squared.sqrt();
+                if !factors.as_slice().is_empty() {
+                    let mut values = gradient.data().to_vec();
+                    for &factor in factors.as_slice() {
+                        for g in &mut values {
+                            *g *= factor;
+                        }
+                    }
+                    after_l2 = values
+                        .iter()
+                        .map(|&g| f64::from(g).powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    clipped = Some(values);
+                }
+                Ok(CausalLmQkvGradientClip {
+                    max_norm: clip.max_norm(),
+                    before_l2: squared.sqrt(),
+                    after_l2,
+                    factors: factors.as_slice().to_vec(),
+                })
+            })
+            .transpose()?;
+        let effective = clipped.as_deref().unwrap_or_else(|| gradient.data());
         if step.rate() != 0. {
             let n = self.weights().len();
             let (mut weights, mut first, mut second) = (
@@ -375,7 +437,7 @@ impl NativeCausalLmQkvAdamW {
                 .steps
                 .checked_add(1)
                 .ok_or("QKV AdamW clock exhausted")?;
-            for (i, &g) in gradient.data().iter().enumerate() {
+            for (i, &g) in effective.iter().enumerate() {
                 let v = step.candidate(
                     self.config,
                     self.weights()[i],
@@ -393,7 +455,7 @@ impl NativeCausalLmQkvAdamW {
             self.second = second;
             self.steps = clock;
         }
-        Ok((self.steps, gradient_l2))
+        Ok((self.steps, gradient_l2, gradient_clip))
     }
 
     /// Bounded little-endian weights and moments with a source-bound header and separately pinned digest.
@@ -413,6 +475,7 @@ impl NativeCausalLmQkvAdamW {
                 self.config.epsilon(),
             ]
             .map(f32::to_bits),
+            max_gradient_norm_bits: self.max_gradient_norm().map(f32::to_bits),
         })?;
         if h.len() > MAX_HEADER {
             return Err("QKV checkpoint header exceeds limit".into());
@@ -453,6 +516,10 @@ impl NativeCausalLmQkvAdamW {
         }
         let [b1, b2, eps] = h.adam_bits.map(f32::from_bits);
         let config = AdamWConfig::new(b1, b2, eps)?;
+        let clip = h
+            .max_gradient_norm_bits
+            .map(|bits| GlobalNormClip::new(f32::from_bits(bits)))
+            .transpose()?;
         let decode = |part: usize| {
             data[4 * part * count..4 * (part + 1) * count]
                 .chunks_exact(4)
@@ -472,6 +539,7 @@ impl NativeCausalLmQkvAdamW {
             model: base.clone(),
             layer: h.layer,
             config,
+            clip,
             steps: h.steps,
             first,
             second,

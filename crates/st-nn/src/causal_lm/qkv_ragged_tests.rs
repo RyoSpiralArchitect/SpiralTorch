@@ -1,6 +1,163 @@
 use super::*;
 use st_core::inference::token_decoding::{TokenDistribution, TokenSelection};
 use st_kernel_contracts::adamw::{AdamWConfig, AdamWStep};
+use st_kernel_contracts::gradient_clip::GlobalNormClip;
+
+#[test]
+fn qkv_clips_the_complete_mean_once_before_adamw_and_restores_the_policy() {
+    let model = adapted(1);
+    let config = AdamWConfig::new(0.9, 0.999, 0.1).unwrap();
+    let plain = NativeCausalLmQkvAdamW::new(&model, 0, config).unwrap();
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let (_, gradient) = plain
+        .answer_sequence_gradients_with_label_smoothing(&qs, &labels, 2, 0.1)
+        .unwrap();
+    let squared = gradient
+        .data()
+        .iter()
+        .map(|&g| f64::from(g).powi(2))
+        .sum::<f64>();
+    let norm = squared.sqrt();
+    assert!(norm > 1e-6);
+    let clip = GlobalNormClip::new((norm * 0.25) as f32).unwrap();
+    let factors = clip.factors(squared).unwrap();
+    let step = AdamWStep::new(0.03, 0.02).unwrap();
+    let expected = plain
+        .weights()
+        .iter()
+        .zip(gradient.data())
+        .map(|(&w, &g)| {
+            let clipped = factors.as_slice().iter().fold(g, |v, &f| v * f);
+            step.candidate(config, w, clipped, 0., 0., 0).unwrap().value
+        })
+        .collect::<Vec<_>>();
+    let mut trainer =
+        NativeCausalLmQkvAdamW::new_with_gradient_clip(&model, 0, config, Some(clip)).unwrap();
+    assert_eq!(trainer.serving_id(), plain.serving_id());
+    assert_eq!(
+        trainer
+            .answer_sequence_gradients_with_label_smoothing(&qs, &labels, 2, 0.1)
+            .unwrap()
+            .1,
+        gradient
+    );
+    let report = trainer
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    assert_eq!(trainer.weights(), expected);
+    assert_eq!(trainer.steps(), 1);
+    let observation = report.gradient_clip.unwrap();
+    assert_eq!(observation.before_l2, norm);
+    assert_eq!(observation.factors, factors.as_slice());
+    assert!(observation.after_l2 <= f64::from(clip.max_norm()) * (1. + 1e-6));
+    let (bytes, pin) = trainer.checkpoint().unwrap();
+    let mut restored = NativeCausalLmQkvAdamW::restore(&model, &bytes, &pin).unwrap();
+    assert_eq!(restored.max_gradient_norm(), Some(clip.max_norm()));
+    assert_eq!(restored.checkpoint().unwrap(), (bytes, pin));
+    let a = trainer
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    let b = restored
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(a).unwrap(),
+        serde_json::to_value(b).unwrap()
+    );
+    assert_eq!(
+        trainer.checkpoint().unwrap(),
+        restored.checkpoint().unwrap()
+    );
+    let state = trainer.checkpoint().unwrap();
+    trainer
+        .step_answer_sequences(&qs, &labels, 2, AdamWStep::new(0., 0.).unwrap())
+        .unwrap();
+    assert_eq!(trainer.checkpoint().unwrap(), state);
+    assert!(trainer
+        .step_answer_sequences(&[&[999]], &[1], 1, step)
+        .is_err());
+    assert_eq!(trainer.checkpoint().unwrap(), state);
+}
+
+#[test]
+fn qkv_unclipped_bytes_and_inactive_clip_gradients_keep_legacy_behavior() {
+    let model = adapted(0);
+    let cfg = AdamWConfig::default();
+    let mut legacy = NativeCausalLmQkvAdamW::new(&model, 0, cfg).unwrap();
+    let mut explicit =
+        NativeCausalLmQkvAdamW::new_with_gradient_clip(&model, 0, cfg, None).unwrap();
+    let mut inactive = NativeCausalLmQkvAdamW::new_with_gradient_clip(
+        &model,
+        0,
+        cfg,
+        Some(GlobalNormClip::new(f32::MAX).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(legacy.checkpoint().unwrap(), explicit.checkpoint().unwrap());
+    let bytes = legacy.checkpoint().unwrap().0;
+    let n = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+    assert!(!std::str::from_utf8(&bytes[4..4 + n])
+        .unwrap()
+        .contains("max_gradient_norm"));
+    assert!(
+        NativeCausalLmQkvAdamW::restore(&model, &bytes, &legacy.checkpoint().unwrap().1)
+            .unwrap()
+            .max_gradient_norm()
+            .is_none()
+    );
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    for _ in 0..2 {
+        let step = AdamWStep::new(0.03, 0.01).unwrap();
+        let a = legacy.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+        let b = explicit
+            .step_answer_sequences(&qs, &labels, 2, step)
+            .unwrap();
+        let c = inactive
+            .step_answer_sequences(&qs, &labels, 2, step)
+            .unwrap();
+        assert!(!serde_json::to_value(&a)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("gradient_clip"));
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap()
+        );
+        assert_eq!(legacy.checkpoint().unwrap(), explicit.checkpoint().unwrap());
+        assert_eq!(legacy.weights(), inactive.weights());
+        let clip = c.gradient_clip.unwrap();
+        assert!(clip.factors.is_empty());
+        assert_eq!(clip.before_l2, clip.after_l2);
+        let data = |t: &NativeCausalLmQkvAdamW| {
+            let bytes = t.checkpoint().unwrap().0;
+            let n = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+            bytes[4 + n..].to_vec()
+        };
+        assert_eq!(data(&legacy), data(&inactive));
+    }
+}
+
+#[test]
+fn qkv_restore_rejects_resealed_invalid_clip_limits() {
+    use sha2::{Digest, Sha256};
+    let model = adapted(0);
+    let trainer = NativeCausalLmQkvAdamW::new(&model, 0, AdamWConfig::default()).unwrap();
+    let original = trainer.checkpoint().unwrap().0;
+    let n = u32::from_le_bytes(original[..4].try_into().unwrap()) as usize;
+    for limit in [0., -1., f32::INFINITY, f32::NAN] {
+        let mut header: serde_json::Value = serde_json::from_slice(&original[4..4 + n]).unwrap();
+        header["max_gradient_norm_bits"] = json!(limit.to_bits());
+        let h = serde_json::to_vec(&header).unwrap();
+        let mut bytes = (h.len() as u32).to_le_bytes().to_vec();
+        bytes.extend(h);
+        bytes.extend_from_slice(&original[4 + n..]);
+        let pin = format!("sha256:{:x}", Sha256::digest(&bytes));
+        assert!(NativeCausalLmQkvAdamW::restore(&model, &bytes, &pin).is_err());
+    }
+}
 
 fn prompts() -> (Vec<Vec<usize>>, Vec<usize>) {
     (
