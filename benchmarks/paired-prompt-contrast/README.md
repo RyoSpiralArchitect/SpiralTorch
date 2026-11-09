@@ -195,3 +195,9 @@ learning the answer vocabulary from choosing the right answer to each question.
 [Finite answer protection](ANSWER-GUARD.md) checks corrected weights on two
 training batches before committing, with independent replay of rejected trials
 as well as accepted ones. Monotone fit loss is not an answer-quality guarantee.
+
+[Causal key-lag capacity](CAUSAL-KEY-LAG.md) trains fused Q/K/V weights with
+ordinary versus explicitly lagged keys, keeping geometry and LoRA frozen.
+It records the failed full-batch admission, the microbatched Rust repair,
+the primary 32/32 training result, and the secondary specificity failure.
+Training-set fit is kept separate from held-out or pretrained-model evidence.
