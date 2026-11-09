@@ -186,6 +186,47 @@ class NativeQkvTests(unittest.TestCase):
         self.assertEqual(full.token_ids, [1] * 8)
         self.assertEqual(a.checkpoint_with_id(), before)
 
+    def test_generator_snapshot_resume_and_old_model_rejection(self):
+        a = self.new()
+        a.step_answers(self.qs, self.ys, learning_rate=.03)
+        saved = a.checkpoint_with_id()
+        frozen = st.NativeCausalLmQkvAdamW.from_bytes(self.model, *saved)
+        cfg = dict(max_new_tokens=4, seed=81)
+        full = a.generator([1, 2, 3], json.dumps(cfg))
+        cache = a.generator([1, 2, 3], json.dumps(dict(
+            cfg, execution=dict(kind="kv_cache", max_values=96))))
+        self.assertEqual(full.projection_id, a.serving_id)
+        self.assertEqual(full.step().to_json(), cache.step().to_json())
+        payload, pin = cache.to_json(), cache.checkpoint_id
+        resumed = frozen.restore_generator(payload, pin)
+        a.step_answers(self.qs, self.ys, learning_rate=.03)
+        with self.assertRaises(ValueError):
+            a.restore_generator(payload, pin)
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmGenerator.from_json(self.model, payload, pin)
+        while not full.finished:
+            expected = full.step().to_json()
+            self.assertEqual(cache.step().to_json(), expected)
+            self.assertEqual(resumed.step().to_json(), expected)
+            self.assertEqual(cache.to_json(), resumed.to_json())
+        self.assertEqual(cache.finish_reason, "length")
+        self.assertEqual(cache.projection_id, frozen.serving_id)
+        self.assertEqual(frozen.checkpoint_with_id(), saved)
+
+    def test_generation_admission_precedes_foreign_token_access(self):
+        class Unreadable:
+            def __len__(self): return 3
+            def __getitem__(self, index): raise AssertionError("prompt read before admission")
+        a = self.new()
+        state = a.checkpoint_with_id()
+        for cfg in [dict(max_new_tokens=7), dict(max_new_tokens=4,
+                    execution=dict(kind="kv_cache", max_values=95))]:
+            with self.assertRaises(ValueError):
+                a.generator(Unreadable(), json.dumps(cfg))
+        with self.assertRaises((TypeError, ValueError)):
+            a.generator([True], json.dumps(dict(max_new_tokens=1)))
+        self.assertEqual(a.checkpoint_with_id(), state)
+
 
 if __name__ == "__main__":
     unittest.main()

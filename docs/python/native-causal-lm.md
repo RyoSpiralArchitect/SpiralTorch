@@ -132,8 +132,9 @@ the matching original model. Preserve the next inputs, learning rate, decay,
 smoothing and batch order separately to reproduce continuation. `serving_id`
 identifies the updated inference state, not the full optimizer or data history.
 Invalid inputs do not change optimizer state; zero learning rate freezes it.
-Checkpoint file storage, automatic sampling/EOS management and exporting a
-new full-model archive are not provided by this wrapper.
+Checkpoint file storage and exporting a new full-model archive are not provided
+by this wrapper. Source builds also connect QKV snapshots to the existing native
+generator for sampling and EOS handling, as described below.
 
 The [binding verification](../../benchmarks/paired-prompt-contrast/PYTHON-QKV.md)
 separates local API checks from wheel publication and language-quality evidence.
@@ -176,6 +177,55 @@ The [saved-model comparison](../../benchmarks/paired-prompt-contrast/PYTHON-QKV-
 also restores four historical, 256-update synthetic-model endpoints and matches
 all 6,144 previously recorded rows. This is artifact/runtime compatibility,
 not a new language-quality result or a published-wheel guarantee.
+
+### Generation After QKV Updates
+
+The source API `trainer.generator(ids, config_json)` returns the existing
+`NativeCausalLmGenerator`, bound to the trainer's current `serving_id`. It uses
+the same Rust-owned greedy/sampling, Z-Space decoding, EOS, repetition rules and
+full-prefix/KV-cache execution as ordinary native generation. Python does not
+implement a second decoding loop or call Torch/NumPy for the arithmetic.
+
+```python
+import json
+
+weights, weights_id = trainer.checkpoint_with_id()
+stream = trainer.generator(ids, json.dumps({
+    "max_new_tokens": 16,
+    "seed": 81,
+    "execution": {"kind": "kv_cache", "max_values": 1_048_576},
+}))
+assert stream.projection_id == trainer.serving_id
+first_token = stream.step_token_id()
+state, state_id = stream.to_json(), stream.checkpoint_id
+
+# `model` is the same original base with the same frozen adapters and readout.
+restored = st.NativeCausalLmQkvAdamW.from_bytes(model, weights, weights_id)
+continued = restored.restore_generator(state, state_id)
+remaining_ids = continued.advance_ids(15)
+```
+
+Choose a generation length and cache capacity that fit the model. Admission
+covers the largest evaluated prefix before Python token values are copied.
+The final emitted token does not itself require another model evaluation.
+
+The generation JSON retains the token history, decoding policy and exact
+`projection_id`; **it does not contain QKV weights or AdamW state**. Preserve
+both checkpoints and their expected hashes. Resume through the matching QKV
+trainer, not `NativeCausalLmGenerator.from_json(model, ...)`. The ordinary-model
+route rejects QKV generation state, and the QKV route rejects ordinary state
+or state from a different serving projection. A trainer with different moments
+but identical serving weights can resume inference; learning continuation still
+requires the optimizer checkpoint and data schedule.
+
+A generator already created from a snapshot stays on those weights after later
+training updates. Create a new generator to use new weights. The acceleration
+cache is reconstructed on restore, not serialized. Existing ordinary generator
+JSON omits `projection_id`, preserving its previous serialization.
+
+[Validation status](../../benchmarks/paired-prompt-contrast/QKV-GENERATION.md):
+Rust CPU tests and Python-binding compilation passed. The new Python methods
+have not yet been exercised in a relinked extension or published wheel.
 
 ## Explicit Readout Arithmetic
 

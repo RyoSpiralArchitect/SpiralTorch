@@ -1,4 +1,5 @@
 use super::*;
+use st_core::inference::token_decoding::{TokenDistribution, TokenSelection};
 use st_kernel_contracts::adamw::{AdamWConfig, AdamWStep};
 
 fn prompts() -> (Vec<Vec<usize>>, Vec<usize>) {
@@ -70,6 +71,147 @@ fn qkv_snapshot_cache_stays_frozen_and_admits_before_prefill() {
         assert!(prefix.branch(usize::MAX).is_err());
         assert_eq!(prefix.logits(), frozen.last_logits(&prompt).unwrap());
     }
+}
+
+#[test]
+fn qkv_generation_uses_updated_snapshot_with_exact_cached_and_sampled_resume() {
+    for lag in [0, 1] {
+        for readout in [
+            CausalLmReadoutAccumulator::F32,
+            CausalLmReadoutAccumulator::F32WideBackward,
+            CausalLmReadoutAccumulator::F64,
+        ] {
+            let base = adapted(lag).with_readout_accumulator(readout);
+            let mut trainer =
+                NativeCausalLmQkvAdamW::new(&base, 0, AdamWConfig::default()).unwrap();
+            let prompt = vec![1, 2, 3];
+            trainer
+                .step_answer_sequences(&[&prompt], &[4], 1, AdamWStep::new(0.03, 0.).unwrap())
+                .unwrap();
+            let saved = trainer.checkpoint().unwrap();
+            let frozen = NativeCausalLmQkvAdamW::restore(&base, &saved.0, &saved.1).unwrap();
+            for selection in [TokenSelection::Greedy, TokenSelection::Sample] {
+                for distribution in [
+                    TokenDistribution::Softmax { temperature: 0.7 },
+                    TokenDistribution::ZSpace {
+                        config: Default::default(),
+                    },
+                ] {
+                    let cfg = CausalLmGenerationConfig {
+                        max_new_tokens: 4,
+                        eos_token_ids: vec![],
+                        seed: 81,
+                        decoding: st_core::inference::token_decoding::TokenDecodingConfig {
+                            selection,
+                            distribution,
+                            ..Default::default()
+                        },
+                        execution: CausalLmGenerationExecution::FullPrefix,
+                    };
+                    let mut full = frozen.generator(prompt.clone(), cfg.clone()).unwrap();
+                    let mut cache = frozen
+                        .generator(
+                            prompt.clone(),
+                            CausalLmGenerationConfig {
+                                execution: CausalLmGenerationExecution::KvCache { max_values: 128 },
+                                ..cfg.clone()
+                            },
+                        )
+                        .unwrap();
+                    assert_eq!(full.projection_id(), Some(frozen.serving_id().as_str()));
+                    if selection == TokenSelection::Greedy {
+                        let expected = st_core::inference::token_decoding::greedy_token_id_f32(
+                            &frozen.last_logits(&prompt).unwrap(),
+                            &prompt,
+                            &cfg.decoding,
+                        )
+                        .unwrap();
+                        assert_eq!(full.clone().step_token_id().unwrap(), Some(expected));
+                    }
+                    assert_eq!(full.step().unwrap(), cache.step().unwrap());
+                    let payload = cache.to_json().unwrap();
+                    let pin = cache.checkpoint_id().unwrap();
+                    let mut resumed = frozen.restore_generator(payload.as_bytes(), &pin).unwrap();
+                    assert_eq!(resumed.to_json().unwrap(), payload);
+                    assert!(NativeCausalLmGenerator::from_json(
+                        base.clone(),
+                        payload.as_bytes(),
+                        &pin
+                    )
+                    .is_err());
+                    // All live generators retain their snapshot while the trainer advances.
+                    trainer
+                        .step_answer_sequences(
+                            &[&prompt],
+                            &[4],
+                            1,
+                            AdamWStep::new(0.03, 0.).unwrap(),
+                        )
+                        .unwrap();
+                    assert_ne!(trainer.serving_id(), frozen.serving_id());
+                    assert!(trainer.restore_generator(payload.as_bytes(), &pin).is_err());
+                    while !full.finished() {
+                        let step = full.step().unwrap();
+                        assert_eq!(step, cache.step().unwrap());
+                        assert_eq!(step, resumed.step().unwrap());
+                        assert_eq!(cache.to_json().unwrap(), resumed.to_json().unwrap());
+                    }
+                    assert_eq!(full.finish_reason(), Some("length"));
+                    assert_eq!(cache.projection_id(), Some(frozen.serving_id().as_str()));
+                    assert_eq!(frozen.checkpoint().unwrap(), saved);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn qkv_generation_admission_eos_and_owner_routes_are_explicit() {
+    let base = adapted(1);
+    let trainer = NativeCausalLmQkvAdamW::new(&base, 0, AdamWConfig::default()).unwrap();
+    let state = trainer.checkpoint().unwrap();
+    let cfg = CausalLmGenerationConfig {
+        max_new_tokens: 4,
+        eos_token_ids: vec![],
+        seed: 0,
+        decoding: Default::default(),
+        execution: CausalLmGenerationExecution::KvCache { max_values: 96 },
+    };
+    assert_eq!(trainer.generation_input_count(3, &cfg).unwrap(), 3);
+    for length in [0, 4, usize::MAX] {
+        assert!(trainer.generation_input_count(length, &cfg).is_err());
+    }
+    assert!(trainer.generator(vec![999], cfg.clone()).is_err());
+    let mut generator = trainer.generator(vec![1, 2, 3], cfg.clone()).unwrap();
+    let first = generator.step_token_id().unwrap().unwrap();
+    let mut eos = trainer
+        .generator(
+            vec![1, 2, 3],
+            CausalLmGenerationConfig {
+                eos_token_ids: vec![first],
+                ..cfg.clone()
+            },
+        )
+        .unwrap();
+    assert_eq!(eos.advance_ids(4).unwrap(), vec![first]);
+    assert_eq!(eos.finish_reason(), Some("eos"));
+    let payload = eos.to_json().unwrap();
+    let mut restored = trainer
+        .restore_generator(payload.as_bytes(), &eos.checkpoint_id().unwrap())
+        .unwrap();
+    assert!(restored.step().unwrap().is_none());
+    assert_eq!(restored.to_json().unwrap(), payload);
+    let ordinary = NativeCausalLmGenerator::new(base.clone(), vec![1, 2, 3], cfg).unwrap();
+    let plain = ordinary.to_json().unwrap();
+    assert!(!plain.contains("projection_id"));
+    assert!(ordinary.projection_id().is_none());
+    assert!(trainer
+        .restore_generator(plain.as_bytes(), &ordinary.checkpoint_id().unwrap())
+        .is_err());
+    assert!(trainer
+        .restore_generator(payload.as_bytes(), &ordinary.checkpoint_id().unwrap())
+        .is_err());
+    assert_eq!(trainer.checkpoint().unwrap(), state);
 }
 
 #[test]

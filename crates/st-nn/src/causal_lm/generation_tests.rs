@@ -43,6 +43,7 @@ fn generation_checkpoint_binds_readout_policy_and_keeps_default_bytes() {
             .unwrap();
             generator.step().unwrap();
             let payload = generator.to_json().unwrap();
+            assert!(!payload.contains("projection_id"));
             assert!(!payload.contains("lora_artifact_id"));
             assert_eq!(
                 payload.contains("readout_accumulator"),

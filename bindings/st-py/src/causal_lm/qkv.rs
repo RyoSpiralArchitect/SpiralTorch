@@ -1,4 +1,5 @@
 //! Bounded transport only; the native QKV optimizer owns all learning semantics.
+use super::generation::PyNativeCausalLmGenerator;
 use super::*;
 use pyo3::types::PyDict;
 use st_nn::causal_lm::{
@@ -151,6 +152,36 @@ impl PyQkv {
         let ids = tokens(prompt, count)?;
         py.detach(|| self.inner.prefill(ids, budget))
             .map(|inner| PyProjectionPrefix { inner })
+            .map_err(error)
+    }
+
+    fn generator(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        config_json: &str,
+    ) -> PyResult<PyNativeCausalLmGenerator> {
+        let config = st_nn::causal_lm::CausalLmGenerationConfig::from_json(config_json.as_bytes())
+            .map_err(error)?;
+        let count = self
+            .inner
+            .generation_input_count(prompt_ids.len()?, &config)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, count)?;
+        py.detach(|| self.inner.generator(ids, config))
+            .map(PyNativeCausalLmGenerator::from_native)
+            .map_err(error)
+    }
+
+    fn restore_generator(
+        &self,
+        py: Python<'_>,
+        payload: &str,
+        expected_id: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmGenerator> {
+        let pin = session_input::pin(expected_id)?;
+        py.detach(|| self.inner.restore_generator(payload.as_bytes(), &pin))
+            .map(PyNativeCausalLmGenerator::from_native)
             .map_err(error)
     }
 

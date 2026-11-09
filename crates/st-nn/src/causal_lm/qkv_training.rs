@@ -144,6 +144,46 @@ impl NativeCausalLmQkvAdamW {
             budget,
         )
     }
+
+    /// Admit the complete generation budget before a binding reads prompt IDs.
+    pub fn generation_input_count(
+        &self,
+        steps: usize,
+        config: &CausalLmGenerationConfig,
+    ) -> CausalLmResult<usize> {
+        config.validate(&self.model, steps)?;
+        Ok(steps)
+    }
+
+    /// Capture this projection's weights; later optimizer updates cannot change the generator.
+    pub fn generator(
+        &self,
+        prompt: Vec<usize>,
+        config: CausalLmGenerationConfig,
+    ) -> CausalLmResult<NativeCausalLmGenerator> {
+        self.generation_input_count(prompt.len(), &config)?;
+        NativeCausalLmGenerator::new_owned(
+            self.model.clone(),
+            prompt,
+            config,
+            Some(self.serving_id()),
+        )
+    }
+
+    /// Restore tokens/RNG only when they belong to these exact serving weights.
+    /// Restore the optimizer checkpoint first to select an older projection.
+    pub fn restore_generator(
+        &self,
+        bytes: &[u8],
+        expected_id: &str,
+    ) -> CausalLmResult<NativeCausalLmGenerator> {
+        NativeCausalLmGenerator::from_json_owned(
+            self.model.clone(),
+            bytes,
+            expected_id,
+            Some(self.serving_id()),
+        )
+    }
     /// Full-vocabulary CE on the last row of each unpadded prefix; labels are never model inputs.
     /// Returns the mean loss and its [3 * width, width] QKV weight derivative.
     pub fn answer_gradients(
