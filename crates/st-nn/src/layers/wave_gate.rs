@@ -15,6 +15,7 @@ use st_tensor::{
 };
 
 mod learning;
+pub(crate) use learning::AnchoredProjectionBatch;
 pub(crate) use learning::WaveStages;
 pub use learning::{WaveGateConditioning, WaveGateKernel, WaveGateLearningBatch};
 

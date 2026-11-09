@@ -17,6 +17,8 @@ pub const GEOMETRY_ADAPTER_ARTIFACT_SCHEMA: &str = "spiraltorch.geometry_adapter
 pub const GEOMETRY_ADAPTER_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub const GEOMETRY_ADAPTER_MAX_VALUES: usize = 1_048_576;
 pub const GEOMETRY_ADAPTER_MAX_KERNEL_TAPS: usize = 65_536;
+mod displacement;
+pub use displacement::{GeometryDeltaMatch, MAX_RELATIVE_DELTA_ERROR};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -123,6 +125,14 @@ pub enum GeometryAdapterRecipe {
         strength: f64,
         max_values: usize,
         stage: WaveStageRecipe,
+    },
+    #[serde(rename = "spiraltorch.anchored_wave_projection_adapter.v1")]
+    AnchoredWaveProjection {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        curvature: f32,
+        log_radius: f32,
     },
     #[serde(rename = "spiraltorch.topos_resonator_adapter.v1")]
     Topos {
@@ -314,6 +324,50 @@ impl GeometryAdapterArtifact {
     pub fn artifact_id(&self) -> &str {
         &self.artifact_id
     }
+
+    /// Open a new coordinate chart at one fixed-radius projection. The old gate
+    /// and bias become frozen buffers; offsets start at zero with the old training flags.
+    pub fn anchor_wave_projection(&self, path: &str) -> Result<Self> {
+        let mut record = self.record.clone();
+        let p = record
+            .placements
+            .iter_mut()
+            .find(|p| p.path == path)
+            .ok_or("unknown geometry placement")?;
+        let GeometryAdapterRecipe::WaveStage {
+            features,
+            strength,
+            max_values,
+            stage:
+                WaveStageRecipe::Projection {
+                    curvature,
+                    log_radius,
+                },
+        } = p.recipe
+        else {
+            return Err("anchoring requires an ordinary fixed-radius wave projection".into());
+        };
+        p.recipe = GeometryAdapterRecipe::AnchoredWaveProjection {
+            features,
+            strength,
+            max_values,
+            curvature,
+            log_radius,
+        };
+        let anchors: Vec<_> = p
+            .tensors
+            .iter_mut()
+            .map(|t| GeometryAdapterTensor {
+                name: format!("{}_anchor", t.name),
+                shape: t.shape.clone(),
+                values: std::mem::replace(&mut t.values, vec![0.; features]),
+                role: GeometryAdapterTensorRole::Buffer,
+                requires_grad: false,
+            })
+            .collect();
+        p.tensors.extend(anchors);
+        Self::create(record)
+    }
     /// Resume compatibility without weights or train/eval mode. Includes exact
     /// ordered placement, recipes, tensor shapes/roles/trainability and base ID.
     pub fn layout_id(&self) -> Result<String> {
@@ -426,6 +480,9 @@ impl GeometryAdapterPlacement {
             | WaveStage {
                 features, strength, ..
             }
+            | AnchoredWaveProjection {
+                features, strength, ..
+            }
             | Topos {
                 features, strength, ..
             }
@@ -468,6 +525,11 @@ impl GeometryAdapterPlacement {
             ChannelAffine { .. } | Wave { .. } | WaveRadius { .. } | WaveStage { .. } => {
                 shapes.insert("gate", vec![features]);
                 shapes.insert("bias", vec![features]);
+            }
+            AnchoredWaveProjection { .. } => {
+                for name in ["gate", "bias", "gate_anchor", "bias_anchor"] {
+                    shapes.insert(name, vec![features]);
+                }
             }
             Topos { .. } => {
                 shapes.insert("gate", vec![features]);
@@ -517,7 +579,9 @@ impl GeometryAdapterPlacement {
                         ..
                     }
                 );
-            let expected_role = if fixed_radius {
+            let anchor = matches!(self.recipe, AnchoredWaveProjection { .. })
+                && matches!(tensor.name.as_str(), "gate_anchor" | "bias_anchor");
+            let expected_role = if fixed_radius || anchor {
                 GeometryAdapterTensorRole::Buffer
             } else {
                 GeometryAdapterTensorRole::Parameter
@@ -534,17 +598,11 @@ impl GeometryAdapterPlacement {
             {
                 return Err("invalid geometry tensor shape or non-finite values".into());
             }
-            if tensor.name == "log_radius"
-                && matches!(
-                    self.recipe,
-                    WaveRadius {
-                        learnable_radius: false,
-                        ..
-                    }
-                )
-                && tensor.requires_grad
-            {
+            if fixed_radius && tensor.requires_grad {
                 return Err("fixed radius buffer cannot require gradients".into());
+            }
+            if anchor && tensor.requires_grad {
+                return Err("projection anchor buffers cannot require gradients".into());
             }
             total += tensor.values.len();
         }
@@ -552,6 +610,20 @@ impl GeometryAdapterPlacement {
             return Err("missing geometry tensors".into());
         }
         match &self.recipe {
+            AnchoredWaveProjection {
+                curvature,
+                log_radius,
+                max_values,
+                ..
+            } => {
+                u32::try_from(*max_values)
+                    .map_err(|_| "anchored projection budget exceeds portable u32")?;
+                if features > *max_values {
+                    return Err("anchored projection channels exceed the value budget".into());
+                }
+                crate::WaveGateKernel::new(*curvature, 1., 0., *max_values)?;
+                crate::WaveGateKernel::validate_log_radius(*log_radius)?;
+            }
             WaveStage {
                 max_values, stage, ..
             } => {

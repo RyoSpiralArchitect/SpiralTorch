@@ -80,6 +80,42 @@ def artifact(kind="affine", *, frozen_gate=False):
 
 
 class NativeGeometryTests(unittest.TestCase):
+    def test_projection_offsets_survive_sub_ulp_sgd_and_reload_before_becoming_visible(self):
+        state = json.loads(artifact().state_json())
+        placement = state["placements"][0]
+        placement["recipe"] = dict(schema="spiraltorch.wave_stage_adapter.v1", features=3, strength=1., max_values=32,
+                                   stage=dict(kind="projection", curvature=-1., log_radius=0.))
+        for tensor in placement["tensors"]:
+            is_gate = tensor["name"] == "gate"
+            tensor.update(values=[16. if is_gate else -16., 0., 0.], requires_grad=is_gate)
+        original = st.GeometryAdapterArtifact.create_json(json.dumps(state))
+        centered = original.anchor_wave_projection("site")
+        x, dy, rate = [1., 0., 0.], [-1., 0., 0.], 2.**-25
+
+        def advance(start):
+            runtime = st.NativeGeometryRuntime(start)
+            visible = []
+            for i in range(4):
+                batch = runtime.forward("site", x, 1)
+                runtime.step_sgd(batch, dy, rate)
+                if i == 1:
+                    saved = runtime.artifact()
+                    restored = st.GeometryAdapterArtifact.from_json(saved.to_json(), saved.artifact_id, saved.base_model_identity)
+                    runtime = st.NativeGeometryRuntime(restored)
+                visible.append(runtime.forward("site", x, 1).output[0])
+            return visible, runtime.artifact()
+
+        absolute, a = advance(original)
+        offset, b = advance(centered)
+        self.assertEqual(absolute, [1.] * 4)
+        self.assertEqual(a.artifact_id, original.artifact_id)
+        self.assertEqual(offset, [1., 1., 1.+2.**-23, 1.+2.**-23])
+        tensors = {t["name"]: t for t in json.loads(b.state_json())["placements"][0]["tensors"]}
+        self.assertEqual(tensors["gate_anchor"]["values"], [16., 0., 0.])
+        self.assertFalse(tensors["gate_anchor"]["requires_grad"])
+        self.assertEqual(array("f", tensors["gate"]["values"]).tolist(), [2.**-23, 0., 0.])
+        self.assertEqual(tensors["bias"]["values"], [0., 0., 0.])
+
     def test_every_recipe_preserves_outputs_when_a_prefix_is_extended(self):
         kinds = ("affine", "wave", "fixed", "learned", "elliptic", "anchored", "causal", "gated", "topos") + FRACTIONAL_KINDS
         rows = [[((i * 17 + b * 11) % 41 - 20) * .031 for i in range(24)] for b in range(2)]

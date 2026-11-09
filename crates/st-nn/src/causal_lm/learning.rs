@@ -3,7 +3,7 @@
 use super::*;
 use crate::geometry_artifact::GeometryAdapterTensorRole;
 use crate::geometry_runtime::{NativeGeometryBatch, ParameterGradients as Parameters};
-use st_kernel_contracts::attention::attention_vjp_reference;
+use st_kernel_contracts::attention::attention_key_lag_vjp_reference;
 use std::collections::BTreeMap;
 
 mod accumulation;
@@ -77,13 +77,14 @@ pub(super) struct TrainingReadout {
     pub logits: Tensor,
     pub d_normalized: Tensor,
     pub loss: f32,
+    pub competition: Option<objective::CompetitionReport>,
 }
 
 pub(super) fn frozen_pullback(
     weight: &PackedB,
     cache: &OnceLock<Result<PackedB, String>>,
     upstream: &Tensor,
-    accumulator: CausalLmReadoutAccumulator,
+    precision: CausalLmHeadPrecision,
 ) -> CausalLmResult<Tensor> {
     // Serialize construction, not just publication: concurrent first calls must
     // not each allocate a vocabulary-sized transpose. Frozen layout errors are
@@ -92,12 +93,7 @@ pub(super) fn frozen_pullback(
         .get_or_init(|| weight.transposed().map_err(|e| e.to_string()))
         .as_ref()
         .map_err(|e| e.clone())?;
-    Ok(match accumulator {
-        CausalLmReadoutAccumulator::F32 => {
-            upstream.matmul_prepacked_with_backend(weight, MatmulBackend::CpuSimd)?
-        }
-        CausalLmReadoutAccumulator::F64 => upstream.matmul_prepacked_wide(weight)?,
-    })
+    precision.multiply(upstream, weight)
 }
 
 impl Dense {
@@ -106,16 +102,54 @@ impl Dense {
             &self.weight,
             &self.backward_weight,
             upstream,
-            CausalLmReadoutAccumulator::F32,
+            CausalLmHeadPrecision::F32,
         )
     }
 }
 
-#[derive(Clone, Copy)]
+impl DecoderBlock {
+    /// Shared MLP branch of the decoder VJP. A production step supplies a no-op
+    /// visitor; a read-only probe can copy individual adjoints before they drop.
+    pub(super) fn mlp_input_pullback(
+        &self,
+        pre_gelu: &Tensor,
+        after_attention: &Tensor,
+        upstream: &Tensor,
+        epsilon: f32,
+        mut visit: impl FnMut(&'static str, &Tensor) -> CausalLmResult<()>,
+    ) -> CausalLmResult<Tensor> {
+        let d_gelu = self.contract.backward_input(upstream)?;
+        visit("mlp_contract_input", &d_gelu)?;
+        let d_expand = pre_gelu.gelu_backward_with_backend(&d_gelu, TensorUtilBackend::Cpu)?;
+        visit("gelu_input", &d_expand)?;
+        let d_norm = self.expand.backward_input(&d_expand)?;
+        visit("mlp_expand_input", &d_norm)?;
+        let d_residual =
+            after_attention.layer_norm_input_backward(&self.second_norm.gamma, &d_norm, epsilon)?;
+        visit("mlp_norm_input", &d_residual)?;
+        Ok(d_residual)
+    }
+}
+
+pub(super) fn ordinary_loss_seed(
+    logits: &Tensor,
+    labels: &[i64],
+    config: CrossEntropyConfig,
+) -> CausalLmResult<(f32, Tensor)> {
+    let loss = logits.cross_entropy_with_logits(labels, config)?.data()[0];
+    let seed = Tensor::from_vec(1, 1, vec![1.])?;
+    Ok((
+        loss,
+        logits.cross_entropy_with_logits_backward(labels, config, &seed)?,
+    ))
+}
+
 pub(super) enum DecoderTarget<'a> {
     GeometryFrom(&'a str),
     Lora,
     Joint,
+    Projection(&'a mut dyn projection_probe::ProjectionCapture),
+    QkvWeight(&'a mut Option<Tensor>),
 }
 
 fn geometry_pullback(
@@ -123,18 +157,21 @@ fn geometry_pullback(
     batch: Option<NativeGeometryBatch>,
     upstream: Tensor,
     parameters: &mut Parameters,
-    target: DecoderTarget<'_>,
+    target: &DecoderTarget<'_>,
     trace: Option<&mut observation::AdaptationTrace>,
 ) -> CausalLmResult<Option<Tensor>> {
     if let Some(batch) = batch {
-        if matches!(target, DecoderTarget::Lora) {
+        if matches!(
+            target,
+            DecoderTarget::Lora | DecoderTarget::Projection(_) | DecoderTarget::QkvWeight(_)
+        ) {
             let input = batch.vjp_input(upstream.data())?;
             if let Some(t) = trace {
                 t.pullback(&path, &batch, &upstream, Some(&input))?;
             }
             return Ok(Some(input));
         }
-        let (input, gradient) = if matches!(target, DecoderTarget::GeometryFrom(first) if path == first)
+        let (input, gradient) = if matches!(target, DecoderTarget::GeometryFrom(first) if path == *first)
         {
             (None, batch.vjp_parameters(upstream.data())?)
         } else {
@@ -153,6 +190,14 @@ fn geometry_pullback(
 }
 
 impl NativeCausalLm {
+    pub(super) fn vocabulary_head_pullback(&self, seed: &Tensor) -> CausalLmResult<Tensor> {
+        frozen_pullback(
+            &self.head,
+            &self.backward_head,
+            seed,
+            self.readout_accumulator.backward_precision(),
+        )
+    }
     pub(super) fn first_geometry_site(&self) -> CausalLmResult<(usize, String)> {
         let runtime = self
             .geometry
@@ -260,6 +305,7 @@ impl NativeCausalLm {
             logits,
             d_normalized,
             loss: causal_loss,
+            ..
         } = self.training_readout(&prepared, hidden, 0, first, observations)?;
         let PreparedCausalWindow {
             shape,
@@ -278,12 +324,7 @@ impl NativeCausalLm {
                 if active_positions == 0 {
                     None
                 } else {
-                    let d_normalized = frozen_pullback(
-                        &self.head,
-                        &self.backward_head,
-                        &gradient,
-                        self.readout_accumulator,
-                    )?;
+                    let d_normalized = self.vocabulary_head_pullback(&gradient)?;
                     Some((loss, active_positions, d_normalized))
                 }
             }
@@ -351,14 +392,14 @@ impl NativeCausalLm {
         })
     }
 
-    pub(super) fn training_readout(
+    pub(super) fn checkpointed_hidden(
         &self,
-        prepared: &PreparedCausalWindow,
         mut hidden: Tensor,
+        shape: [usize; 2],
         start_layer: usize,
         first_trainable: usize,
         mut observations: Option<&mut observation::ResidualSums>,
-    ) -> CausalLmResult<TrainingReadout> {
+    ) -> CausalLmResult<(Tensor, Vec<Tensor>)> {
         if start_layer > first_trainable || first_trainable >= self.config.layers {
             return Err("training prefix crosses an adaptation site".into());
         }
@@ -371,8 +412,26 @@ impl NativeCausalLm {
                 Some(sums) => decoder::BlockPass::Observe(sums),
                 None => decoder::BlockPass::Forward,
             };
-            hidden = self.run_block(index, hidden, prepared.shape, pass)?.output;
+            hidden = self.run_block(index, hidden, shape, pass)?.output;
         }
+        Ok((hidden, checkpoints))
+    }
+
+    pub(super) fn training_readout(
+        &self,
+        prepared: &PreparedCausalWindow,
+        hidden: Tensor,
+        start_layer: usize,
+        first_trainable: usize,
+        observations: Option<&mut observation::ResidualSums>,
+    ) -> CausalLmResult<TrainingReadout> {
+        let (hidden, checkpoints) = self.checkpointed_hidden(
+            hidden,
+            prepared.shape,
+            start_layer,
+            first_trainable,
+            observations,
+        )?;
         let hidden_rows = hidden.shape().0;
         let selected = match &prepared.selected_rows {
             Some(rows) => hidden.gather_rows(rows)?,
@@ -383,18 +442,84 @@ impl NativeCausalLm {
             .forward(&selected, self.config.norm_epsilon)?;
         let logits = self.project_readout(&normalized)?;
         let config = prepared.objective.kernel_config();
-        let loss = logits
-            .cross_entropy_with_logits(&prepared.labels, config)?
-            .data()[0];
-        let seed = Tensor::from_vec(1, 1, vec![1.])?;
-        let d_logits =
-            logits.cross_entropy_with_logits_backward(&prepared.labels, config, &seed)?;
-        let d_normalized = frozen_pullback(
-            &self.head,
-            &self.backward_head,
-            &d_logits,
-            self.readout_accumulator,
-        )?;
+        let (loss, d_logits, competition) = if let Some(c) = &prepared.competition {
+            match c {
+                objective::PreparedCompetition::ContextToken { target, margin } => {
+                    let (report, grad) =
+                        logits.context_token_preference_gradient(*target, *margin)?;
+                    let loss = report.loss as f32;
+                    if !loss.is_finite() {
+                        return Err(
+                            "context preference loss exceeds the finite f32 training domain".into(),
+                        );
+                    }
+                    (
+                        loss,
+                        grad,
+                        Some(objective::CompetitionReport::ContextToken(report)),
+                    )
+                }
+                objective::PreparedCompetition::LineSubset(plan) => {
+                    let (report, grad) = plan.loss_gradient(&logits)?;
+                    (
+                        report.loss,
+                        grad,
+                        Some(objective::CompetitionReport::LineSubset(report)),
+                    )
+                }
+                objective::PreparedCompetition::LineSet(plan) => {
+                    let (report, grad) = plan.loss_gradient(&logits)?;
+                    (
+                        report.loss,
+                        grad,
+                        Some(objective::CompetitionReport::LineSet(report)),
+                    )
+                }
+                objective::PreparedCompetition::LineMenu(plan) => {
+                    let (report, grad) = plan.loss_gradient(&logits)?;
+                    (
+                        report.loss,
+                        grad,
+                        Some(objective::CompetitionReport::LineMenu(report)),
+                    )
+                }
+                objective::PreparedCompetition::Top { recipe, guard } => {
+                    let (report, grad) = match guard {
+                        Some((reference, guard)) => logits
+                            .guarded_rival_cross_entropy_mean_gradient(
+                                &prepared.labels,
+                                *recipe,
+                                reference,
+                                *guard,
+                            )?,
+                        None => {
+                            logits.rival_cross_entropy_mean_gradient(&prepared.labels, *recipe)?
+                        }
+                    };
+                    (
+                        report.loss,
+                        grad,
+                        Some(objective::CompetitionReport::Top(report)),
+                    )
+                }
+                objective::PreparedCompetition::Declared { selected, mix } => {
+                    let (report, grad) = logits.declared_rival_cross_entropy_mean_gradient(
+                        &prepared.labels,
+                        selected,
+                        *mix,
+                    )?;
+                    (
+                        report.loss,
+                        grad,
+                        Some(objective::CompetitionReport::Declared(report)),
+                    )
+                }
+            }
+        } else {
+            let (loss, grad) = ordinary_loss_seed(&logits, &prepared.labels, config)?;
+            (loss, grad, None)
+        };
+        let d_normalized = self.vocabulary_head_pullback(&d_logits)?;
         Ok(TrainingReadout {
             checkpoints,
             hidden_rows,
@@ -402,6 +527,7 @@ impl NativeCausalLm {
             logits,
             d_normalized,
             loss,
+            competition,
         })
     }
 
@@ -451,7 +577,7 @@ impl NativeCausalLm {
         selected_rows: Option<&[usize]>,
         d_normalized: Tensor,
         first_layer: usize,
-        target: DecoderTarget<'_>,
+        mut target: DecoderTarget<'_>,
         mut trace: Option<&mut observation::AdaptationTrace>,
     ) -> CausalLmResult<Parameters> {
         let c = &self.config;
@@ -484,7 +610,7 @@ impl NativeCausalLm {
                 cache.block_geometry,
                 gradient,
                 &mut parameters,
-                target,
+                &target,
                 trace.as_deref_mut(),
             )?
             else {
@@ -495,21 +621,18 @@ impl NativeCausalLm {
                 cache.mlp_geometry,
                 residual.clone(),
                 &mut parameters,
-                target,
+                &target,
                 trace.as_deref_mut(),
             )?
             else {
                 break;
             };
-            let d_gelu = block.contract.backward_input(&mlp)?;
-            let d_expand = cache
-                .pre_gelu
-                .gelu_backward_with_backend(&d_gelu, TensorUtilBackend::Cpu)?;
-            let d_norm = block.expand.backward_input(&d_expand)?;
-            let d_residual = cache.after_attention.layer_norm_input_backward(
-                &block.second_norm.gamma,
-                &d_norm,
+            let d_residual = block.mlp_input_pullback(
+                &cache.pre_gelu,
+                &cache.after_attention,
+                &mlp,
                 c.norm_epsilon,
+                |_, _| Ok(()),
             )?;
             let residual = residual.add_with_backend(&d_residual, TensorUtilBackend::Cpu)?;
             let Some(attention) = geometry_pullback(
@@ -517,7 +640,7 @@ impl NativeCausalLm {
                 cache.attention_geometry,
                 residual.clone(),
                 &mut parameters,
-                target,
+                &target,
                 trace.as_deref_mut(),
             )?
             else {
@@ -536,9 +659,18 @@ impl NativeCausalLm {
                 );
                 break;
             }
-            let d_merge = block.output.backward_input(&attention)?;
+            if let DecoderTarget::Projection(probe) = &mut target {
+                if index == first_layer && probe.site() == CausalLmProjectionSite::Output {
+                    probe.record(&cache.attention_input, &attention)?;
+                    break;
+                }
+            }
+            let mut d_merge = block.output.backward_input(&attention)?;
+            if let Some(adapter) = self.lora.as_ref().filter(|a| a.layer() == index) {
+                d_merge = adapter.add_input_vjp(&attention, d_merge)?;
+            }
             let [d_heads] = self.split_heads::<1>(&d_merge, shape)?;
-            let d_qkv = attention_vjp_reference(
+            let d_qkv = attention_key_lag_vjp_reference(
                 self.attention_spec(index, shape)?,
                 &cache.qkv[0],
                 &cache.qkv[1],
@@ -546,7 +678,24 @@ impl NativeCausalLm {
                 None,
                 None,
                 &d_heads,
+                self.key_lag_at(index),
             )?;
+            if let DecoderTarget::Projection(probe) = &mut target {
+                if index == first_layer {
+                    let separated = match probe.site() {
+                        CausalLmProjectionSite::Query => d_qkv.query.as_slice(),
+                        CausalLmProjectionSite::Key => d_qkv.key.as_slice(),
+                        CausalLmProjectionSite::Value => d_qkv.value.as_slice(),
+                        CausalLmProjectionSite::Output => {
+                            unreachable!("output gradient captured before attention")
+                        }
+                    };
+                    let adjoint = self.merge_heads([separated], shape)?;
+                    let source = block.first_norm.forward(&input, c.norm_epsilon)?;
+                    probe.record(&source, &adjoint)?;
+                    break;
+                }
+            }
             let d_fused = self.merge_heads(
                 [
                     d_qkv.query.as_slice(),
@@ -555,6 +704,18 @@ impl NativeCausalLm {
                 ],
                 shape,
             )?;
+            if let DecoderTarget::QkvWeight(slot) = &mut target {
+                if index == first_layer {
+                    let source = block.first_norm.forward(&input, c.norm_epsilon)?;
+                    // Directly produce [Q/K/V output channel, input channel], matching PackedB.
+                    **slot = Some(d_fused.matmul_lhs_transpose_scaled_with_backend(
+                        &source,
+                        1.,
+                        MatmulBackend::CpuSimd,
+                    )?);
+                    break;
+                }
+            }
             let d_norm = block.qkv.backward_input(&d_fused)?;
             let d_input = input.layer_norm_input_backward(
                 &block.first_norm.gamma,

@@ -90,6 +90,14 @@ impl GeometryAdapterArtifact {
         self.inner.state_json().map_err(js_error)
     }
 
+    #[wasm_bindgen(js_name = anchorWaveProjection)]
+    pub fn anchor_wave_projection(&self, path: &str) -> Result<Self, JsValue> {
+        self.inner
+            .anchor_wave_projection(path)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(getter, js_name = artifactId)]
     pub fn artifact_id(&self) -> String {
         self.inner.artifact_id().to_owned()

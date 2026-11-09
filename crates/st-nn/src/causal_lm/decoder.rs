@@ -2,13 +2,14 @@
 use super::context::InferenceBlockCache;
 use super::*;
 use crate::geometry_runtime::NativeGeometryBatch;
-use st_kernel_contracts::attention::{attention_reference, AttentionMask, AttentionSpec};
+use st_kernel_contracts::attention::{attention_key_lag_reference, AttentionMask, AttentionSpec};
 
 pub(super) enum BlockPass<'a> {
     Forward,
     Observe(&'a mut observation::ResidualSums),
     BackwardReplay,
     Prefill,
+    Projection(projection_probe::ProjectionDelta<'a>),
 }
 
 pub(super) struct BlockCache {
@@ -159,17 +160,30 @@ impl NativeCausalLm {
         let inference = matches!(pass, BlockPass::Prefill);
         let block = &self.blocks[index];
         let norm = block.first_norm.forward(&input, self.config.norm_epsilon)?;
-        let qkv = self.split_heads::<3>(&block.qkv.forward(&norm)?, shape)?;
-        let attended = attention_reference(
+        let mut fused = block.qkv.forward(&norm)?;
+        if let BlockPass::Projection(d) = &pass {
+            if let Some(part) = d.spec.site.qkv_part() {
+                fused = d.apply(&norm, &fused, part)?;
+            }
+        }
+        let qkv = self.split_heads::<3>(&fused, shape)?;
+        drop(fused);
+        let attended = attention_key_lag_reference(
             self.attention_spec(index, shape)?,
             &qkv[0],
             &qkv[1],
             &qkv[2],
             None,
             None,
+            self.key_lag_at(index),
         )?;
         let attention_input = self.merge_heads([attended.as_slice()], shape)?;
-        let attention = self.project_attention_output(index, &attention_input)?;
+        let mut attention = self.project_attention_output(index, &attention_input)?;
+        if let BlockPass::Projection(d) = &pass {
+            if d.spec.site == CausalLmProjectionSite::Output {
+                attention = d.apply(&attention_input, &attention, 0)?;
+            }
+        }
         let attention_input = capture.then_some(attention_input);
         let path = format!("transformer.h.{index}");
         let mut history = std::array::from_fn(|_| None);

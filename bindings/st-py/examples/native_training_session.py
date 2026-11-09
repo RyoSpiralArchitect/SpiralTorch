@@ -123,7 +123,7 @@ def main() -> None:
     parser.add_argument("--window-policy", choices=("disjoint", "covering_targets"),
                         help="default: disjoint full windows; covering_targets keeps short documents and tails")
     parser.add_argument("--learning-rate", type=float, default=.01)
-    parser.add_argument("--readout", choices=("f32", "f64"), default="f32")
+    parser.add_argument("--readout", choices=("f32", "f64", "f32_wide_backward"), default="f32")
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--checkpoint-every", type=int, metavar="N",
                         help="commit at absolute N-update boundaries and at the final step; write OUTPUT.progress.jsonl")

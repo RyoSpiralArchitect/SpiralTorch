@@ -24,6 +24,25 @@ pub fn attention_vjp_reference(
     pair_bias: Option<&[f32]>,
     upstream: &[f32],
 ) -> Result<AttentionGradients, AttentionError> {
+    attention_key_lag_vjp_reference(spec, query, key, value, z_bias, pair_bias, upstream, 0)
+}
+
+/// Adjoint of a key-lagged read. Reused keys accumulate at their source row;
+/// values and biases accumulate at the attended slot, not the key's origin.
+#[allow(clippy::too_many_arguments)]
+pub fn attention_key_lag_vjp_reference(
+    spec: AttentionSpec,
+    query: &[f32],
+    key: &[f32],
+    value: &[f32],
+    z_bias: Option<&[f32]>,
+    pair_bias: Option<&[f32]>,
+    upstream: &[f32],
+    lag: usize,
+) -> Result<AttentionGradients, AttentionError> {
+    if lag != 0 && spec.mask() == AttentionMask::None {
+        return Err(AttentionError::KeyLagMask);
+    }
     validate_inputs(spec, query, key, value, z_bias, pair_bias)?;
     if upstream.len() != query.len() {
         return Err(AttentionError::Length);
@@ -56,8 +75,8 @@ pub fn attention_vjp_reference(
                     key,
                     (z_bias, pair_bias),
                     row,
-                    key_row,
-                    k,
+                    (key_row, k),
+                    lag,
                 )?);
                 maximum = maximum.max(*p);
             }
@@ -77,11 +96,12 @@ pub fn attention_vjp_reference(
             }
             for k in 0..visible {
                 let key_row = context * spec.keys() + k;
+                let source = key_row - k.min(lag);
                 let ds = probabilities[k] * (dp[k] - center);
                 for i in 0..d {
                     dq[row * d + i] +=
-                        f64::from(spec.scale()) * ds * f64::from(key[key_row * d + i]);
-                    dk[key_row * d + i] +=
+                        f64::from(spec.scale()) * ds * f64::from(key[source * d + i]);
+                    dk[source * d + i] +=
                         f64::from(spec.scale()) * ds * f64::from(query[row * d + i]);
                     dv[key_row * d + i] += probabilities[k] * f64::from(upstream[row * d + i]);
                 }

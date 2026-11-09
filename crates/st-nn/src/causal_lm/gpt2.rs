@@ -18,6 +18,8 @@ fn activation() -> String {
 #[derive(Deserialize)]
 struct Gpt2Config {
     model_type: String,
+    #[serde(default)]
+    spiraltorch_key_lag: Option<CausalLmKeyLag>,
     vocab_size: usize,
     n_positions: usize,
     n_embd: usize,
@@ -42,14 +44,24 @@ struct Gpt2Config {
     pruned_heads: BTreeMap<String, Vec<usize>>,
 }
 
-fn config(bytes: &[u8], limits: CausalLmLimits) -> CausalLmResult<CausalLmConfig> {
+fn config(
+    bytes: &[u8],
+    limits: CausalLmLimits,
+) -> CausalLmResult<(CausalLmConfig, Option<CausalLmKeyLag>)> {
     limits.validate()?;
     if bytes.len() > 131_072 {
         return Err("GPT-2 config exceeds byte budget".into());
     }
     let value: Gpt2Config = serde_json::from_slice(bytes)?;
-    if value.model_type != "gpt2"
-        || value.activation_function != "gelu_new"
+    let lag = match (value.model_type.as_str(), value.spiraltorch_key_lag) {
+        ("gpt2", None) => None,
+        (CausalLmKeyLag::MODEL_TYPE, Some(p)) => {
+            p.validate(value.n_layer, value.n_positions)?;
+            Some(p)
+        }
+        _ => return Err("unsupported GPT-2 model type or inconsistent key-lag policy".into()),
+    };
+    if value.activation_function != "gelu_new"
         || value.add_cross_attention
         || value.reorder_and_upcast_attn
         || value.pruned_heads.values().any(|heads| !heads.is_empty())
@@ -97,18 +109,21 @@ fn config(bytes: &[u8], limits: CausalLmLimits) -> CausalLmResult<CausalLmConfig
         limits.max_parameter_elements,
         "MLP parameters",
     )?;
-    Ok(CausalLmConfig {
-        vocabulary: value.vocab_size,
-        positions: value.n_positions,
-        width: value.n_embd,
-        heads: value.n_head,
-        layers: value.n_layer,
-        intermediate,
-        norm_epsilon: value.layer_norm_epsilon,
-        scale_attention: value.scale_attn_weights,
-        inverse_layer_scale: value.scale_attn_by_inverse_layer_idx,
-        tied_head: value.tie_word_embeddings,
-    })
+    Ok((
+        CausalLmConfig {
+            vocabulary: value.vocab_size,
+            positions: value.n_positions,
+            width: value.n_embd,
+            heads: value.n_head,
+            layers: value.n_layer,
+            intermediate,
+            norm_epsilon: value.layer_norm_epsilon,
+            scale_attention: value.scale_attn_weights,
+            inverse_layer_scale: value.scale_attn_by_inverse_layer_idx,
+            tied_head: value.tie_word_embeddings,
+        },
+        lag,
+    ))
 }
 
 fn matrix(
@@ -176,7 +191,7 @@ pub(super) fn load(
     weights: &SafeTensorArchive,
     limits: CausalLmLimits,
 ) -> CausalLmResult<NativeCausalLm> {
-    let c = config(bytes, limits)?;
+    let (c, lag) = config(bytes, limits)?;
     let names: BTreeSet<_> = weights.names().into_iter().collect();
     let prefix = match (
         names.contains("wte.weight"),
@@ -274,8 +289,9 @@ pub(super) fn load(
     identity.update(b"spiraltorch.native_causal_lm.gpt2.f32.v1\0");
     identity.update(serde_json::to_vec(&c)?);
     identity.update(weights.content_id());
-    Ok(NativeCausalLm {
+    let model = NativeCausalLm {
         config: c,
+        key_lag: None,
         limits,
         base_id: format!("sha256:{:x}", identity.finalize()),
         token,
@@ -287,5 +303,9 @@ pub(super) fn load(
         geometry: None,
         lora: None,
         readout_accumulator: CausalLmReadoutAccumulator::F32,
-    })
+    };
+    match lag {
+        Some(p) => model.with_key_lag(p),
+        None => Ok(model),
+    }
 }

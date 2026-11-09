@@ -621,6 +621,7 @@ fn session_save_resume_owns_policy_cursor_and_both_groups_exactly() {
     for readout in [
         CausalLmReadoutAccumulator::F32,
         CausalLmReadoutAccumulator::F64,
+        CausalLmReadoutAccumulator::F32WideBackward,
     ] {
         for mode in [
             CausalLmAdaptationMode::Lora,

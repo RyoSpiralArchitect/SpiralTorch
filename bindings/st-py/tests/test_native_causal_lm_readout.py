@@ -42,6 +42,11 @@ class NativeReadoutTests(unittest.TestCase):
 
     def test_policy_is_explicit_immutable_and_rejects_unknown_values(self):
         wide = self.model.with_readout_accumulator("f64")
+        split = self.model.with_readout_accumulator("f32_wide_backward")
+        self.assertEqual((split.readout_accumulator, split.readout_forward_precision, split.readout_backward_precision),
+                         ("f32_wide_backward", "f32", "f64"))
+        self.assertEqual((self.model.readout_forward_precision, self.model.readout_backward_precision), ("f32", "f32"))
+        self.assertEqual((wide.readout_forward_precision, wide.readout_backward_precision), ("f64", "f64"))
         self.assertEqual(self.model.readout_accumulator, "f32")
         self.assertEqual(wide.readout_accumulator, "f64")
         self.assertEqual(wide.base_model_identity, self.model.base_model_identity)
@@ -53,12 +58,13 @@ class NativeReadoutTests(unittest.TestCase):
             wide.readout_accumulator = "f32"
 
     def test_forward_loss_context_and_gradient_owners_agree(self):
-        models = [self.model.with_readout_accumulator(p) for p in ("f32", "f64")]
+        models = [self.model.with_readout_accumulator(p) for p in ("f32", "f64", "f32_wide_backward")]
         windows = [1, 2, 3, 4]
         gradients = [m.geometry_loss_gradients(windows, [1, 4]) for m in models]
         for i, model in enumerate(models):
             with self.subTest(accumulator=model.readout_accumulator):
-                own, foreign = gradients[i], gradients[1-i]
+                other = (i + 1) % len(models)
+                own, foreign = gradients[i], gradients[other]
                 self.assertEqual(own.readout_accumulator, model.readout_accumulator)
                 self.assertEqual(own.loss, model.next_token_loss(windows, [1, 4]))
                 context = st.NativeCausalLmContext(model, [1, 2])
@@ -80,19 +86,19 @@ class NativeReadoutTests(unittest.TestCase):
                 self.assertEqual(accumulator.microbatches, 0)
                 accumulator.add(own)
                 with self.assertRaises(ValueError):
-                    accumulator.accumulate_loss(models[1-i], windows, [1, 4])
+                    accumulator.accumulate_loss(models[other], windows, [1, 4])
                 self.assertEqual(accumulator.microbatches, 1)
                 with self.assertRaises(ValueError):
-                    accumulator.step_sgd(models[1-i], .01)
+                    accumulator.step_sgd(models[other], .01)
                 with self.assertRaises(ValueError):
-                    accumulator.step_adamw(models[1-i], optimizer, .01)
+                    accumulator.step_adamw(models[other], optimizer, .01)
                 updated, _ = accumulator.step_adamw(model, optimizer, .01)
                 self.assertEqual(updated.readout_accumulator, model.readout_accumulator)
 
     def test_generation_resume_binds_arithmetic_in_both_execution_modes(self):
-        for policy in ("f32", "f64"):
+        for policy in ("f32", "f64", "f32_wide_backward"):
             model = self.model.with_readout_accumulator(policy)
-            other = self.model.with_readout_accumulator("f32" if policy == "f64" else "f64")
+            other = self.model.with_readout_accumulator("f64" if policy == "f32" else "f32")
             for execution in (None, {"kind": "kv_cache", "max_values": 1024}):
                 config = {"max_new_tokens": 4, "seed": 81, "decoding": {
                     "selection": "sample", "top_k": 6, "top_p": .8,
@@ -102,7 +108,7 @@ class NativeReadoutTests(unittest.TestCase):
                 generator = st.NativeCausalLmGenerator(model, [1, 2], json.dumps(config))
                 generator.step()
                 payload = generator.to_json()
-                self.assertEqual("readout_accumulator" in json.loads(payload), policy == "f64")
+                self.assertEqual(json.loads(payload).get("readout_accumulator"), None if policy == "f32" else policy)
                 with self.assertRaises(ValueError):
                     st.NativeCausalLmGenerator.from_json(other, payload, generator.checkpoint_id)
                 restored = st.NativeCausalLmGenerator.from_json(model, payload, generator.checkpoint_id)
@@ -113,15 +119,15 @@ class NativeReadoutTests(unittest.TestCase):
 
     def test_training_resume_and_inference_restore_bind_arithmetic(self):
         docs = [[1, 2, 3, 4, 5, 6, 7]]
-        for policy in ("f32", "f64"):
+        for policy in ("f32", "f64", "f32_wide_backward"):
             base = self.base.with_readout_accumulator(policy)
             model = self.model.with_readout_accumulator(policy)
             trainer = st.NativeCausalLmTrainer(model, st.NativeGeometryAdamW(model.geometry_artifact()),
                 docs, 4, learning_rate=.001, epochs=2)
             trainer.step()
             payload, pin = trainer.to_json(), trainer.checkpoint_id
-            self.assertEqual("readout_accumulator" in json.loads(payload), policy == "f64")
-            other = self.base.with_readout_accumulator("f32" if policy == "f64" else "f64")
+            self.assertEqual(json.loads(payload).get("readout_accumulator"), None if policy == "f32" else policy)
+            other = self.base.with_readout_accumulator("f64" if policy == "f32" else "f32")
             with self.assertRaises(ValueError):
                 st.NativeCausalLmTrainer.from_json(other, docs, payload, pin)
             with self.assertRaises(ValueError):

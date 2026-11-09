@@ -72,6 +72,108 @@ fn create(value: &Value) -> Result<GeometryAdapterArtifact> {
 }
 
 #[test]
+fn displacement_is_global_and_preserves_endpoint_identities() {
+    let mut state = record();
+    state["placements"][0]["tensors"][0]["values"] = json!([0., 0.]);
+    let mut second = state["placements"][0].clone();
+    second["path"] = json!("transformer.h.1.mlp");
+    state["placements"].as_array_mut().unwrap().push(second);
+    let a = create(&state).unwrap();
+    state["placements"][0]["tensors"][0]["values"] = json!([3., 0.]);
+    state["placements"][1]["tensors"][1]["values"] = json!([0., 4.]);
+    let bytes = serde_json::to_vec_pretty(&state).unwrap();
+    let id = format!("sha256:{:x}", Sha256::digest(&bytes));
+    let b =
+        GeometryAdapterArtifact::from_json(&bytes, &id, &a.record().base_model_identity).unwrap();
+    assert_eq!(a.trainable_delta_l2(&b).unwrap(), 5.);
+    for d in [0., 2.5, 5., 10.] {
+        let (out, r) = a.match_trainable_delta(&b, d).unwrap();
+        assert_eq!(
+            (
+                r.direction_l2,
+                r.requested_l2,
+                r.realized_l2,
+                r.trainable_values
+            ),
+            (5., d, d, 8)
+        );
+        assert_eq!(r.relative_vector_error, 0.);
+        assert_eq!(out.artifact_id(), r.result_id);
+        assert_eq!(r.origin_id, a.artifact_id());
+        assert_eq!(r.direction_id, b.artifact_id());
+        assert_eq!(a.trainable_delta_l2(&out).unwrap(), d);
+        assert_eq!(
+            out.record().placements[0].tensor("gate")[0],
+            (3. * d / 5.) as f32
+        );
+        assert_eq!(
+            out.record().placements[1].tensor("bias")[1],
+            (4. * d / 5.) as f32
+        );
+        if d == 0. {
+            assert_eq!(out.to_json(), a.to_json());
+        }
+        if d == 5. {
+            assert_eq!(out.to_json().as_bytes(), &bytes);
+        }
+    }
+    assert!(a.match_trainable_delta(&a, 1.).is_err());
+    for bad in [-1., f64::INFINITY, f64::NAN, f64::MAX] {
+        assert!(a.match_trainable_delta(&b, bad).is_err());
+    }
+}
+
+#[test]
+fn displacement_rejects_incompatible_and_frozen_changes_even_at_zero_length() {
+    let mut state = record();
+    state["placements"][0]["recipe"]["schema"] = json!("spiraltorch.wave_gate_adapter.v2");
+    state["placements"][0]["recipe"]["learnable_radius"] = json!(false);
+    state["placements"][0]["tensors"][1]["requires_grad"] = json!(false);
+    state["placements"][0]["tensors"].as_array_mut().unwrap().push(
+        json!({"name":"log_radius","values":[0.],"shape":[],"role":"buffer","requires_grad":false}));
+    let a = create(&state).unwrap();
+    for (pointer, value) in [
+        (
+            "/base_model_identity",
+            json!(format!("sha256:{}", "b".repeat(64))),
+        ),
+        ("/training", json!(false)),
+        ("/placements/0/training", json!(false)),
+        ("/placements/0/recipe/strength", json!(0.3)),
+        ("/placements/0/tensors/0/requires_grad", json!(false)),
+        ("/placements/0/tensors/1/values/0", json!(0.0)), // frozen -0.0 is not +0.0
+        ("/placements/0/tensors/2/values/0", json!(0.1)),
+    ] {
+        let mut other = state.clone();
+        *other.pointer_mut(pointer).unwrap() = value;
+        let b = create(&other).unwrap();
+        assert!(a.trainable_delta_l2(&b).is_err(), "{pointer}");
+        assert!(a.match_trainable_delta(&b, 0.).is_err(), "{pointer}");
+    }
+}
+
+#[test]
+fn displacement_checks_the_vector_not_only_length_and_retains_small_directions() {
+    let mut state = record();
+    state["placements"][0]["tensors"][0]["values"] = json!([16777216., 0.]);
+    let a = create(&state).unwrap();
+    state["placements"][0]["tensors"][0]["values"] = json!([16777218., 2000.]);
+    let b = create(&state).unwrap();
+    let goal = a.trainable_delta_l2(&b).unwrap() / 4.;
+    assert!((500. / goal - 1.).abs() < MAX_RELATIVE_DELTA_ERROR);
+    assert!(a.match_trainable_delta(&b, goal).is_err());
+    let tiny = f32::from_bits(1);
+    state["placements"][0]["tensors"][0]["values"] = json!([0., 0.]);
+    let a = create(&state).unwrap();
+    state["placements"][0]["tensors"][0]["values"] = json!([tiny, 0.]);
+    let b = create(&state).unwrap();
+    let (two, r) = a.match_trainable_delta(&b, 2. * f64::from(tiny)).unwrap();
+    assert_eq!(two.record().placements[0].tensor("gate")[0].to_bits(), 2);
+    assert_eq!(r.relative_vector_error, 0.);
+    assert!(a.match_trainable_delta(&b, f64::from_bits(1)).is_err());
+}
+
+#[test]
 fn exact_byte_and_base_id_required_and_no_mutable_record_escape() {
     let artifact = create(&record()).unwrap();
     let base = &artifact.record().base_model_identity;

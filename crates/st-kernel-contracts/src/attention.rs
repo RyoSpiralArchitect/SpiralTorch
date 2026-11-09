@@ -5,7 +5,7 @@
 use thiserror::Error;
 
 mod backward;
-pub use backward::{attention_vjp_reference, AttentionGradients};
+pub use backward::{attention_key_lag_vjp_reference, attention_vjp_reference, AttentionGradients};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttentionMask {
@@ -29,6 +29,8 @@ pub enum AttentionError {
     Scale,
     #[error("causal query offset and length must fit inside the key sequence")]
     QueryOffset,
+    #[error("nonzero attention key lag requires a causal mask")]
+    KeyLagMask,
     #[error("attention data length does not match its validated shape")]
     Length,
     #[error("attention inputs, scores and computed outputs must be finite")]
@@ -188,17 +190,18 @@ fn score(
     key: &[f32],
     biases: (Option<&[f32]>, Option<&[f32]>),
     row: usize,
-    key_row: usize,
-    k: usize,
+    (slot_row, k): (usize, usize),
+    lag: usize,
 ) -> Result<f32, AttentionError> {
     let d = spec.head_dim();
+    let key_row = slot_row - k.min(lag);
     let mut dot = 0.;
     for i in 0..d {
         dot = finite(dot + finite(query[row * d + i] * key[key_row * d + i])?)?;
     }
     let mut score = finite(dot * spec.scale())?;
     if let Some(bias) = biases.0 {
-        score = finite(score + bias[key_row])?;
+        score = finite(score + bias[slot_row])?;
     }
     if let Some(bias) = biases.1 {
         score = finite(score + bias[row * spec.keys() + k])?;
@@ -218,6 +221,24 @@ pub fn attention_reference(
     z_bias: Option<&[f32]>,
     pair_bias: Option<&[f32]>,
 ) -> Result<Vec<f32>, AttentionError> {
+    attention_key_lag_reference(spec, query, key, value, z_bias, pair_bias, 0)
+}
+
+/// Read value slot j with the key from max(0, j-lag) in the same batch and head.
+/// Visibility and both biases belong to the value slot: no future value is exposed.
+/// Raw keys need not be shifted or duplicated, including in incremental decode.
+pub fn attention_key_lag_reference(
+    spec: AttentionSpec,
+    query: &[f32],
+    key: &[f32],
+    value: &[f32],
+    z_bias: Option<&[f32]>,
+    pair_bias: Option<&[f32]>,
+    lag: usize,
+) -> Result<Vec<f32>, AttentionError> {
+    if lag != 0 && spec.mask() == AttentionMask::None {
+        return Err(AttentionError::KeyLagMask);
+    }
     validate_inputs(spec, query, key, value, z_bias, pair_bias)?;
     let mut output = vec![0.; query.len()];
     let d = spec.head_dim();
@@ -232,7 +253,15 @@ pub fn attention_reference(
             let mut sum = 0.;
             for k in 0..visible {
                 let key_row = context * spec.keys() + k;
-                let score = score(spec, query, key, (z_bias, pair_bias), row, key_row, k)?;
+                let score = score(
+                    spec,
+                    query,
+                    key,
+                    (z_bias, pair_bias),
+                    row,
+                    (key_row, k),
+                    lag,
+                )?;
                 let next_maximum = maximum.max(score);
                 let previous = sum * (maximum - next_maximum).exp();
                 let current = (score - next_maximum).exp();
@@ -250,5 +279,7 @@ pub fn attention_reference(
     Ok(output)
 }
 
+#[cfg(test)]
+mod key_lag_tests;
 #[cfg(test)]
 mod tests;

@@ -1,9 +1,69 @@
+use st_tensor::classification::{RivalCrossEntropy, TargetClassScore};
 use st_tensor::{
     class_indices_from_tensor, AutogradTensor, CrossEntropyConfig, Layout, LossReduction, Tensor,
 };
 
 fn scalar(value: f32) -> Tensor {
     Tensor::from_vec(1, 1, vec![value]).unwrap()
+}
+
+#[test]
+fn target_score_agrees_with_training_for_each_target_including_ties() {
+    for values in [vec![-0.0, 0.0, -2.0, -0.0], vec![1.0, 2.0, -3.0, 2.0]] {
+        let logits = Tensor::from_vec(1, values.len(), values.clone()).unwrap();
+        for id in 0..values.len() {
+            let s = TargetClassScore::from_logits(&values, id).unwrap();
+            let mut order: Vec<_> = (0..values.len()).collect();
+            order.sort_by(|&a, &b| values[b].partial_cmp(&values[a]).unwrap().then(a.cmp(&b)));
+            let wrong = *order.iter().find(|&&k| k != id).unwrap();
+            assert_eq!(
+                (s.vocabulary, s.target_id, s.strongest_rival_id, s.greedy_id),
+                (4, id, wrong, order[0])
+            );
+            assert_eq!(
+                s.target_rank,
+                1 + order.iter().position(|&k| k == id).unwrap()
+            );
+            let (r, _) = logits
+                .rival_cross_entropy_mean_gradient(
+                    &[id as i64],
+                    RivalCrossEntropy {
+                        rivals: 2,
+                        mix: 0.5,
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                (r.mean_target_rank, r.mean_target_minus_best_rival),
+                (s.target_rank as f64, s.target_minus_best_rival)
+            );
+            assert_eq!(s.nll as f32, r.full_ce);
+        }
+    }
+}
+
+#[test]
+fn target_score_widens_before_subtraction_and_retains_tiny_nll() {
+    let s = TargetClassScore::from_logits(&[-f32::MAX, f32::MAX], 0).unwrap();
+    assert_eq!(s.target_minus_best_rival, -2.0 * f64::from(f32::MAX));
+    assert_eq!(s.nll, -s.target_minus_best_rival);
+    let row = [0.0, -60.0, -60.0];
+    let s = TargetClassScore::from_logits(&row, 0).unwrap();
+    assert_eq!(
+        (s.greedy_id, s.strongest_rival_id, s.target_rank),
+        (0, 1, 1)
+    );
+    assert_eq!(s.nll, (2.0 * (-60.0_f64).exp()).ln_1p());
+    assert!(s.nll > 0.);
+    for (row, target) in [
+        (&[][..], 0),
+        (&[0.0], 0),
+        (&[2.0, 2.0], 2),
+        (&[0.0, f32::INFINITY], 0),
+        (&[f32::NAN, 0.0], 1),
+    ] {
+        assert!(TargetClassScore::from_logits(row, target).is_err());
+    }
 }
 
 #[test]

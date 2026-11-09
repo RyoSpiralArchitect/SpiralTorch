@@ -9,6 +9,8 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Full-vocabulary target rank, best rival, raw margin and NLL; no model execution. */
+    export function scoreTokenLogitsJsonF32(logits: Float32Array, target_id: number): string;
     /** Native greedy ID, using the configured Z-Space policy when present. No GPU required. */
     export function greedyTokenIdF32(logits: Float32Array, history: Uint32Array, configJson: string): number;
     /** Full Rust TokenDecision, including exact final filtered probability and entropy. */

@@ -14,6 +14,10 @@ pub enum CausalLmAdaptationMode {
     Joint,
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "paired_geometry_tests.rs"]
+mod paired_geometry_tests;
+
 #[derive(Debug)]
 pub struct NativeCausalLmAdaptationGradients {
     base_id: String,
@@ -25,9 +29,51 @@ pub struct NativeCausalLmAdaptationGradients {
     shape: [usize; 2],
     parameters: BTreeMap<String, BTreeMap<String, Vec<f32>>>,
     pub(super) observation: Option<Box<CausalLmAdaptationObservation>>,
+    competition: Option<objective::CompetitionReport>,
 }
 
 impl NativeCausalLmAdaptationGradients {
+    pub fn context_token_preference_report(&self) -> Option<&ContextTokenPreference> {
+        match &self.competition {
+            Some(objective::CompetitionReport::ContextToken(r)) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn line_subset_report(&self) -> Option<&CausalLmLineSubsetReport> {
+        match &self.competition {
+            Some(objective::CompetitionReport::LineSubset(r)) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn line_set_report(&self) -> Option<&CausalLmLineSetReport> {
+        match &self.competition {
+            Some(objective::CompetitionReport::LineSet(r)) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn line_menu_report(&self) -> Option<&CausalLmLineMenuReport> {
+        match &self.competition {
+            Some(objective::CompetitionReport::LineMenu(r)) => Some(r),
+            _ => None,
+        }
+    }
+    pub fn competition(&self) -> Option<&RivalCrossEntropyReport> {
+        match &self.competition {
+            Some(objective::CompetitionReport::Top(r)) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn declared_rival_report(&self) -> Option<&DeclaredRivalReport> {
+        match &self.competition {
+            Some(objective::CompetitionReport::Declared(r)) => Some(r),
+            _ => None,
+        }
+    }
+
     pub fn observation(&self) -> Option<&CausalLmAdaptationObservation> {
         self.observation.as_deref()
     }
@@ -179,6 +225,89 @@ impl NativeCausalLm {
         )
     }
 
+    /// Admit the bounded candidate pool and geometry owner before a client copies IDs.
+    pub fn geometry_competition_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+        recipe: RivalCrossEntropy,
+    ) -> CausalLmResult<usize> {
+        recipe.validate(self.config.vocabulary)?;
+        self.validate_adaptation_mode(CausalLmAdaptationMode::Geometry)?;
+        self.adaptation_labeled_input_count(shape, has_labels)
+    }
+
+    /// Backpropagate a mixture of ordinary and top-rival CE into geometry only.
+    /// Attached LoRA remains in the forward computation and is not an update target.
+    pub fn geometry_competition_gradients(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        recipe: RivalCrossEntropy,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.geometry_competition_input_count(shape, labels.is_some(), recipe)?;
+        let mut prepared =
+            self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
+        prepared.competition = Some(recipe.into());
+        self.geometry_gradients_for_competition(&prepared)
+    }
+
+    /// The plan uses flat, unshifted [batch,time] target positions. The first
+    /// token of each independent window has no predictor. Omitted active labels use full CE.
+    pub fn geometry_declared_rival_gradients(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        plan: &[DeclaredRivalRow],
+        mix: f64,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.validate_adaptation_mode(CausalLmAdaptationMode::Geometry)?;
+        let count = self.adaptation_labeled_input_count(shape, labels.is_some())?;
+        DeclaredRivalRow::validate_plan(plan, count, self.config.vocabulary, mix)?;
+        let mut prepared =
+            self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
+        let mut selected = Vec::with_capacity(plan.len());
+        for r in plan {
+            let column = r.position % shape[1];
+            if column == 0 {
+                return Err("the first position in a causal window has no predictor".into());
+            }
+            let shifted = (r.position / shape[1]) * (shape[1] - 1) + column - 1;
+            let row = match &prepared.selected_rows {
+                Some(rows) => rows
+                    .binary_search(&shifted)
+                    .map_err(|_| "declared rival at an ignored target")?,
+                None => shifted,
+            };
+            if usize::try_from(prepared.labels[row])? != r.target {
+                return Err("declared target differs from the supervised label".into());
+            }
+            selected.push(DeclaredRivalRow {
+                position: row,
+                target: r.target,
+                rivals: r.rivals.clone(),
+            });
+        }
+        prepared.competition = Some(objective::PreparedCompetition::Declared { selected, mix });
+        self.geometry_gradients_for_competition(&prepared)
+    }
+
+    pub(super) fn geometry_gradients_for_competition(
+        &self,
+        prepared: &PreparedCausalWindow,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        self.adaptation_gradients_from_prefix(
+            prepared,
+            hidden,
+            0,
+            Some(CausalLmAdaptationMode::Geometry),
+            None,
+        )
+    }
+
     pub fn admit_wave_factorial(
         &self,
         config: crate::geometry_runtime::WaveFactorConfig,
@@ -226,8 +355,25 @@ impl NativeCausalLm {
         hidden: Tensor,
         depth: usize,
         mode: Option<CausalLmAdaptationMode>,
-        mut trace: Option<observation::AdaptationTrace>,
+        trace: Option<observation::AdaptationTrace>,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        Ok(self
+            .adaptation_gradients_capturing_reference(prepared, hidden, depth, mode, trace, None)?
+            .0)
+    }
+
+    pub(super) fn adaptation_gradients_capturing_reference(
+        &self,
+        prepared: &PreparedCausalWindow,
+        hidden: Tensor,
+        depth: usize,
+        mode: Option<CausalLmAdaptationMode>,
+        mut trace: Option<observation::AdaptationTrace>,
+        capture_rivals: Option<usize>,
+    ) -> CausalLmResult<(
+        NativeCausalLmAdaptationGradients,
+        Option<RivalCoverageReference>,
+    )> {
         let (first, site) = match &self.lora {
             Some(a) => (a.layer(), format!("transformer.h.{}.attn", a.layer())),
             None => self.first_geometry_site()?,
@@ -249,7 +395,8 @@ impl NativeCausalLm {
             selected,
             d_normalized,
             loss,
-            ..
+            competition,
+            logits,
         } = self.training_readout(
             prepared,
             hidden,
@@ -257,6 +404,10 @@ impl NativeCausalLm {
             first,
             trace.as_mut().map(|t| &mut t.forward),
         )?;
+        let reference = capture_rivals
+            .map(|k| logits.rival_coverage_reference(&prepared.labels, k))
+            .transpose()?;
+        drop(logits);
         let parameters = self.decoder_parameter_pullback(
             checkpoints,
             hidden_rows,
@@ -304,11 +455,12 @@ impl NativeCausalLm {
             shape,
             parameters,
             observation: None,
+            competition,
         };
         if let Some(trace) = trace {
             gradients.observation = Some(Box::new(trace.finish(self, mode, &gradients)?));
         }
-        Ok(gradients)
+        Ok((gradients, reference))
     }
 
     /// Construct both updates from the same immutable source, committing only
