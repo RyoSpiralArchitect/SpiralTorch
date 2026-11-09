@@ -19,6 +19,8 @@ mod lora;
 
 #[path = "key_lag_tests.rs"]
 mod key_lag_cases;
+#[path = "qkv_causal_tests.rs"]
+mod qkv_causal_cases;
 #[path = "qkv_ragged_tests.rs"]
 mod qkv_ragged_cases;
 

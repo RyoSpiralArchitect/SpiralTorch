@@ -121,6 +121,49 @@ class NativeQkvTests(unittest.TestCase):
         original = self.model.forward(self.qs[1], [1, 3], last_only=True).values()
         self.assertEqual(initial, struct.pack("<11f", *original))
 
+    def test_full_completion_uses_native_labels_and_selected_token_mean(self):
+        completion = st.CausalCompletion([1, 2], [1, 2, 3, 4], [1, 2, 3, 4, 5])
+        ids, labels = completion.training_document()
+        trainer = st.NativeCausalLmQkvAdamW(self.model, 0, max_gradient_norm=.001)
+        g = trainer.loss_gradients(ids, [1, len(ids)], labels=labels, label_smoothing=.1)
+        self.assertEqual(g["target_tokens"], 3)  # two answer IDs plus explicit terminator
+        self.assertEqual(tuple(g["gradient_shape"]), (12, 4))
+        self.assertEqual(len(g["gradient_f32le"]), 192)
+        pieces = [trainer.answer_gradients([ids[:pos]], [labels[pos]], label_smoothing=.1)
+                  for pos in range(1, len(ids)) if labels[pos] != -100]
+        self.assertAlmostEqual(g["objective_loss"], sum(p["objective_loss"] for p in pieces)/3, places=6)
+        values = [struct.unpack("<48f", p["gradient_f32le"]) for p in pieces]
+        for actual, expected in zip(struct.unpack("<48f", g["gradient_f32le"]), zip(*values)):
+            self.assertAlmostEqual(actual, sum(expected)/3, places=6)
+        kw = dict(labels=labels, learning_rate=.03, label_smoothing=.1)
+        report = trainer.step_windows(ids, [1, len(ids)], **kw)
+        self.assertEqual((report["steps"], report["target_tokens"]), (1, 3))
+        self.assertIn("gradient_clip", report)
+        restored = st.NativeCausalLmQkvAdamW.from_bytes(self.model, *trainer.checkpoint_with_id())
+        self.assertEqual(trainer.step_windows(ids, [1, len(ids)], **kw), restored.step_windows(ids, [1, len(ids)], **kw))
+        self.assertEqual(trainer.checkpoint_with_id(), restored.checkpoint_with_id())
+        prefix = trainer.prefill(completion.prompt_ids)
+        self.assertEqual(prefix.logits_f32le(), trainer.last_logits_f32le(completion.prompt_ids))
+
+    def test_window_admission_and_invalid_labels_preserve_qkv_state(self):
+        class Unreadable:
+            def __len__(self): return 10
+            def __getitem__(self, index): raise AssertionError("token read before admission")
+        trainer = self.new()
+        state = trainer.checkpoint_with_id()
+        with self.assertRaises(ValueError):
+            trainer.loss_gradients(Unreadable(), [1, 10])
+        for labels in ([-100]*4, [1], [99]*4, [True]*4):
+            with self.assertRaises((ValueError, TypeError)):
+                trainer.step_windows([1, 2, 3, 4], [1, 4], labels=labels, learning_rate=.03)
+            self.assertEqual(trainer.checkpoint_with_id(), state)
+        for epsilon in (True, -1., float("nan")):
+            with self.assertRaises((ValueError, TypeError)):
+                trainer.step_windows([1, 2, 3, 4], [1, 4], learning_rate=.03, label_smoothing=epsilon)
+            self.assertEqual(trainer.checkpoint_with_id(), state)
+        trainer.step_windows([1, 2, 3, 4], [1, 4], learning_rate=0.)
+        self.assertEqual(trainer.checkpoint_with_id(), state)
+
     def test_rejections_and_zero_rate_never_change_state(self):
         a = self.new()
         state = a.checkpoint_with_id()

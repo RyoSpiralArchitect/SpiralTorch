@@ -139,6 +139,57 @@ generator for sampling and EOS handling, as described below.
 The [binding verification](../../benchmarks/paired-prompt-contrast/PYTHON-QKV.md)
 separates local API checks from wheel publication and language-quality evidence.
 
+### Full-Answer QKV Learning
+
+For teacher-forced supervision of every answer token, source builds also expose
+`loss_gradients` and `step_windows`. They reuse Rust's existing shifted causal
+objective, decoder backward and atomic QKV optimizer, not a Python training loop
+over expanded prefixes. The original answer-only API above is unchanged.
+
+```python
+# Explicit IDs for a prompt, its answer, and a terminating token.
+# These small IDs illustrate layout, not a meaningful natural-language example.
+completion = st.CausalCompletion([1, 2], [1, 2, 3, 4], [1, 2, 3, 4, 5])
+window, labels = completion.training_document()
+trainer = st.NativeCausalLmQkvAdamW(model, layer=0)
+report = trainer.step_windows(
+    window, [1, len(window)], labels=labels, learning_rate=1e-4,
+)
+assert report["target_tokens"] == 3  # Answer IDs 3/4 plus explicit terminator 5.
+print(report["objective_loss"], report["gradient_l2"])
+```
+
+`windows` is a flat array with rectangular `window_shape=[B,T]`, with `T >= 2`.
+Each row feeds its first `T-1` IDs and predicts the following IDs. Optional
+`labels` has the same **unshifted** shape: the first label per row is not scored,
+and `-100` masks only loss, never attention or context. With no labels, every
+next token is scored. All-ignored labels and out-of-vocabulary IDs are rejected.
+Neither padding, EOS insertion, truncation nor an attention mask is inferred.
+Different-length windows must be handled explicitly; successive calls are
+separate optimizer updates, not hidden gradient accumulation.
+
+The loss is a mean over **selected target tokens across the batch**, not an
+equal mean of sequence losses. Each successful `step_windows` applies one
+update after that mean; optional global clipping follows the same shared
+contract below. Reports always use `objective_loss`, `label_smoothing`,
+`window_shape` and `target_tokens`, with raw Q/K/V `gradient_l2` and optional
+`gradient_clip`. Label smoothing defaults to zero. Repetition/rival objectives
+are not part of this API. Only the selected QKV weight learns; attached geometry,
+LoRA, biases and all other model parameters remain frozen.
+
+`trainer.loss_gradients(window, shape, labels=labels, label_smoothing=0.1)`
+returns the raw objective derivative without updating, as output-major
+`gradient_f32le`, `gradient_shape`, `objective_loss`, `label_smoothing` and
+`target_tokens`. Checkpoint/restore, cached inference and generation use the
+same trainer APIs below. Save the input order, masks and objective policy
+separately: the QKV checkpoint is not a dataset cursor.
+
+[Verification](../../benchmarks/paired-prompt-contrast/QKV-CAUSAL-WINDOWS.md):
+222 native CPU tests and 72 isolated Python tests pass, including finite
+differences, sparse-label admission and exact continuation. This is a source
+build API check using synthetic models, not pretrained-model SFT quality or
+wheel-release evidence.
+
 ### Optional QKV Gradient Clipping
 
 Choose a positive, finite f32 `max_gradient_norm` when creating the optimizer

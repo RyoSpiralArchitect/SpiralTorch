@@ -6,6 +6,8 @@ use st_kernel_contracts::gradient_clip::GlobalNormClip;
 use st_tensor::PackedLayout;
 
 mod batching;
+mod causal;
+pub use causal::CausalLmQkvWindowStep;
 
 const MAX_VALUES: usize = 1 << 22;
 const MAX_HEADER: usize = 16384;
@@ -265,18 +267,30 @@ impl NativeCausalLmQkvAdamW {
             None,
         )?;
         let gradient = gradient.ok_or("unreached QKV derivative")?;
+        self.validate_derivative(loss, &gradient)?;
+        Ok((loss, gradient))
+    }
+
+    fn validate_derivative(&self, loss: f32, gradient: &Tensor) -> CausalLmResult<()> {
+        let c = &self.model.config;
         if !loss.is_finite()
             || gradient.shape() != (3 * c.width, c.width)
             || gradient.data().iter().any(|v| !v.is_finite())
         {
             return Err("nonfinite or misshaped QKV derivative".into());
         }
-        Ok((loss, gradient))
+        Ok(())
     }
 
     fn answer_gradient_rows(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
         let m = &self.model;
         let rows = m.input_count(shape, true)?;
+        self.admit_gradient_rows(rows)?;
+        Ok(rows)
+    }
+
+    fn admit_gradient_rows(&self, rows: usize) -> CausalLmResult<()> {
+        let m = &self.model;
         product(
             &[m.config.layers - self.layer, rows, m.config.width],
             m.limits.max_training_checkpoint_elements,
@@ -287,7 +301,7 @@ impl NativeCausalLmQkvAdamW {
             1 << 30,
             "QKV gradient work",
         )?;
-        Ok(rows)
+        Ok(())
     }
     fn install(&mut self, weights: Vec<f32>) -> CausalLmResult<()> {
         let w = self.model.config.width;

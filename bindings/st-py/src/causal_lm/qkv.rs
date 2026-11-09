@@ -234,6 +234,79 @@ impl PyQkv {
         Ok(out.into_any().unbind())
     }
 
+    #[pyo3(signature=(windows, window_shape, *, labels=None, label_smoothing=None))]
+    fn loss_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        window_shape: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let objective = loss_objective(label_smoothing, None)?;
+        let shape = shape(window_shape)?;
+        let count = self
+            .inner
+            .loss_input_count(shape, labels.is_some())
+            .map_err(error)?;
+        let ids = tokens(windows, count)?;
+        let labels = loss_labels(labels, count)?;
+        let (loss, gradient, target_tokens) = py
+            .detach(|| {
+                self.inner.causal_loss_gradients(
+                    &ids,
+                    shape,
+                    labels.as_deref(),
+                    objective.label_smoothing,
+                )
+            })
+            .map_err(error)?;
+        let out = PyDict::new(py);
+        out.set_item("objective_loss", loss)?;
+        out.set_item("label_smoothing", objective.label_smoothing)?;
+        out.set_item("target_tokens", target_tokens)?;
+        out.set_item("gradient_shape", gradient.shape())?;
+        out.set_item("gradient_f32le", bytes(py, gradient.data())?)?;
+        Ok(out.into_any().unbind())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(windows, window_shape, *, learning_rate, labels=None, label_smoothing=None, weight_decay=None))]
+    fn step_windows(
+        &mut self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        window_shape: &Bound<'_, PyAny>,
+        learning_rate: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
+        weight_decay: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let step = adamw_step(learning_rate, weight_decay)?;
+        let objective = loss_objective(label_smoothing, None)?;
+        let shape = shape(window_shape)?;
+        let count = self
+            .inner
+            .loss_input_count(shape, labels.is_some())
+            .map_err(error)?;
+        let ids = tokens(windows, count)?;
+        let labels = loss_labels(labels, count)?;
+        let report = py.detach(|| -> PyResult<serde_json::Value> {
+            let report = self
+                .inner
+                .step_windows(
+                    &ids,
+                    shape,
+                    labels.as_deref(),
+                    objective.label_smoothing,
+                    step,
+                )
+                .map_err(error)?;
+            serde_json::to_value(report).map_err(error)
+        })?;
+        crate::json::json_to_py(py, &report)
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature=(prompts, gold, *, learning_rate, max_rows=None, weight_decay=None, label_smoothing=None))]
     fn step_answers(
