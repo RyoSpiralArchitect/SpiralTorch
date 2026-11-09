@@ -1,6 +1,9 @@
 """Real native QKV updates without foreign ML packages or array libraries."""
+import ast
 import importlib.abc
+import inspect
 import json
+from pathlib import Path
 import struct
 import sys
 import unittest
@@ -226,6 +229,58 @@ class NativeQkvTests(unittest.TestCase):
         with self.assertRaises((TypeError, ValueError)):
             a.generator([True], json.dumps(dict(max_new_tokens=1)))
         self.assertEqual(a.checkpoint_with_id(), state)
+
+    def test_generation_type_stubs_match_the_native_interface(self):
+        tree = ast.parse(Path(st.__file__).with_suffix(".pyi").read_text())
+        classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+        methods = {node.name: node for node in classes["NativeCausalLmQkvAdamW"].body
+                   if isinstance(node, ast.FunctionDef)}
+        for name in ("generator", "restore_generator"):
+            node = methods[name]
+            self.assertEqual(ast.unparse(node.returns), "NativeCausalLmGenerator")
+            declared = tuple(arg.arg for arg in node.args.posonlyargs + node.args.args)
+            native = tuple(inspect.signature(getattr(st.NativeCausalLmQkvAdamW, name)).parameters)
+            self.assertEqual(declared, native)
+        properties = {node.name: node for node in classes["NativeCausalLmGenerator"].body
+                      if isinstance(node, ast.FunctionDef)}
+        owner = properties["projection_id"]
+        self.assertEqual(ast.unparse(owner.returns), "str | None")
+        self.assertEqual([ast.unparse(d) for d in owner.decorator_list], ["property"])
+        self.assertTrue(hasattr(st.NativeCausalLmGenerator, "projection_id"))
+
+    def test_qkv_sampled_zspace_preserves_policy_and_resumes_for_each_readout(self):
+        for lag in (0, 1):
+            for arithmetic in ("f32", "f32_wide_backward", "f64"):
+                with self.subTest(lag=lag, arithmetic=arithmetic):
+                    config, weights = fixture()
+                    if lag:
+                        config = json.loads(config)
+                        config.update(model_type="spiraltorch_gpt2_key_lag_v1",
+                                      spiraltorch_key_lag={"layer": 0, "lag": lag})
+                        config = json.dumps(config)
+                    model = st.NativeCausalLm.from_gpt2(config, weights)
+                    model = model.with_lora(1, 2, 1.).with_geometry(
+                        artifact(model, path="transformer.h.1.attn")
+                    ).with_readout_accumulator(arithmetic)
+                    trainer = st.NativeCausalLmQkvAdamW(model, 0)
+                    trainer.step_answers(self.qs, self.ys, learning_rate=.03)
+                    saved = trainer.checkpoint_with_id()
+                    policy = dict(max_new_tokens=4, seed=132, decoding=dict(
+                        selection="sample", top_k=6, top_p=.8,
+                        distribution=dict(kind="zspace", config=dict(curvature=-1.))))
+                    full = trainer.generator([1, 2, 3], json.dumps(policy))
+                    cached = trainer.generator([1, 2, 3], json.dumps(dict(
+                        policy, execution=dict(kind="kv_cache", max_values=96))))
+                    while not full.finished:
+                        resumed = trainer.restore_generator(cached.to_json(), cached.checkpoint_id)
+                        report = full.step().to_json()
+                        self.assertEqual(cached.step().to_json(), report)
+                        self.assertEqual(resumed.step().to_json(), report)
+                        self.assertEqual(cached.to_json(), resumed.to_json())
+                        self.assertEqual(json.loads(report)["zspace_contract"],
+                                         "spiraltorch.zspace_generation_control.v1")
+                        self.assertEqual(cached.projection_id, trainer.serving_id)
+                    self.assertEqual(trainer.checkpoint_with_id(), saved)
 
 
 if __name__ == "__main__":

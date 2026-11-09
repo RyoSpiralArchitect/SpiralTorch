@@ -224,8 +224,10 @@ cache is reconstructed on restore, not serialized. Existing ordinary generator
 JSON omits `projection_id`, preserving its previous serialization.
 
 [Validation status](../../benchmarks/paired-prompt-contrast/QKV-GENERATION.md):
-Rust CPU tests and Python-binding compilation passed. The new Python methods
-have not yet been exercised in a relinked extension or published wheel.
+215 Rust CPU tests, Python-binding compilation and 66 isolated Python runtime
+tests passed. The new methods were exercised in a freshly built CPU extension,
+including sampled Z-Space continuation. This is local source-build verification,
+not a published-wheel, GPU or pretrained-model quality guarantee.
 
 ## Explicit Readout Arithmetic
 

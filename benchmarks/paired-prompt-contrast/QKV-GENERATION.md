@@ -1,9 +1,10 @@
 # Native Generation From Trained QKV Snapshots
 
-Status: source implementation, 215 native CPU decoder tests, and CPU Python
-binding compilation passed. Python runtime verification is pending: this stage
-did not relink the extension or replace the saved wheel. It did not run a new
-pretrained-model study, score historical evaluation inputs, or publish artifacts.
+Status: source implementation, 215 native CPU decoder tests, CPU binding
+compilation, and 66 isolated Python runtime tests passed. The CPU extension was
+subsequently built once into a private source-package overlay; the saved previous
+extension and wheels were preserved. No new pretrained-model study, historical
+evaluation scoring, installed wheel, or publication was performed.
 
 The previous [saved-model restore comparison](PYTHON-QKV-RESTORE.md) established
 full-prefix/cache compatibility, not automatic sampling. This change connects
@@ -45,10 +46,9 @@ optimizer updates, cross-owner and cross-route refusal, length/cache admission,
 EOS stopping, and preservation of optimizer state during inference. Existing
 ordinary generation tests also assert omission of the projection field.
 
-One CPU binding `cargo check` completed in 22.84 seconds. It verifies the Rust
-types and PyO3 binding compilation, **not Python execution**. Two new Python
-tests cover snapshot continuation/owner rejection and admission before foreign
-token access, but await a new extension. The prior 51-test Python result belongs
+One CPU binding `cargo check` completed in 22.84 seconds. That result verifies
+the Rust types and PyO3 compilation, **not Python execution**. It was followed
+by the separate runtime checks below. The prior 51-test Python result belongs
 to the earlier cache API and is not reused as evidence for these new methods.
 
 Both commands used the existing scoped Cargo target with incremental output
@@ -57,14 +57,51 @@ and a 4 GiB free-space floor. Both completed on the first invocation with no
 guard trigger and unchanged source inventories. No files were deleted. Existing
 dead-code warnings remain; this was not a full CI or WASM/GPU validation.
 
+## Python Runtime Verification
+
+One CPU release build completed in 118.23 seconds under a 600-second cap and
+the same 4 GiB free-space floor. It used `--no-default-features --features
+python-default`, reused the current Cargo target, and neither deleted caches
+nor installed a wheel. The previous saved library's SHA-256 was checked before
+and after the work and remained unchanged.
+
+An isolated 83-file package overlay was pinned before import. Under
+`python3.12 -I -B -S`, one fail-fast invocation passed all **66 tests**:
+11 QKV/interface tests, 44 existing native decoder tests, and 11 existing
+generation tests. No skips, import attempts for foreign ML packages, or loaded
+Torch/NumPy/Transformers/Python-safetensors/Accelerate modules were recorded.
+Package and source inventories were unchanged during the invocation. The outer
+CPU runner took 2.04 seconds against a 120-second cap; test-body time was 0.227
+seconds. These timings describe validation, not a performance benchmark.
+
+The new runtime checks cover snapshot ownership and refusal after further
+training, admission before foreign prompt access, and sampled Z-Space report
+and checkpoint equality across ordinary/key-lag attention and all three readout
+policies, with frozen LoRA and geometry. Existing generation regressions also
+exercise EOS, numeric failures, token-only/chunked generation, ordinary sampling,
+and the file-based public example's uninterrupted/resumed output agreement.
+All models are small synthetic test fixtures; no pretrained model was loaded.
+
+Inspection also found the new methods missing from the Python type declarations.
+The declarations now include QKV `generator`/`restore_generator` and generator
+`projection_id`. A runtime regression checks the declared method names,
+argument names, return annotations and property declaration against the new
+native interface. This is not a full static-type-checker audit.
+
 Local evidence: `2026-11-10-qkv-generation-v1` in the SpiralTorch validation store.
 
 | Evidence | SHA-256 |
 | --- | --- |
-| Tested source inventory | `1ca3a35751916ed342f8cbee86fdfa0469c379d55aca49ae8584048e210c1e43` |
+| Initial Rust/check source inventory | `1ca3a35751916ed342f8cbee86fdfa0469c379d55aca49ae8584048e210c1e43` |
 | Native test log | `d9351068c672c565e6cd8ba8b7a64fe367a71488e99707bdeba875ac69605109` |
 | CPU binding check log | `3d683bf3d25c8ac23e29f1f9235ba1490e70c87c8bab4b6ea4eef998a6a101ad` |
+| One CPU extension build log | `d2fa151b4d7ba2e03c9c29e178e590b505afd4535fa5eb7217dd54298f1ef92c` |
+| New CPU extension | `98cb127768f5d18ab330fe60739f40ab57a068a6e11ef34852f6d481dfceeace` |
+| Frozen package manifest | `c5b024e4d356bb9977a96a32a3f8377a473b6da00283aa955d9f66a7618ea92e` |
+| Python runtime source inventory | `eb78abaf172975f04bf73d1c36dece9ba0e1092ea9f77d08ccd59f082f8f9218` |
+| Python 66-test log | `f4a8efdd66e8c413f3930f751a40ad9b25a0c224a824414cc8d16fb6d6b63fcb` |
 
-The code tested by these receipts precedes only the documentation additions.
-No decoder/source code was changed after these successful invocations.
+The native Rust implementation did not change after the initial Rust checks.
+Python tests and type declarations were extended before the Python runtime
+invocation; only documentation changed after that invocation.
 See the [usage guide](../../docs/python/native-causal-lm.md#generation-after-qkv-updates).
