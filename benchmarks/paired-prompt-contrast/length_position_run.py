@@ -84,6 +84,20 @@ def checkpoint(path, pin, owner, step):
     require(all(math.isfinite(x[0]) for x in struct.iter_unpack("<f", raw[4+n:])), "nonfinite state")
 
 
+def update_report(report, action):
+    smoothing = action.get("label_smoothing")
+    if smoothing is None:
+        require(set(report) == {"steps", "gold_nll", "gradient_l2"}, "wrong plain CE report")
+        value = report["gold_nll"]
+    else:
+        require(math.isfinite(smoothing) and 0 <= smoothing <= 1
+                and set(report) == {"steps", "objective_loss", "label_smoothing", "gradient_l2"}
+                and report["label_smoothing"] == smoothing, "wrong smoothed CE report")
+        value = report["objective_loss"]
+    require(math.isfinite(value) and len(report["gradient_l2"]) == 3
+            and all(math.isfinite(x) and x >= 0 for x in report["gradient_l2"]), "nonfinite update")
+
+
 class Native:
     def __init__(self, p, parent, driver, out, seconds):
         self.p, self.parent, self.driver, self.out = p, parent, driver, out
@@ -123,7 +137,7 @@ class Native:
             require(z["steps"] == step and len(z["data"]["updates"]) == 1
                     and z["data"]["updates"][0]["steps"] == step, "wrong update count")
             report = z["data"]["updates"][0]
-            require(math.isfinite(report["gold_nll"]) and all(map(math.isfinite, report["gradient_l2"])), "nonfinite update")
+            update_report(report, action)
             pin = z["data"]["pins"][str(step)]
             require(pin["serving"] == z["end"], "wrong saved serving identity")
             state = lane / f"state/{step}.bin"

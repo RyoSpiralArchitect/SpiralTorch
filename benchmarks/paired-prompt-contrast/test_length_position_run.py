@@ -10,6 +10,16 @@ import length_position_run as r
 
 
 class RunnerTests(unittest.TestCase):
+    def test_objective_report_cannot_impersonate_plain_nll(self):
+        plain = dict(steps=1, gold_nll=2., gradient_l2=[0., 1., 2.])
+        smooth = dict(steps=1, objective_loss=2., label_smoothing=.1, gradient_l2=[0., 1., 2.])
+        r.update_report(plain, {})
+        r.update_report(smooth, dict(label_smoothing=.1))
+        for report, action in ((smooth, {}), (plain, dict(label_smoothing=.1)),
+                               (smooth, dict(label_smoothing=.2))):
+            with self.assertRaises(ValueError):
+                r.update_report(report, action)
+
     def test_steps_carry_state_and_do_not_repeat_first_batch(self):
         seen = []
 

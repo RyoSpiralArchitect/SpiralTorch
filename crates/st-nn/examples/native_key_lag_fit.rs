@@ -41,6 +41,7 @@ enum Action {
         microbatch: usize,
         #[serde(default)]
         batch_kind: BatchKind,
+        label_smoothing: Option<f64>,
         rate: f32,
         updates: u32,
         save_at: Vec<u32>,
@@ -56,6 +57,7 @@ enum Action {
         microbatch: usize,
         #[serde(default)]
         batch_kind: BatchKind,
+        label_smoothing: Option<f64>,
     },
 }
 
@@ -108,6 +110,12 @@ fn input(prompts: &[Vec<usize>]) -> CausalLmResult<(Vec<usize>, [usize; 2])> {
     }
     Ok((prompts.concat(), [prompts.len(), n]))
 }
+fn check_smoothing(value: Option<f64>) -> CausalLmResult<()> {
+    if value.is_some_and(|x| !x.is_finite() || !(0.0..=1.0).contains(&x)) {
+        return Err("label_smoothing must be finite and within [0, 1]".into());
+    }
+    Ok(())
+}
 fn main() -> CausalLmResult<()> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 4 {
@@ -151,12 +159,15 @@ fn main() -> CausalLmResult<()> {
             gold,
             microbatch,
             batch_kind,
+            label_smoothing,
             rate,
             updates,
             save_at,
             out,
         } => {
             let batch = AnswerBatch::new(&prompts, batch_kind)?;
+            check_smoothing(label_smoothing)?;
+            let sequences = prompts.iter().map(Vec::as_slice).collect::<Vec<_>>();
             if rate <= 0.
                 || updates == 0
                 || updates > 512
@@ -172,13 +183,19 @@ fn main() -> CausalLmResult<()> {
             let mut losses = vec![];
             let mut pins = BTreeMap::new();
             for i in 1..=updates {
-                losses.push(match &batch {
-                    AnswerBatch::EqualLength(ids, shape) => {
-                        train.step_answers_microbatched(ids, *shape, &gold, microbatch, step)?
-                    }
-                    AnswerBatch::UnpaddedSequences(prompts) => {
-                        train.step_answer_sequences(prompts, &gold, microbatch, step)?
-                    }
+                losses.push(if let Some(epsilon) = label_smoothing {
+                    json!(train.step_answer_sequences_with_label_smoothing(
+                        &sequences, &gold, microbatch, epsilon, step
+                    )?)
+                } else {
+                    json!(match &batch {
+                        AnswerBatch::EqualLength(ids, shape) => {
+                            train.step_answers_microbatched(ids, *shape, &gold, microbatch, step)?
+                        }
+                        AnswerBatch::UnpaddedSequences(prompts) => {
+                            train.step_answer_sequences(prompts, &gold, microbatch, step)?
+                        }
+                    })
                 });
                 if save_at.contains(&i) {
                     let (bytes, pin) = train.checkpoint()?;
@@ -200,19 +217,36 @@ fn main() -> CausalLmResult<()> {
             gold,
             microbatch,
             batch_kind,
+            label_smoothing,
         } => {
             if train.weights().len() > 1 << 16 {
                 return Err("gradient export exceeds example budget".into());
             }
-            let (loss, g) = match AnswerBatch::new(&prompts, batch_kind)? {
-                AnswerBatch::EqualLength(ids, shape) => {
-                    train.answer_gradients_microbatched(&ids, shape, &gold, microbatch)?
-                }
-                AnswerBatch::UnpaddedSequences(prompts) => {
-                    train.answer_sequence_gradients(&prompts, &gold, microbatch)?
+            let batch = AnswerBatch::new(&prompts, batch_kind)?;
+            check_smoothing(label_smoothing)?;
+            let (loss, g) = if let Some(epsilon) = label_smoothing {
+                train.answer_sequence_gradients_with_label_smoothing(
+                    &prompts.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+                    &gold,
+                    microbatch,
+                    epsilon,
+                )?
+            } else {
+                match batch {
+                    AnswerBatch::EqualLength(ids, shape) => {
+                        train.answer_gradients_microbatched(&ids, shape, &gold, microbatch)?
+                    }
+                    AnswerBatch::UnpaddedSequences(prompts) => {
+                        train.answer_sequence_gradients(&prompts, &gold, microbatch)?
+                    }
                 }
             };
-            json!({"loss":loss,"packed_bits":g.data().iter().map(|v|v.to_bits()).collect::<Vec<_>>()})
+            let bits = g.data().iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+            if let Some(epsilon) = label_smoothing {
+                json!({"objective_loss":loss,"label_smoothing":epsilon,"packed_bits":bits})
+            } else {
+                json!({"loss":loss,"packed_bits":bits})
+            }
         }
         Action::Score {
             prompts,
@@ -294,5 +328,24 @@ mod tests {
         for qs in [vec![], vec![vec![]], vec![vec![1; 513]], vec![vec![1]; 129]] {
             assert!(AnswerBatch::new(&qs, BatchKind::UnpaddedSequences).is_err());
         }
+    }
+
+    #[test]
+    fn smoothing_is_explicit_and_checked_before_output_creation() {
+        assert!(check_smoothing(None).is_ok());
+        for value in [0., 0.1, 1.] {
+            assert!(check_smoothing(Some(value)).is_ok());
+        }
+        for value in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+            assert!(check_smoothing(Some(value)).is_err());
+        }
+        let raw = json!({"kind":"gradient", "prompts":[[1]], "gold":[2], "microbatch":1});
+        let Action::Gradient {
+            label_smoothing, ..
+        } = serde_json::from_value(raw).unwrap()
+        else {
+            panic!("wrong action")
+        };
+        assert_eq!(label_smoothing, None);
     }
 }
