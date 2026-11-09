@@ -132,11 +132,46 @@ the matching original model. Preserve the next inputs, learning rate, decay,
 smoothing and batch order separately to reproduce continuation. `serving_id`
 identifies the updated inference state, not the full optimizer or data history.
 Invalid inputs do not change optimizer state; zero learning rate freezes it.
-Python file storage, cached generation and exporting a new full-model archive
-are not provided by this wrapper.
+Checkpoint file storage, automatic sampling/EOS management and exporting a
+new full-model archive are not provided by this wrapper.
 
 The [binding verification](../../benchmarks/paired-prompt-contrast/PYTHON-QKV.md)
 separates local API checks from wheel publication and language-quality evidence.
+
+### Cached Inference After QKV Updates
+
+`trainer.prefill(ids, max_cache_values=...)` creates an immutable
+`NativeCausalLmProjectionPrefix` bound to the trainer's **current** `serving_id`.
+It retains the native model snapshot, K/V state and any causal-geometry history.
+Calling `branch(token_id)` returns a new prefix with one token appended, without
+changing the parent. Python does not implement attention or mutate cache buffers.
+
+```python
+prefix = trainer.prefill(ids, max_cache_values=1_048_576)
+left = prefix.branch(262)
+right = prefix.branch(257)
+assert prefix.token_ids == ids
+assert left.logits_f32le() == trainer.last_logits_f32le(ids + [262])
+print(left.serving_id, left.cache_values, left.max_cache_values)
+```
+
+If training subsequently changes the weights, these prefixes still serve their
+old snapshot. Start a **new** prefill to serve the new weights; do not treat old
+cache logits as outputs of the latest trainer. Restoring a matching optimizer
+checkpoint and prefilling again reconstructs serving state; this acceleration
+cache itself is not a serialized checkpoint.
+
+The default limit is 16,777,216 retained f32 cache values **per branch**, including
+K/V and required geometry history. It excludes frozen weights, logits and
+temporary transaction buffers; keeping many branches multiplies memory usage.
+Lengths and cache capacity are admitted before Python prefix tokens are copied.
+Invalid tokens, capacity exhaustion and position overflow leave the parent
+prefix unchanged. Causal geometry may replay its retained input history; this
+API is not a zero-copy, GPU or speedup claim.
+
+The [cache verification](../../benchmarks/paired-prompt-contrast/PYTHON-QKV-CACHE.md)
+covers ordinary/key-lag attention with frozen LoRA and geometry, all three
+readout policies, exact full-prefix agreement and snapshot isolation.
 
 ## Explicit Readout Arithmetic
 

@@ -1,12 +1,54 @@
 //! Bounded transport only; the native QKV optimizer owns all learning semantics.
 use super::*;
 use pyo3::types::PyDict;
-use st_nn::causal_lm::NativeCausalLmQkvAdamW;
+use st_nn::causal_lm::{
+    NativeCausalLmContext, NativeCausalLmProjectionPrefix, NativeCausalLmQkvAdamW,
+};
 use st_nn::geometry_runtime::AdamWConfig;
 
 #[pyclass(name = "NativeCausalLmQkvAdamW", module = "spiraltorch")]
 pub(super) struct PyQkv {
     inner: NativeCausalLmQkvAdamW,
+}
+
+/// Immutable cached prefix of one exact trained projection snapshot.
+#[pyclass(
+    name = "NativeCausalLmProjectionPrefix",
+    module = "spiraltorch",
+    frozen
+)]
+pub(super) struct PyProjectionPrefix {
+    inner: NativeCausalLmProjectionPrefix,
+}
+
+#[pymethods]
+impl PyProjectionPrefix {
+    #[getter]
+    fn serving_id(&self) -> &str {
+        self.inner.projection_id()
+    }
+    #[getter]
+    fn token_ids(&self) -> Vec<usize> {
+        self.inner.token_ids().to_vec()
+    }
+    #[getter]
+    fn cache_values(&self) -> usize {
+        self.inner.cache_values()
+    }
+    #[getter]
+    fn max_cache_values(&self) -> usize {
+        self.inner.max_cache_values()
+    }
+    fn logits_f32le<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        bytes(py, self.inner.logits())
+    }
+    /// Return a new branch; this prefix remains bound to its original weights.
+    fn branch(&self, py: Python<'_>, token_id: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let id = dimension(token_id)?;
+        py.detach(|| self.inner.branch(id))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
 }
 
 fn scalar(value: Option<&Bound<'_, PyAny>>, default: f32) -> PyResult<f32> {
@@ -89,6 +131,27 @@ impl PyQkv {
     #[getter]
     fn serving_id(&self, py: Python<'_>) -> String {
         py.detach(|| self.inner.serving_id())
+    }
+
+    #[pyo3(signature=(prompt, *, max_cache_values=None))]
+    fn prefill(
+        &self,
+        py: Python<'_>,
+        prompt: &Bound<'_, PyAny>,
+        max_cache_values: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyProjectionPrefix> {
+        let budget = limit(
+            max_cache_values,
+            NativeCausalLmContext::DEFAULT_MAX_CACHE_VALUES,
+        )?;
+        let count = self
+            .inner
+            .prefill_input_count(prompt.len()?, budget)
+            .map_err(error)?;
+        let ids = tokens(prompt, count)?;
+        py.detach(|| self.inner.prefill(ids, budget))
+            .map(|inner| PyProjectionPrefix { inner })
+            .map_err(error)
     }
 
     #[pyo3(signature=(prompts, gold, *, max_rows=None, label_smoothing=None))]
@@ -206,5 +269,6 @@ impl PyQkv {
 }
 
 pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<PyQkv>()
+    module.add_class::<PyQkv>()?;
+    module.add_class::<PyProjectionPrefix>()
 }

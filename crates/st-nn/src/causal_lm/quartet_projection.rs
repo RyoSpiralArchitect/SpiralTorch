@@ -128,6 +128,12 @@ impl NativeCausalLmProjectionPrefix {
     pub fn token_ids(&self) -> &[usize] {
         self.cache.token_ids()
     }
+    pub fn cache_values(&self) -> usize {
+        self.cache.cache_values()
+    }
+    pub fn max_cache_values(&self) -> usize {
+        self.cache.max_cache_values()
+    }
     pub fn logits(&self) -> &[f32] {
         self.cache.logits_tensor().data()
     }

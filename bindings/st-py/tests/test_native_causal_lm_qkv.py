@@ -1,5 +1,6 @@
 """Real native QKV updates without foreign ML packages or array libraries."""
 import importlib.abc
+import json
 import struct
 import sys
 import unittest
@@ -123,6 +124,67 @@ class NativeQkvTests(unittest.TestCase):
             def __getitem__(self, index): raise AssertionError("roster copied before admission")
         with self.assertRaises(ValueError):
             a.answer_gradients(TooMany(), [])
+
+    def test_cached_projection_keeps_old_snapshot_after_training(self):
+        for lag in (0, 1):
+            for arithmetic in ("f32", "f32_wide_backward", "f64"):
+                with self.subTest(lag=lag, arithmetic=arithmetic):
+                    config, weights = fixture()
+                    if lag:
+                        config = json.loads(config)
+                        config.update(model_type="spiraltorch_gpt2_key_lag_v1",
+                                      spiraltorch_key_lag={"layer": 0, "lag": lag})
+                        config = json.dumps(config)
+                    model = st.NativeCausalLm.from_gpt2(config, weights)
+                    model = model.with_lora(1, 2, 1.).with_geometry(
+                        artifact(model, path="transformer.h.1.attn")
+                    )
+                    model = model.with_readout_accumulator(arithmetic)
+                    a = st.NativeCausalLmQkvAdamW(model, 0)
+                    a.step_answers(self.qs, self.ys, learning_rate=.03, label_smoothing=.1)
+                    frozen = st.NativeCausalLmQkvAdamW.from_bytes(model, *a.checkpoint_with_id())
+                    prefix = a.prefill([1, 2, 3], max_cache_values=128)
+                    self.assertIsInstance(prefix, st.NativeCausalLmProjectionPrefix)
+                    self.assertIn("NativeCausalLmProjectionPrefix", st.__all__)
+                    self.assertEqual(prefix.serving_id, a.serving_id)
+                    original = prefix.logits_f32le()
+                    self.assertEqual(original, a.last_logits_f32le([1, 2, 3]))
+                    a.step_answers(self.qs, self.ys, learning_rate=.03, label_smoothing=.1)
+                    self.assertNotEqual(a.serving_id, prefix.serving_id)
+                    for tail in ([4, 5], [7, 8]):
+                        branch = prefix
+                        for token in tail:
+                            branch = branch.branch(token)
+                            self.assertEqual(branch.logits_f32le(), frozen.last_logits_f32le(branch.token_ids))
+                            self.assertEqual(branch.serving_id, frozen.serving_id)
+                        self.assertEqual(branch.token_ids, [1, 2, 3] + tail)
+                    self.assertEqual(prefix.token_ids, [1, 2, 3])
+                    self.assertEqual(prefix.logits_f32le(), original)
+                    fresh = a.prefill([1, 2, 3])
+                    self.assertEqual(fresh.logits_f32le(), a.last_logits_f32le([1, 2, 3]))
+                    self.assertNotEqual(fresh.logits_f32le(), original)
+                    self.assertEqual((prefix.cache_values, prefix.max_cache_values), (48, 128))
+
+    def test_cache_admission_and_failed_branch_preserve_prefix(self):
+        class Unreadable:
+            def __len__(self): return 3
+            def __getitem__(self, index): raise AssertionError("token read before cache admission")
+        a = self.new()
+        before = a.checkpoint_with_id()
+        for budget in (0, 47, True):
+            with self.assertRaises((TypeError, ValueError)):
+                a.prefill(Unreadable(), max_cache_values=budget)
+        prefix = a.prefill([1, 2, 3], max_cache_values=48)
+        state = (prefix.serving_id, prefix.token_ids, prefix.logits_f32le(), prefix.cache_values)
+        for token in (True, -1, 999, 4):
+            with self.assertRaises((TypeError, ValueError, OverflowError)):
+                prefix.branch(token)
+            self.assertEqual(state, (prefix.serving_id, prefix.token_ids, prefix.logits_f32le(), prefix.cache_values))
+        full = a.prefill([1] * 8)
+        with self.assertRaises(ValueError):
+            full.branch(2)
+        self.assertEqual(full.token_ids, [1] * 8)
+        self.assertEqual(a.checkpoint_with_id(), before)
 
 
 if __name__ == "__main__":

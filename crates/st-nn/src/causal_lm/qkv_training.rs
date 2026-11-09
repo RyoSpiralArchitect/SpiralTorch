@@ -123,11 +123,20 @@ impl NativeCausalLmQkvAdamW {
         }
         format!("sha256:{:x}", h.finalize())
     }
+    /// Admit a snapshot's cache before a binding copies its prefix IDs.
+    pub fn prefill_input_count(
+        &self,
+        steps: usize,
+        max_cache_values: usize,
+    ) -> CausalLmResult<usize> {
+        self.model.context_prefill_count(steps, max_cache_values)
+    }
     pub fn prefill(
         &self,
         prompt: Vec<usize>,
         budget: usize,
     ) -> CausalLmResult<NativeCausalLmProjectionPrefix> {
+        self.prefill_input_count(prompt.len(), budget)?;
         NativeCausalLmProjectionPrefix::from_snapshot(
             &self.model,
             self.serving_id(),

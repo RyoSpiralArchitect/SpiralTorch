@@ -32,6 +32,47 @@ fn adapted(lag: usize) -> NativeCausalLm {
 }
 
 #[test]
+fn qkv_snapshot_cache_stays_frozen_and_admits_before_prefill() {
+    for lag in [0, 1] {
+        let model = adapted(lag);
+        let mut trainer = NativeCausalLmQkvAdamW::new(&model, 0, AdamWConfig::default()).unwrap();
+        let prompt = vec![1, 2, 3];
+        assert_eq!(trainer.prefill_input_count(3, 48).unwrap(), 3);
+        for (n, cap) in [(0, 48), (3, 47), (9, 4096), (3, 0)] {
+            assert!(trainer.prefill_input_count(n, cap).is_err());
+        }
+        let tight = trainer.prefill(prompt.clone(), 48).unwrap();
+        assert_eq!((tight.cache_values(), tight.max_cache_values()), (48, 48));
+        assert!(tight.branch(4).is_err());
+        assert_eq!(tight.token_ids(), prompt);
+        let frozen = trainer.clone();
+        let prefix = trainer.prefill(prompt.clone(), 128).unwrap();
+        trainer
+            .step_answer_sequences(&[&prompt], &[4], 1, AdamWStep::new(0.03, 0.).unwrap())
+            .unwrap();
+        assert_ne!(trainer.serving_id(), prefix.projection_id());
+        assert_eq!(prefix.projection_id(), frozen.serving_id());
+        for token in [4, 7] {
+            let branch = prefix.branch(token).unwrap();
+            let mut ids = prompt.clone();
+            ids.push(token);
+            assert_eq!(branch.logits(), frozen.last_logits(&ids).unwrap());
+            assert_eq!(branch.projection_id(), prefix.projection_id());
+            assert_eq!(branch.cache_values(), 64);
+            assert_eq!(branch.max_cache_values(), 128);
+        }
+        assert_eq!(prefix.logits(), frozen.last_logits(&prompt).unwrap());
+        assert_eq!(prefix.token_ids(), prompt);
+        assert_eq!(
+            trainer.prefill(prompt.clone(), 128).unwrap().logits(),
+            trainer.last_logits(&prompt).unwrap()
+        );
+        assert!(prefix.branch(usize::MAX).is_err());
+        assert_eq!(prefix.logits(), frozen.last_logits(&prompt).unwrap());
+    }
+}
+
+#[test]
 fn ragged_qkv_matches_individual_unpadded_prefixes_not_token_weighting() {
     let (owned, labels) = prompts();
     let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();

@@ -73,3 +73,6 @@ That entry point records rejected optional import attempts rather than relying
 only on the absence of imported modules. The local evidence used an additional
 isolated runner that verified the loaded extension path and digest before
 running both test modules.
+
+The subsequent [snapshot-cache binding](PYTHON-QKV-CACHE.md) connects updated
+QKV weights to Rust-owned cached branching and tests old-snapshot isolation.
