@@ -167,5 +167,7 @@ preserve the rescue. Nothing here implies push, merge, GPU validation or release
 Next scientific boundary: freeze unseen associations and varied entity/value
 separations before inspecting their outputs, using these already-selected
 endpoints. Distinguish memorized template capacity from transferable binding.
-No such holdout was opened in this run.
+No such holdout was opened in this run. The subsequent read-only
+[transfer and matched-distance test](KEY-LAG-TRANSFER.md) now records an
+81/96 recombination result and failed competence/layout-robustness gates.
 
