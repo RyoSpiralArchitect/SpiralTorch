@@ -9,7 +9,7 @@ use st_nn::geometry_runtime::AdamWConfig;
 
 #[pyclass(name = "NativeCausalLmQkvAdamW", module = "spiraltorch")]
 pub(super) struct PyQkv {
-    inner: NativeCausalLmQkvAdamW,
+    pub(super) inner: NativeCausalLmQkvAdamW,
 }
 
 /// Immutable cached prefix of one exact trained projection snapshot.

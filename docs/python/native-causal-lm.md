@@ -232,6 +232,61 @@ window scheduling, or joint update of frozen geometry/LoRA is implied.
 226 Rust tests and 74 isolated Python tests, using synthetic models. No new
 pretrained-model study, speed comparison or wheel publication was performed.
 
+### Corpus Schedule And Resume
+
+`NativeCausalLmQkvTrainer` adds a Rust-owned corpus cursor around a snapshot of
+`NativeCausalLmQkvAdamW`, including an already-trained optimizer:
+
+```python
+session = st.NativeCausalLmQkvTrainer(
+    trainer, token_documents, context_length=128, labels=label_documents,
+    learning_rate=1e-4, weight_decay=0.01, label_smoothing=0.1,
+    batch_windows=8, max_rows=2, epochs=2,
+)
+report = session.step()  # One update, or None after the fixed plan finishes.
+payload, checkpoint_id = session.checkpoint_with_id()
+restored = st.NativeCausalLmQkvTrainer.from_bytes(
+    model, token_documents, payload, checkpoint_id, labels=label_documents,
+)
+snapshot = restored.optimizer_snapshot()
+prefix = snapshot.prefill(prompt_ids)
+```
+
+`token_documents` and optional `label_documents` are nested ID/label sequences.
+The illustration assumes `model` is the matching original frozen model, with
+the same adapters and readout policy, and `prompt_ids` fits its context budget.
+Keep that model, both arrays, checkpoint bytes and the expected hash separately.
+The session checkpoint contains QKV weights/moments, original optimizer step
+offset, configuration, data identity and update cursor, **not** corpus content
+or the frozen model. Its hash detects changes relative to the retained pin;
+it is not a signature or an authenticity guarantee.
+
+Rust uses the existing target-covering window planner: neighboring windows
+overlap by one token, short tails are kept, document boundaries are never
+crossed, and positions restart within each window. This is **not** full-document
+attention or cached long-context training. Windows with no selected shifted
+labels are omitted; all original tokens, labels and document order still enter
+the corpus identity, including ignored content. An entirely target-free corpus
+is rejected. Without labels, every within-document next-token target is used.
+
+`batch_windows` sets active windows per optimizer update; `max_rows` controls
+adjacent equal-length microbatches inside it. Epochs retain fixed input order,
+without shuffle, learning-rate schedule or inferred EOS/padding. Learning rate
+must be positive; use manual QKV calls for zero-rate inspection. Limits include
+16,777,216 corpus IDs, the shared document/window limits, actual batch admission
+and enough remaining optimizer-clock capacity for the complete plan.
+
+`updates`, `total_updates`, `active_windows`, `data_id` and `config_json()` expose
+the schedule. Step reports use a one-based `update`, zero-based `epoch`, active
+`window_start`/`window_end`, and a nested `optimizer` report. Failed updates
+leave weights, moments and cursor unchanged; repeated calls after completion
+return `None` without mutation. The constructor and `optimizer_snapshot()`
+clone optimizer ownership, so independent edits cannot alter the session.
+
+[Verification](../../benchmarks/paired-prompt-contrast/QKV-CORPUS-SESSION.md):
+230 Rust tests and 77 isolated Python tests. This verifies synthetic CPU
+continuation, not long-run model quality or a published wheel.
+
 ### Optional QKV Gradient Clipping
 
 Choose a positive, finite f32 `max_gradient_norm` when creating the optimizer

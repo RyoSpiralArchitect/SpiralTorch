@@ -225,6 +225,79 @@ class NativeQkvTests(unittest.TestCase):
         b.step_windows(docs[0]+docs[1], [2, 3], learning_rate=.03)
         self.assertEqual(a.checkpoint_with_id(), b.checkpoint_with_id())
 
+    def test_qkv_corpus_session_owns_schedule_and_exact_resume(self):
+        docs = [[1,2,3,4,5,6,7,8,9,10], [2,4,6,8,10], [1], []]
+        labels = [[-100]*4+[5,6,7,8,9,10], [-100,4,6,8,10], [-100], []]
+        opt = self.new()
+        opt.step_windows([1,2,3], [1,3], learning_rate=.01)
+        original = opt.checkpoint_with_id()
+        session = st.NativeCausalLmQkvTrainer(opt, docs, 4, labels=labels,
+            learning_rate=.03, weight_decay=.02, label_smoothing=.1, batch_windows=3, max_rows=2, epochs=2)
+        self.assertIn("NativeCausalLmQkvTrainer", st.__all__)
+        self.assertEqual((session.active_windows, session.total_updates, session.updates), (4,4,0))
+        self.assertEqual(json.loads(session.config_json())["batch_windows"], 3)
+        manual = st.NativeCausalLmQkvAdamW.from_bytes(self.model, *original)
+        total = 0
+        for update in range(4):
+            restored = st.NativeCausalLmQkvTrainer.from_bytes(self.model, docs, *session.checkpoint_with_id(), labels=labels)
+            ds, ys = (([docs[0][3:7],docs[0][6:10],docs[1][:4]], [labels[0][3:7],labels[0][6:10],labels[1][:4]])
+                      if update%2 == 0 else ([docs[1][3:]], [labels[1][3:]]))
+            expected = manual.step_documents(ds, labels=ys, max_rows=2, learning_rate=.03, weight_decay=.02, label_smoothing=.1)
+            report = session.step()
+            self.assertEqual(report, restored.step())
+            self.assertEqual(report["optimizer"], expected)
+            self.assertEqual((report["update"], report["epoch"]), (update+1, update//2))
+            self.assertEqual(session.checkpoint_with_id(), restored.checkpoint_with_id())
+            self.assertEqual(session.optimizer_snapshot().checkpoint_with_id(), manual.checkpoint_with_id())
+            total += report["optimizer"]["target_tokens"]
+        self.assertEqual(total, 20)
+        before = session.checkpoint_with_id()
+        self.assertIsNone(session.step())
+        self.assertEqual(session.checkpoint_with_id(), before)
+        snapshot = session.optimizer_snapshot()
+        self.assertEqual(snapshot.prefill([1,2]).logits_f32le(), snapshot.last_logits_f32le([1,2]))
+        snapshot.step_windows([1,2,3], [1,3], learning_rate=.03)
+        self.assertEqual(session.checkpoint_with_id(), before)
+        self.assertEqual(opt.checkpoint_with_id(), original)
+
+    def test_qkv_session_restore_rejects_changed_corpus_and_checks_pin_before_data(self):
+        docs = [[1,2,3,4,5]]
+        labels = [[-100,-100,3,4,5]]
+        session = st.NativeCausalLmQkvTrainer(self.new(), docs, 4, labels=labels, learning_rate=.03)
+        raw, pin = session.checkpoint_with_id()
+        for ds, ys in (([[2,2,3,4,5]],labels), (docs,[[1,-100,3,4,5]]), (docs,None)):
+            with self.assertRaises(ValueError):
+                st.NativeCausalLmQkvTrainer.from_bytes(self.model, ds, raw, pin, labels=ys)
+        class Unreadable:
+            def __len__(self): raise AssertionError("corpus read before checkpoint verification")
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmQkvTrainer.from_bytes(self.model, Unreadable(), raw[:-1], pin)
+        class OversizedRow:
+            def __len__(self): return st.NativeCausalLmQkvTrainer.MAX_TOKENS+1
+            def __getitem__(self, i): raise AssertionError("IDs read before admission")
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmQkvTrainer(self.new(), [OversizedRow()], 4, learning_rate=.03)
+        for kw in (dict(epochs=True),dict(batch_windows=0),dict(learning_rate=0.)):
+            with self.assertRaises((ValueError,TypeError)):
+                st.NativeCausalLmQkvTrainer(self.new(), docs, 4, **(dict(learning_rate=.03)|kw))
+        self.assertEqual(session.checkpoint_with_id(), (raw,pin))
+
+    def test_qkv_dense_session_end_and_failed_update_do_not_advance_cursor(self):
+        docs = [[1,2,3],[4,5,6]]
+        session = st.NativeCausalLmQkvTrainer(self.new(), docs, 3, batch_windows=2, max_rows=2, learning_rate=.03)
+        manual = self.new()
+        self.assertEqual(session.step()["optimizer"], manual.step_documents(docs, max_rows=2, learning_rate=.03))
+        restored = st.NativeCausalLmQkvTrainer.from_bytes(self.model, docs, *session.checkpoint_with_id())
+        self.assertIsNone(restored.step())
+        self.assertEqual(session.checkpoint_with_id(), restored.checkpoint_with_id())
+        huge = float.fromhex("0x1.fffffep+127")
+        bad = st.NativeCausalLmQkvTrainer(self.new(), docs, 3, learning_rate=huge, weight_decay=huge)
+        state = bad.checkpoint_with_id()
+        with self.assertRaises(ValueError):
+            bad.step()
+        self.assertEqual(bad.updates, 0)
+        self.assertEqual(bad.checkpoint_with_id(), state)
+
     def test_rejections_and_zero_rate_never_change_state(self):
         a = self.new()
         state = a.checkpoint_with_id()

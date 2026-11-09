@@ -25,6 +25,8 @@ mod qkv_causal_cases;
 mod qkv_document_cases;
 #[path = "qkv_ragged_tests.rs"]
 mod qkv_ragged_cases;
+#[path = "qkv_session_tests.rs"]
+mod qkv_session_cases;
 
 fn config() -> serde_json::Value {
     json!({"model_type":"gpt2","vocab_size":11,"n_positions":8,"n_embd":4,"n_head":2,"n_layer":2})

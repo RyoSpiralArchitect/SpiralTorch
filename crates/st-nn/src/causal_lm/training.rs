@@ -129,6 +129,32 @@ impl Corpus {
         })
     }
 
+    pub(super) fn has_labels(&self) -> bool {
+        self.labels.is_some()
+    }
+
+    pub(super) fn window_rows<'a>(
+        &'a self,
+        windows: &[CausalDocumentWindow],
+    ) -> (Vec<&'a [usize]>, Option<Vec<&'a [i64]>>) {
+        let ids = windows
+            .iter()
+            .map(|w| {
+                &self.documents[w.document as usize]
+                    [w.start as usize..(w.start + w.length) as usize]
+            })
+            .collect();
+        let labels = self.labels.as_ref().map(|rows| {
+            windows
+                .iter()
+                .map(|w| {
+                    &rows[w.document as usize][w.start as usize..(w.start + w.length) as usize]
+                })
+                .collect()
+        });
+        (ids, labels)
+    }
+
     pub(super) fn batch(&self, windows: &[CausalDocumentWindow]) -> (Vec<usize>, Option<Vec<i64>>) {
         let count = windows.iter().map(|w| w.length as usize).sum();
         let mut ids = Vec::with_capacity(count);

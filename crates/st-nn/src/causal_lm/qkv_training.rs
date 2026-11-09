@@ -10,6 +10,11 @@ mod causal;
 pub use causal::CausalLmQkvWindowStep;
 mod documents;
 pub use documents::CausalLmQkvDocumentStep;
+mod session;
+pub use session::{
+    CausalLmQkvTrainingConfig, CausalLmQkvTrainingResume, CausalLmQkvTrainingStep,
+    NativeCausalLmQkvTrainer,
+};
 
 const MAX_VALUES: usize = 1 << 22;
 const MAX_HEADER: usize = 16384;
