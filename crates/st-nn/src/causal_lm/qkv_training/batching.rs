@@ -2,14 +2,14 @@
 use super::*;
 use crate::language_windows::{equal_width_groups, CausalDocumentWindow};
 
-pub(super) struct AnswerGradientMean {
+pub(super) struct WeightedGradientMean {
     width: usize,
     samples: u64,
     loss: sum::Sum,
     values: Vec<sum::Sum>,
 }
 
-impl AnswerGradientMean {
+impl WeightedGradientMean {
     pub(super) fn new(width: usize) -> Self {
         Self {
             width,
@@ -21,7 +21,7 @@ impl AnswerGradientMean {
         }
     }
     pub(super) fn add(&mut self, loss: f32, gradient: &Tensor, samples: usize) {
-        // Only checked, nonempty answer_gradients results reach this reducer.
+        // Checked group means carry their own answer or selected-token count.
         debug_assert_eq!(gradient.shape(), (3 * self.width, self.width));
         self.samples += samples as u64;
         self.loss.add(f64::from(loss) * samples as f64);
@@ -145,7 +145,7 @@ impl NativeCausalLmQkvAdamW {
                 return Err("invalid unpadded QKV prefix or answer".into());
             }
         }
-        let mut mean = AnswerGradientMean::new(c.width);
+        let mut mean = WeightedGradientMean::new(c.width);
         for group in groups {
             let shape = [group.len(), lengths[group.start]];
             let ids = prompts[group.clone()].concat();

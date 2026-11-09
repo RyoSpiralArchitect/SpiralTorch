@@ -165,8 +165,8 @@ Each row feeds its first `T-1` IDs and predicts the following IDs. Optional
 and `-100` masks only loss, never attention or context. With no labels, every
 next token is scored. All-ignored labels and out-of-vocabulary IDs are rejected.
 Neither padding, EOS insertion, truncation nor an attention mask is inferred.
-Different-length windows must be handled explicitly; successive calls are
-separate optimizer updates, not hidden gradient accumulation.
+Successive window calls are separate optimizer updates, not hidden gradient
+accumulation. Use `step_documents` below for one update over different lengths.
 
 The loss is a mean over **selected target tokens across the batch**, not an
 equal mean of sequence losses. Each successful `step_windows` applies one
@@ -189,6 +189,48 @@ separately: the QKV checkpoint is not a dataset cursor.
 differences, sparse-label admission and exact continuation. This is a source
 build API check using synthetic models, not pretrained-model SFT quality or
 wheel-release evidence.
+
+### One Update Over Ragged Answers
+
+`step_documents` combines different-length, unpadded windows into **one**
+selected-token mean and optimizer update. `document_loss_gradients` computes
+that same raw mean without changing weights. Both accept a sequence of token
+sequences and optional matching unshifted label sequences:
+
+```python
+rows = [completion.training_document() for completion in completions]
+report = trainer.step_documents(
+    [ids for ids, labels in rows],
+    labels=[labels for ids, labels in rows],
+    max_rows=2, learning_rate=1e-4, label_smoothing=0.1,
+)
+print(report["documents"], report["microbatches"], report["target_tokens"])
+```
+
+Here `completions` is a nonempty sequence of `st.CausalCompletion` instances.
+Rust groups only **adjacent equal-length** documents, with at most `max_rows`
+(default 1) per group. It preserves order and document boundaries, never pads,
+sorts, concatenates context across documents, inserts EOS or truncates. It
+weights each group by its selected target count, not its document count, and
+clips the complete mean once before AdamW. Reports always use `objective_loss`
+and `label_smoothing`, plus the same gradient diagnostics as `step_windows`.
+
+Each document must contain at least two IDs and at least one non-ignored shifted
+target. Unlike a row inside a rectangular `step_windows` batch, an entirely
+loss-masked document is rejected even when a neighboring document has targets.
+There are at most `MAX_CAUSAL_DOCUMENTS` (4,096) documents and 1,024 actual
+groups, with native context/work/checkpoint limits and per-group logit budgets.
+All document IDs, labels and group budgets are checked before the first forward
+pass. No optimizer state changes unless every group and the update succeed.
+
+Preserve input order, `max_rows`, labels and smoothing alongside the existing
+optimizer checkpoint. Changing the grouping can change floating-point rounding;
+exact partition-invariant bits are not promised. No corpus iterator, automatic
+window scheduling, or joint update of frozen geometry/LoRA is implied.
+
+[Verification](../../benchmarks/paired-prompt-contrast/QKV-CAUSAL-DOCUMENTS.md):
+226 Rust tests and 74 isolated Python tests, using synthetic models. No new
+pretrained-model study, speed comparison or wheel publication was performed.
 
 ### Optional QKV Gradient Clipping
 

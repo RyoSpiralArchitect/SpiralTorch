@@ -164,6 +164,67 @@ class NativeQkvTests(unittest.TestCase):
         trainer.step_windows([1, 2, 3, 4], [1, 4], learning_rate=0.)
         self.assertEqual(trainer.checkpoint_with_id(), state)
 
+    def test_ragged_completions_form_one_token_weighted_native_update(self):
+        completions = [
+            st.CausalCompletion([1, 2, 3], [1, 2, 3, 4], [1, 2, 3, 4, 5]),
+            st.CausalCompletion([6], [6, 7, 8, 9], [6, 7, 8, 9, 10]),
+            st.CausalCompletion([2], [2, 3], [2, 3, 4]),
+        ]
+        rows = [c.training_document() for c in completions]
+        docs, labels = [r[0] for r in rows], [r[1] for r in rows]
+        a = st.NativeCausalLmQkvAdamW(self.model, 0, max_gradient_norm=.001)
+        pieces = [a.loss_gradients(d, [1, len(d)], labels=y, label_smoothing=.1)
+                  for d, y in zip(docs, labels)]
+        total = sum(p["target_tokens"] for p in pieces)
+        self.assertEqual(total, 8)
+        before = a.checkpoint_with_id()
+        for cap in (1, 2):
+            g = a.document_loss_gradients(docs, labels=labels, max_rows=cap, label_smoothing=.1)
+            self.assertEqual(g["target_tokens"], total)
+            self.assertAlmostEqual(g["objective_loss"], sum(p["objective_loss"]*p["target_tokens"] for p in pieces)/total, places=6)
+            values = [struct.unpack("<48f", p["gradient_f32le"]) for p in pieces]
+            for actual, row in zip(struct.unpack("<48f", g["gradient_f32le"]), zip(*values)):
+                self.assertAlmostEqual(actual, sum(v*p["target_tokens"] for v,p in zip(row,pieces))/total, places=6)
+        self.assertEqual(a.checkpoint_with_id(), before)
+        kw = dict(labels=labels, max_rows=2, label_smoothing=.1, learning_rate=.03)
+        report = a.step_documents(docs, **kw)
+        self.assertEqual((report["steps"], report["documents"], report["microbatches"], report["target_tokens"]), (1, 3, 2, 8))
+        self.assertIn("gradient_clip", report)
+        b = st.NativeCausalLmQkvAdamW.from_bytes(self.model, *a.checkpoint_with_id())
+        self.assertEqual(a.step_documents(docs, **kw), b.step_documents(docs, **kw))
+        self.assertEqual(a.checkpoint_with_id(), b.checkpoint_with_id())
+        self.assertEqual(a.prefill([1, 2]).logits_f32le(), a.last_logits_f32le([1, 2]))
+
+    def test_document_admission_rejects_before_token_read_and_never_partially_updates(self):
+        class Unreadable:
+            def __len__(self): return 10
+            def __getitem__(self, index): raise AssertionError("token read before admission")
+        class TooMany:
+            def __len__(self): return st.NativeCausalLmQkvAdamW.MAX_CAUSAL_DOCUMENTS + 1
+            def __getitem__(self, index): raise AssertionError("row read before admission")
+        a = self.new()
+        before = a.checkpoint_with_id()
+        for documents in ([], [Unreadable()], TooMany()):
+            with self.assertRaises(ValueError):
+                a.document_loss_gradients(documents)
+        docs = [[1, 2, 3], [4, 5, 6]]
+        for kwargs in (
+            dict(labels=[[-100, 2, 3], [-100]*3]),
+            dict(labels=[[-100, 2, 3], [-100, 99, 6]]),
+            dict(labels=[[-100, 2, 3], [False, 5, 6]]),
+            dict(labels=[[-100, 2, 3]]),
+            dict(max_rows=0), dict(max_rows=True), dict(label_smoothing=float("nan")),
+        ):
+            with self.assertRaises((ValueError, TypeError)):
+                a.step_documents(docs, learning_rate=.03, **kwargs)
+            self.assertEqual(a.checkpoint_with_id(), before)
+        a.step_documents(docs, learning_rate=0.)
+        self.assertEqual(a.checkpoint_with_id(), before)
+        b = self.new()
+        a.step_documents(docs, max_rows=2, learning_rate=.03)
+        b.step_windows(docs[0]+docs[1], [2, 3], learning_rate=.03)
+        self.assertEqual(a.checkpoint_with_id(), b.checkpoint_with_id())
+
     def test_rejections_and_zero_rate_never_change_state(self):
         a = self.new()
         state = a.checkpoint_with_id()

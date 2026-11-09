@@ -481,6 +481,7 @@ class NativeCausalLmProjectionPrefix:
 class NativeCausalLmQkvAdamW:
     MAX_CHECKPOINT_BYTES: int
     MAX_ANSWER_SEQUENCES: int
+    MAX_CAUSAL_DOCUMENTS: int
     def __init__(self, model: NativeCausalLm, layer: int, *, beta1: float | None = None,
                  beta2: float | None = None, epsilon: float | None = None,
                  max_gradient_norm: float | None = None) -> None: ...
@@ -502,6 +503,11 @@ class NativeCausalLmQkvAdamW:
     def step_windows(self, windows: Sequence[int], window_shape: Sequence[int], *, learning_rate: float,
                      labels: Sequence[int] | None = None, label_smoothing: float | None = None,
                      weight_decay: float | None = None) -> dict[str, Any]: ...
+    def document_loss_gradients(self, documents: Sequence[Sequence[int]], *, labels: Sequence[Sequence[int]] | None = None,
+                                max_rows: int | None = None, label_smoothing: float | None = None) -> dict[str, Any]: ...
+    def step_documents(self, documents: Sequence[Sequence[int]], *, learning_rate: float,
+                       labels: Sequence[Sequence[int]] | None = None, max_rows: int | None = None,
+                       label_smoothing: float | None = None, weight_decay: float | None = None) -> dict[str, Any]: ...
     def step_answers(self, prompts: Sequence[Sequence[int]], gold: Sequence[int], *, learning_rate: float,
                      max_rows: int | None = None, weight_decay: float | None = None,
                      label_smoothing: float | None = None) -> dict[str, Any]: ...

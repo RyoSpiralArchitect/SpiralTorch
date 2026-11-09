@@ -91,12 +91,33 @@ fn bytes<'py>(py: Python<'py>, values: &[f32]) -> PyResult<Bound<'py, PyBytes>> 
     })
 }
 
+#[allow(clippy::type_complexity)]
+fn causal_documents(
+    model: &NativeCausalLmQkvAdamW,
+    value: &Bound<'_, PyAny>,
+    labels: Option<&Bound<'_, PyAny>>,
+    maximum: usize,
+) -> PyResult<(Vec<Vec<usize>>, Option<Vec<Vec<i64>>>)> {
+    let n = value.len()?;
+    if n == 0 || n > NativeCausalLmQkvAdamW::MAX_CAUSAL_DOCUMENTS {
+        return Err(error("invalid QKV causal document roster"));
+    }
+    documents::documents(value, labels, usize::MAX, |lengths, has_labels| {
+        model
+            .document_input_count(lengths, maximum, has_labels)
+            .map(|_| ())
+            .map_err(error)
+    })
+}
+
 #[pymethods]
 impl PyQkv {
     #[classattr]
     const MAX_CHECKPOINT_BYTES: usize = NativeCausalLmQkvAdamW::MAX_CHECKPOINT_BYTES;
     #[classattr]
     const MAX_ANSWER_SEQUENCES: usize = NativeCausalLmQkvAdamW::MAX_ANSWER_SEQUENCES;
+    #[classattr]
+    const MAX_CAUSAL_DOCUMENTS: usize = NativeCausalLmQkvAdamW::MAX_CAUSAL_DOCUMENTS;
 
     #[new]
     #[allow(clippy::too_many_arguments)]
@@ -301,6 +322,71 @@ impl PyQkv {
                     objective.label_smoothing,
                     step,
                 )
+                .map_err(error)?;
+            serde_json::to_value(report).map_err(error)
+        })?;
+        crate::json::json_to_py(py, &report)
+    }
+
+    #[pyo3(signature=(documents, *, labels=None, max_rows=None, label_smoothing=None))]
+    fn document_loss_gradients(
+        &self,
+        py: Python<'_>,
+        documents: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        max_rows: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let cap = limit(max_rows, 1)?;
+        let objective = loss_objective(label_smoothing, None)?;
+        let (rows, labels) = causal_documents(&self.inner, documents, labels, cap)?;
+        let (loss, gradient, target_tokens) = py
+            .detach(|| {
+                let qs = rows.iter().map(Vec::as_slice).collect::<Vec<_>>();
+                let ys = labels
+                    .as_ref()
+                    .map(|rows| rows.iter().map(Vec::as_slice).collect::<Vec<_>>());
+                self.inner.document_loss_gradients(
+                    &qs,
+                    ys.as_deref(),
+                    cap,
+                    objective.label_smoothing,
+                )
+            })
+            .map_err(error)?;
+        let out = PyDict::new(py);
+        out.set_item("objective_loss", loss)?;
+        out.set_item("label_smoothing", objective.label_smoothing)?;
+        out.set_item("target_tokens", target_tokens)?;
+        out.set_item("gradient_shape", gradient.shape())?;
+        out.set_item("gradient_f32le", bytes(py, gradient.data())?)?;
+        Ok(out.into_any().unbind())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(documents, *, learning_rate, labels=None, max_rows=None, label_smoothing=None, weight_decay=None))]
+    fn step_documents(
+        &mut self,
+        py: Python<'_>,
+        documents: &Bound<'_, PyAny>,
+        learning_rate: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        max_rows: Option<&Bound<'_, PyAny>>,
+        label_smoothing: Option<&Bound<'_, PyAny>>,
+        weight_decay: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let step = adamw_step(learning_rate, weight_decay)?;
+        let cap = limit(max_rows, 1)?;
+        let objective = loss_objective(label_smoothing, None)?;
+        let (rows, labels) = causal_documents(&self.inner, documents, labels, cap)?;
+        let report = py.detach(|| -> PyResult<serde_json::Value> {
+            let qs = rows.iter().map(Vec::as_slice).collect::<Vec<_>>();
+            let ys = labels
+                .as_ref()
+                .map(|rows| rows.iter().map(Vec::as_slice).collect::<Vec<_>>());
+            let report = self
+                .inner
+                .step_documents(&qs, ys.as_deref(), cap, objective.label_smoothing, step)
                 .map_err(error)?;
             serde_json::to_value(report).map_err(error)
         })?;

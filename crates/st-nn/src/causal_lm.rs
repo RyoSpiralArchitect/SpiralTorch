@@ -90,8 +90,8 @@ pub use projection_probe::{
     CausalLmProjectionSpec,
 };
 pub use qkv_training::{
-    CausalLmQkvGradientClip, CausalLmQkvSmoothedStep, CausalLmQkvStep, CausalLmQkvWindowStep,
-    NativeCausalLmQkvAdamW,
+    CausalLmQkvDocumentStep, CausalLmQkvGradientClip, CausalLmQkvSmoothedStep, CausalLmQkvStep,
+    CausalLmQkvWindowStep, NativeCausalLmQkvAdamW,
 };
 pub use quartet_projection::{
     CausalLmAnswerBinding, CausalLmAnswerCorrection, CausalLmAnswerGuard,

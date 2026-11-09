@@ -8,6 +8,8 @@ use st_tensor::PackedLayout;
 mod batching;
 mod causal;
 pub use causal::CausalLmQkvWindowStep;
+mod documents;
+pub use documents::CausalLmQkvDocumentStep;
 
 const MAX_VALUES: usize = 1 << 22;
 const MAX_HEADER: usize = 16384;
@@ -344,7 +346,7 @@ impl NativeCausalLmQkvAdamW {
         if max_rows >= batch {
             return self.answer_gradients(ids, shape, gold);
         }
-        let mut mean = batching::AnswerGradientMean::new(c.width);
+        let mut mean = batching::WeightedGradientMean::new(c.width);
         for first in (0..batch).step_by(max_rows) {
             let end = first + max_rows.min(batch - first);
             let n = end - first;
