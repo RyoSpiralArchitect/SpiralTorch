@@ -4,6 +4,8 @@ use sha2::{Digest, Sha256};
 use st_kernel_contracts::adamw::{AdamWConfig, AdamWStep};
 use st_tensor::PackedLayout;
 
+mod batching;
+
 const MAX_VALUES: usize = 1 << 22;
 const MAX_HEADER: usize = 16384;
 
@@ -131,16 +133,10 @@ impl NativeCausalLmQkvAdamW {
         let m = &self.model;
         let c = &m.config;
         let [batch, steps] = shape;
-        let rows = m.input_count(shape, true)?;
+        let rows = self.answer_gradient_rows(shape)?;
         if ids.len() != rows || gold.len() != batch || gold.iter().any(|&v| v >= c.vocabulary) {
             return Err("invalid QKV answer roster".into());
         }
-        product(
-            &[c.layers - self.layer, rows, c.width],
-            m.limits.max_training_checkpoint_elements,
-            "QKV training checkpoints",
-        )?;
-        product(&[rows, 3, c.width, c.width], 1 << 30, "QKV gradient work")?;
         let (hidden, checkpoints) =
             m.checkpointed_hidden(m.embed(ids, shape)?, shape, 0, self.layer, None)?;
         let last = (0..batch).map(|b| (b + 1) * steps - 1).collect::<Vec<_>>();
@@ -169,6 +165,22 @@ impl NativeCausalLmQkvAdamW {
             return Err("nonfinite or misshaped QKV derivative".into());
         }
         Ok((loss, gradient))
+    }
+
+    fn answer_gradient_rows(&self, shape: [usize; 2]) -> CausalLmResult<usize> {
+        let m = &self.model;
+        let rows = m.input_count(shape, true)?;
+        product(
+            &[m.config.layers - self.layer, rows, m.config.width],
+            m.limits.max_training_checkpoint_elements,
+            "QKV training checkpoints",
+        )?;
+        product(
+            &[rows, 3, m.config.width, m.config.width],
+            1 << 30,
+            "QKV gradient work",
+        )?;
+        Ok(rows)
     }
     fn install(&mut self, weights: Vec<f32>) -> CausalLmResult<()> {
         let w = self.model.config.width;
@@ -211,10 +223,7 @@ impl NativeCausalLmQkvAdamW {
         if max_rows >= batch {
             return self.answer_gradients(ids, shape, gold);
         }
-        let mut loss = sum::Sum::default();
-        let mut accum: Vec<_> = (0..self.weights().len())
-            .map(|_| sum::Sum::default())
-            .collect();
+        let mut mean = batching::AnswerGradientMean::new(c.width);
         for first in (0..batch).step_by(max_rows) {
             let end = first + max_rows.min(batch - first);
             let n = end - first;
@@ -223,19 +232,9 @@ impl NativeCausalLmQkvAdamW {
                 [n, steps],
                 &gold[first..end],
             )?;
-            loss.add(f64::from(v) * n as f64);
-            for (a, &x) in accum.iter_mut().zip(g.data()) {
-                a.add(f64::from(x) * n as f64);
-            }
+            mean.add(v, &g, n);
         }
-        let grad = accum
-            .into_iter()
-            .map(|s| s.mean(batch as u64) as f32)
-            .collect();
-        Ok((
-            loss.mean(batch as u64) as f32,
-            Tensor::from_vec(3 * c.width, c.width, grad)?,
-        ))
+        mean.finish()
     }
     /// Atomic checked AdamW, reusing the kernel contract including the zero-rate freeze policy.
     pub fn step_answers(

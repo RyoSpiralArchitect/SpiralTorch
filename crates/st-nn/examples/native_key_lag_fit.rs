@@ -39,6 +39,8 @@ enum Action {
         prompts: Vec<Vec<usize>>,
         gold: Vec<usize>,
         microbatch: usize,
+        #[serde(default)]
+        batch_kind: BatchKind,
         rate: f32,
         updates: u32,
         save_at: Vec<u32>,
@@ -52,7 +54,43 @@ enum Action {
         prompts: Vec<Vec<usize>>,
         gold: Vec<usize>,
         microbatch: usize,
+        #[serde(default)]
+        batch_kind: BatchKind,
     },
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BatchKind {
+    #[default]
+    EqualLength,
+    UnpaddedSequences,
+}
+
+enum AnswerBatch<'a> {
+    EqualLength(Vec<usize>, [usize; 2]),
+    UnpaddedSequences(Vec<&'a [usize]>),
+}
+impl<'a> AnswerBatch<'a> {
+    fn new(prompts: &'a [Vec<usize>], kind: BatchKind) -> CausalLmResult<Self> {
+        match kind {
+            BatchKind::EqualLength => {
+                let (ids, shape) = input(prompts)?;
+                Ok(Self::EqualLength(ids, shape))
+            }
+            BatchKind::UnpaddedSequences => {
+                if prompts.is_empty()
+                    || prompts.len() > 128
+                    || prompts.iter().any(|p| !(1..=512).contains(&p.len()))
+                {
+                    return Err("expected bounded unpadded prefixes".into());
+                }
+                Ok(Self::UnpaddedSequences(
+                    prompts.iter().map(Vec::as_slice).collect(),
+                ))
+            }
+        }
+    }
 }
 
 fn read(r: impl Read, cap: usize) -> CausalLmResult<Vec<u8>> {
@@ -112,12 +150,13 @@ fn main() -> CausalLmResult<()> {
             prompts,
             gold,
             microbatch,
+            batch_kind,
             rate,
             updates,
             save_at,
             out,
         } => {
-            let (ids, shape) = input(&prompts)?;
+            let batch = AnswerBatch::new(&prompts, batch_kind)?;
             if rate <= 0.
                 || updates == 0
                 || updates > 512
@@ -133,7 +172,14 @@ fn main() -> CausalLmResult<()> {
             let mut losses = vec![];
             let mut pins = BTreeMap::new();
             for i in 1..=updates {
-                losses.push(train.step_answers_microbatched(&ids, shape, &gold, microbatch, step)?);
+                losses.push(match &batch {
+                    AnswerBatch::EqualLength(ids, shape) => {
+                        train.step_answers_microbatched(ids, *shape, &gold, microbatch, step)?
+                    }
+                    AnswerBatch::UnpaddedSequences(prompts) => {
+                        train.step_answer_sequences(prompts, &gold, microbatch, step)?
+                    }
+                });
                 if save_at.contains(&i) {
                     let (bytes, pin) = train.checkpoint()?;
                     let mut f = OpenOptions::new()
@@ -153,12 +199,19 @@ fn main() -> CausalLmResult<()> {
             prompts,
             gold,
             microbatch,
+            batch_kind,
         } => {
             if train.weights().len() > 1 << 16 {
                 return Err("gradient export exceeds example budget".into());
             }
-            let (ids, shape) = input(&prompts)?;
-            let (loss, g) = train.answer_gradients_microbatched(&ids, shape, &gold, microbatch)?;
+            let (loss, g) = match AnswerBatch::new(&prompts, batch_kind)? {
+                AnswerBatch::EqualLength(ids, shape) => {
+                    train.answer_gradients_microbatched(&ids, shape, &gold, microbatch)?
+                }
+                AnswerBatch::UnpaddedSequences(prompts) => {
+                    train.answer_sequence_gradients(&prompts, &gold, microbatch)?
+                }
+            };
             json!({"loss":loss,"packed_bits":g.data().iter().map(|v|v.to_bits()).collect::<Vec<_>>()})
         }
         Action::Score {
@@ -198,4 +251,48 @@ fn main() -> CausalLmResult<()> {
         json!({"base":r.base,"lora":r.lora,"geometry":r.geometry,"key_lag":m.key_lag(),"initial":initial,"end":train.serving_id(),"steps":train.steps(),"data":data})
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_requests_keep_equal_length_admission() {
+        let raw = json!({"kind":"gradient", "prompts":[[1],[2,3]], "gold":[2,4], "microbatch":2});
+        let Action::Gradient {
+            prompts,
+            batch_kind,
+            ..
+        } = serde_json::from_value(raw.clone()).unwrap()
+        else {
+            panic!("wrong action")
+        };
+        assert!(AnswerBatch::new(&prompts, batch_kind).is_err());
+        let mut explicit = raw.clone();
+        explicit["batch_kind"] = json!("unpadded_sequences");
+        let Action::Gradient {
+            prompts,
+            batch_kind,
+            ..
+        } = serde_json::from_value(explicit).unwrap()
+        else {
+            panic!("wrong action")
+        };
+        let AnswerBatch::UnpaddedSequences(qs) = AnswerBatch::new(&prompts, batch_kind).unwrap()
+        else {
+            panic!("wrong batch")
+        };
+        assert_eq!(qs, [&[1][..], &[2, 3][..]]);
+        let mut unknown = raw;
+        unknown["batch_kind"] = json!("automatic");
+        assert!(serde_json::from_value::<Action>(unknown).is_err());
+    }
+
+    #[test]
+    fn unpadded_example_does_not_loosen_roster_limits() {
+        for qs in [vec![], vec![vec![]], vec![vec![1; 513]], vec![vec![1]; 129]] {
+            assert!(AnswerBatch::new(&qs, BatchKind::UnpaddedSequences).is_err());
+        }
+    }
 }
