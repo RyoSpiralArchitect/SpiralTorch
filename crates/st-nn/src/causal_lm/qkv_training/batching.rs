@@ -49,6 +49,55 @@ impl NativeCausalLmQkvAdamW {
     /// Admission bound on sequences in one logical answer update.
     pub const MAX_ANSWER_SEQUENCES: usize = 4096;
 
+    /// Admit the entire logical batch before a client copies token storage.
+    pub fn answer_sequence_input_count(
+        &self,
+        lengths: &[usize],
+        max_rows: usize,
+    ) -> CausalLmResult<usize> {
+        self.answer_sequence_groups(lengths, max_rows)
+            .map(|(_, count)| count)
+    }
+
+    fn answer_sequence_groups(
+        &self,
+        lengths: &[usize],
+        max_rows: usize,
+    ) -> CausalLmResult<(Vec<std::ops::Range<usize>>, usize)> {
+        if lengths.is_empty() || lengths.len() > Self::MAX_ANSWER_SEQUENCES || max_rows == 0 {
+            return Err("invalid QKV sequence roster or microbatch limit".into());
+        }
+        let c = &self.model.config;
+        let mut total = 0usize;
+        let mut windows = Vec::with_capacity(lengths.len());
+        for (i, &length) in lengths.iter().enumerate() {
+            if length == 0 || length > c.positions {
+                return Err("invalid unpadded QKV prefix length".into());
+            }
+            total = total
+                .checked_add(length)
+                .ok_or("QKV sequence token count overflow")?;
+            windows.push(CausalDocumentWindow {
+                document: i as u32,
+                start: 0,
+                length: u32::try_from(length)?,
+            });
+        }
+        product(
+            &[total, 3, c.width, c.width],
+            1 << 30,
+            "logical QKV gradient work",
+        )?;
+        let groups: Vec<_> = equal_width_groups(&windows, max_rows).collect();
+        if groups.len() > 1024 {
+            return Err("QKV sequence microbatch count exceeds limit".into());
+        }
+        for group in &groups {
+            self.answer_gradient_rows([group.len(), lengths[group.start]])?;
+        }
+        Ok((groups, total))
+    }
+
     /// Mean full-vocabulary answer CE and derivative for ragged unpadded prefixes.
     ///
     /// Each sequence contributes one final-position answer, irrespective of its
@@ -89,40 +138,16 @@ impl NativeCausalLmQkvAdamW {
             return Err("invalid QKV sequence roster or microbatch limit".into());
         }
         let c = &self.model.config;
-        let mut total = 0usize;
-        let mut windows = Vec::with_capacity(prompts.len());
-        for (i, (q, &label)) in prompts.iter().zip(gold).enumerate() {
-            if q.is_empty()
-                || q.len() > c.positions
-                || label >= c.vocabulary
-                || q.iter().any(|&x| x >= c.vocabulary)
-            {
+        let lengths = prompts.iter().map(|q| q.len()).collect::<Vec<_>>();
+        let (groups, _) = self.answer_sequence_groups(&lengths, max_rows)?;
+        for (q, &label) in prompts.iter().zip(gold) {
+            if label >= c.vocabulary || q.iter().any(|&x| x >= c.vocabulary) {
                 return Err("invalid unpadded QKV prefix or answer".into());
             }
-            total = total
-                .checked_add(q.len())
-                .ok_or("QKV sequence token count overflow")?;
-            windows.push(CausalDocumentWindow {
-                document: i as u32,
-                start: 0,
-                length: u32::try_from(q.len())?,
-            });
-        }
-        product(
-            &[total, 3, c.width, c.width],
-            1 << 30,
-            "logical QKV gradient work",
-        )?;
-        let groups: Vec<_> = equal_width_groups(&windows, max_rows).collect();
-        if groups.len() > 1024 {
-            return Err("QKV sequence microbatch count exceeds limit".into());
-        }
-        for group in &groups {
-            self.answer_gradient_rows([group.len(), windows[group.start].length as usize])?;
         }
         let mut mean = AnswerGradientMean::new(c.width);
         for group in groups {
-            let shape = [group.len(), windows[group.start].length as usize];
+            let shape = [group.len(), lengths[group.start]];
             let ids = prompts[group.clone()].concat();
             let (loss, gradient) =
                 self.answer_gradients_smoothed(&ids, shape, &gold[group.clone()], label_smoothing)?;

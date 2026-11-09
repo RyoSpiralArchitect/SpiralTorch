@@ -94,6 +94,10 @@ impl NativeCausalLmQkvAdamW {
     pub fn weights(&self) -> &[f32] {
         self.model.blocks[self.layer].qkv.weight.as_slice()
     }
+    /// Bound a serving prefix before a binding materializes its token IDs.
+    pub fn last_logits_input_count(&self, steps: usize) -> CausalLmResult<usize> {
+        self.model.input_count([1, steps], true)
+    }
     pub fn last_logits(&self, prompt: &[usize]) -> CausalLmResult<Vec<f32>> {
         Ok(self
             .model

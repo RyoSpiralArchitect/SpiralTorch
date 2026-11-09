@@ -24,6 +24,7 @@ mod mixture_probe;
 mod output_margin;
 mod prefix_cache;
 mod projection_probe;
+mod qkv;
 mod scalar_output;
 mod session;
 mod session_input;
@@ -1537,6 +1538,7 @@ impl PyNativeCausalLm {
 }
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    qkv::register(module)?;
     module.add_function(wrap_pyfunction!(score_token_logits_f32le, module)?)?;
     module.add_class::<supervision::PyCausalTargetAlignment>()?;
     module.add_class::<supervision::PyCausalCompletion>()?;

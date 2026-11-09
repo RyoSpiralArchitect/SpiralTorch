@@ -178,6 +178,14 @@ fn ragged_qkv_checks_each_real_group_against_geometry_budget() {
     let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
     let origin = a.checkpoint().unwrap();
     let step = AdamWStep::new(0.01, 0.).unwrap();
+    let lengths = qs.iter().map(|q| q.len()).collect::<Vec<_>>();
+    assert!(a.answer_sequence_input_count(&lengths, 3).is_err());
+    assert_eq!(
+        a.answer_sequence_input_count(&lengths, 2).unwrap(),
+        lengths.iter().sum::<usize>()
+    );
+    assert!(a.last_logits_input_count(9).is_err());
+    assert_eq!(a.last_logits_input_count(3).unwrap(), 3);
     // Three length-five sequences exceed the bound together; two do not.
     assert!(a.step_answer_sequences(&qs, &labels, 3, step).is_err());
     assert_eq!(a.checkpoint().unwrap(), origin);

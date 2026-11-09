@@ -69,7 +69,8 @@ logits and reject invalid IDs. Use `forward(..., last_only=True)` and keep the
 raw bytes when checking exact replay: equal summaries do not prove equal logits.
 
 Positions restart at zero in each row. No padding, token-type IDs, attention
-mask, custom position IDs, dropout or base-weight updates are implemented here.
+mask, custom position IDs or dropout are implemented here. Base-weight updates
+are available only through the separate, opt-in QKV optimizer described below.
 The separate [native context](native-generation.md#cached-execution) adds owned
 single-sequence K/V reuse without changing the full-prefix `forward` contract.
 Frozen inference and the geometry-only learning below are
@@ -81,6 +82,61 @@ Last-only output skips vocabulary projection for earlier positions, not the
 causal prefix computation. F16/BF16 checkpoint values explicitly become f32.
 This is not a resident-GPU or speedup claim. The Rust core compiles for WASM;
 a JavaScript client and browser model execution require separate work.
+
+## Answer-QKV Learning
+
+Source builds containing `NativeCausalLmQkvAdamW` can update one decoder layer's
+fused Q/K/V weight matrix, with the rest of the model and attached LoRA/geometry
+frozen. Forward, backward, loss, AdamW, admission and checkpoint ownership stay
+in Rust. Python passes token IDs, controls the schedule and stores bytes; no
+Torch, NumPy, Transformers or Python safetensors are required.
+
+```python
+# Continue with the local NativeCausalLm loaded above.
+trainer = st.NativeCausalLmQkvAdamW(model, layer=0)
+prompts = [ids, ids + [262]]  # Unpadded prefixes, independently positioned.
+answers = [262, 995]         # One final-position target per prefix.
+report = trainer.step_answers(
+    prompts, answers, learning_rate=1e-4, max_rows=2,
+    label_smoothing=0.1,     # Opt-in, not a recommended universal setting.
+)
+print(report["objective_loss"], report["gradient_l2"])  # Q, K, V norms.
+payload, checkpoint_id = trainer.checkpoint_with_id()
+restored = st.NativeCausalLmQkvAdamW.from_bytes(model, payload, checkpoint_id)
+assert restored.last_logits_f32le(ids) == trainer.last_logits_f32le(ids)
+```
+
+`step_answers` mutates the trainer, not `model`, and commits one atomic optimizer
+step for the whole logical batch. Each sequence gets one equal vote, regardless
+of its length. `max_rows` (default 1) groups adjacent equal-length prefixes; it
+does not pad, reorder or split one prefix. There are at most 4,096 sequences and
+1,024 actual groups, with additional native work/activation limits checked
+before copying prefix token values. This is answer supervision, not all-token
+SFT or full-model fine-tuning. The demonstrated execution is CPU, not GPU.
+
+Omit `label_smoothing` for ordinary CE and a `gold_nll` report. An explicit
+coefficient, including zero, reports `objective_loss` and `label_smoothing`
+instead: the target is `(1-epsilon) * one_hot(answer) + epsilon / vocabulary`.
+Smoothing does not change inference logits. The constructor's `epsilon` is
+AdamW's numerical stabilizer, **not** the smoothing coefficient.
+
+`answer_gradients` accepts the same batch and optional smoothing without an
+update. It returns the corresponding loss, `gradient_shape=(3*width, width)`
+and output-major `gradient_f32le` bytes, not HF Conv1D's transposed layout.
+`last_logits_f32le` returns one full-vocabulary row of little-endian f32 bytes;
+it can be passed directly to `st.score_token_logits_f32le(raw, target_id)`.
+
+The checkpoint binds the frozen source, attached adapters, arithmetic policy,
+selected layer, updated weights, AdamW moments and step counter. Restore with
+the matching original model. Preserve the next inputs, learning rate, decay,
+smoothing and batch order separately to reproduce continuation. `serving_id`
+identifies the updated inference state, not the full optimizer or data history.
+Invalid inputs do not change optimizer state; zero learning rate freezes it.
+Python file storage, cached generation and exporting a new full-model archive
+are not provided by this wrapper.
+
+The [binding verification](../../benchmarks/paired-prompt-contrast/PYTHON-QKV.md)
+separates local API checks from wheel publication and language-quality evidence.
 
 ## Explicit Readout Arithmetic
 

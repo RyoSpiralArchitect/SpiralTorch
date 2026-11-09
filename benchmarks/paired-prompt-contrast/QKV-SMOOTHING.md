@@ -77,3 +77,7 @@ Evidence: `2026-11-10-native-qkv-smoothing-v1/decoder-tests-receipt.json`.
 This implementation-only stage did not retrain the saved model or perform GPU,
 wheel, Python/WASM binding, push or release work. The linked follow-up froze
 its coefficient, matched CE control and evaluation boundary before execution.
+
+A later [Python binding stage](PYTHON-QKV.md) now exposes this same native
+optimizer and objective without a Python ML dependency; its local transport
+checks are separate from the quality comparison and wheel publication.
