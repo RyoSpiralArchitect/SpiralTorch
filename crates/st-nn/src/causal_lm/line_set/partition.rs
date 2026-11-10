@@ -11,7 +11,6 @@ fn two_sum(a: f64, b: f64) -> Term {
 
 impl Term {
     pub const ZERO: Self = Self(0., 0.);
-    pub const ONE: Self = Self(1., 0.);
 
     pub fn times(self, rhs: Self) -> Self {
         let hi = self.0 * rhs.0;

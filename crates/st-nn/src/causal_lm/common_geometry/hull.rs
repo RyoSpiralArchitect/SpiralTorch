@@ -43,10 +43,11 @@ fn face(gram: &[Vec<f64>], ids: &[usize]) -> Option<Vec<f64>> {
             return None;
         }
         a.swap(k, p);
-        for i in k + 1..n {
-            let f = a[i][k] / a[k][k];
-            for j in k + 1..=n {
-                a[i][j] -= f * a[k][j];
+        let pivot_row = a[k];
+        for row in a.iter_mut().take(n).skip(k + 1) {
+            let f = row[k] / pivot_row[k];
+            for (value, pivot) in row[k + 1..=n].iter_mut().zip(&pivot_row[k + 1..=n]) {
+                *value -= f * pivot;
             }
         }
     }

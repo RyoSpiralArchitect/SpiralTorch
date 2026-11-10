@@ -461,8 +461,8 @@ fn prefixed_weights_tied_and_untied_heads_use_explicit_contract() {
     )
     .unwrap();
     close(
-        &a.logits(&[1, 2], [1, 2], false).unwrap().data(),
-        &b.logits(&[1, 2], [1, 2], false).unwrap().data(),
+        a.logits(&[1, 2], [1, 2], false).unwrap().data(),
+        b.logits(&[1, 2], [1, 2], false).unwrap().data(),
     );
     let mut p = p;
     p.insert("lm_head.weight".into(), p["wte.weight"].clone());

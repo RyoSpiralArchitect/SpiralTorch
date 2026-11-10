@@ -2,7 +2,7 @@ use super::*;
 
 fn objective(data: &[f32], labels: &[i64], k: usize, mix: f64) -> f64 {
     let mut losses = Vec::new();
-    for (row, &label) in data.chunks_exact(5).zip(labels) {
+    for (row, &label) in data.as_chunks::<5>().0.iter().zip(labels) {
         if label == -100 {
             continue;
         }
