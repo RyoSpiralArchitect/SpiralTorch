@@ -26,12 +26,13 @@ impl ByteCorpusStudy {
         self.validate_segment(None, self.total_updates())
     }
 
-    /// Run the full request, accepting one selected update before its next
-    /// forward without checkpoint capture or an extra evaluation.
+    /// Run the full request, accepting update one in the selected case before
+    /// its next forward without a pause checkpoint or an extra evaluation.
     ///
     /// This changes host synchronization and receipt-resource lifetime, but
     /// leaves the ordinary `run()` path untouched. A result from this route is
     /// diagnostic only, not a proof of deterministic resume or release safety.
+    /// Ordinary final optimizer-state capture still occurs when configured.
     /// Preflight errors return `Err`; execution errors are retained in the
     /// returned outcome rather than hidden by a retry.
     #[cfg(feature = "wgpu")]
@@ -59,7 +60,7 @@ impl ByteCorpusStudy {
             "request_sha256": self.request_sha256(),
             "case": case_name,
             "requested_after_update": after_update,
-            "boundary": "accept_update_before_next_forward_without_checkpoint",
+            "boundary": "accept_update_one_before_next_forward_without_pause_checkpoint",
             "release_ready": false,
             "scope": "Instrumented synchronization: receipt timing and resource lifetime change. \
                 No repair, determinism or release claim."
