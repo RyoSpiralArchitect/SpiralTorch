@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import stat
 from pathlib import Path
@@ -59,7 +60,14 @@ def _json(data):
     def invalid_constant(value):
         raise ValueError(f"nonfinite QKV run JSON value: {value}")
 
-    return json.loads(data, object_pairs_hook=unique, parse_constant=invalid_constant)
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("nonfinite QKV run JSON number")
+        return result
+
+    return json.loads(data, object_pairs_hook=unique,
+                      parse_constant=invalid_constant, parse_float=finite_float)
 
 
 def _number(value):
@@ -95,10 +103,11 @@ def _checkpoint(data, pin, result, update):
     if inner_length > 16384 or 4 + inner_length > len(inner):
         raise ValueError("invalid QKV optimizer checkpoint header")
     optimizer = _json(inner[4:4 + inner_length])
+    initial_steps = _number(header.get("initial_steps"))
     if (optimizer.get("schema") != "spiraltorch.qkv_adamw.v1"
-            or _number(optimizer.get("steps")) != _number(header.get("initial_steps")) + update):
+            or _number(optimizer.get("steps")) != initial_steps + update):
         raise ValueError("QKV optimizer clock disagrees with run")
-    return inner, optimizer
+    return inner, optimizer, initial_steps
 
 
 def verify_qkv_run(directory):
@@ -131,6 +140,7 @@ def verify_qkv_run(directory):
     final_inner = None
     final_optimizer = None
     final_row = None
+    initial_steps = None
     for row in _records(root, "checkpoints.jsonl"):
         update = _number(row.get("updates"))
         if (update < start or update > end or (previous is None and update != start)
@@ -138,7 +148,11 @@ def verify_qkv_run(directory):
                 or row.get("file") != f"checkpoint-{update:09d}.bin"):
             raise ValueError("invalid QKV checkpoint index order or name")
         data = _read_regular(root, row["file"], 1 << 26)
-        final_inner, final_optimizer = _checkpoint(data, row.get("checkpoint_id"), result, update)
+        final_inner, final_optimizer, clock_origin = _checkpoint(
+            data, row.get("checkpoint_id"), result, update)
+        if initial_steps is not None and clock_origin != initial_steps:
+            raise ValueError("QKV checkpoint optimizer clock origin changed")
+        initial_steps = clock_origin
         previous = update
         final_row = row
     if previous != end or final_row != result.get("final_checkpoint"):

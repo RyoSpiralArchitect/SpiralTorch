@@ -86,6 +86,8 @@ pin, and exact equality of the final optimizer payload with `qkv.bin`. It
 returns the parsed result or raises on a missing, truncated, inconsistent or
 oversize file. This is a local integrity check, not authentication, a model
 reload, or proof of learning quality. Keep the original files for recovery.
+Step log continuity and finite JSON are checked, but individual report fields
+are not hash-pinned by this v1 output format; do not treat them as authenticated.
 
 On **any** error, stop. A native publication error may leave a complete file
 while the live session remains unchanged. A later Python index/report error

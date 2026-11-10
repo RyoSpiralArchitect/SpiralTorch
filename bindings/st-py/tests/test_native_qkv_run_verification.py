@@ -149,6 +149,37 @@ class QkvRunVerificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runs.verify_qkv_run(self.root)
 
+    def test_rejects_overflowing_numeric_log_metric(self):
+        (self.root / "steps.jsonl").write_text('{"update":1,"optimizer":{"objective_loss":1e999}}\n')
+        with self.assertRaises(ValueError):
+            runs.verify_qkv_run(self.root)
+
+    def test_rejects_changed_clock_origin_even_with_resealed_files(self):
+        path = self.root / "checkpoint-000000001.bin"
+        data = path.read_bytes()
+        header_length = int.from_bytes(data[:4], "little")
+        header = json.loads(data[4:4 + header_length])
+        inner = data[4 + header_length:]
+        optimizer_length = int.from_bytes(inner[:4], "little")
+        optimizer = json.loads(inner[4:4 + optimizer_length])
+        optimizer["steps"] = 2
+        inner = encode(optimizer, inner[4 + optimizer_length:])
+        header["initial_steps"] = 1
+        header["optimizer_id"] = pin(inner)
+        data = encode(header, inner)
+        path.write_bytes(data)
+        index_path = self.root / "checkpoints.jsonl"
+        rows = [json.loads(row) for row in index_path.read_text().splitlines()]
+        rows[-1]["checkpoint_id"] = pin(data)
+        index_path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        (self.root / "qkv.bin").write_bytes(inner)
+        self.result["final_checkpoint"] = rows[-1]
+        self.result["qkv"]["checkpoint_id"] = pin(inner)
+        self.result["qkv"]["optimizer_steps"] = 2
+        self.write_result()
+        with self.assertRaises(ValueError):
+            runs.verify_qkv_run(self.root)
+
 
 if __name__ == "__main__":
     unittest.main()
