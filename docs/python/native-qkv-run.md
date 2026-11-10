@@ -80,6 +80,13 @@ and replaces the live session only after publishing the complete checkpoint.
 Existing paths, including links, are never overwritten. On Unix, publication
 requires hard-link support; use a private directory with a single writer.
 
+After a run, `spiraltorch.native_qkv_runs.verify_qkv_run(directory)` checks the
+completion marker, ordered index and step log, every trainer/optimizer SHA-256
+pin, and exact equality of the final optimizer payload with `qkv.bin`. It
+returns the parsed result or raises on a missing, truncated, inconsistent or
+oversize file. This is a local integrity check, not authentication, a model
+reload, or proof of learning quality. Keep the original files for recovery.
+
 On **any** error, stop. A native publication error may leave a complete file
 while the live session remains unchanged. A later Python index/report error
 occurs after native publication and can therefore leave both a durable new
