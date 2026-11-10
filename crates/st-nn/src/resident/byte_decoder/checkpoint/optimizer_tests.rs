@@ -48,6 +48,65 @@ fn adamw_checkpoint_preserves_full_topology_history_and_exact_float_bits() {
 }
 
 #[test]
+fn adamw_contextual_checkpoint_rebuilds_updated_router_and_frozen_query() {
+    let mut checkpoint = checkpoint();
+    let geometry = checkpoint
+        .plan
+        .parameter_layout()
+        .geometry()
+        .unwrap()
+        .clone();
+    let router = geometry.mixture_logits().unwrap().start;
+    let query_slots = geometry.query_projections()[0].clone();
+    let mut record = ModelRecord::from_plan(&checkpoint.plan).unwrap();
+    let mut values = record.values_mut().collect::<Vec<_>>();
+    // Distinct query values represent frozen initialization; the router value is updated.
+    values[router][0] = 0.375;
+    values[query_slots.start][0] = 0.125;
+    values[query_slots.start + 1][0] = -0.25;
+    drop(values);
+    checkpoint.plan = record.into_plan().unwrap();
+
+    let state = checkpoint.optimizer.as_mut().unwrap();
+    state.slots[router].first[0] = 0.0625;
+    state.slots[router].second[0] = 0.03125;
+    for slot in &mut state.slots[query_slots.clone()] {
+        slot.first.fill(0.);
+        slot.second.fill(0.);
+        slot.steps = 0;
+    }
+
+    let encoded = checkpoint.to_json().unwrap();
+    let restored = ByteDecoderCheckpoint::from_json(&encoded).unwrap();
+    let geometry = restored.plan.causal_geometry().unwrap();
+    assert_eq!(
+        geometry.mixture().unwrap().raw_logits()[0][0].to_bits(),
+        0.375f32.to_bits()
+    );
+    let query = geometry.mixture().unwrap().query_projections()[0]
+        .graph_definition()
+        .unwrap();
+    assert_eq!(
+        query.parameters()[0].values[0].to_bits(),
+        0.125f32.to_bits()
+    );
+    assert_eq!(
+        query.parameters()[1].values[0].to_bits(),
+        (-0.25f32).to_bits()
+    );
+    let state = restored.adamw_state().unwrap();
+    assert_eq!(state.slots[router].first[0].to_bits(), 0.0625f32.to_bits());
+    assert_eq!(
+        state.slots[router].second[0].to_bits(),
+        0.03125f32.to_bits()
+    );
+    assert!(state.slots[query_slots].iter().all(|slot| slot.steps == 0
+        && slot.first.iter().all(|&v| v == 0.)
+        && slot.second.iter().all(|&v| v == 0.)));
+    assert_eq!(restored.to_json().unwrap(), encoded);
+}
+
+#[test]
 fn adamw_checkpoint_rejects_missing_downgraded_and_malformed_state() {
     let original: serde_json::Value =
         serde_json::from_str(&checkpoint().to_json().unwrap()).unwrap();
