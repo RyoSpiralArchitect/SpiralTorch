@@ -107,7 +107,35 @@ def _checkpoint(data, pin, result, update):
     if (optimizer.get("schema") != "spiraltorch.qkv_adamw.v1"
             or _number(optimizer.get("steps")) != initial_steps + update):
         raise ValueError("QKV optimizer clock disagrees with run")
-    return inner, optimizer, initial_steps
+    owner_fields = ("base", "lora", "geometry", "readout", "layer", "width",
+                    "adam_bits", "max_gradient_norm_bits")
+    if any(field not in optimizer for field in owner_fields[:-1]):
+        raise ValueError("incomplete QKV optimizer owner")
+    owner = {field: optimizer.get(field) for field in owner_fields}
+    return inner, optimizer, initial_steps, owner
+
+
+def _projection_id(inner, optimizer):
+    length = int.from_bytes(inner[:4], "little")
+    payload = inner[4 + length:]
+    width = _number(optimizer.get("width"))
+    layer = _number(optimizer.get("layer"))
+    if not width or len(payload) != 36 * width * width:
+        raise ValueError("invalid QKV optimizer weight payload")
+    if (not isinstance(optimizer.get("base"), str)
+            or optimizer.get("readout") not in ("f32", "f64", "f32_wide_backward")
+            or any(value is not None and not isinstance(value, str)
+                   for value in (optimizer.get("lora"), optimizer.get("geometry")))):
+        raise ValueError("invalid QKV optimizer projection owner")
+    digest = hashlib.sha256(b"spiraltorch.qkv_projection.f32.v1\0")
+    for value in (optimizer["base"], optimizer["lora"] or "",
+                  optimizer["geometry"] or "", optimizer["readout"]):
+        encoded = value.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "little"))
+        digest.update(encoded)
+    digest.update(layer.to_bytes(8, "little"))
+    digest.update(payload[:len(payload) // 3])
+    return "sha256:" + digest.hexdigest()
 
 
 def verify_qkv_run(directory):
@@ -128,9 +156,16 @@ def verify_qkv_run(directory):
     start = _number(result.get("initial_update"))
     end = _number(result.get("updates"))
     total = _number(result.get("total_updates"))
+    windows = _number(result.get("active_windows"))
+    config = result.get("config")
+    if not isinstance(config, dict):
+        raise ValueError("invalid QKV run config")
+    batch = _number(config.get("batch_windows"))
+    epochs = _number(config.get("epochs"))
     if (result.get("schema") != "spiraltorch.native_qkv_run.v1"
             or not isinstance(result.get("data_id"), str)
-            or not isinstance(result.get("config"), dict)
+            or not windows or not batch or not epochs
+            or total != ((windows + batch - 1) // batch) * epochs
             or not start <= end <= total
             or result.get("exhausted") is not (end == total)
             or result.get("checkpoint_index") != "checkpoints.jsonl"
@@ -141,6 +176,7 @@ def verify_qkv_run(directory):
     final_optimizer = None
     final_row = None
     initial_steps = None
+    optimizer_owner = None
     for row in _records(root, "checkpoints.jsonl"):
         update = _number(row.get("updates"))
         if (update < start or update > end or (previous is None and update != start)
@@ -148,11 +184,14 @@ def verify_qkv_run(directory):
                 or row.get("file") != f"checkpoint-{update:09d}.bin"):
             raise ValueError("invalid QKV checkpoint index order or name")
         data = _read_regular(root, row["file"], 1 << 26)
-        final_inner, final_optimizer, clock_origin = _checkpoint(
+        final_inner, final_optimizer, clock_origin, owner = _checkpoint(
             data, row.get("checkpoint_id"), result, update)
         if initial_steps is not None and clock_origin != initial_steps:
             raise ValueError("QKV checkpoint optimizer clock origin changed")
+        if optimizer_owner is not None and owner != optimizer_owner:
+            raise ValueError("QKV checkpoint optimizer owner changed")
         initial_steps = clock_origin
+        optimizer_owner = owner
         previous = update
         final_row = row
     if previous != end or final_row != result.get("final_checkpoint"):
@@ -171,7 +210,8 @@ def verify_qkv_run(directory):
     _pinned(exported, qkv.get("checkpoint_id"))
     if (exported != final_inner
             or _number(qkv.get("optimizer_steps")) != final_optimizer["steps"]
-            or _number(qkv.get("layer")) != _number(final_optimizer.get("layer"))):
+            or _number(qkv.get("layer")) != _number(final_optimizer.get("layer"))
+            or qkv.get("projection_id") != _projection_id(exported, final_optimizer)):
         raise ValueError("QKV export differs from final trainer checkpoint")
     return result
 

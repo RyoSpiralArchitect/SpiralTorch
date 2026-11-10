@@ -82,7 +82,9 @@ requires hard-link support; use a private directory with a single writer.
 
 After a run, `spiraltorch.native_qkv_runs.verify_qkv_run(directory)` checks the
 completion marker, ordered index and step log, every trainer/optimizer SHA-256
-pin, and exact equality of the final optimizer payload with `qkv.bin`. It
+pin, consistent optimizer owners and training-plan length, exact equality of
+the final optimizer payload with `qkv.bin`, and the Rust serving projection ID
+recomputed from its frozen owner and QKV weights. It
 returns the parsed result or raises on a missing, truncated, inconsistent or
 oversize file. This is a local integrity check, not authentication, a model
 reload, or proof of learning quality. Keep the original files for recovery.

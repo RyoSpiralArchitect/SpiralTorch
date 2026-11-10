@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 
@@ -22,13 +23,25 @@ def pin(data):
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def projection_id(base, weights):
+    digest = hashlib.sha256(b"spiraltorch.qkv_projection.f32.v1\0")
+    for value in (base, "", "", "f32"):
+        encoded = value.encode()
+        digest.update(len(encoded).to_bytes(8, "little"))
+        digest.update(encoded)
+    digest.update((0).to_bytes(8, "little"))
+    digest.update(weights)
+    return "sha256:" + digest.hexdigest()
+
+
 class QkvRunVerificationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.config = {"context_length": 4, "batch_windows": 1}
+        self.config = {"context_length": 4, "batch_windows": 1, "epochs": 1}
         self.data_id = "sha256:" + "a" * 64
+        self.base_id = "sha256:" + "b" * 64
         self.result = {
             "schema": "spiraltorch.native_qkv_run.v1",
             "data_id": self.data_id,
@@ -36,13 +49,19 @@ class QkvRunVerificationTests(unittest.TestCase):
             "initial_update": 0,
             "updates": 1,
             "total_updates": 1,
+            "active_windows": 1,
             "exhausted": True,
             "checkpoint_index": "checkpoints.jsonl",
             "step_log": "steps.jsonl",
         }
         index = []
         for update in (0, 1):
-            inner = encode({"schema": "spiraltorch.qkv_adamw.v1", "steps": update, "layer": 0}, b"weight")
+            weights = struct.pack("<3f", float(update), 0.25, -0.5)
+            inner = encode({
+                "schema": "spiraltorch.qkv_adamw.v1", "base": self.base_id,
+                "lora": None, "geometry": None, "readout": "f32", "layer": 0,
+                "width": 1, "steps": update, "adam_bits": [0, 0, 0],
+            }, weights + bytes(24))
             outer = encode({
                 "schema": "spiraltorch.native_causal_lm_qkv_trainer.v1",
                 "data_id": self.data_id,
@@ -58,6 +77,7 @@ class QkvRunVerificationTests(unittest.TestCase):
         self.result["qkv"] = {
             "file": "qkv.bin", "checkpoint_id": pin(inner),
             "optimizer_steps": 1, "layer": 0,
+            "projection_id": projection_id(self.base_id, weights),
         }
         (self.root / "qkv.bin").write_bytes(inner)
         (self.root / "checkpoints.jsonl").write_text("".join(json.dumps(row) + "\n" for row in index))
@@ -153,6 +173,41 @@ class QkvRunVerificationTests(unittest.TestCase):
         (self.root / "steps.jsonl").write_text('{"update":1,"optimizer":{"objective_loss":1e999}}\n')
         with self.assertRaises(ValueError):
             runs.verify_qkv_run(self.root)
+
+    def test_rejects_rewritten_plan_and_completion_status(self):
+        self.result["total_updates"] = 2
+        self.result["exhausted"] = False
+        self.write_result()
+        with self.assertRaises(ValueError):
+            runs.verify_qkv_run(self.root)
+
+    def test_rejects_resealed_optimizer_owner_splice(self):
+        path = self.root / "checkpoint-000000000.bin"
+        data = path.read_bytes()
+        header_length = int.from_bytes(data[:4], "little")
+        header = json.loads(data[4:4 + header_length])
+        inner = data[4 + header_length:]
+        optimizer_length = int.from_bytes(inner[:4], "little")
+        optimizer = json.loads(inner[4:4 + optimizer_length])
+        optimizer["base"] = "sha256:" + "c" * 64
+        inner = encode(optimizer, inner[4 + optimizer_length:])
+        header["optimizer_id"] = pin(inner)
+        data = encode(header, inner)
+        path.write_bytes(data)
+        index_path = self.root / "checkpoints.jsonl"
+        rows = [json.loads(row) for row in index_path.read_text().splitlines()]
+        rows[0]["checkpoint_id"] = pin(data)
+        index_path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        with self.assertRaises(ValueError):
+            runs.verify_qkv_run(self.root)
+
+    def test_rejects_wrong_or_missing_projection_id(self):
+        for value in ("sha256:" + "0" * 64, None):
+            with self.subTest(value=value):
+                self.result["qkv"]["projection_id"] = value
+                self.write_result()
+                with self.assertRaises(ValueError):
+                    runs.verify_qkv_run(self.root)
 
     def test_rejects_changed_clock_origin_even_with_resealed_files(self):
         path = self.root / "checkpoint-000000001.bin"
