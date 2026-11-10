@@ -8,6 +8,16 @@ use crate::{emit_tensor_op, emit_tensor_op_meta, Layout, PureResult, Tensor, Ten
 use st_kernel_contracts::classification::{decode_class_index, ClassReduction, CrossEntropySpec};
 use std::str::FromStr;
 
+mod competition;
+pub use competition::{RivalCrossEntropy, RivalCrossEntropyReport, MAX_RIVAL_CLASSES};
+mod declared;
+pub use declared::{DeclaredRivalReport, DeclaredRivalRow, MAX_DECLARED_RIVAL_IDS};
+mod coverage;
+pub use coverage::{RivalCoverageGuard, RivalCoverageGuardReport, RivalCoverageReference};
+mod target;
+pub use target::TargetClassScore;
+mod context_preference;
+pub use context_preference::ContextTokenPreference;
 mod unlikelihood;
 pub use unlikelihood::UnlikelihoodPosition;
 
@@ -136,6 +146,10 @@ impl RowPartition {
                 maximum_index = index;
             }
         }
+        Self::with_maximum(row, maximum_index)
+    }
+
+    fn with_maximum(row: &[f32], maximum_index: usize) -> Self {
         let maximum = f64::from(row[maximum_index]);
         // Excluding one maximum preserves tiny tails with ln_1p instead of ln(1 + tail).
         let tail = row

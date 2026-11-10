@@ -57,6 +57,35 @@ impl PyGeometryAdapterArtifact {
         self.inner.state_json().map_err(value_error)
     }
 
+    /// Create a distinct projection artifact with immutable anchors and zero offsets.
+    fn anchor_wave_projection(&self, py: Python<'_>, path: &str) -> PyResult<Self> {
+        py.detach(|| self.inner.anchor_wave_projection(path))
+            .map(|inner| Self { inner })
+            .map_err(value_error)
+    }
+
+    fn trainable_delta_l2(&self, py: Python<'_>, endpoint: &Self) -> PyResult<f64> {
+        py.detach(|| self.inner.trainable_delta_l2(&endpoint.inner))
+            .map_err(value_error)
+    }
+
+    /// Return a new artifact in the supplied parameter direction and its Rust rounding receipt.
+    fn match_trainable_delta(
+        &self,
+        py: Python<'_>,
+        endpoint: &Self,
+        target_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        crate::channel_affine::reject_bool(target_l2)?;
+        let target_l2 = target_l2.extract::<f64>()?;
+        let (inner, receipt) = py
+            .detach(|| self.inner.match_trainable_delta(&endpoint.inner, target_l2))
+            .map_err(value_error)?;
+        let report =
+            crate::json::json_to_py(py, &serde_json::to_value(receipt).map_err(value_error)?)?;
+        Ok((Self { inner }, report))
+    }
+
     #[getter]
     fn artifact_id(&self) -> &str {
         self.inner.artifact_id()

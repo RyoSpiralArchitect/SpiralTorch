@@ -8,6 +8,12 @@ pub struct PyNativeCausalLmGenerator {
     inner: NativeCausalLmGenerator,
 }
 
+impl PyNativeCausalLmGenerator {
+    pub(super) fn from_native(inner: NativeCausalLmGenerator) -> Self {
+        Self { inner }
+    }
+}
+
 #[pyclass(name = "NativeCausalLmGenerationStep", module = "spiraltorch", frozen)]
 pub struct PyNativeCausalLmGenerationStep {
     inner: CausalLmGenerationStep,
@@ -54,6 +60,10 @@ impl PyNativeCausalLmGenerator {
     fn advance_ids(&mut self, py: Python<'_>, count: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
         let count = super::dimension(count)?;
         py.detach(|| self.inner.advance_ids(count)).map_err(error)
+    }
+    #[getter]
+    fn projection_id(&self) -> Option<&str> {
+        self.inner.projection_id()
     }
     #[getter]
     fn finished(&self) -> bool {

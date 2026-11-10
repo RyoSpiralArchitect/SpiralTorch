@@ -1,0 +1,672 @@
+use super::*;
+use st_core::inference::token_decoding::{TokenDistribution, TokenSelection};
+use st_kernel_contracts::adamw::{AdamWConfig, AdamWStep};
+use st_kernel_contracts::gradient_clip::GlobalNormClip;
+
+#[test]
+fn qkv_clips_the_complete_mean_once_before_adamw_and_restores_the_policy() {
+    let model = adapted(1);
+    let config = AdamWConfig::new(0.9, 0.999, 0.1).unwrap();
+    let plain = NativeCausalLmQkvAdamW::new(&model, 0, config).unwrap();
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let (_, gradient) = plain
+        .answer_sequence_gradients_with_label_smoothing(&qs, &labels, 2, 0.1)
+        .unwrap();
+    let squared = gradient
+        .data()
+        .iter()
+        .map(|&g| f64::from(g).powi(2))
+        .sum::<f64>();
+    let norm = squared.sqrt();
+    assert!(norm > 1e-6);
+    let clip = GlobalNormClip::new((norm * 0.25) as f32).unwrap();
+    let factors = clip.factors(squared).unwrap();
+    let step = AdamWStep::new(0.03, 0.02).unwrap();
+    let expected = plain
+        .weights()
+        .iter()
+        .zip(gradient.data())
+        .map(|(&w, &g)| {
+            let clipped = factors.as_slice().iter().fold(g, |v, &f| v * f);
+            step.candidate(config, w, clipped, 0., 0., 0).unwrap().value
+        })
+        .collect::<Vec<_>>();
+    let mut trainer =
+        NativeCausalLmQkvAdamW::new_with_gradient_clip(&model, 0, config, Some(clip)).unwrap();
+    assert_eq!(trainer.serving_id(), plain.serving_id());
+    assert_eq!(
+        trainer
+            .answer_sequence_gradients_with_label_smoothing(&qs, &labels, 2, 0.1)
+            .unwrap()
+            .1,
+        gradient
+    );
+    let report = trainer
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    assert_eq!(trainer.weights(), expected);
+    assert_eq!(trainer.steps(), 1);
+    let observation = report.gradient_clip.unwrap();
+    assert_eq!(observation.before_l2, norm);
+    assert_eq!(observation.factors, factors.as_slice());
+    assert!(observation.after_l2 <= f64::from(clip.max_norm()) * (1. + 1e-6));
+    let (bytes, pin) = trainer.checkpoint().unwrap();
+    let mut restored = NativeCausalLmQkvAdamW::restore(&model, &bytes, &pin).unwrap();
+    assert_eq!(restored.max_gradient_norm(), Some(clip.max_norm()));
+    assert_eq!(restored.checkpoint().unwrap(), (bytes, pin));
+    let a = trainer
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    let b = restored
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(a).unwrap(),
+        serde_json::to_value(b).unwrap()
+    );
+    assert_eq!(
+        trainer.checkpoint().unwrap(),
+        restored.checkpoint().unwrap()
+    );
+    let state = trainer.checkpoint().unwrap();
+    trainer
+        .step_answer_sequences(&qs, &labels, 2, AdamWStep::new(0., 0.).unwrap())
+        .unwrap();
+    assert_eq!(trainer.checkpoint().unwrap(), state);
+    assert!(trainer
+        .step_answer_sequences(&[&[999]], &[1], 1, step)
+        .is_err());
+    assert_eq!(trainer.checkpoint().unwrap(), state);
+}
+
+#[test]
+fn qkv_unclipped_bytes_and_inactive_clip_gradients_keep_legacy_behavior() {
+    let model = adapted(0);
+    let cfg = AdamWConfig::default();
+    let mut legacy = NativeCausalLmQkvAdamW::new(&model, 0, cfg).unwrap();
+    let mut explicit =
+        NativeCausalLmQkvAdamW::new_with_gradient_clip(&model, 0, cfg, None).unwrap();
+    let mut inactive = NativeCausalLmQkvAdamW::new_with_gradient_clip(
+        &model,
+        0,
+        cfg,
+        Some(GlobalNormClip::new(f32::MAX).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(legacy.checkpoint().unwrap(), explicit.checkpoint().unwrap());
+    let bytes = legacy.checkpoint().unwrap().0;
+    let n = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+    assert!(!std::str::from_utf8(&bytes[4..4 + n])
+        .unwrap()
+        .contains("max_gradient_norm"));
+    assert!(
+        NativeCausalLmQkvAdamW::restore(&model, &bytes, &legacy.checkpoint().unwrap().1)
+            .unwrap()
+            .max_gradient_norm()
+            .is_none()
+    );
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    for _ in 0..2 {
+        let step = AdamWStep::new(0.03, 0.01).unwrap();
+        let a = legacy.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+        let b = explicit
+            .step_answer_sequences(&qs, &labels, 2, step)
+            .unwrap();
+        let c = inactive
+            .step_answer_sequences(&qs, &labels, 2, step)
+            .unwrap();
+        assert!(!serde_json::to_value(&a)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("gradient_clip"));
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap()
+        );
+        assert_eq!(legacy.checkpoint().unwrap(), explicit.checkpoint().unwrap());
+        assert_eq!(legacy.weights(), inactive.weights());
+        let clip = c.gradient_clip.unwrap();
+        assert!(clip.factors.is_empty());
+        assert_eq!(clip.before_l2, clip.after_l2);
+        let data = |t: &NativeCausalLmQkvAdamW| {
+            let bytes = t.checkpoint().unwrap().0;
+            let n = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+            bytes[4 + n..].to_vec()
+        };
+        assert_eq!(data(&legacy), data(&inactive));
+    }
+}
+
+#[test]
+fn qkv_restore_rejects_resealed_invalid_clip_limits() {
+    use sha2::{Digest, Sha256};
+    let model = adapted(0);
+    let trainer = NativeCausalLmQkvAdamW::new(&model, 0, AdamWConfig::default()).unwrap();
+    let original = trainer.checkpoint().unwrap().0;
+    let n = u32::from_le_bytes(original[..4].try_into().unwrap()) as usize;
+    for limit in [0., -1., f32::INFINITY, f32::NAN] {
+        let mut header: serde_json::Value = serde_json::from_slice(&original[4..4 + n]).unwrap();
+        header["max_gradient_norm_bits"] = json!(limit.to_bits());
+        let h = serde_json::to_vec(&header).unwrap();
+        let mut bytes = (h.len() as u32).to_le_bytes().to_vec();
+        bytes.extend(h);
+        bytes.extend_from_slice(&original[4 + n..]);
+        let pin = format!("sha256:{:x}", Sha256::digest(&bytes));
+        assert!(NativeCausalLmQkvAdamW::restore(&model, &bytes, &pin).is_err());
+    }
+}
+
+fn prompts() -> (Vec<Vec<usize>>, Vec<usize>) {
+    (
+        vec![
+            vec![3, 1],
+            vec![4, 2, 0, 6],
+            vec![1, 8, 3, 7],
+            vec![6],
+            vec![7, 2, 1, 9, 8],
+            vec![5, 6, 3, 2, 1],
+            vec![4, 7, 2, 6, 3],
+            vec![8, 1, 5],
+        ],
+        vec![2, 7, 4, 1, 5, 2, 8, 6],
+    )
+}
+
+fn adapted(lag: usize) -> NativeCausalLm {
+    let base = load();
+    let model = if lag == 0 {
+        base
+    } else {
+        base.with_key_lag(CausalLmKeyLag { layer: 0, lag }).unwrap()
+    };
+    model
+        .with_lora(1, 2, 1.)
+        .unwrap()
+        .with_geometry(artifact(&model, "transformer.h.1.attn", 0.2))
+        .unwrap()
+}
+
+#[test]
+fn qkv_snapshot_cache_stays_frozen_and_admits_before_prefill() {
+    for lag in [0, 1] {
+        let model = adapted(lag);
+        let mut trainer = NativeCausalLmQkvAdamW::new(&model, 0, AdamWConfig::default()).unwrap();
+        let prompt = vec![1, 2, 3];
+        assert_eq!(trainer.prefill_input_count(3, 48).unwrap(), 3);
+        for (n, cap) in [(0, 48), (3, 47), (9, 4096), (3, 0)] {
+            assert!(trainer.prefill_input_count(n, cap).is_err());
+        }
+        let tight = trainer.prefill(prompt.clone(), 48).unwrap();
+        assert_eq!((tight.cache_values(), tight.max_cache_values()), (48, 48));
+        assert!(tight.branch(4).is_err());
+        assert_eq!(tight.token_ids(), prompt);
+        let frozen = trainer.clone();
+        let prefix = trainer.prefill(prompt.clone(), 128).unwrap();
+        trainer
+            .step_answer_sequences(&[&prompt], &[4], 1, AdamWStep::new(0.03, 0.).unwrap())
+            .unwrap();
+        assert_ne!(trainer.serving_id(), prefix.projection_id());
+        assert_eq!(prefix.projection_id(), frozen.serving_id());
+        for token in [4, 7] {
+            let branch = prefix.branch(token).unwrap();
+            let mut ids = prompt.clone();
+            ids.push(token);
+            assert_eq!(branch.logits(), frozen.last_logits(&ids).unwrap());
+            assert_eq!(branch.projection_id(), prefix.projection_id());
+            assert_eq!(branch.cache_values(), 64);
+            assert_eq!(branch.max_cache_values(), 128);
+        }
+        assert_eq!(prefix.logits(), frozen.last_logits(&prompt).unwrap());
+        assert_eq!(prefix.token_ids(), prompt);
+        assert_eq!(
+            trainer.prefill(prompt.clone(), 128).unwrap().logits(),
+            trainer.last_logits(&prompt).unwrap()
+        );
+        assert!(prefix.branch(usize::MAX).is_err());
+        assert_eq!(prefix.logits(), frozen.last_logits(&prompt).unwrap());
+    }
+}
+
+#[test]
+fn qkv_generation_uses_updated_snapshot_with_exact_cached_and_sampled_resume() {
+    for lag in [0, 1] {
+        for readout in [
+            CausalLmReadoutAccumulator::F32,
+            CausalLmReadoutAccumulator::F32WideBackward,
+            CausalLmReadoutAccumulator::F64,
+        ] {
+            let base = adapted(lag).with_readout_accumulator(readout);
+            let mut trainer =
+                NativeCausalLmQkvAdamW::new(&base, 0, AdamWConfig::default()).unwrap();
+            let prompt = vec![1, 2, 3];
+            trainer
+                .step_answer_sequences(&[&prompt], &[4], 1, AdamWStep::new(0.03, 0.).unwrap())
+                .unwrap();
+            let saved = trainer.checkpoint().unwrap();
+            let frozen = NativeCausalLmQkvAdamW::restore(&base, &saved.0, &saved.1).unwrap();
+            for selection in [TokenSelection::Greedy, TokenSelection::Sample] {
+                for distribution in [
+                    TokenDistribution::Softmax { temperature: 0.7 },
+                    TokenDistribution::ZSpace {
+                        config: Default::default(),
+                    },
+                ] {
+                    let cfg = CausalLmGenerationConfig {
+                        max_new_tokens: 4,
+                        eos_token_ids: vec![],
+                        seed: 81,
+                        decoding: st_core::inference::token_decoding::TokenDecodingConfig {
+                            selection,
+                            distribution,
+                            ..Default::default()
+                        },
+                        execution: CausalLmGenerationExecution::FullPrefix,
+                    };
+                    let mut full = frozen.generator(prompt.clone(), cfg.clone()).unwrap();
+                    let mut cache = frozen
+                        .generator(
+                            prompt.clone(),
+                            CausalLmGenerationConfig {
+                                execution: CausalLmGenerationExecution::KvCache { max_values: 128 },
+                                ..cfg.clone()
+                            },
+                        )
+                        .unwrap();
+                    assert_eq!(full.projection_id(), Some(frozen.serving_id().as_str()));
+                    if selection == TokenSelection::Greedy {
+                        let expected = st_core::inference::token_decoding::greedy_token_id_f32(
+                            &frozen.last_logits(&prompt).unwrap(),
+                            &prompt,
+                            &cfg.decoding,
+                        )
+                        .unwrap();
+                        assert_eq!(full.clone().step_token_id().unwrap(), Some(expected));
+                    }
+                    assert_eq!(full.step().unwrap(), cache.step().unwrap());
+                    let payload = cache.to_json().unwrap();
+                    let pin = cache.checkpoint_id().unwrap();
+                    let mut resumed = frozen.restore_generator(payload.as_bytes(), &pin).unwrap();
+                    assert_eq!(resumed.to_json().unwrap(), payload);
+                    assert!(NativeCausalLmGenerator::from_json(
+                        base.clone(),
+                        payload.as_bytes(),
+                        &pin
+                    )
+                    .is_err());
+                    // All live generators retain their snapshot while the trainer advances.
+                    trainer
+                        .step_answer_sequences(
+                            &[&prompt],
+                            &[4],
+                            1,
+                            AdamWStep::new(0.03, 0.).unwrap(),
+                        )
+                        .unwrap();
+                    assert_ne!(trainer.serving_id(), frozen.serving_id());
+                    assert!(trainer.restore_generator(payload.as_bytes(), &pin).is_err());
+                    while !full.finished() {
+                        let step = full.step().unwrap();
+                        assert_eq!(step, cache.step().unwrap());
+                        assert_eq!(step, resumed.step().unwrap());
+                        assert_eq!(cache.to_json().unwrap(), resumed.to_json().unwrap());
+                    }
+                    assert_eq!(full.finish_reason(), Some("length"));
+                    assert_eq!(cache.projection_id(), Some(frozen.serving_id().as_str()));
+                    assert_eq!(frozen.checkpoint().unwrap(), saved);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn qkv_generation_admission_eos_and_owner_routes_are_explicit() {
+    let base = adapted(1);
+    let trainer = NativeCausalLmQkvAdamW::new(&base, 0, AdamWConfig::default()).unwrap();
+    let state = trainer.checkpoint().unwrap();
+    let cfg = CausalLmGenerationConfig {
+        max_new_tokens: 4,
+        eos_token_ids: vec![],
+        seed: 0,
+        decoding: Default::default(),
+        execution: CausalLmGenerationExecution::KvCache { max_values: 96 },
+    };
+    assert_eq!(trainer.generation_input_count(3, &cfg).unwrap(), 3);
+    for length in [0, 4, usize::MAX] {
+        assert!(trainer.generation_input_count(length, &cfg).is_err());
+    }
+    assert!(trainer.generator(vec![999], cfg.clone()).is_err());
+    let mut generator = trainer.generator(vec![1, 2, 3], cfg.clone()).unwrap();
+    let first = generator.step_token_id().unwrap().unwrap();
+    let mut eos = trainer
+        .generator(
+            vec![1, 2, 3],
+            CausalLmGenerationConfig {
+                eos_token_ids: vec![first],
+                ..cfg.clone()
+            },
+        )
+        .unwrap();
+    assert_eq!(eos.advance_ids(4).unwrap(), vec![first]);
+    assert_eq!(eos.finish_reason(), Some("eos"));
+    let payload = eos.to_json().unwrap();
+    let mut restored = trainer
+        .restore_generator(payload.as_bytes(), &eos.checkpoint_id().unwrap())
+        .unwrap();
+    assert!(restored.step().unwrap().is_none());
+    assert_eq!(restored.to_json().unwrap(), payload);
+    let ordinary = NativeCausalLmGenerator::new(base.clone(), vec![1, 2, 3], cfg).unwrap();
+    let plain = ordinary.to_json().unwrap();
+    assert!(!plain.contains("projection_id"));
+    assert!(ordinary.projection_id().is_none());
+    assert!(trainer
+        .restore_generator(plain.as_bytes(), &ordinary.checkpoint_id().unwrap())
+        .is_err());
+    assert!(trainer
+        .restore_generator(payload.as_bytes(), &ordinary.checkpoint_id().unwrap())
+        .is_err());
+    assert_eq!(trainer.checkpoint().unwrap(), state);
+}
+
+#[test]
+fn ragged_qkv_matches_individual_unpadded_prefixes_not_token_weighting() {
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    for lag in [0, 1] {
+        let trainer =
+            NativeCausalLmQkvAdamW::new(&adapted(lag), 0, AdamWConfig::default()).unwrap();
+        let mut reference = vec![0.; 48];
+        let mut loss = 0.;
+        let mut token_loss = 0.;
+        for (q, y) in qs.iter().zip(&labels) {
+            let (v, g) = trainer.answer_gradients(q, [1, q.len()], &[*y]).unwrap();
+            loss += f64::from(v) / qs.len() as f64;
+            token_loss += f64::from(v) * q.len() as f64;
+            for (a, &x) in reference.iter_mut().zip(g.data()) {
+                *a += f64::from(x) / qs.len() as f64;
+            }
+        }
+        token_loss /= qs.iter().map(|q| q.len()).sum::<usize>() as f64;
+        assert!(
+            (token_loss - loss).abs() > 1e-6,
+            "fixture must distinguish answer and prefix-token weights"
+        );
+        for max_rows in [1, 2, 3, 32] {
+            let (v, g) = trainer
+                .answer_sequence_gradients(&qs, &labels, max_rows)
+                .unwrap();
+            assert!((f64::from(v) - loss).abs() < 7e-7);
+            assert!(g
+                .data()
+                .iter()
+                .zip(&reference)
+                .all(|(&a, &b)| (f64::from(a) - b).abs() < 2e-6));
+        }
+    }
+}
+
+#[test]
+fn equal_length_sequence_api_keeps_existing_microbatch_bits() {
+    let trainer = NativeCausalLmQkvAdamW::new(&adapted(1), 0, AdamWConfig::default()).unwrap();
+    let ids = [2, 4, 6, 1, 3, 8, 7, 9, 1, 6, 2, 5, 4, 2, 8];
+    let qs = ids.chunks_exact(3).collect::<Vec<_>>();
+    let labels = [7, 3, 5, 9, 1];
+    for max_rows in [1, 2, 3, 5, 32] {
+        let (v, a) = trainer
+            .answer_gradients_microbatched(&ids, [5, 3], &labels, max_rows)
+            .unwrap();
+        let (w, b) = trainer
+            .answer_sequence_gradients(&qs, &labels, max_rows)
+            .unwrap();
+        assert_eq!(v.to_bits(), w.to_bits());
+        assert_eq!(a, b);
+    }
+}
+
+#[test]
+fn ragged_qkv_update_has_one_clock_and_exact_continuation() {
+    let model = adapted(1);
+    let cfg = AdamWConfig::default();
+    let mut a = NativeCausalLmQkvAdamW::new(&model, 0, cfg).unwrap();
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let origin = a.checkpoint().unwrap();
+    a.step_answer_sequences(&qs, &labels, 2, AdamWStep::new(0., 0.).unwrap())
+        .unwrap();
+    assert_eq!(a.checkpoint().unwrap(), origin);
+    let prefix = a.prefill(owned[0].clone(), 4096).unwrap();
+    let step = AdamWStep::new(0.01, 0.02).unwrap();
+    let (_, g) = a.answer_sequence_gradients(&qs, &labels, 2).unwrap();
+    let expected = a
+        .weights()
+        .iter()
+        .zip(g.data())
+        .map(|(&w, &x)| step.candidate(cfg, w, x, 0., 0., 0).unwrap().value)
+        .collect::<Vec<_>>();
+    let report = a.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+    assert_eq!((a.steps(), report.steps), (1, 1));
+    assert_eq!(a.weights(), expected);
+    assert_ne!(prefix.projection_id(), a.serving_id());
+    assert_eq!(
+        prefix.logits(),
+        model
+            .logits(&owned[0], [1, owned[0].len()], true)
+            .unwrap()
+            .data()
+    );
+    let (checkpoint, pin) = a.checkpoint().unwrap();
+    let mut b = NativeCausalLmQkvAdamW::restore(&model, &checkpoint, &pin).unwrap();
+    a.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+    b.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+    assert_eq!(a.steps(), 2);
+    assert_eq!(a.checkpoint().unwrap(), b.checkpoint().unwrap());
+}
+
+#[test]
+fn ragged_qkv_rejects_bad_tails_and_large_rosters_without_mutating_state() {
+    let mut a = NativeCausalLmQkvAdamW::new(&adapted(1), 0, AdamWConfig::default()).unwrap();
+    let origin = a.checkpoint().unwrap();
+    let step = AdamWStep::new(0.01, 0.).unwrap();
+    for tail in [vec![], vec![99], vec![1; 9]] {
+        let valid = [1, 2];
+        assert!(a
+            .step_answer_sequences(&[&valid, &tail], &[2, 3], 1, step)
+            .is_err());
+        assert_eq!(a.checkpoint().unwrap(), origin);
+    }
+    let valid = [1, 2];
+    for (qs, gold, cap) in [
+        (vec![], vec![], 1),
+        (vec![&valid[..]], vec![], 1),
+        (vec![&valid[..]], vec![99], 1),
+        (vec![&valid[..]], vec![2], 0),
+        (
+            vec![&valid[..]; NativeCausalLmQkvAdamW::MAX_ANSWER_SEQUENCES + 1],
+            vec![2; NativeCausalLmQkvAdamW::MAX_ANSWER_SEQUENCES + 1],
+            4,
+        ),
+    ] {
+        assert!(a.step_answer_sequences(&qs, &gold, cap, step).is_err());
+        assert_eq!(a.checkpoint().unwrap(), origin);
+    }
+    let widths = (0..1025).map(|i| vec![1; 1 + i % 2]).collect::<Vec<_>>();
+    let qs = widths.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    assert!(a
+        .step_answer_sequences(&qs, &vec![2; qs.len()], 32, step)
+        .is_err());
+    assert_eq!(a.checkpoint().unwrap(), origin);
+}
+
+#[test]
+fn ragged_qkv_checks_each_real_group_against_geometry_budget() {
+    let base = load();
+    let mut record = serde_json::from_str::<serde_json::Value>(
+        artifact(&base, "transformer.h.1.attn", 0.2).to_json(),
+    )
+    .unwrap();
+    record["placements"][0]["recipe"]["max_values"] = json!(40);
+    let model = base
+        .with_geometry(
+            GeometryAdapterArtifact::create_json(&serde_json::to_vec(&record).unwrap()).unwrap(),
+        )
+        .unwrap();
+    let mut a = NativeCausalLmQkvAdamW::new(&model, 0, AdamWConfig::default()).unwrap();
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let origin = a.checkpoint().unwrap();
+    let step = AdamWStep::new(0.01, 0.).unwrap();
+    let lengths = qs.iter().map(|q| q.len()).collect::<Vec<_>>();
+    assert!(a.answer_sequence_input_count(&lengths, 3).is_err());
+    assert_eq!(
+        a.answer_sequence_input_count(&lengths, 2).unwrap(),
+        lengths.iter().sum::<usize>()
+    );
+    assert!(a.last_logits_input_count(9).is_err());
+    assert_eq!(a.last_logits_input_count(3).unwrap(), 3);
+    // Three length-five sequences exceed the bound together; two do not.
+    assert!(a.step_answer_sequences(&qs, &labels, 3, step).is_err());
+    assert_eq!(a.checkpoint().unwrap(), origin);
+    a.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+    assert_eq!(a.steps(), 1);
+}
+
+fn smoothed_reference(m: &NativeCausalLm, qs: &[&[usize]], gold: &[usize], epsilon: f64) -> f64 {
+    qs.iter()
+        .zip(gold)
+        .map(|(q, &label)| {
+            let logits = m.logits(q, [1, q.len()], true).unwrap();
+            let row = logits.data();
+            let high = row.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+            let logz = high
+                + row
+                    .iter()
+                    .map(|&v| (f64::from(v) - high).exp())
+                    .sum::<f64>()
+                    .ln();
+            logz - (1. - epsilon) * f64::from(row[label])
+                - epsilon * row.iter().map(|&v| f64::from(v)).sum::<f64>() / row.len() as f64
+        })
+        .sum::<f64>()
+        / qs.len() as f64
+}
+
+#[test]
+fn smoothed_qkv_uses_shared_full_vocabulary_loss_and_answer_weights() {
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    for lag in [0, 1] {
+        let m = adapted(lag);
+        let train = NativeCausalLmQkvAdamW::new(&m, 0, AdamWConfig::default()).unwrap();
+        for epsilon in [0., 0.1, 1.] {
+            let expected = smoothed_reference(&m, &qs, &labels, epsilon);
+            for cap in [1, 2, 32] {
+                let (loss, g) = train
+                    .answer_sequence_gradients_with_label_smoothing(&qs, &labels, cap, epsilon)
+                    .unwrap();
+                assert!((f64::from(loss) - expected).abs() < 2e-6);
+                let mut mean = vec![0.; g.data().len()];
+                for (q, y) in qs.iter().zip(&labels) {
+                    let (_, part) = train
+                        .answer_sequence_gradients_with_label_smoothing(&[*q], &[*y], 1, epsilon)
+                        .unwrap();
+                    for (v, &x) in mean.iter_mut().zip(part.data()) {
+                        *v += f64::from(x) / qs.len() as f64;
+                    }
+                }
+                assert!(g
+                    .data()
+                    .iter()
+                    .zip(mean)
+                    .all(|(&x, y)| (f64::from(x) - y).abs() < 2e-6));
+            }
+        }
+    }
+}
+
+#[test]
+fn smoothed_qkv_derivative_matches_physical_parameter_edits() {
+    let owned = [vec![1, 2], vec![3, 7, 4, 8]];
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let gold = [6, 2];
+    for lag in [0, 1] {
+        let make = |p: &BTreeMap<String, (Vec<usize>, Vec<f32>)>| {
+            let m = NativeCausalLm::from_gpt2_json(
+                &serde_json::to_vec(&config()).unwrap(),
+                &archive(p),
+                Default::default(),
+            )
+            .unwrap();
+            if lag == 0 {
+                m
+            } else {
+                m.with_key_lag(CausalLmKeyLag { layer: 0, lag }).unwrap()
+            }
+        };
+        let m = make(&parameters());
+        let a = NativeCausalLmQkvAdamW::new(&m, 0, AdamWConfig::default()).unwrap();
+        let (_, g) = a
+            .answer_sequence_gradients_with_label_smoothing(&qs, &gold, 2, 0.2)
+            .unwrap();
+        for output in 0..12 {
+            for input in 0..4 {
+                let loss = |sign: f32| {
+                    let mut p = parameters();
+                    p.get_mut("h.0.attn.c_attn.weight").unwrap().1[input * 12 + output] +=
+                        sign * 0.002;
+                    smoothed_reference(&make(&p), &qs, &gold, 0.2)
+                };
+                let numerical = (loss(1.) - loss(-1.)) / 0.004;
+                assert!((numerical - f64::from(g.data()[output * 4 + input])).abs() < 1e-4);
+            }
+        }
+    }
+}
+
+#[test]
+fn smoothing_is_opt_in_atomic_and_reported_without_mislabeling_nll() {
+    let m = adapted(1);
+    let mut a = NativeCausalLmQkvAdamW::new(&m, 0, AdamWConfig::default()).unwrap();
+    let (owned, labels) = prompts();
+    let qs = owned.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let origin = a.checkpoint().unwrap();
+    let step = AdamWStep::new(0.01, 0.).unwrap();
+    for epsilon in [-0.1, 1.01, f64::NAN, f64::INFINITY] {
+        assert!(a
+            .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, epsilon, step)
+            .is_err());
+        assert_eq!(a.checkpoint().unwrap(), origin);
+    }
+    a.step_answer_sequences_with_label_smoothing(
+        &qs,
+        &labels,
+        2,
+        0.1,
+        AdamWStep::new(0., 0.).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(a.checkpoint().unwrap(), origin);
+    let mut old = a.clone();
+    let plain = old.step_answer_sequences(&qs, &labels, 2, step).unwrap();
+    let explicit = a
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0., step)
+        .unwrap();
+    assert_eq!(plain.gold_nll.to_bits(), explicit.objective_loss.to_bits());
+    assert_eq!(a.checkpoint().unwrap(), old.checkpoint().unwrap());
+    let report = a
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    let value = serde_json::to_value(report).unwrap();
+    assert_eq!(value["label_smoothing"], json!(0.1));
+    assert!(value.get("gold_nll").is_none());
+    let (bytes, pin) = a.checkpoint().unwrap();
+    let mut restored = NativeCausalLmQkvAdamW::restore(&m, &bytes, &pin).unwrap();
+    a.step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    restored
+        .step_answer_sequences_with_label_smoothing(&qs, &labels, 2, 0.1, step)
+        .unwrap();
+    assert_eq!(a.checkpoint().unwrap(), restored.checkpoint().unwrap());
+}

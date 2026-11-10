@@ -100,6 +100,7 @@ pub struct CausalLmGenerationStep {
 #[derive(Clone, Debug)]
 pub struct NativeCausalLmGenerator {
     model: NativeCausalLm,
+    projection_id: Option<String>,
     config: CausalLmGenerationConfig,
     prompt_length: usize,
     tokens: Vec<usize>,
@@ -120,6 +121,8 @@ struct Checkpoint {
     tokens: Vec<usize>,
     #[serde(default, skip_serializing_if = "CausalLmReadoutAccumulator::is_f32")]
     readout_accumulator: CausalLmReadoutAccumulator,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    projection_id: Option<String>,
 }
 
 fn identity(bytes: &[u8]) -> String {
@@ -161,12 +164,22 @@ impl NativeCausalLmGenerator {
         prompt: Vec<usize>,
         config: CausalLmGenerationConfig,
     ) -> CausalLmResult<Self> {
+        Self::new_owned(model, prompt, config, None)
+    }
+
+    pub(super) fn new_owned(
+        model: NativeCausalLm,
+        prompt: Vec<usize>,
+        config: CausalLmGenerationConfig,
+        projection_id: Option<String>,
+    ) -> CausalLmResult<Self> {
         config.validate(&model, prompt.len())?;
         if prompt.iter().any(|&id| id >= model.config.vocabulary) {
             return Err("generation prompt contains an out-of-vocabulary token".into());
         }
         Ok(Self {
             model,
+            projection_id,
             config,
             prompt_length: prompt.len(),
             tokens: prompt,
@@ -175,6 +188,10 @@ impl NativeCausalLmGenerator {
     }
     pub fn config(&self) -> &CausalLmGenerationConfig {
         &self.config
+    }
+    /// Present only for a trained projection snapshot, not an ordinary base model.
+    pub fn projection_id(&self) -> Option<&str> {
+        self.projection_id.as_deref()
     }
     pub fn token_ids(&self) -> &[usize] {
         &self.tokens
@@ -314,6 +331,7 @@ impl NativeCausalLmGenerator {
             prompt_length: self.prompt_length,
             tokens: self.tokens.clone(),
             readout_accumulator: self.model.readout_accumulator,
+            projection_id: self.projection_id.clone(),
         })?;
         if json.len() > MAX_CHECKPOINT_BYTES {
             return Err("generation checkpoint exceeds byte budget".into());
@@ -328,6 +346,15 @@ impl NativeCausalLmGenerator {
         bytes: &[u8],
         expected_id: &str,
     ) -> CausalLmResult<Self> {
+        Self::from_json_owned(model, bytes, expected_id, None)
+    }
+
+    pub(super) fn from_json_owned(
+        model: NativeCausalLm,
+        bytes: &[u8],
+        expected_id: &str,
+        projection_id: Option<String>,
+    ) -> CausalLmResult<Self> {
         if bytes.len() > MAX_CHECKPOINT_BYTES {
             return Err("generation checkpoint exceeds byte budget".into());
         }
@@ -341,9 +368,10 @@ impl NativeCausalLmGenerator {
             || saved.geometry_artifact_id.as_deref() != model.geometry_artifact_id()
             || saved.lora_artifact_id.as_deref() != model.lora_artifact_id()
             || saved.readout_accumulator != model.readout_accumulator
+            || saved.projection_id != projection_id
         {
             return Err(
-                "generation schema, RNG, base, geometry, LoRA or readout accumulator owner mismatch"
+                "generation schema, RNG, base, geometry, LoRA, readout or projection owner mismatch"
                     .into(),
             );
         }
@@ -364,6 +392,7 @@ impl NativeCausalLmGenerator {
         }
         Ok(Self {
             model,
+            projection_id,
             config: saved.config,
             prompt_length: saved.prompt_length,
             tokens: saved.tokens,

@@ -30,8 +30,11 @@ pub(super) fn admit_new(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub(super) fn save(path: &Path, (payload, pin): (String, String)) -> CausalLmResult<String> {
-    st_core::runtime::atomic_create_new(path, payload.as_bytes())?;
+pub(super) fn save<P: AsRef<[u8]>>(
+    path: &Path,
+    (payload, pin): (P, String),
+) -> CausalLmResult<String> {
+    st_core::runtime::atomic_create_new(path, payload.as_ref())?;
     Ok(pin)
 }
 
@@ -55,12 +58,12 @@ pub(super) fn steps<S, R>(
         .collect()
 }
 
-pub(super) fn advance_new<S: Clone, R>(
+pub(super) fn advance_new<S: Clone, R, P: AsRef<[u8]>>(
     state: &mut S,
     count: usize,
     path: &Path,
     step: impl Fn(&mut S) -> CausalLmResult<Option<R>>,
-    snapshot: impl FnOnce(&S) -> CausalLmResult<(String, String)>,
+    snapshot: impl FnOnce(&S) -> CausalLmResult<(P, String)>,
 ) -> CausalLmResult<(Vec<R>, String)> {
     admit_new(path)?;
     transaction(state, |next| {

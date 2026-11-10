@@ -316,6 +316,7 @@ fn training_resume_requires_same_readout_policy_and_preserves_default_bytes() {
     for accumulator in [
         CausalLmReadoutAccumulator::F32,
         CausalLmReadoutAccumulator::F64,
+        CausalLmReadoutAccumulator::F32WideBackward,
     ] {
         let mut trainer = create_with_readout(config(), accumulator);
         trainer.step().unwrap();
@@ -323,7 +324,7 @@ fn training_resume_requires_same_readout_policy_and_preserves_default_bytes() {
         let id = trainer.checkpoint_id().unwrap();
         assert_eq!(
             payload.contains("readout_accumulator"),
-            accumulator == CausalLmReadoutAccumulator::F64
+            accumulator != CausalLmReadoutAccumulator::F32
         );
         let base = load().with_readout_accumulator(accumulator);
         let other =

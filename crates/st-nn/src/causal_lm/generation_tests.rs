@@ -29,6 +29,7 @@ fn generation_checkpoint_binds_readout_policy_and_keeps_default_bytes() {
         for accumulator in [
             CausalLmReadoutAccumulator::F32,
             CausalLmReadoutAccumulator::F64,
+            CausalLmReadoutAccumulator::F32WideBackward,
         ] {
             let model = load().with_readout_accumulator(accumulator);
             let mut generator = NativeCausalLmGenerator::new(
@@ -42,10 +43,11 @@ fn generation_checkpoint_binds_readout_policy_and_keeps_default_bytes() {
             .unwrap();
             generator.step().unwrap();
             let payload = generator.to_json().unwrap();
+            assert!(!payload.contains("projection_id"));
             assert!(!payload.contains("lora_artifact_id"));
             assert_eq!(
                 payload.contains("readout_accumulator"),
-                accumulator == CausalLmReadoutAccumulator::F64
+                accumulator != CausalLmReadoutAccumulator::F32
             );
             let other =
                 model.with_readout_accumulator(if accumulator == CausalLmReadoutAccumulator::F32 {

@@ -37,6 +37,56 @@ pub struct PyNativeCausalLmAdaptationGradients {
 }
 #[pymethods]
 impl PyNativeCausalLmAdaptationGradients {
+    fn context_token_preference_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .context_token_preference_report()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
+    /// Same-snapshot gradient statistics; does not apply an update or export the gradients.
+    fn alignment_with(&self, py: Python<'_>, other: &Self) -> PyResult<Py<PyAny>> {
+        let report = py
+            .detach(|| self.inner.alignment_with(&other.inner))
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)
+    }
+
+    fn competition_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .competition()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
+    fn line_menu_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .line_menu_report()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
+    fn line_subset_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .line_subset_report()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
+    fn line_set_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .line_set_report()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
+    fn declared_rival_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .declared_rival_report()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
     fn observation_json(&self) -> PyResult<Option<String>> {
         self.inner
             .observation()

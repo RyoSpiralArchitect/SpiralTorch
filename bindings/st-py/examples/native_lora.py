@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--alpha", type=float, default=4.)
     parser.add_argument("--learning-rate", type=float, default=.01)
     parser.add_argument("--resume-adapter", type=Path)
-    parser.add_argument("--readout", choices=("f32", "f64"), default="f32",
+    parser.add_argument("--readout", choices=("f32", "f64", "f32_wide_backward"), default="f32",
                         help="retain the same policy when resuming training")
     args = parser.parse_args()
 

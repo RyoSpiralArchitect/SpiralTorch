@@ -1,5 +1,6 @@
 //! Paired descriptive scores for contiguous runs of supervised targets.
 use super::*;
+use crate::causal_lm::sum::Sum;
 use st_tensor::ClassScoreGroup;
 
 /// Bound the opt-in answer-by-variant result independently of corpus size.
@@ -45,26 +46,6 @@ pub struct CausalLmAnswerContrast {
     pub candidate_top1_correct: u64,
     pub reference_all_correct_answers: usize,
     pub candidate_all_correct_answers: usize,
-}
-
-#[derive(Default)]
-struct Sum {
-    high: f64,
-    low: f64,
-}
-impl Sum {
-    fn add(&mut self, v: f64) {
-        let n = self.high + v;
-        self.low += if self.high.abs() >= v.abs() {
-            (self.high - n) + v
-        } else {
-            (v - n) + self.high
-        };
-        self.high = n;
-    }
-    fn mean(self, count: u64) -> f64 {
-        (self.high + self.low) / count as f64
-    }
 }
 
 impl CausalLmAnswerComparison {

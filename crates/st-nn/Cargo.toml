@@ -256,6 +256,14 @@ name = "planner_trace_demo"
 path = "../../examples/planner_trace_demo.rs"
 
 [[example]]
+name = "paired_projection_language"
+path = "examples/paired_projection_language/main.rs"
+
+[[example]]
+name = "output_margin_fit"
+path = "examples/output_margin_fit.rs"
+
+[[example]]
 name = "gnn_roundtable_trace_demo"
 path = "../../examples/gnn_roundtable_trace_demo.rs"
 

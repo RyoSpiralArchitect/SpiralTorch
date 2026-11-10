@@ -27,6 +27,7 @@ pub(super) struct NativeLoraAdapter {
     record: LoraRecord,
     id: String,
     a: PackedB,
+    backward_a: TransposeCache,
     b: PackedB,
     b_transpose: PackedB,
     zero_delta: bool,
@@ -68,6 +69,7 @@ impl NativeLoraAdapter {
         Ok(Self {
             id: format!("sha256:{:x}", hash.finalize()),
             a: PackedB::from_tensor(&a, Tile::col_major())?,
+            backward_a: Default::default(),
             b: PackedB::from_tensor(&b, Tile::col_major())?,
             b_transpose: PackedB::from_tensor_transpose(&b, Tile::col_major())?,
             zero_delta: record.b.iter().all(|&v| v == 0.),
@@ -81,6 +83,26 @@ impl NativeLoraAdapter {
 
     pub(super) fn path(&self) -> String {
         format!("transformer.h.{}.attn.c_proj", self.record.layer)
+    }
+
+    /// The frozen adapter still contributes to the input adjoint below its output.
+    pub(super) fn add_input_vjp(&self, upstream: &Tensor, base: Tensor) -> CausalLmResult<Tensor> {
+        if self.zero_delta {
+            return Ok(base);
+        }
+        let hidden = upstream
+            .matmul_prepacked_with_backend(&self.b_transpose, MatmulBackend::CpuSimd)?
+            .scale_with_backend(
+                self.record.alpha / self.record.rank as f32,
+                TensorUtilBackend::Cpu,
+            )?;
+        let extra = learning::frozen_pullback(
+            &self.a,
+            &self.backward_a,
+            &hidden,
+            CausalLmHeadPrecision::F32,
+        )?;
+        Ok(base.add_with_backend(&extra, TensorUtilBackend::Cpu)?)
     }
 
     pub(super) fn vjp_parameters(

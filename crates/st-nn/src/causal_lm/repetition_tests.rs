@@ -174,6 +174,7 @@ fn repetition_all_sources_match_parameter_differences_and_unequal_masked_reducti
     for arithmetic in [
         CausalLmReadoutAccumulator::F32,
         CausalLmReadoutAccumulator::F64,
+        CausalLmReadoutAccumulator::F32WideBackward,
     ] {
         let base = load().with_readout_accumulator(arithmetic);
         let state = trainable(&base);

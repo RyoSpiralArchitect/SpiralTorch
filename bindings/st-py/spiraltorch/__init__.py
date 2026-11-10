@@ -1498,13 +1498,6 @@ from .zspace_live import (
     ZSpaceTraceLiveServer,
 )
 
-from .elliptic import (
-    EllipticWarpFunction,
-    elliptic_warp_autograd,
-    elliptic_warp_features,
-    elliptic_warp_partial,
-)
-
 # 追加API（Rust側とPython補助面で公開できるものだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
@@ -9561,6 +9554,12 @@ def __getattr__(name: str) -> _Any:
 
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    if name in {"EllipticWarpFunction", "elliptic_warp_autograd",
+                "elliptic_warp_features", "elliptic_warp_partial"}:
+        # Optional PyTorch autograd must not load on the native learning path.
+        value = getattr(import_module("spiraltorch.elliptic"), name)
+        globals()[name] = value
+        return value
     if name == "HfGeometryDataset":
         value = getattr(import_module("spiraltorch.hf_geometry_dataset"), name)
         globals()[name] = value
@@ -9690,8 +9689,9 @@ if _resolve_rs_attr("CausalCompletion") is not None:
     _EXPORTED.update(("CausalCompletion", "encode_supervised_completion"))
 for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact",
               "NativeGeometryRuntime", "NativeGeometryBatch", "NativeGeometryAdamW", "SafeTensorArchive",
-              "NdTensor", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",
-              "NativeCausalLmLoraGradients", "NativeCausalLmAccumulator", "NativeCausalLmAdaptationGradients",
+              "NdTensor", "score_token_logits_f32le", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",
+              "NativeCausalLmLoraGradients", "NativeCausalLmAccumulator", "NativeCausalLmAdaptationGradients", "NativeCausalLmScalarOutput", "NativeCausalLmQkvAdamW", "NativeCausalLmQkvTrainer", "NativeCausalLmProjectionPrefix",
+              "NativeCausalLmOutputContrastBank", "NativeCausalLmOutputMarginDirection",
               "NativeCausalLmTrainingPrefixCache", "NativeCausalLmTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
               "NativeCausalLmTrainingStep", "NativeCausalLmObservedTrainingStep", "NativeCausalLmGenerator",
               "NativeCausalLmGenerationStep", "NativeCausalLmContext"):

@@ -129,6 +129,10 @@ impl ProjectionRadius {
 
     fn row(&self, z: &[f32], scale: f64) -> (f64, f64, f64, f64) {
         let norm = z.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>().sqrt();
+        self.row_gains(norm, scale)
+    }
+
+    pub(super) fn row_gains(&self, norm: f64, scale: f64) -> (f64, f64, f64, f64) {
         let a = norm / (scale * self.radius);
         let t = a.tanh();
         let tangent = if a == 0.0 { 1.0 } else { t / a };

@@ -17,6 +17,17 @@ mod learning;
 #[path = "lora_tests.rs"]
 mod lora;
 
+#[path = "key_lag_tests.rs"]
+mod key_lag_cases;
+#[path = "qkv_causal_tests.rs"]
+mod qkv_causal_cases;
+#[path = "qkv_document_tests.rs"]
+mod qkv_document_cases;
+#[path = "qkv_ragged_tests.rs"]
+mod qkv_ragged_cases;
+#[path = "qkv_session_tests.rs"]
+mod qkv_session_cases;
+
 fn config() -> serde_json::Value {
     json!({"model_type":"gpt2","vocab_size":11,"n_positions":8,"n_embd":4,"n_head":2,"n_layer":2})
 }
@@ -115,9 +126,14 @@ fn explicit_wide_readout_reaches_full_last_and_cached_paths() {
     )
     .unwrap();
     let wide = base.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+    let split = base.with_readout_accumulator(CausalLmReadoutAccumulator::F32WideBackward);
     assert_eq!(base.readout_accumulator(), CausalLmReadoutAccumulator::F32);
     assert_eq!(wide.base_model_identity(), base.base_model_identity());
     for last in [false, true] {
+        assert_eq!(
+            split.logits(&[1, 2], [1, 2], last).unwrap().data(),
+            base.logits(&[1, 2], [1, 2], last).unwrap().data()
+        );
         assert!(base
             .logits(&[1, 2], [1, 2], last)
             .unwrap()
@@ -131,6 +147,15 @@ fn explicit_wide_readout_reaches_full_last_and_cached_paths() {
             .iter()
             .all(|&v| v == 2.));
     }
+    let mut split_ctx = NativeCausalLmContext::new(split, vec![1, 2], 1024).unwrap();
+    assert_eq!(
+        split_ctx.logits().unwrap().read_values().unwrap(),
+        vec![1.; 11]
+    );
+    assert_eq!(
+        split_ctx.append(3).unwrap().read_values().unwrap(),
+        vec![1.; 11]
+    );
     let mut context = NativeCausalLmContext::new(wide, vec![1, 2], 1024).unwrap();
     assert_eq!(
         context.readout_accumulator(),
@@ -225,6 +250,8 @@ fn greedy_rejects_finite_weight_overflow_and_breaks_ties_at_lowest_id() {
     for error in [
         model.forward(&[1, 2], [1, 2], false).unwrap_err(),
         model.next_token_ids(&[1, 2], [1, 2]).unwrap_err(),
+        model.next_token_contrast(&[1, 2], 1, 2).unwrap_err(),
+        model.next_token_score(&[1, 2], 1).unwrap_err(),
         model.next_token_loss(&[1, 2], [1, 2]).unwrap_err(),
     ] {
         assert!(error.to_string().contains("matmul_prepacked_output"));
@@ -237,6 +264,80 @@ fn greedy_rejects_finite_weight_overflow_and_breaks_ties_at_lowest_id() {
     )
     .unwrap();
     assert_eq!(model.next_token_ids(&[1, 2], [2, 1]).unwrap(), [0, 0]);
+    let tied = model.next_token_contrast(&[1, 2], 4, 2).unwrap();
+    assert_eq!((tied.greedy_id, tied.target_minus_alternative), (0, 0.0));
+    let ranked = model.next_token_score(&[1, 2], 4).unwrap();
+    assert_eq!(
+        (
+            ranked.greedy_id,
+            ranked.target_rank,
+            ranked.strongest_rival_id
+        ),
+        (0, 5, 0)
+    );
+}
+
+#[test]
+fn target_score_reads_only_the_last_position_of_the_unmodified_prompt() {
+    let model = load();
+    let prompt = [1, 2, 3, 4, 5, 6, 7, 8];
+    let raw = model
+        .forward(&prompt, [1, 8], false)
+        .unwrap()
+        .read_values()
+        .unwrap();
+    for target in [0, 3, 10] {
+        assert_eq!(
+            model.next_token_score(&prompt, target).unwrap(),
+            TargetClassScore::from_logits(&raw[7 * 11..], target).unwrap()
+        );
+    }
+    for (p, id) in [(&[][..], 0), (&[1; 9], 0), (&[11], 1), (&[1], 11)] {
+        assert!(model.next_token_score(p, id).is_err());
+    }
+}
+
+#[test]
+fn next_token_contrast_reads_only_the_prompt_and_keeps_other_winners() {
+    let model = load();
+    let prompt = [1, 2, 3, 4, 5, 6, 7, 8];
+    let full = model
+        .forward(&prompt, [1, 8], false)
+        .unwrap()
+        .read_values()
+        .unwrap();
+    let last = &full[7 * 11..];
+    let winner = model.next_token_ids(&prompt, [1, 8]).unwrap()[0];
+    let (a, b) = ((winner + 1) % 11, (winner + 2) % 11);
+    let c = model.next_token_contrast(&prompt, a, b).unwrap();
+    assert_eq!(
+        (c.prompt_tokens, c.greedy_id, c.target_id, c.alternative_id),
+        (8, winner, a, b)
+    );
+    assert_eq!(
+        (c.target_logit, c.alternative_logit),
+        (f64::from(last[a]), f64::from(last[b]))
+    );
+    assert_eq!(
+        c.target_minus_alternative,
+        c.target_logit - c.alternative_logit
+    );
+    assert_eq!(
+        model
+            .next_token_contrast(&prompt, b, a)
+            .unwrap()
+            .target_minus_alternative,
+        -c.target_minus_alternative
+    );
+    for (ids, a, b) in [
+        (&prompt[..], 1, 1),
+        (&prompt, 11, 0),
+        (&prompt, 0, 11),
+        (&[], 1, 0),
+        (&[11], 1, 0),
+    ] {
+        assert!(model.next_token_contrast(ids, a, b).is_err());
+    }
 }
 
 #[test]
@@ -360,8 +461,8 @@ fn prefixed_weights_tied_and_untied_heads_use_explicit_contract() {
     )
     .unwrap();
     close(
-        &a.logits(&[1, 2], [1, 2], false).unwrap().data(),
-        &b.logits(&[1, 2], [1, 2], false).unwrap().data(),
+        a.logits(&[1, 2], [1, 2], false).unwrap().data(),
+        b.logits(&[1, 2], [1, 2], false).unwrap().data(),
     );
     let mut p = p;
     p.insert("lm_head.weight".into(), p["wte.weight"].clone());
@@ -410,7 +511,7 @@ fn validates_redundant_legacy_causal_masks_instead_of_ignoring_them() {
     .is_err());
 }
 
-fn artifact(model: &NativeCausalLm, path: &str, gate: f32) -> GeometryAdapterArtifact {
+pub(super) fn artifact(model: &NativeCausalLm, path: &str, gate: f32) -> GeometryAdapterArtifact {
     GeometryAdapterArtifact::create_json(&serde_json::to_vec(&json!({
         "schema":"spiraltorch.geometry_adapter_artifact.v1","base_model_identity":model.base_model_identity(),
         "policy":"full_prefix_f32_no_cache.v1","training":false,"placements":[{

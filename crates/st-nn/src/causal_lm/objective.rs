@@ -26,6 +26,43 @@ impl CausalLmObjective {
     }
 }
 
+pub(super) enum PreparedCompetition {
+    ContextToken {
+        target: usize,
+        margin: f64,
+    },
+    LineMenu(super::line_menu::LineMenu),
+    LineSet(super::line_set::LineSet),
+    LineSubset(super::line_set::LineSubset),
+    Top {
+        recipe: RivalCrossEntropy,
+        guard: Option<(RivalCoverageReference, RivalCoverageGuard)>,
+    },
+    Declared {
+        selected: Vec<DeclaredRivalRow>,
+        mix: f64,
+    },
+}
+
+#[derive(Debug)]
+pub(super) enum CompetitionReport {
+    ContextToken(ContextTokenPreference),
+    LineMenu(CausalLmLineMenuReport),
+    LineSet(CausalLmLineSetReport),
+    LineSubset(CausalLmLineSubsetReport),
+    Top(RivalCrossEntropyReport),
+    Declared(DeclaredRivalReport),
+}
+
+impl From<RivalCrossEntropy> for PreparedCompetition {
+    fn from(recipe: RivalCrossEntropy) -> Self {
+        Self::Top {
+            recipe,
+            guard: None,
+        }
+    }
+}
+
 pub(super) struct PreparedCausalWindow {
     pub input: Vec<usize>,
     pub labels: Vec<i64>,
@@ -34,6 +71,7 @@ pub(super) struct PreparedCausalWindow {
     pub target_tokens: usize,
     pub selected_rows: Option<Vec<usize>>,
     pub objective: CausalLmObjective,
+    pub competition: Option<PreparedCompetition>,
     pub repetition: Option<super::repetition::RepetitionWindow>,
 }
 
@@ -144,6 +182,7 @@ impl NativeCausalLm {
             target_tokens,
             selected_rows,
             objective,
+            competition: None,
             repetition,
         })
     }

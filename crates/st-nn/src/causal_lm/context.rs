@@ -2,7 +2,7 @@
 //! Updates are built separately and published only after successful execution.
 use super::*;
 use crate::geometry_runtime::GeometrySequenceDependency;
-use st_kernel_contracts::attention::{attention_reference, AttentionMask, AttentionSpec};
+use st_kernel_contracts::attention::{attention_key_lag_reference, AttentionMask, AttentionSpec};
 
 #[derive(Clone, Debug)]
 pub(super) struct InferenceBlockCache {
@@ -170,6 +170,40 @@ fn append_head_rows(previous: &[f32], row: &[f32], heads: usize) -> CausalLmResu
     Ok(values)
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[test]
+fn key_substitution_matches_manual_cache_edit_before_any_append() {
+    let m = super::tests::load();
+    let (heads, d) = (m.config.heads, m.config.width / m.config.heads);
+    let x = NativeCausalLmContext::new(m.clone(), vec![4, 8, 2], 4096).unwrap();
+    let mut donor = NativeCausalLmContext::new(m, vec![4, 6, 2], 4096).unwrap();
+    let mut manual = x.clone();
+    let replacement = [17., -23., 41., -53.];
+    for (j, &value) in replacement.iter().enumerate() {
+        let offset = ((j / d) * 3 + 2) * d + j % d;
+        Arc::make_mut(&mut manual.blocks[1]).key[offset] = value;
+        Arc::make_mut(&mut donor.blocks[1]).key[offset] = value;
+    }
+    let actual = x.preview_with_edit(3, Some((1, 2, &replacement))).unwrap();
+    let expected = manual.preview(3).unwrap();
+    for layer in 0..2 {
+        assert_eq!(actual.blocks[layer].key, expected.blocks[layer].key);
+        assert_eq!(actual.blocks[layer].value, expected.blocks[layer].value);
+    }
+    assert_eq!(actual.key_row(1, 2).unwrap(), replacement);
+    assert_eq!(actual.key_row(0, 2).unwrap(), x.key_row(0, 2).unwrap());
+    assert_ne!(actual.key_row(1, 2).unwrap(), x.key_row(1, 2).unwrap());
+    assert_eq!(
+        actual.logits_tensor().data(),
+        expected.logits_tensor().data()
+    );
+    assert_eq!(
+        x.probe_key_from(&donor, 1, 2, &[3, 1]).unwrap(),
+        expected.preview(1).unwrap().logits_tensor().data()
+    );
+    assert_eq!(heads * d, replacement.len());
+}
+
 impl NativeCausalLmContext {
     pub const DEFAULT_MAX_CACHE_VALUES: usize = 16_777_216;
 
@@ -255,6 +289,66 @@ impl NativeCausalLmContext {
     }
 
     pub(super) fn preview(&self, token: usize) -> CausalLmResult<Self> {
+        self.preview_with_edit(token, None)
+    }
+
+    pub(super) fn key_row(&self, layer: usize, position: usize) -> CausalLmResult<Vec<f32>> {
+        let key = &self
+            .blocks
+            .get(layer)
+            .ok_or("key layer outside cached prefix")?
+            .key;
+        let steps = self.tokens.len();
+        if position >= steps {
+            return Err("key position outside cached prefix".into());
+        }
+        let dim = self.model.config.width / self.model.config.heads;
+        let mut row = Vec::with_capacity(self.model.config.width);
+        for head in key.chunks_exact(steps * dim) {
+            row.extend_from_slice(&head[position * dim..(position + 1) * dim]);
+        }
+        Ok(row)
+    }
+
+    // The caller has verified the two projection owners. Only future reads of
+    // the specified cached key change. No transplanted cache escapes this call.
+    pub(super) fn probe_key_from(
+        &self,
+        donor: &Self,
+        layer: usize,
+        position: usize,
+        suffix: &[usize],
+    ) -> CausalLmResult<Vec<f32>> {
+        if self.tokens.len() != donor.tokens.len()
+            || position >= self.tokens.len()
+            || self.tokens[position] != donor.tokens[position]
+            || !(1..=64).contains(&suffix.len())
+            || suffix.iter().any(|&t| t >= self.model.config.vocabulary)
+        {
+            return Err(
+                "key substitution requires aligned token, length and admitted suffix".into(),
+            );
+        }
+        self.model.cached_input_count(
+            self.tokens
+                .len()
+                .checked_add(suffix.len())
+                .ok_or("prefix length overflow")?,
+            self.max_cache_values,
+        )?;
+        let key = donor.key_row(layer, position)?;
+        let mut branch = self.preview_with_edit(suffix[0], Some((layer, position, &key)))?;
+        for &token in &suffix[1..] {
+            branch = branch.preview(token)?;
+        }
+        Ok(branch.logits_tensor().data().to_vec())
+    }
+
+    fn preview_with_edit(
+        &self,
+        token: usize,
+        edit: Option<(usize, usize, &[f32])>,
+    ) -> CausalLmResult<Self> {
         let model = &self.model;
         let c = &model.config;
         let steps = self
@@ -275,7 +369,15 @@ impl NativeCausalLmContext {
             let block = &model.blocks[index];
             let norm = block.first_norm.forward(&hidden, c.norm_epsilon)?;
             let qkv = model.split_heads::<3>(&block.qkv.forward(&norm)?, [1, 1])?;
-            let key = append_head_rows(&previous.key, &qkv[1], c.heads)?;
+            let mut key = append_head_rows(&previous.key, &qkv[1], c.heads)?;
+            if let Some((_, pos, row)) = edit.filter(|(layer, _, _)| *layer == index) {
+                let dim = c.width / c.heads;
+                for (head, replacement) in
+                    key.chunks_exact_mut(steps * dim).zip(row.chunks_exact(dim))
+                {
+                    head[pos * dim..(pos + 1) * dim].copy_from_slice(replacement);
+                }
+            }
             let value = append_head_rows(&previous.value, &qkv[2], c.heads)?;
             let qshape = [1, c.heads, 1, c.width / c.heads];
             let kshape = [1, c.heads, steps, c.width / c.heads];
@@ -288,7 +390,15 @@ impl NativeCausalLmContext {
                     query_offset: steps - 1,
                 },
             )?;
-            let attended = attention_reference(spec, &qkv[0], &key, &value, None, None)?;
+            let attended = attention_key_lag_reference(
+                spec,
+                &qkv[0],
+                &key,
+                &value,
+                None,
+                None,
+                model.key_lag_at(index),
+            )?;
             let attention = model.project_attention_output(
                 index,
                 &model.merge_heads([attended.as_slice()], [1, 1])?,

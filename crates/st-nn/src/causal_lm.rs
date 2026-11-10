@@ -13,19 +13,42 @@ use std::sync::{Arc, OnceLock};
 
 mod adaptation;
 mod checkpoint;
+mod common_geometry;
+mod competition_pair;
 mod context;
+mod context_preference;
 mod decoder;
 mod evaluation;
 mod generation;
+mod geometry_cohort;
 mod gpt2;
+mod gradient_alignment;
+mod key_lag;
 mod learning;
+mod line_menu;
+mod line_set;
 mod lora;
+mod mixture_probe;
 mod objective;
 mod observation;
+mod output_margin;
+mod paired_geometry;
+mod projection_probe;
+mod qkv_training;
+mod quartet_projection;
+mod readout_policy;
 mod repetition;
+mod scalar_output;
 mod session;
+mod sum;
 mod training;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
+pub use common_geometry::hull::CommonDirectionRefusal;
+pub use common_geometry::{
+    CausalLmCommonGeometryStep, CausalLmGeometrySteeringStep, CausalLmGeometryStepGuard,
+    MAX_COMMON_GEOMETRY_GROUPS,
+};
+pub use competition_pair::{CausalLmGeometryCompetitionPair, CausalLmGeometryCompetitionStep};
 pub use context::NativeCausalLmContext;
 pub use evaluation::{
     CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
@@ -36,20 +59,65 @@ pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,
     NativeCausalLmGenerator,
 };
+pub use geometry_cohort::{
+    CausalLmGeometryCohortStep, MAX_GEOMETRY_COHORT_ELEMENTS, MAX_GEOMETRY_COHORT_MEMBERS,
+};
+pub use gradient_alignment::{CausalLmGradientAlignment, CausalLmGradientPairStats};
+pub use key_lag::CausalLmKeyLag;
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
+pub use line_menu::{CausalLmLineMenuReport, MAX_LINE_MENU_CANDIDATES, MAX_LINE_MENU_TARGETS};
+pub use line_set::{CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport};
 pub use lora::NativeCausalLmLoraGradients;
+pub use mixture_probe::{
+    CausalLmMixtureObjectiveTrace, CausalLmMixturePath, CausalLmMixtureProbe,
+    MAX_MIXTURE_PROBE_ELEMENTS,
+};
 pub use objective::CausalLmObjective;
 use objective::PreparedCausalWindow;
 pub use observation::{
     CausalLmAdaptationObservation, CausalLmAdaptationSite, CausalLmObservedTrainingStep,
     CausalLmSiteObservation, CausalLmSitePullback,
 };
+pub use output_margin::{
+    CausalLmOutputContrastBank, CausalLmOutputMarginBank, CausalLmOutputMarginDirection,
+    CausalLmOutputMarginRule, MAX_OUTPUT_CONTRAST_ROWS,
+};
+pub use paired_geometry::{
+    CausalLmPairDisplacement, CausalLmPairWeighting, CausalLmPairedGeometryStep,
+};
+pub use projection_probe::{
+    CausalLmProjectionBasis, CausalLmProjectionPullback, CausalLmProjectionSite,
+    CausalLmProjectionSpec,
+};
+pub use qkv_training::{
+    CausalLmQkvDocumentStep, CausalLmQkvGradientClip, CausalLmQkvSmoothedStep, CausalLmQkvStep,
+    CausalLmQkvTrainingConfig, CausalLmQkvTrainingResume, CausalLmQkvTrainingStep,
+    CausalLmQkvWindowStep, NativeCausalLmQkvAdamW, NativeCausalLmQkvTrainer,
+};
+pub use quartet_projection::{
+    CausalLmAnswerBinding, CausalLmAnswerCorrection, CausalLmAnswerGuard,
+    CausalLmAnswerGuardStatus, CausalLmAnswerGuardStep, CausalLmAnswerPoint,
+    CausalLmAnswerProjectionStep, CausalLmAnswerProtection, CausalLmAnswerTrial,
+    CausalLmLossGradient, CausalLmQuartetObjective, CausalLmQuartetStep,
+    NativeCausalLmProjectionPrefix, NativeCausalLmRankOneProjection,
+};
+pub use readout_policy::{CausalLmHeadPrecision, CausalLmReadoutAccumulator};
 pub use repetition::CausalLmRepetition;
+pub use scalar_output::{
+    CausalLmScalarPairLoss, CausalLmScalarPairStep, CausalLmScalarSearch,
+    CausalLmScalarSearchReport, CausalLmScalarSearchStatus, CausalLmScalarTrial,
+    NativeCausalLmScalarOutput, MAX_SCALAR_OUTPUT_PAIRS, MAX_SCALAR_SEARCH_TRIALS,
+};
 pub use session::{
     CausalLmMatchedTrainingStep, CausalLmPrefixCacheAction, CausalLmPrefixCacheStats,
     CausalLmSessionWindowPolicy, CausalLmTrainingSessionConfig, CausalLmTrainingSessionResume,
     CausalLmTrainingSessionStep, NativeCausalLmTrainingPrefixCache, NativeCausalLmTrainingSession,
 };
+pub use st_tensor::classification::{
+    ContextTokenPreference, DeclaredRivalReport, DeclaredRivalRow, RivalCrossEntropy,
+    RivalCrossEntropyReport, TargetClassScore, MAX_DECLARED_RIVAL_IDS, MAX_RIVAL_CLASSES,
+};
+use st_tensor::classification::{RivalCoverageGuard, RivalCoverageReference};
 pub use training::{
     CausalLmObservedCheckpointFiles, CausalLmTrainingConfig, CausalLmTrainingResume,
     CausalLmTrainingStep, NativeCausalLmTrainer,
@@ -60,25 +128,27 @@ mod tests;
 pub type CausalLmResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type TransposeCache = Arc<OnceLock<Result<PackedB, String>>>;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum CausalLmReadoutAccumulator {
-    #[default]
-    F32,
-    F64,
+/// Raw last-position logits for two named IDs, plus the unrestricted greedy choice.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct CausalLmTokenContrast {
+    pub prompt_tokens: usize,
+    pub target_id: usize,
+    pub alternative_id: usize,
+    pub greedy_id: usize,
+    pub target_logit: f64,
+    pub alternative_logit: f64,
+    /// Difference after widening both f32 logits, with no sampling or temperature transform.
+    pub target_minus_alternative: f64,
 }
 
-impl CausalLmReadoutAccumulator {
-    fn is_f32(&self) -> bool {
-        *self == Self::F32
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::F32 => "f32",
-            Self::F64 => "f64",
+fn greedy_id(row: &[f32]) -> usize {
+    let mut best = 0;
+    for index in 1..row.len() {
+        if row[index] > row[best] {
+            best = index;
         }
     }
+    best
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +256,7 @@ struct DecoderBlock {
 #[derive(Clone, Debug)]
 pub struct NativeCausalLm {
     config: CausalLmConfig,
+    key_lag: Option<CausalLmKeyLag>,
     limits: CausalLmLimits,
     base_id: String,
     token: Tensor,
@@ -235,12 +306,9 @@ impl NativeCausalLm {
     }
 
     fn project_readout(&self, normalized: &Tensor) -> CausalLmResult<Tensor> {
-        Ok(match self.readout_accumulator {
-            CausalLmReadoutAccumulator::F32 => {
-                normalized.matmul_prepacked_with_backend(&self.head, MatmulBackend::CpuSimd)?
-            }
-            CausalLmReadoutAccumulator::F64 => normalized.matmul_prepacked_wide(&self.head)?,
-        })
+        self.readout_accumulator
+            .forward_precision()
+            .multiply(normalized, &self.head)
     }
 
     pub fn base_model_identity(&self) -> &str {
@@ -358,16 +426,88 @@ impl NativeCausalLm {
         Ok(logits
             .data()
             .chunks_exact(self.config.vocabulary)
-            .map(|row| {
-                let mut best = 0;
-                for index in 1..row.len() {
-                    if row[index] > row[best] {
-                        best = index;
-                    }
-                }
-                best
-            })
+            .map(greedy_id)
             .collect())
+    }
+
+    fn check_contrast_candidates(
+        &self,
+        target_id: usize,
+        alternative_id: usize,
+    ) -> CausalLmResult<()> {
+        if target_id == alternative_id || target_id.max(alternative_id) >= self.config.vocabulary {
+            return Err("next-token contrast requires two distinct in-vocabulary IDs".into());
+        }
+        Ok(())
+    }
+
+    /// Check the candidate IDs and shape before a client copies the prompt.
+    pub fn next_token_contrast_input_count(
+        &self,
+        prompt_tokens: usize,
+        target_id: usize,
+        alternative_id: usize,
+    ) -> CausalLmResult<usize> {
+        self.check_contrast_candidates(target_id, alternative_id)?;
+        self.input_count([1, prompt_tokens], true)
+    }
+
+    pub fn next_token_score_input_count(
+        &self,
+        prompt_tokens: usize,
+        target_id: usize,
+    ) -> CausalLmResult<usize> {
+        TargetClassScore::validate_domain(self.config.vocabulary, target_id)?;
+        self.input_count([1, prompt_tokens], true)
+    }
+
+    /// One readout of the prompt's final position, without feeding the target or copying the
+    /// full vocabulary to the caller. Ties, rank, margin and NLL use tensor classification.
+    pub fn next_token_score(
+        &self,
+        prompt_ids: &[usize],
+        target_id: usize,
+    ) -> CausalLmResult<TargetClassScore> {
+        TargetClassScore::validate_domain(self.config.vocabulary, target_id)?;
+        let logits = self.logits(prompt_ids, [1, prompt_ids.len()], true)?;
+        Ok(TargetClassScore::from_logits(logits.data(), target_id)?)
+    }
+
+    /// Inspect one unpadded prompt. Neither candidate is appended to the input.
+    /// The greedy choice is over the entire vocabulary; ties keep the lowest ID.
+    pub fn next_token_contrast(
+        &self,
+        prompt_ids: &[usize],
+        target_id: usize,
+        alternative_id: usize,
+    ) -> CausalLmResult<CausalLmTokenContrast> {
+        self.check_contrast_candidates(target_id, alternative_id)?;
+        let logits = self.logits(prompt_ids, [1, prompt_ids.len()], true)?;
+        Ok(Self::contrast_row(
+            logits.data(),
+            prompt_ids.len(),
+            target_id,
+            alternative_id,
+        ))
+    }
+
+    fn contrast_row(
+        row: &[f32],
+        prompt_tokens: usize,
+        target_id: usize,
+        alternative_id: usize,
+    ) -> CausalLmTokenContrast {
+        let target_logit = f64::from(row[target_id]);
+        let alternative_logit = f64::from(row[alternative_id]);
+        CausalLmTokenContrast {
+            prompt_tokens,
+            target_id,
+            alternative_id,
+            greedy_id: greedy_id(row),
+            target_logit,
+            alternative_logit,
+            target_minus_alternative: target_logit - alternative_logit,
+        }
     }
 
     /// Mean teacher-forced next-token NLL for B independent windows of T+1 IDs.

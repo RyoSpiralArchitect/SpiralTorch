@@ -2,6 +2,8 @@ use super::*;
 use crate::execution::{push_backend_policy, BackendPolicy};
 use st_core::backend::device_caps::DeviceCaps;
 
+mod anchored;
+pub(crate) use anchored::AnchoredProjectionBatch;
 mod radius;
 use radius::ProjectionRadius;
 

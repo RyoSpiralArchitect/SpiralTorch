@@ -1,0 +1,18 @@
+{
+  "layer": 0,
+  "optimizer": {
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "epsilon": 1e-8,
+    "max_gradient_norm": 1.0
+  },
+  "training": {
+    "context_length": 128,
+    "batch_windows": 2,
+    "max_rows": 1,
+    "epochs": 1,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.01,
+    "label_smoothing": 0.0
+  }
+}

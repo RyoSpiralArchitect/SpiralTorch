@@ -33,6 +33,8 @@ pub enum GeometrySequenceDependency {
     CausalPrefix,
 }
 #[cfg(test)]
+mod anchored_tests;
+#[cfg(test)]
 mod memory_tests;
 #[cfg(test)]
 mod sequence_tests;
@@ -49,6 +51,7 @@ enum Pullback {
     Wave(Box<WaveGateLearningBatch>),
     WaveRadius(Box<WaveGateLearningBatch>),
     WaveStage(Box<WaveGateLearningBatch>),
+    AnchoredWaveProjection(Box<crate::layers::wave_gate::AnchoredProjectionBatch>),
     Elliptic(Box<elliptic::EllipticRuntimeBatch>),
     Topos(Box<topos::ToposRuntimeBatch>),
     Fractional(Box<fractional::FractionalRuntimeBatch>),
@@ -132,6 +135,7 @@ impl NativeGeometryRuntime {
             | GeometryAdapterRecipe::Wave { .. }
             | GeometryAdapterRecipe::WaveRadius { .. }
             | GeometryAdapterRecipe::WaveStage { .. }
+            | GeometryAdapterRecipe::AnchoredWaveProjection { .. }
             | GeometryAdapterRecipe::Topos { .. }
             | GeometryAdapterRecipe::Elliptic { .. }
             | GeometryAdapterRecipe::EllipticAnchored { .. } => RowLocal,
@@ -149,7 +153,8 @@ impl NativeGeometryRuntime {
     pub fn dimensions(&self, path: &str) -> Result<(usize, usize)> {
         match &self.placement(path)?.recipe {
             GeometryAdapterRecipe::ChannelAffine { features, max_values, .. } => Ok((*features, *max_values)),
-            GeometryAdapterRecipe::WaveStage { features, max_values, .. } => Ok((*features, *max_values)),
+            GeometryAdapterRecipe::WaveStage { features, max_values, .. }
+            | GeometryAdapterRecipe::AnchoredWaveProjection { features, max_values, .. } => Ok((*features, *max_values)),
             GeometryAdapterRecipe::Wave { features, kernel, .. }
             | GeometryAdapterRecipe::WaveRadius { features, kernel, .. } => Ok((*features, kernel.max_values)),
             GeometryAdapterRecipe::Topos { features, kernel, .. } => Ok((*features, kernel.max_values)),
@@ -274,6 +279,7 @@ impl NativeGeometryRuntime {
             | GeometryAdapterRecipe::Wave { strength, .. }
             | GeometryAdapterRecipe::WaveRadius { strength, .. }
             | GeometryAdapterRecipe::WaveStage { strength, .. }
+            | GeometryAdapterRecipe::AnchoredWaveProjection { strength, .. }
             | GeometryAdapterRecipe::Topos { strength, .. }
             | GeometryAdapterRecipe::Elliptic { strength, .. }
             | GeometryAdapterRecipe::EllipticAnchored { strength, .. } => strength as f32,
@@ -303,6 +309,23 @@ impl NativeGeometryRuntime {
                     [rows, features],
                     *max_values,
                 )?)),
+                GeometryAdapterRecipe::AnchoredWaveProjection {
+                    curvature,
+                    log_radius,
+                    max_values,
+                    ..
+                } => {
+                    let kernel = WaveGateKernel::new(*curvature, 1., 0., *max_values)?;
+                    Pullback::AnchoredWaveProjection(Box::new(kernel.forward_anchored_projection(
+                        &input_tensor,
+                        [
+                            tensor(placement, "gate_anchor"),
+                            tensor(placement, "bias_anchor"),
+                        ],
+                        [tensor(placement, "gate"), tensor(placement, "bias")],
+                        *log_radius,
+                    )?))
+                }
                 GeometryAdapterRecipe::Topos { kernel, .. } => Pullback::Topos(Box::new(
                     topos::ToposRuntimeBatch::forward(placement, kernel, &input_tensor)?,
                 )),
@@ -358,6 +381,7 @@ impl NativeGeometryRuntime {
         let residual = match &pullback {
             Pullback::Identity => None,
             Pullback::Affine(batch) => Some(batch.output()),
+            Pullback::AnchoredWaveProjection(batch) => Some(batch.output()),
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
                 Some(batch.output())
             }
@@ -444,7 +468,7 @@ impl NativeGeometryRuntime {
         Ok(Self::new(GeometryAdapterArtifact::create(record)?))
     }
 
-    fn validate_gradients<V: Borrow<PlacementGradients>>(
+    pub(crate) fn validate_gradients<V: Borrow<PlacementGradients>>(
         &self,
         source_id: &str,
         gradients: &BTreeMap<String, V>,
@@ -580,6 +604,7 @@ impl NativeGeometryBatch {
         let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
         let branch = match &self.pullback {
             Pullback::Affine(batch) => batch.vjp_input(&scaled)?,
+            Pullback::AnchoredWaveProjection(batch) => batch.vjp_input(&scaled)?,
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
                 batch.vjp_input(&scaled)?
             }
@@ -609,6 +634,10 @@ impl NativeGeometryBatch {
             }
             Pullback::Affine(batch) => {
                 let (input, gate, bias) = batch.vjp_requested(scaled.data(), need_input)?;
+                channel_pullback(input, gate, bias, None)
+            }
+            Pullback::AnchoredWaveProjection(batch) => {
+                let (input, gate, bias) = batch.vjp(&scaled, need_input)?;
                 channel_pullback(input, gate, bias, None)
             }
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
