@@ -49,10 +49,13 @@ class NativeQkvCorpusExampleTests(unittest.TestCase):
                     originals={p:p.read_bytes() for p in root.iterdir() if p.is_file()}
                     base=[*common,"--data-json",root/"data.json","--save-every",2]
                     full=self.invoke([*base,"--recipe-json",root/"recipe.json","--output",root/"full"])
+                    self.assertEqual(native_qkv_runs.verify_qkv_run(root/"full"),full)
                     part=self.invoke([*base,"--recipe-json",root/"recipe.json","--stop-after",1,"--output",root/"part"])
+                    self.assertEqual(native_qkv_runs.verify_qkv_run(root/"part"),part)
                     checkpoint=root/"part"/part["final_checkpoint"]["file"]
                     resumed=self.invoke([*base,"--resume",checkpoint,"--checkpoint-id",part["final_checkpoint"]["checkpoint_id"],
                                          "--output",root/"resumed"])
+                    self.assertEqual(native_qkv_runs.verify_qkv_run(root/"resumed"),resumed)
                     manual=st.NativeCausalLmQkvTrainer(st.NativeCausalLmQkvAdamW(model,0,**recipe["optimizer"]),
                         docs,labels=labels,**recipe["training"])
                     expected=[]
@@ -124,6 +127,8 @@ class NativeQkvCorpusExampleTests(unittest.TestCase):
             self.assertTrue((root/"failed/checkpoint-000000000.bin").exists())
             self.assertFalse((root/"failed/result.json").exists())
             self.assertFalse((root/"failed/qkv.bin").exists())
+            with self.assertRaises(OSError):
+                native_qkv_runs.verify_qkv_run(root/"failed")
             state=trainer.checkpoint_with_id()
             for stop,every in ((True,2),(1,2),(99,2),(2,0),(2,True),(2,1025)):
                 with self.assertRaises(ValueError):

@@ -5,11 +5,175 @@ contract. Stop on any error; never infer a latest checkpoint or retry a segment.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
+import stat
 from pathlib import Path
 
-__all__ = ["run_qkv_corpus"]
+__all__ = ["run_qkv_corpus", "verify_qkv_run"]
+
+
+def _read_regular(root, name, limit):
+    if not stat.S_ISREG((root / name).lstat().st_mode):
+        raise ValueError(f"invalid QKV run file: {name}")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(root / name, flags)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise ValueError(f"invalid QKV run file: {name}")
+        data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError(f"oversize QKV run file: {name}")
+        return data
+
+
+def _records(root, name):
+    if not stat.S_ISREG((root / name).lstat().st_mode):
+        raise ValueError(f"invalid QKV run log: {name}")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(root / name, flags)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 1 << 30:
+            raise ValueError(f"invalid QKV run log: {name}")
+        while raw := stream.readline((1 << 20) + 1):
+            if len(raw) > 1 << 20 or not raw.endswith(b"\n"):
+                raise ValueError(f"truncated or oversize QKV run log row: {name}")
+            row = _json(raw)
+            if not isinstance(row, dict):
+                raise ValueError(f"invalid QKV run log row: {name}")
+            yield row
+
+
+def _json(data):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate QKV run field: {key}")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError(f"nonfinite QKV run JSON value: {value}")
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("nonfinite QKV run JSON number")
+        return result
+
+    return json.loads(data, object_pairs_hook=unique,
+                      parse_constant=invalid_constant, parse_float=finite_float)
+
+
+def _number(value):
+    if type(value) is not int or not 0 <= value <= (1 << 64) - 1:
+        raise ValueError("invalid QKV run update counter")
+    return value
+
+
+def _pinned(data, expected):
+    actual = "sha256:" + hashlib.sha256(data).hexdigest()
+    if expected != actual:
+        raise ValueError("QKV run file identity mismatch")
+
+
+def _checkpoint(data, pin, result, update):
+    _pinned(data, pin)
+    if len(data) < 4:
+        raise ValueError("truncated QKV trainer checkpoint")
+    length = int.from_bytes(data[:4], "little")
+    if length > 16384 or 4 + length > len(data):
+        raise ValueError("invalid QKV trainer checkpoint header")
+    header = _json(data[4:4 + length])
+    if (header.get("schema") != "spiraltorch.native_causal_lm_qkv_trainer.v1"
+            or header.get("data_id") != result["data_id"]
+            or header.get("config") != result["config"]
+            or _number(header.get("updates")) != update):
+        raise ValueError("QKV trainer checkpoint disagrees with run")
+    inner = data[4 + length:]
+    _pinned(inner, header.get("optimizer_id"))
+    if len(inner) < 4:
+        raise ValueError("truncated QKV optimizer checkpoint")
+    inner_length = int.from_bytes(inner[:4], "little")
+    if inner_length > 16384 or 4 + inner_length > len(inner):
+        raise ValueError("invalid QKV optimizer checkpoint header")
+    optimizer = _json(inner[4:4 + inner_length])
+    initial_steps = _number(header.get("initial_steps"))
+    if (optimizer.get("schema") != "spiraltorch.qkv_adamw.v1"
+            or _number(optimizer.get("steps")) != initial_steps + update):
+        raise ValueError("QKV optimizer clock disagrees with run")
+    return inner, optimizer, initial_steps
+
+
+def verify_qkv_run(directory):
+    """Check a completed run's local pins, order and checkpoint/export agreement.
+
+    This is an integrity check, not authentication or model-quality evidence.
+    It does not load a model or trust an incomplete run without result.json.
+    """
+    root = Path(directory)
+    if not stat.S_ISDIR(root.lstat().st_mode):
+        raise ValueError("QKV run root must be a directory, not a link")
+    marker = _read_regular(root, "result.json", 1 << 20)
+    if not marker.endswith(b"\n"):
+        raise ValueError("truncated QKV run completion marker")
+    result = _json(marker)
+    if not isinstance(result, dict):
+        raise ValueError("invalid QKV run result")
+    start = _number(result.get("initial_update"))
+    end = _number(result.get("updates"))
+    total = _number(result.get("total_updates"))
+    if (result.get("schema") != "spiraltorch.native_qkv_run.v1"
+            or not isinstance(result.get("data_id"), str)
+            or not isinstance(result.get("config"), dict)
+            or not start <= end <= total
+            or result.get("exhausted") is not (end == total)
+            or result.get("checkpoint_index") != "checkpoints.jsonl"
+            or result.get("step_log") != "steps.jsonl"):
+        raise ValueError("invalid QKV run result")
+    previous = None
+    final_inner = None
+    final_optimizer = None
+    final_row = None
+    initial_steps = None
+    for row in _records(root, "checkpoints.jsonl"):
+        update = _number(row.get("updates"))
+        if (update < start or update > end or (previous is None and update != start)
+                or (previous is not None and update <= previous)
+                or row.get("file") != f"checkpoint-{update:09d}.bin"):
+            raise ValueError("invalid QKV checkpoint index order or name")
+        data = _read_regular(root, row["file"], 1 << 26)
+        final_inner, final_optimizer, clock_origin = _checkpoint(
+            data, row.get("checkpoint_id"), result, update)
+        if initial_steps is not None and clock_origin != initial_steps:
+            raise ValueError("QKV checkpoint optimizer clock origin changed")
+        initial_steps = clock_origin
+        previous = update
+        final_row = row
+    if previous != end or final_row != result.get("final_checkpoint"):
+        raise ValueError("QKV final checkpoint disagrees with index")
+    expected = start
+    for row in _records(root, "steps.jsonl"):
+        expected += 1
+        if _number(row.get("update")) != expected or expected > end:
+            raise ValueError("QKV step log has a gap or extra update")
+    if expected != end:
+        raise ValueError("QKV step log is incomplete")
+    qkv = result.get("qkv")
+    if not isinstance(qkv, dict) or qkv.get("file") != "qkv.bin":
+        raise ValueError("invalid QKV export reference")
+    exported = _read_regular(root, "qkv.bin", 1 << 26)
+    _pinned(exported, qkv.get("checkpoint_id"))
+    if (exported != final_inner
+            or _number(qkv.get("optimizer_steps")) != final_optimizer["steps"]
+            or _number(qkv.get("layer")) != _number(final_optimizer.get("layer"))):
+        raise ValueError("QKV export differs from final trainer checkpoint")
+    return result
 
 
 def _open_new(path):
