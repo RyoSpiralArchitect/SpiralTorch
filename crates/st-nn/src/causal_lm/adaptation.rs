@@ -253,7 +253,7 @@ impl NativeCausalLm {
         self.geometry_gradients_for_competition(&prepared)
     }
 
-    /// The plan uses flat, unshifted [batch,time] target positions. The first
+    /// The plan uses flat, unshifted `[batch,time]` target positions. The first
     /// token of each independent window has no predictor. Omitted active labels use full CE.
     pub fn geometry_declared_rival_gradients(
         &self,

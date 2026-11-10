@@ -25,7 +25,7 @@ impl NativeCausalLmQkvAdamW {
     }
 
     /// Mean CE and QKV derivative over selected shifted target tokens, not sequences.
-    /// Labels have unshifted [B,T] layout; -100 masks loss, never attention/context.
+    /// Labels have unshifted `[B,T]` layout; -100 masks loss, never attention/context.
     /// No padding, EOS, truncation or repetition objective is inferred.
     pub fn causal_loss_gradients(
         &self,
