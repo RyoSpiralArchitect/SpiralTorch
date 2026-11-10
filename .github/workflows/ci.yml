@@ -26,6 +26,8 @@ jobs:
         run: python3 -I -S -B verify.py receipts.zip
       - name: Check WASM build profiles and locked CLI schema
         run: python3 -I -B tests/test_build_wasm_web.py
+      - name: Test native geometry and QKV study protocols without model execution
+        run: python3 -I -S -B -m unittest discover -s benchmarks/paired-prompt-contrast -p 'test_*.py'
       - name: Test resident benchmark admission
         run: |
           python3 -I -S -B tests/test_native_lm_readout_bench.py
@@ -734,6 +736,7 @@ jobs:
           python -I -B bindings/st-py/tests/test_native_geometry_adamw.py -v
           python -I -B bindings/st-py/tests/test_native_weights.py -v
           python -I -B bindings/st-py/tests/test_native_causal_lm.py -v
+          python -I -B -m unittest discover -s bindings/st-py/tests -p 'test_native*qkv*.py' -v
           python -I -B bindings/st-py/tests/test_native_causal_supervision.py -v
           python -I -B bindings/st-py/tests/test_native_causal_completion.py -v
           python -I -B bindings/st-py/tests/test_native_wave_factorial.py -v

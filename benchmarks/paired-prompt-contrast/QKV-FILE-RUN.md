@@ -60,6 +60,11 @@ or Accelerate. These checks establish no language-quality or throughput gain.
 
 ## Evidence
 
+A subsequent [real GPT-2 qualification](GPT2-QKV-RESUME.md) completed four
+updates with exact continuous/resumed checkpoint, optimizer and report parity.
+That result is separate from the synthetic validation below and does not
+establish a language-quality improvement.
+
 Private evidence: `2026-11-10-qkv-file-run-v1`. Documentation and the illustrative
 recipe were added after runtime checks; the recipe is not a measured FT setting.
 

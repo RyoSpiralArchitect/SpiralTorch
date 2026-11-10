@@ -174,4 +174,3 @@ No such holdout was opened in this run. The subsequent read-only
 The subsequent [unpadded answer-QKV API](RAGGED-QKV.md) supports mixed-length
 training with one answer-weighted logical update and verified continuation.
 This is a correctness foundation for that follow-up, not a new transfer result.
-

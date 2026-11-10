@@ -1,5 +1,11 @@
 # Does the prompt form change the first answer token?
 
+For the subsequent native training API work, see the
+[QKV file-training interface](../../docs/python/native-qkv-run.md) and the
+[bounded GPT-2 update/save/resume qualification](GPT2-QKV-RESUME.md).
+That qualification establishes exact CPU continuation for its recorded inputs,
+not model quality or geometric superiority.
+
 This matrix was fixed before scoring and has since been used in a private
 first-token comparison. **The 32 record combinations are now observed, not a
 fresh holdout for future studies.** No per-model scores or model weights are
