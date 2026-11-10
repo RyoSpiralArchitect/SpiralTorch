@@ -20,6 +20,7 @@ fn forward_observer_accepts_locally_owned_state_without_running_a_future() {
             None,
             study.total_updates(),
             false,
+            None,
             None::<UpdateObserverFn>,
             Some(
                 move |_: &str, _, _: &ResidentByteDecoder, _: &ResidentByteDecoderForward| {

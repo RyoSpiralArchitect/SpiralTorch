@@ -128,6 +128,7 @@ impl ByteCorpusStudy {
                 resume,
                 self.total_updates(),
                 false,
+                None,
                 None::<UpdateObserverFn>,
                 Some(
                     |name: &str,

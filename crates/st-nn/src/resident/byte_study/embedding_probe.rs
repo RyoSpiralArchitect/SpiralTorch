@@ -89,6 +89,7 @@ impl ByteEmbeddingProbe<'_> {
                 None,
                 self.study.total_updates(),
                 false,
+                None,
                 Some(|case: &str, update, step: SubmittedStep<'_>| {
                     if case == selection.case && update == selection.update {
                         if capture.is_some() {

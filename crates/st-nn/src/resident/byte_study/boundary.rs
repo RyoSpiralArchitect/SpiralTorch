@@ -13,6 +13,72 @@ pub struct ByteCorpusBoundaryObservation {
 }
 
 impl ByteCorpusStudy {
+    /// Validate the unscheduled update-1 receipt boundary without a GPU.
+    /// Update one must precede another forward in the same case.
+    pub fn validate_receipt_drain(&self, case_name: &str, after_update: usize) -> Result<()> {
+        if after_update != 1
+            || self.total_updates() < 2
+            || self.evaluation_boundary(after_update)
+            || !self.request.cases.iter().any(|case| case.name == case_name)
+        {
+            return Err("requires a known case and unscheduled update one".into());
+        }
+        self.validate_segment(None, self.total_updates())
+    }
+
+    /// Run the full request, accepting one selected update before its next
+    /// forward without checkpoint capture or an extra evaluation.
+    ///
+    /// This changes host synchronization and receipt-resource lifetime, but
+    /// leaves the ordinary `run()` path untouched. A result from this route is
+    /// diagnostic only, not a proof of deterministic resume or release safety.
+    /// Preflight errors return `Err`; execution errors are retained in the
+    /// returned outcome rather than hidden by a retry.
+    #[cfg(feature = "wgpu")]
+    pub async fn run_with_receipt_drain(
+        &self,
+        runtime: WgpuRuntime,
+        case_name: &str,
+        after_update: usize,
+    ) -> Result<Value> {
+        self.validate_receipt_drain(case_name, after_update)?;
+        let result = self
+            .execute(
+                runtime,
+                None,
+                self.total_updates(),
+                false,
+                Some((case_name, after_update)),
+                None::<UpdateObserverFn>,
+                None::<ForwardObserverFn>,
+            )
+            .await
+            .map(|(report, _)| report);
+        let mut outcome = json!({
+            "schema": "spiraltorch.byte_receipt_drain_diagnostic.v1",
+            "request_sha256": self.request_sha256(),
+            "case": case_name,
+            "requested_after_update": after_update,
+            "boundary": "accept_update_before_next_forward_without_checkpoint",
+            "release_ready": false,
+            "scope": "Instrumented synchronization: receipt timing and resource lifetime change. \
+                No repair, determinism or release claim."
+        });
+        match result {
+            Ok(report) => {
+                outcome["status"] = json!("completed");
+                outcome["all_cases_completed"] = json!(true);
+                outcome["report"] = report;
+            }
+            Err(error) => {
+                outcome["status"] = json!("error");
+                outcome["all_cases_completed"] = json!(false);
+                outcome["error"] = json!(error.to_string());
+            }
+        }
+        Ok(outcome)
+    }
+
     /// CPU-only preflight for a single update-1 diagnostic. The reference is
     /// validated against this entire request, not used to initialize the run.
     pub fn validate_retained_boundary_reference(
@@ -104,6 +170,37 @@ mod tests {
 
     fn study() -> ByteCorpusStudy {
         ByteCorpusStudy::from_json(fixture().to_string().as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn receipt_drain_preflight_selects_only_one_unscheduled_boundary() {
+        let study = study();
+        study.validate_receipt_drain("plain", 1).unwrap();
+        assert!(ByteCorpusStudy::selected_receipt_boundary(
+            Some(("plain", 1)),
+            "plain",
+            1
+        ));
+        for (case, update) in [("frozen", 1), ("plain", 2)] {
+            assert!(!ByteCorpusStudy::selected_receipt_boundary(
+                Some(("plain", 1)),
+                case,
+                update
+            ));
+        }
+        for (case, update) in [("missing", 1), ("plain", 0), ("plain", 2)] {
+            assert!(study.validate_receipt_drain(case, update).is_err());
+        }
+        let mut scheduled = fixture();
+        scheduled["checkpoint_every"] = json!(1);
+        let scheduled = ByteCorpusStudy::from_json(scheduled.to_string().as_bytes()).unwrap();
+        assert!(scheduled.validate_receipt_drain("plain", 1).is_err());
+        let mut longer = fixture();
+        let first = longer["train_batches"][0].clone();
+        longer["train_batches"].as_array_mut().unwrap().push(first);
+        longer["checkpoint_every"] = json!(3);
+        let longer = ByteCorpusStudy::from_json(longer.to_string().as_bytes()).unwrap();
+        assert!(longer.validate_receipt_drain("plain", 2).is_err());
     }
 
     #[test]

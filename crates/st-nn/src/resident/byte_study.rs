@@ -670,6 +670,15 @@ impl ByteCorpusStudy {
         revision.is_multiple_of(self.request.checkpoint_every) || revision == self.total_updates()
     }
 
+    #[cfg(any(feature = "wgpu", test))]
+    fn selected_receipt_boundary(
+        selection: Option<(&str, usize)>,
+        case_name: &str,
+        revision: usize,
+    ) -> bool {
+        selection == Some((case_name, revision))
+    }
+
     fn checked_models(
         &self,
         checkpoint: &ByteCorpusStudyCheckpoint,
@@ -757,6 +766,7 @@ impl ByteCorpusStudy {
                 None,
                 self.total_updates(),
                 false,
+                None,
                 None::<UpdateObserverFn>,
                 None::<ForwardObserverFn>,
             )
@@ -789,6 +799,7 @@ impl ByteCorpusStudy {
                 None,
                 self.total_updates(),
                 false,
+                None,
                 Some(|name: &str, update, step: SubmittedStep<'_>| {
                     observer(name, update, step.model)
                 }),
@@ -815,6 +826,7 @@ impl ByteCorpusStudy {
                 resume,
                 stop_after,
                 true,
+                None,
                 None::<UpdateObserverFn>,
                 None::<ForwardObserverFn>,
             )
@@ -832,6 +844,7 @@ impl ByteCorpusStudy {
         resume: Option<&ByteCorpusStudyCheckpoint>,
         stop_after: usize,
         capture: bool,
+        receipt_drain: Option<(&str, usize)>,
         mut observer: Option<F>,
         mut forward_observer: Option<G>,
     ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)>
@@ -940,7 +953,10 @@ impl ByteCorpusStudy {
                         },
                     )?;
                 }
-                if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
+                if self.evaluation_boundary(step + 1)
+                    || step + 1 == stop_after
+                    || Self::selected_receipt_boundary(receipt_drain, case.name.as_str(), step + 1)
+                {
                     // Bounded bursts; all receipts are drained even at a pause
                     // that is not a scheduled evaluation boundary.
                     for (update, loss) in pending.drain(..) {
