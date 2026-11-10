@@ -23,7 +23,10 @@ impl ByteCorpusStudy {
         {
             return Err("requires a known case and unscheduled update one".into());
         }
-        self.validate_segment(None, self.total_updates())
+        if self.request.optimizer.is_some() {
+            self.validate_segment(None, self.total_updates())?;
+        }
+        Ok(())
     }
 
     /// Run the full request, accepting update one in the selected case before
@@ -43,13 +46,14 @@ impl ByteCorpusStudy {
         after_update: usize,
     ) -> Result<Value> {
         self.validate_receipt_drain(case_name, after_update)?;
+        let mut progress = ReceiptDrainProgress::default();
         let result = self
             .execute(
                 runtime,
                 None,
                 self.total_updates(),
                 false,
-                Some((case_name, after_update)),
+                Some((case_name, after_update, &mut progress)),
                 None::<UpdateObserverFn>,
                 None::<ForwardObserverFn>,
             )
@@ -61,6 +65,7 @@ impl ByteCorpusStudy {
             "case": case_name,
             "requested_after_update": after_update,
             "boundary": "accept_update_one_before_next_forward_without_pause_checkpoint",
+            "boundary_status": progress.status(),
             "release_ready": false,
             "scope": "Instrumented synchronization: receipt timing and resource lifetime change. \
                 No repair, determinism or release claim."
@@ -171,6 +176,17 @@ mod tests {
 
     fn study() -> ByteCorpusStudy {
         ByteCorpusStudy::from_json(fixture().to_string().as_bytes()).unwrap()
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn receipt_drain_status_distinguishes_not_reached_from_unaccepted() {
+        let mut progress = ReceiptDrainProgress::default();
+        assert_eq!(progress.status(), "not_reached");
+        progress.reached = true;
+        assert_eq!(progress.status(), "reached_unaccepted");
+        progress.accepted = true;
+        assert_eq!(progress.status(), "accepted");
     }
 
     #[test]

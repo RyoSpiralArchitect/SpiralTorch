@@ -37,6 +37,23 @@ type UpdateObserverFn = fn(&str, usize, SubmittedStep<'_>) -> Result<()>;
 #[cfg(feature = "wgpu")]
 type ForwardObserverFn =
     fn(&str, usize, &ResidentByteDecoder, &ResidentByteDecoderForward) -> Result<()>;
+#[cfg(feature = "wgpu")]
+#[derive(Default)]
+struct ReceiptDrainProgress {
+    reached: bool,
+    accepted: bool,
+}
+
+#[cfg(feature = "wgpu")]
+impl ReceiptDrainProgress {
+    fn status(&self) -> &'static str {
+        match (self.reached, self.accepted) {
+            (false, _) => "not_reached",
+            (true, false) => "reached_unaccepted",
+            (true, true) => "accepted",
+        }
+    }
+}
 /// Input and checkpoint JSON are bounded before deserialization.
 pub const BYTE_CORPUS_STUDY_MAX_BYTES: usize = 64 * 1024 * 1024;
 const CHECKPOINT_SCHEMA: &str = "spiraltorch.byte_corpus.checkpoint.v1";
@@ -844,7 +861,7 @@ impl ByteCorpusStudy {
         resume: Option<&ByteCorpusStudyCheckpoint>,
         stop_after: usize,
         capture: bool,
-        receipt_drain: Option<(&str, usize)>,
+        mut receipt_drain: Option<(&str, usize, &mut ReceiptDrainProgress)>,
         mut observer: Option<F>,
         mut forward_observer: Option<G>,
     ) -> Result<(Value, Option<ByteCorpusStudyCheckpoint>)>
@@ -953,10 +970,18 @@ impl ByteCorpusStudy {
                         },
                     )?;
                 }
-                if self.evaluation_boundary(step + 1)
-                    || step + 1 == stop_after
-                    || Self::selected_receipt_boundary(receipt_drain, case.name.as_str(), step + 1)
+                let selected_receipt = Self::selected_receipt_boundary(
+                    receipt_drain
+                        .as_ref()
+                        .map(|(name, update, _)| (*name, *update)),
+                    case.name.as_str(),
+                    step + 1,
+                );
+                if self.evaluation_boundary(step + 1) || step + 1 == stop_after || selected_receipt
                 {
+                    if selected_receipt {
+                        receipt_drain.as_mut().unwrap().2.reached = true;
+                    }
                     // Bounded bursts; all receipts are drained even at a pause
                     // that is not a scheduled evaluation boundary.
                     for (update, loss) in pending.drain(..) {
@@ -972,6 +997,9 @@ impl ByteCorpusStudy {
                             revision: revision.try_into()?,
                             ce,
                         });
+                    }
+                    if selected_receipt {
+                        receipt_drain.as_mut().unwrap().2.accepted = true;
                     }
                     if self.evaluation_boundary(step + 1) {
                         evaluations.push(evaluate(&mut model, r).await?);
