@@ -41,6 +41,7 @@ struct Args {
     headwise: bool,
     mixtures: bool,
     query_mixtures: bool,
+    receipt_case: Option<String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -50,8 +51,8 @@ impl Args {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut args = args.into_iter();
         let mut result = Self {
-            request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json]")?.into(),
-            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false, mixtures: false, query_mixtures: false,
+            request: args.next().ok_or("usage: resident_byte_learning <request.json> [--stop-after N] [--resume checkpoint.json] [--checkpoint-out NEW.json] [--receipt-drain CASE]")?.into(),
+            resume: None, output: None, stop: None, calibrate: None, fisher: false, headwise: false, mixtures: false, query_mixtures: false, receipt_case: None,
         };
         while let Some(flag) = args.next() {
             if flag == "--prepare-query-mixtures" {
@@ -83,6 +84,13 @@ impl Args {
                 }
                 Some("--stop-after") if result.stop.is_none() => {
                     result.stop = Some(value.to_str().ok_or("invalid stop cursor")?.parse()?);
+                }
+                Some("--receipt-drain") if result.receipt_case.is_none() => {
+                    let case = value.to_str().ok_or("invalid receipt case name")?;
+                    if case.is_empty() {
+                        return Err("receipt case name must not be empty".into());
+                    }
+                    result.receipt_case = Some(case.to_owned());
                 }
                 Some("--calibrate-flat" | "--calibrate-fisher") if result.calibrate.is_none() => {
                     result.fisher = flag == "--calibrate-fisher";
@@ -118,6 +126,17 @@ impl Args {
         }
         if (result.stop.is_some() || result.resume.is_some()) && result.output.is_none() {
             return Err("stop/resume requires --checkpoint-out with a new file path".into());
+        }
+        if result.receipt_case.is_some()
+            && (result.stop.is_some()
+                || result.resume.is_some()
+                || result.output.is_some()
+                || result.calibrate.is_some()
+                || result.headwise
+                || result.mixtures
+                || result.query_mixtures)
+        {
+            return Err("receipt diagnostic cannot prepare, pause or resume learning".into());
         }
         if let Some(path) = &result.output {
             if std::fs::symlink_metadata(path).is_ok() {
@@ -202,6 +221,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let study = ByteCorpusStudy::from_json(&input)?;
+    if let Some(case) = &args.receipt_case {
+        study.validate_receipt_drain(case, 1)?;
+    }
     let resume = args
         .resume
         .as_ref()
@@ -213,7 +235,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let (runtime, _) =
         st_backend_wgpu::runtime::ensure_default_runtime_blocking("byte.corpus.learning")?;
-    let report = if let Some(output) = &args.output {
+    let report = if let Some(case) = &args.receipt_case {
+        pollster::block_on(study.run_with_receipt_drain(runtime, case, 1))?
+    } else if let Some(output) = &args.output {
         let segment = pollster::block_on(study.advance(runtime, resume.as_ref(), stop))?;
         save_checkpoint(output, &segment.checkpoint.to_json()?)?;
         segment.report
@@ -221,6 +245,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pollster::block_on(study.run(runtime))?
     };
     println!("{report}");
+    if args.receipt_case.is_some() && report["status"] != "completed" {
+        return Err("receipt diagnostic learning run failed; retain its printed outcome".into());
+    }
     Ok(())
 }
 
@@ -279,6 +306,30 @@ mod tests {
             vec!["request", "--calibrate-flat", "0", "--prepare-headwise"],
             vec!["request", "--prepare-headwise", "--stop-after", "1"],
             vec!["request", "--prepare-headwise", "--resume", "old.json"],
+            vec!["request", "--receipt-drain", ""],
+            vec![
+                "request",
+                "--receipt-drain",
+                "plain",
+                "--receipt-drain",
+                "plain",
+            ],
+            vec!["request", "--receipt-drain", "plain", "--prepare-mixtures"],
+            vec!["request", "--receipt-drain", "plain", "--stop-after", "1"],
+            vec![
+                "request",
+                "--receipt-drain",
+                "plain",
+                "--resume",
+                "old.json",
+            ],
+            vec![
+                "request",
+                "--receipt-drain",
+                "plain",
+                "--checkpoint-out",
+                "new.json",
+            ],
             vec!["request", "--prepare-mixtures", "--prepare-mixtures"],
             vec!["request", "--prepare-mixtures", "--prepare-headwise"],
             vec!["request", "--prepare-mixtures", "--calibrate-fisher", "0"],
@@ -317,6 +368,17 @@ mod tests {
         .unwrap();
         assert!(fisher.fisher);
         assert_eq!(fisher.calibrate, Some(vec![0, 1]));
+        assert_eq!(
+            super::Args::parse(
+                ["request", "--receipt-drain", "plain"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+            )
+            .unwrap()
+            .receipt_case
+            .as_deref(),
+            Some("plain")
+        );
         assert!(
             super::Args::parse(
                 ["request", "--prepare-headwise"]
