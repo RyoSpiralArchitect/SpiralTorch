@@ -39,6 +39,36 @@ class NativeQkvTests(unittest.TestCase):
     def new(self):
         return st.NativeCausalLmQkvAdamW(self.model, 0)
 
+    def test_held_out_evaluation_tracks_exact_qkv_snapshot(self):
+        docs = [[1, 2, 3, 4], [4, 5, 6]]
+        labels = [[-100, -100, 3, 4], [-100, 5, 6]]
+        qkv = self.new()
+        before = qkv.checkpoint_with_id()
+        baseline = self.model.evaluate_documents(docs, 4, labels=labels)
+        initial = qkv.evaluate_documents(docs, 4, labels=labels)
+        self.assertIn("NativeCausalLmQkvEvaluation", st.__all__)
+        self.assertEqual(initial.evaluation.nll, baseline.nll)
+        self.assertEqual(initial.evaluation.data_id, baseline.data_id)
+        self.assertEqual((initial.serving_id, initial.layer, initial.steps), (qkv.serving_id, 0, 0))
+        self.assertEqual(qkv.checkpoint_with_id(), before)
+
+        qkv.step_documents(docs, labels=labels, learning_rate=.03)
+        updated = qkv.evaluate_documents(docs, 4, labels=labels)
+        self.assertEqual((updated.serving_id, updated.steps), (qkv.serving_id, 1))
+        self.assertNotEqual(updated.serving_id, initial.serving_id)
+        self.assertGreater(updated.evaluation.target_tokens, 0)
+        self.assertEqual(json.loads(updated.to_json())["serving_id"], updated.serving_id)
+        restored = st.NativeCausalLmQkvAdamW.from_bytes(self.model, *qkv.checkpoint_with_id())
+        self.assertEqual(updated.to_json(), restored.evaluate_documents(docs, 4, labels=labels).to_json())
+        with self.assertRaises((ValueError, TypeError)):
+            qkv.evaluate_documents(docs, 4, labels=[labels[0]])
+        class OversizeRow:
+            def __len__(self): return 20_000_000
+            def __getitem__(self, index): raise AssertionError("token read before admission")
+        with self.assertRaises(ValueError):
+            qkv.evaluate_documents([OversizeRow()], 4)
+        self.assertEqual(qkv.checkpoint_with_id(), restored.checkpoint_with_id())
+
     def test_optional_elliptic_exports_resolve_only_when_requested(self):
         names = ("EllipticWarpFunction", "elliptic_warp_autograd",
                  "elliptic_warp_features", "elliptic_warp_partial")

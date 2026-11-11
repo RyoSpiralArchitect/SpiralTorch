@@ -9689,7 +9689,7 @@ if _resolve_rs_attr("CausalCompletion") is not None:
     _EXPORTED.update(("CausalCompletion", "encode_supervised_completion"))
 for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAdapterArtifact",
               "NativeGeometryRuntime", "NativeGeometryBatch", "NativeGeometryAdamW", "SafeTensorArchive",
-              "NdTensor", "score_token_logits_f32le", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",
+              "NdTensor", "score_token_logits_f32le", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmQkvEvaluation", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",
               "NativeCausalLmLoraGradients", "NativeCausalLmAccumulator", "NativeCausalLmAdaptationGradients", "NativeCausalLmScalarOutput", "NativeCausalLmQkvAdamW", "NativeCausalLmQkvTrainer", "NativeCausalLmProjectionPrefix",
               "NativeCausalLmOutputContrastBank", "NativeCausalLmOutputMarginDirection",
               "NativeCausalLmTrainingPrefixCache", "NativeCausalLmTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
