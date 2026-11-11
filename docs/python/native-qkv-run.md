@@ -70,24 +70,31 @@ result = run_qkv_corpus(session, new_directory, save_every=10, stop_after=stop)
 The same Rust corpus evaluator can score a detached QKV snapshot without an
 optimizer update or Torch/NumPy. Use data not selected for training, keep the
 same documents and labels for the baseline and trained comparison, and choose
-the context/window policy before reading results:
+the context/window policy before reading results. `frozen_source` below is the
+exact `NativeCausalLm` used to create the trainer, or its pinned reload:
 
 ```python
 snapshot = session.optimizer_snapshot()
-score = snapshot.evaluate_documents(
+pair = snapshot.evaluate_against_source(
+    frozen_source,
     heldout_token_documents, context_length=128,
     microbatch_windows=2, labels=heldout_labels,
 )
-assert score.serving_id == snapshot.serving_id
-print(score.evaluation.nll, score.evaluation.target_tokens)
+assert pair.serving_id == snapshot.serving_id
+baseline, trained = pair.evaluations
+assert baseline.data_id == trained.data_id
+print(baseline.nll, trained.nll, trained.target_tokens)
 ```
 
-The score records the QKV layer, accepted update count and exact serving ID;
-the nested evaluation retains the corpus/plan identities and target-weighted
-unsmoothed NLL. `score.to_json()` preserves the complete receipt. A baseline
-`NativeCausalLm.evaluate_documents(...)` must use the same frozen LoRA,
-geometry, readout and held-out inputs. This API makes a matched comparison
-possible; it does not itself show that training improved language quality.
+The ordered pair records the QKV layer, accepted update count and exact serving
+ID; each evaluation retains the corpus/plan identities and target-weighted
+unsmoothed NLL. `pair.to_json()` preserves the complete receipt. The source
+must have the same base, frozen LoRA, geometry and readout identities as the
+snapshot. Rust shares only blocks strictly before both models' first adapter
+site and the trained QKV layer. `snapshot.evaluate_documents(...)` remains
+available for a single trained-model score. This API makes a matched
+comparison possible; it does not itself show that training improved language
+quality or that the paired path is fast enough for a large real model.
 
 On a source build with the CPU autotune fast path, set
 `SPIRALTORCH_AUTOTUNE=0` before starting Python to skip first-use

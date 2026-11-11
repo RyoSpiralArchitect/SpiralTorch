@@ -71,6 +71,16 @@ pub struct CausalLmQkvEvaluation {
     pub evaluation: CausalLmEvaluation,
 }
 
+/// Ordered source/QKV scores; no layer at or after the trained QKV is shared.
+#[derive(Debug, Serialize)]
+pub struct CausalLmQkvComparison {
+    pub schema: &'static str,
+    pub serving_id: String,
+    pub layer: usize,
+    pub steps: u32,
+    pub comparison: CausalLmEvaluationComparison,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Header {
@@ -206,6 +216,54 @@ impl NativeCausalLmQkvAdamW {
             layer: self.layer,
             steps: self.steps,
             evaluation,
+        })
+    }
+
+    fn ensure_source(&self, source: &NativeCausalLm) -> CausalLmResult<()> {
+        if source.base_model_identity() != self.model.base_model_identity()
+            || source.lora_artifact_id() != self.model.lora_artifact_id()
+            || source.geometry_artifact_id() != self.model.geometry_artifact_id()
+            || source.readout_accumulator() != self.model.readout_accumulator()
+        {
+            return Err("QKV comparison requires the exact frozen source owner".into());
+        }
+        Ok(())
+    }
+
+    pub fn source_comparison_plan(
+        &self,
+        source: &NativeCausalLm,
+        lengths: &[usize],
+        config: CausalLmEvaluationConfig,
+        has_labels: bool,
+    ) -> CausalLmResult<CausalDocumentWindows> {
+        self.ensure_source(source)?;
+        NativeCausalLm::comparison_plan(&[source, &self.model], lengths, config, has_labels)
+    }
+
+    /// Evaluate the frozen source and this snapshot in one pass. The QKV layer
+    /// itself and every later block execute separately even without adapters.
+    pub fn evaluate_against_source(
+        &self,
+        source: &NativeCausalLm,
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+    ) -> CausalLmResult<CausalLmQkvComparison> {
+        self.ensure_source(source)?;
+        let comparison = NativeCausalLm::evaluate_variants_with_prefix_cap(
+            &[source, &self.model],
+            documents,
+            labels,
+            config,
+            self.layer,
+        )?;
+        Ok(CausalLmQkvComparison {
+            schema: "spiraltorch.native_causal_lm_qkv_comparison.v1",
+            serving_id: self.serving_id(),
+            layer: self.layer,
+            steps: self.steps,
+            comparison,
         })
     }
     /// Admit a snapshot's cache before a binding copies its prefix IDs.
