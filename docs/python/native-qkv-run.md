@@ -89,6 +89,11 @@ unsmoothed NLL. `score.to_json()` preserves the complete receipt. A baseline
 geometry, readout and held-out inputs. This API makes a matched comparison
 possible; it does not itself show that training improved language quality.
 
+On a source build with the CPU autotune fast path, set
+`SPIRALTORCH_AUTOTUNE=0` before starting Python to skip first-use
+microbenchmarking and use the deterministic default matmul kernel. This is
+useful for a bounded diagnostic, not a steady-state performance comparison.
+
 ## Inference And Failure Boundaries
 
 The final `qkv.bin` is the existing optimizer-snapshot format, separate from

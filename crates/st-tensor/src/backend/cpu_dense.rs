@@ -865,7 +865,17 @@ fn autotune_microkernel(
     cols: usize,
     rhs_layout: CpuRhsLayout,
 ) -> Option<&'static MicroKernelSpec> {
-    if !should_autotune(rows, inner, cols) {
+    autotune_microkernel_with_policy(rows, inner, cols, rhs_layout, autotune_env_enabled())
+}
+
+fn autotune_microkernel_with_policy(
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    rhs_layout: CpuRhsLayout,
+    autotune_enabled: bool,
+) -> Option<&'static MicroKernelSpec> {
+    if !autotune_enabled || !should_autotune(rows, inner, cols) {
         return None;
     }
 
@@ -892,7 +902,6 @@ fn autotune_microkernel(
         rhs_layout,
     };
 
-    let autotune_enabled = autotune_env_enabled();
     eprintln!("[autotune] key={key} apply={autotune_enabled}");
 
     let matches = if autotune_enabled {
@@ -1621,6 +1630,18 @@ mod tests {
             )));
         }
         assert_eq!(sample_dimension(4096), CPU_AUTOTUNE_SAMPLE_MAX_DIM);
+    }
+
+    #[test]
+    fn disabled_autotune_skips_microbenchmark_selection() {
+        assert!(autotune_microkernel_with_policy(
+            22,
+            768,
+            2304,
+            CpuRhsLayout::PrepackedColumns,
+            false,
+        )
+        .is_none());
     }
 
     #[test]
