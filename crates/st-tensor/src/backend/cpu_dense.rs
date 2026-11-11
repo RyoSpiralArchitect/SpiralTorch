@@ -865,6 +865,9 @@ fn autotune_microkernel(
     cols: usize,
     rhs_layout: CpuRhsLayout,
 ) -> Option<&'static MicroKernelSpec> {
+    if !should_autotune(rows, inner, cols) {
+        return None;
+    }
     autotune_microkernel_with_policy(rows, inner, cols, rhs_layout, autotune_env_enabled())
 }
 
