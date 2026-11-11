@@ -45,6 +45,52 @@ fn seal(bytes: &[u8], change: impl FnOnce(&mut serde_json::Value)) -> (Vec<u8>, 
 }
 
 #[test]
+fn qkv_evaluation_binds_trained_projection_and_survives_restore() {
+    let model = load();
+    let (docs, labels) = corpus();
+    let config = CausalLmEvaluationConfig {
+        context_length: 4,
+        microbatch_windows: 2,
+    };
+    let mut trainer =
+        NativeCausalLmQkvTrainer::new(optimizer(&model), docs.clone(), Some(labels.clone()), cfg())
+            .unwrap();
+    let initial = trainer
+        .optimizer()
+        .evaluate_documents(&docs, Some(&labels), config)
+        .unwrap();
+    let baseline = model
+        .evaluate_documents(&docs, Some(&labels), config)
+        .unwrap();
+    assert_eq!(initial.evaluation.nll.to_bits(), baseline.nll.to_bits());
+    assert_eq!(initial.evaluation.data_id, baseline.data_id);
+    assert_eq!(initial.serving_id, trainer.optimizer().serving_id());
+    assert_eq!(initial.steps, 0);
+
+    trainer.step().unwrap().unwrap();
+    let (bytes, pin) = trainer.optimizer().checkpoint().unwrap();
+    let updated = trainer
+        .optimizer()
+        .evaluate_documents(&docs, Some(&labels), config)
+        .unwrap();
+    assert_ne!(updated.serving_id, initial.serving_id);
+    assert_eq!(updated.steps, 1);
+    assert_eq!(updated.serving_id, trainer.optimizer().serving_id());
+    let restored = NativeCausalLmQkvAdamW::restore(&model, &bytes, &pin).unwrap();
+    let replay = restored
+        .evaluate_documents(&docs, Some(&labels), config)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(updated).unwrap(),
+        serde_json::to_value(replay).unwrap()
+    );
+    assert_eq!(trainer.optimizer().checkpoint().unwrap(), (bytes, pin));
+    assert!(restored
+        .evaluate_documents(&docs, Some(&labels[..1]), config)
+        .is_err());
+}
+
+#[test]
 fn qkv_session_matches_explicit_target_covering_windows_and_all_restart_boundaries() {
     let base = load();
     let model = base

@@ -169,6 +169,25 @@ impl PyQkv {
         py.detach(|| self.inner.serving_id())
     }
 
+    #[pyo3(signature=(token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_documents(
+        &self,
+        py: Python<'_>,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<super::evaluation::PyNativeCausalLmQkvEvaluation> {
+        super::evaluation::evaluate_qkv(
+            &self.inner,
+            py,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
     #[pyo3(signature=(prompt, *, max_cache_values=None))]
     fn prefill(
         &self,

@@ -65,6 +65,30 @@ from spiraltorch.native_qkv_runs import run_qkv_corpus
 result = run_qkv_corpus(session, new_directory, save_every=10, stop_after=stop)
 ```
 
+## Held-Out Scoring
+
+The same Rust corpus evaluator can score a detached QKV snapshot without an
+optimizer update or Torch/NumPy. Use data not selected for training, keep the
+same documents and labels for the baseline and trained comparison, and choose
+the context/window policy before reading results:
+
+```python
+snapshot = session.optimizer_snapshot()
+score = snapshot.evaluate_documents(
+    heldout_token_documents, context_length=128,
+    microbatch_windows=2, labels=heldout_labels,
+)
+assert score.serving_id == snapshot.serving_id
+print(score.evaluation.nll, score.evaluation.target_tokens)
+```
+
+The score records the QKV layer, accepted update count and exact serving ID;
+the nested evaluation retains the corpus/plan identities and target-weighted
+unsmoothed NLL. `score.to_json()` preserves the complete receipt. A baseline
+`NativeCausalLm.evaluate_documents(...)` must use the same frozen LoRA,
+geometry, readout and held-out inputs. This API makes a matched comparison
+possible; it does not itself show that training improved language quality.
+
 ## Inference And Failure Boundaries
 
 The final `qkv.bin` is the existing optimizer-snapshot format, separate from

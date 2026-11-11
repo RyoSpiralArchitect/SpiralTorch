@@ -1,5 +1,6 @@
 //! One unfrozen QKV matrix. Prefix, output projection, decoder head and attached adapters stay frozen.
 use super::*;
+use crate::language_windows::CausalDocumentWindows;
 use sha2::{Digest, Sha256};
 use st_kernel_contracts::adamw::{AdamWConfig, AdamWStep};
 use st_kernel_contracts::gradient_clip::GlobalNormClip;
@@ -58,6 +59,16 @@ pub struct CausalLmQkvSmoothedStep {
     pub gradient_l2: [f64; 3],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gradient_clip: Option<CausalLmQkvGradientClip>,
+}
+
+/// Read-only corpus score bound to the exact trained QKV projection.
+#[derive(Clone, Debug, Serialize)]
+pub struct CausalLmQkvEvaluation {
+    pub schema: &'static str,
+    pub serving_id: String,
+    pub layer: usize,
+    pub steps: u32,
+    pub evaluation: CausalLmEvaluation,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -167,6 +178,35 @@ impl NativeCausalLmQkvAdamW {
             h.update(v.to_le_bytes());
         }
         format!("sha256:{:x}", h.finalize())
+    }
+
+    /// Admit a read-only held-out corpus against the current projection before
+    /// a foreign client copies token IDs or labels.
+    pub fn evaluation_plan(
+        &self,
+        lengths: &[usize],
+        config: CausalLmEvaluationConfig,
+        has_labels: bool,
+    ) -> CausalLmResult<CausalDocumentWindows> {
+        self.model.evaluation_plan(lengths, config, has_labels)
+    }
+
+    /// Score the current immutable projection with the shared target-weighted
+    /// evaluator. This never updates weights or Adam state.
+    pub fn evaluate_documents(
+        &self,
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+    ) -> CausalLmResult<CausalLmQkvEvaluation> {
+        let evaluation = self.model.evaluate_documents(documents, labels, config)?;
+        Ok(CausalLmQkvEvaluation {
+            schema: "spiraltorch.native_causal_lm_qkv_evaluation.v1",
+            serving_id: self.serving_id(),
+            layer: self.layer,
+            steps: self.steps,
+            evaluation,
+        })
     }
     /// Admit a snapshot's cache before a binding copies its prefix IDs.
     pub fn prefill_input_count(

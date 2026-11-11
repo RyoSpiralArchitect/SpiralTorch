@@ -3,14 +3,44 @@ use super::{dimension, documents::documents, error, limit, PyNativeCausalLm};
 use pyo3::prelude::*;
 use st_nn::causal_lm::{
     CausalLmAnswerComparison, CausalLmEvaluation, CausalLmEvaluationComparison,
-    CausalLmEvaluationConfig, CausalLmResult, NativeCausalLm, MAX_ANSWER_SCORE_CELLS,
-    MAX_EVALUATION_VARIANTS,
+    CausalLmEvaluationConfig, CausalLmQkvEvaluation, CausalLmResult, NativeCausalLm,
+    NativeCausalLmQkvAdamW, MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_VARIANTS,
 };
 use st_nn::language_windows::CausalDocumentWindows;
 
 #[pyclass(name = "NativeCausalLmEvaluation", module = "spiraltorch", frozen)]
 pub struct PyNativeCausalLmEvaluation {
     inner: CausalLmEvaluation,
+}
+
+#[pyclass(name = "NativeCausalLmQkvEvaluation", module = "spiraltorch", frozen)]
+pub struct PyNativeCausalLmQkvEvaluation {
+    inner: CausalLmQkvEvaluation,
+}
+
+#[pymethods]
+impl PyNativeCausalLmQkvEvaluation {
+    #[getter]
+    fn serving_id(&self) -> &str {
+        &self.inner.serving_id
+    }
+    #[getter]
+    fn layer(&self) -> usize {
+        self.inner.layer
+    }
+    #[getter]
+    fn steps(&self) -> u32 {
+        self.inner.steps
+    }
+    #[getter]
+    fn evaluation(&self) -> PyNativeCausalLmEvaluation {
+        PyNativeCausalLmEvaluation {
+            inner: self.inner.evaluation.clone(),
+        }
+    }
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner).map_err(error)
+    }
 }
 
 #[pyclass(
@@ -192,6 +222,29 @@ pub(super) fn evaluate(
     .map_err(error)
 }
 
+pub(super) fn evaluate_qkv(
+    model: &NativeCausalLmQkvAdamW,
+    py: Python<'_>,
+    token_documents: &Bound<'_, PyAny>,
+    context_length: &Bound<'_, PyAny>,
+    microbatch_windows: Option<&Bound<'_, PyAny>>,
+    labels: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyNativeCausalLmQkvEvaluation> {
+    let config = policy(context_length, microbatch_windows)?;
+    let limit = NativeCausalLm::evaluation_token_limit(1).map_err(error)?;
+    let (docs, labels) = documents(token_documents, labels, limit, |lengths, has_labels| {
+        py.detach(|| {
+            model
+                .evaluation_plan(lengths, config, has_labels)
+                .map(|_| ())
+        })
+        .map_err(error)
+    })?;
+    py.detach(|| model.evaluate_documents(&docs, labels.as_deref(), config))
+        .map(|inner| PyNativeCausalLmQkvEvaluation { inner })
+        .map_err(error)
+}
+
 pub(super) fn compare(
     py: Python<'_>,
     variants: &Bound<'_, PyAny>,
@@ -281,6 +334,7 @@ fn compare_with<T: Send>(
 
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLmEvaluation>()?;
+    module.add_class::<PyNativeCausalLmQkvEvaluation>()?;
     module.add_class::<PyNativeCausalLmEvaluationComparison>()?;
     module.add_class::<PyNativeCausalLmAnswerComparison>()
 }
