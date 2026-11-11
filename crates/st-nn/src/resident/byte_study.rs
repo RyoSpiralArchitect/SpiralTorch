@@ -940,9 +940,10 @@ impl ByteCorpusStudy {
                         },
                     )?;
                 }
-                if self.evaluation_boundary(step + 1) || step + 1 == stop_after {
-                    // Bounded bursts; all receipts are drained even at a pause
-                    // that is not a scheduled evaluation boundary.
+                if capture || self.evaluation_boundary(step + 1) || step + 1 == stop_after {
+                    // A checkpointed continuation must cross the same accepted
+                    // update boundary as a stop/resume before its next forward.
+                    // Uncheckpointed runs may still drain in bounded bursts.
                     for (update, loss) in pending.drain(..) {
                         let receipt = update.snapshot_with_scalar(&loss)?;
                         #[cfg(not(target_arch = "wasm32"))]
