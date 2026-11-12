@@ -100,6 +100,38 @@ class NativeQkvTests(unittest.TestCase):
         late_pair = late.evaluate_against_source(plain, docs, 4, labels=labels)
         self.assertEqual(late_pair.shared_prefix_layers, 1)
 
+    def test_paired_answer_scores_keep_source_identity_and_aggregate_receipt(self):
+        docs = [[1, 2, 3, 4, 5, 6], [4, 5, 6]]
+        labels = [[-100, -100, 3, 4, -100, 6], [-100, 5, 6]]
+        qkv = self.new()
+        qkv.step_documents(docs, labels=labels, learning_rate=.03)
+        before = qkv.checkpoint_with_id()
+        detail = qkv.evaluate_against_source_by_answer(self.model, docs, 4, labels=labels)
+        pair = qkv.evaluate_against_source(self.model, docs, 4, labels=labels)
+        self.assertIn("NativeCausalLmQkvAnswerComparison", st.__all__)
+        self.assertIsInstance(detail, st.NativeCausalLmQkvAnswerComparison)
+        self.assertEqual((detail.serving_id, detail.layer, detail.steps),
+                         (qkv.serving_id, 0, 1))
+        self.assertEqual((len(detail), detail.document_count, detail.scored_documents), (3, 2, 2))
+        self.assertEqual([(a["document"], a["start"], a["end"])
+                          for a in map(detail.answer, range(len(detail)))],
+                         [(0, 2, 4), (0, 5, 6), (1, 1, 3)])
+        self.assertEqual(json.loads(detail.to_json())["comparison"]["comparison"],
+                         json.loads(pair.to_json())["comparison"])
+        self.assertEqual(detail.contrast(0, 1)["target_tokens"], 5)
+        self.assertEqual(qkv.checkpoint_with_id(), before)
+        with self.assertRaises(IndexError):
+            detail.answer(3)
+        with self.assertRaises(ValueError):
+            detail.contrast(0, 0)
+
+        other = st.NativeCausalLm.from_gpt2(*fixture())
+        class UnreadableRow:
+            def __len__(self): return 2
+            def __getitem__(self, index): raise AssertionError("read before source admission")
+        with self.assertRaises(ValueError):
+            qkv.evaluate_against_source_by_answer(other, [UnreadableRow()], 4)
+
     def test_optional_elliptic_exports_resolve_only_when_requested(self):
         names = ("EllipticWarpFunction", "elliptic_warp_autograd",
                  "elliptic_warp_features", "elliptic_warp_partial")

@@ -3,8 +3,9 @@ use super::{dimension, documents::documents, error, limit, PyNativeCausalLm};
 use pyo3::prelude::*;
 use st_nn::causal_lm::{
     CausalLmAnswerComparison, CausalLmEvaluation, CausalLmEvaluationComparison,
-    CausalLmEvaluationConfig, CausalLmQkvComparison, CausalLmQkvEvaluation, CausalLmResult,
-    NativeCausalLm, NativeCausalLmQkvAdamW, MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_VARIANTS,
+    CausalLmEvaluationConfig, CausalLmQkvAnswerComparison, CausalLmQkvComparison,
+    CausalLmQkvEvaluation, CausalLmResult, NativeCausalLm, NativeCausalLmQkvAdamW,
+    MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_VARIANTS,
 };
 use st_nn::language_windows::CausalDocumentWindows;
 
@@ -21,6 +22,67 @@ pub struct PyNativeCausalLmQkvEvaluation {
 #[pyclass(name = "NativeCausalLmQkvComparison", module = "spiraltorch", frozen)]
 pub struct PyNativeCausalLmQkvComparison {
     inner: CausalLmQkvComparison,
+}
+
+#[pyclass(
+    name = "NativeCausalLmQkvAnswerComparison",
+    module = "spiraltorch",
+    frozen
+)]
+pub struct PyNativeCausalLmQkvAnswerComparison {
+    inner: CausalLmQkvAnswerComparison,
+}
+
+#[pymethods]
+impl PyNativeCausalLmQkvAnswerComparison {
+    #[classattr]
+    const MAX_SCORE_CELLS: usize = MAX_ANSWER_SCORE_CELLS;
+    fn __len__(&self) -> usize {
+        self.inner.comparison.answers().len()
+    }
+    #[getter]
+    fn serving_id(&self) -> &str {
+        &self.inner.serving_id
+    }
+    #[getter]
+    fn layer(&self) -> usize {
+        self.inner.layer
+    }
+    #[getter]
+    fn steps(&self) -> u32 {
+        self.inner.steps
+    }
+    #[getter]
+    fn document_count(&self) -> usize {
+        self.inner.comparison.document_count()
+    }
+    #[getter]
+    fn scored_documents(&self) -> usize {
+        self.inner.comparison.scored_documents()
+    }
+    #[getter]
+    fn shared_prefix_layers(&self) -> usize {
+        self.inner.comparison.comparison().shared_prefix_layers
+    }
+    #[getter]
+    fn evaluations(&self) -> Vec<PyNativeCausalLmEvaluation> {
+        wrap_scores(self.inner.comparison.comparison())
+    }
+    fn answer(&self, py: Python<'_>, index: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        answer_at(&self.inner.comparison, py, index)
+    }
+    fn contrast(
+        &self,
+        py: Python<'_>,
+        reference: &Bound<'_, PyAny>,
+        candidate: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        answer_contrast(&self.inner.comparison, py, reference, candidate)
+    }
+    fn to_json(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| serde_json::to_string(&self.inner))
+            .map_err(error)
+    }
 }
 
 #[pymethods]
@@ -119,11 +181,7 @@ impl PyNativeCausalLmAnswerComparison {
         wrap_scores(self.inner.comparison())
     }
     fn answer(&self, py: Python<'_>, index: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let answer =
-            self.inner.answers().get(dimension(index)?).ok_or_else(|| {
-                pyo3::exceptions::PyIndexError::new_err("answer index out of range")
-            })?;
-        crate::json::json_to_py(py, &serde_json::to_value(answer).map_err(error)?)
+        answer_at(&self.inner, py, index)
     }
     fn contrast(
         &self,
@@ -131,14 +189,35 @@ impl PyNativeCausalLmAnswerComparison {
         reference: &Bound<'_, PyAny>,
         candidate: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        let (a, b) = (dimension(reference)?, dimension(candidate)?);
-        let c = py.detach(|| self.inner.contrast(a, b)).map_err(error)?;
-        crate::json::json_to_py(py, &serde_json::to_value(c).map_err(error)?)
+        answer_contrast(&self.inner, py, reference, candidate)
     }
     fn to_json(&self, py: Python<'_>) -> PyResult<String> {
         py.detach(|| serde_json::to_string(&self.inner))
             .map_err(error)
     }
+}
+
+fn answer_at(
+    comparison: &CausalLmAnswerComparison,
+    py: Python<'_>,
+    index: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let answer = comparison
+        .answers()
+        .get(dimension(index)?)
+        .ok_or_else(|| pyo3::exceptions::PyIndexError::new_err("answer index out of range"))?;
+    crate::json::json_to_py(py, &serde_json::to_value(answer).map_err(error)?)
+}
+
+fn answer_contrast(
+    comparison: &CausalLmAnswerComparison,
+    py: Python<'_>,
+    reference: &Bound<'_, PyAny>,
+    candidate: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let (a, b) = (dimension(reference)?, dimension(candidate)?);
+    let result = py.detach(|| comparison.contrast(a, b)).map_err(error)?;
+    crate::json::json_to_py(py, &serde_json::to_value(result).map_err(error)?)
 }
 
 fn wrap_scores(comparison: &CausalLmEvaluationComparison) -> Vec<PyNativeCausalLmEvaluation> {
@@ -301,6 +380,32 @@ pub(super) fn compare_qkv(
         .map_err(error)
 }
 
+pub(super) fn compare_qkv_answers(
+    model: &NativeCausalLmQkvAdamW,
+    source: &PyNativeCausalLm,
+    py: Python<'_>,
+    token_documents: &Bound<'_, PyAny>,
+    context_length: &Bound<'_, PyAny>,
+    microbatch_windows: Option<&Bound<'_, PyAny>>,
+    labels: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyNativeCausalLmQkvAnswerComparison> {
+    let config = policy(context_length, microbatch_windows)?;
+    let limit = NativeCausalLm::evaluation_token_limit(2).map_err(error)?;
+    let (docs, labels) = documents(token_documents, labels, limit, |lengths, has_labels| {
+        py.detach(|| {
+            model
+                .source_answer_comparison_plan(&source.inner, lengths, config, has_labels)
+                .map(|_| ())
+        })
+        .map_err(error)
+    })?;
+    py.detach(|| {
+        model.evaluate_against_source_by_answer(&source.inner, &docs, labels.as_deref(), config)
+    })
+    .map(|inner| PyNativeCausalLmQkvAnswerComparison { inner })
+    .map_err(error)
+}
+
 pub(super) fn compare(
     py: Python<'_>,
     variants: &Bound<'_, PyAny>,
@@ -392,6 +497,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLmEvaluation>()?;
     module.add_class::<PyNativeCausalLmQkvEvaluation>()?;
     module.add_class::<PyNativeCausalLmQkvComparison>()?;
+    module.add_class::<PyNativeCausalLmQkvAnswerComparison>()?;
     module.add_class::<PyNativeCausalLmEvaluationComparison>()?;
     module.add_class::<PyNativeCausalLmAnswerComparison>()
 }

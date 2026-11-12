@@ -134,7 +134,23 @@ impl NativeCausalLm {
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
     ) -> CausalLmResult<CausalLmAnswerComparison> {
-        let shared_prefix_layers = Self::comparison_prefix_layers(models)?;
+        Self::evaluate_variants_by_answer_with_prefix_cap(
+            models,
+            documents,
+            labels,
+            config,
+            usize::MAX,
+        )
+    }
+
+    pub(crate) fn evaluate_variants_by_answer_with_prefix_cap(
+        models: &[&Self],
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+        prefix_cap: usize,
+    ) -> CausalLmResult<CausalLmAnswerComparison> {
+        let shared_prefix_layers = Self::comparison_prefix_layers(models)?.min(prefix_cap);
         let mut detail = AnswerCollector::default();
         let evaluations = models[0].evaluate_corpus(
             models,

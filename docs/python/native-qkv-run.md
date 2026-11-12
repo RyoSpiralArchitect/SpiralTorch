@@ -96,6 +96,28 @@ available for a single trained-model score. This API makes a matched
 comparison possible; it does not itself show that training improved language
 quality or that the paired path is fast enough for a large real model.
 
+For answer-only labels, request the Rust-owned answer breakdown on the same
+frozen corpus. It keeps the source/serving identity and safe prefix cap, and
+reports each contiguous run of selected targets, even across windows:
+
+```python
+detail = snapshot.evaluate_against_source_by_answer(
+    frozen_source,
+    heldout_token_documents, context_length=128,
+    microbatch_windows=2, labels=heldout_labels,
+)
+assert detail.serving_id == snapshot.serving_id
+assert detail.evaluations[0].data_id == detail.evaluations[1].data_id
+print(detail.contrast(0, 1))  # trained minus source; negative NLL is better
+print(detail.answer(0))
+```
+
+`contrast(0, 1)` separates token-weighted and answer-weighted NLL changes,
+top-1 counts and improved/tied/regressed answer counts. These are descriptive
+scores on the chosen corpus, not a significance test or a new held-out split.
+Answer detail is opt-in, bounded by 65,536 answer-by-variant cells, and may
+cost more than aggregate NLL because it scores selected logits by answer.
+
 On a source build with the CPU autotune fast path, set
 `SPIRALTORCH_AUTOTUNE=0` before starting Python to skip first-use
 microbenchmarking and use the deterministic default matmul kernel. This is

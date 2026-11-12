@@ -147,6 +147,99 @@ fn qkv_paired_evaluation_matches_independent_scores_without_sharing_trained_laye
 }
 
 #[test]
+fn qkv_answer_comparison_matches_independent_prefixes_and_keeps_source_bound() {
+    let base = load();
+    let source = base
+        .with_lora(1, 2, 1.)
+        .unwrap()
+        .with_geometry(artifact(&base, "transformer.h.1.attn", 0.2))
+        .unwrap();
+    let (docs, mut labels) = corpus();
+    labels[0][6] = -100;
+    let config = CausalLmEvaluationConfig {
+        context_length: 4,
+        microbatch_windows: 2,
+    };
+    for layer in [0, 1] {
+        let mut snapshot =
+            NativeCausalLmQkvAdamW::new(&source, layer, AdamWConfig::default()).unwrap();
+        snapshot
+            .step_windows(
+                &[1, 2, 3],
+                [1, 3],
+                None,
+                0.,
+                AdamWStep::new(0.03, 0.).unwrap(),
+            )
+            .unwrap();
+        let checkpoint = snapshot.checkpoint().unwrap();
+        let detail = snapshot
+            .evaluate_against_source_by_answer(&source, &docs, Some(&labels), config)
+            .unwrap();
+        let aggregate = snapshot
+            .evaluate_against_source(&source, &docs, Some(&labels), config)
+            .unwrap();
+        assert_eq!(detail.serving_id, snapshot.serving_id());
+        assert_eq!(detail.steps, 1);
+        assert_eq!(detail.layer, layer);
+        assert_eq!(detail.comparison.comparison().shared_prefix_layers, layer);
+        assert_eq!(detail.comparison.document_count(), docs.len());
+        assert_eq!(detail.comparison.scored_documents(), 2);
+        assert_eq!(detail.comparison.answers().len(), 3);
+        assert_eq!(
+            serde_json::to_value(detail.comparison.comparison()).unwrap(),
+            serde_json::to_value(aggregate.comparison).unwrap()
+        );
+        for answer in detail.comparison.answers() {
+            for (owner, score) in answer.scores.iter().enumerate() {
+                let mut sum = 0.;
+                let mut correct = 0;
+                let doc = &docs[answer.document];
+                let row = &labels[answer.document];
+                for target in answer.start..answer.end {
+                    let left = (target - 1) / 3 * 3;
+                    let prefix = &doc[left..target];
+                    let logits = if owner == 0 {
+                        source
+                            .logits(prefix, [1, prefix.len()], true)
+                            .unwrap()
+                            .data()
+                            .to_vec()
+                    } else {
+                        snapshot.last_logits(prefix).unwrap()
+                    };
+                    let best = (1..logits.len()).fold(0, |best, index| {
+                        if logits[index] > logits[best] {
+                            index
+                        } else {
+                            best
+                        }
+                    });
+                    let maximum = f64::from(logits[best]);
+                    sum += maximum - f64::from(logits[row[target] as usize])
+                        + logits
+                            .iter()
+                            .map(|&v| (f64::from(v) - maximum).exp())
+                            .sum::<f64>()
+                            .ln();
+                    correct += u64::from(best == row[target] as usize);
+                }
+                assert!((score.nll - sum / (answer.end - answer.start) as f64).abs() < 2e-6);
+                assert_eq!(score.top1_correct, correct);
+            }
+        }
+        let contrast = detail.comparison.contrast(0, 1).unwrap();
+        assert_eq!(contrast.answer_count, 3);
+        assert_eq!(contrast.target_tokens, 9);
+        assert_eq!(contrast.improved + contrast.tied + contrast.regressed, 3);
+        assert_eq!(snapshot.checkpoint().unwrap(), checkpoint);
+        assert!(snapshot
+            .source_answer_comparison_plan(&base, &[4], config, true)
+            .is_err());
+    }
+}
+
+#[test]
 fn qkv_session_matches_explicit_target_covering_windows_and_all_restart_boundaries() {
     let base = load();
     let model = base
