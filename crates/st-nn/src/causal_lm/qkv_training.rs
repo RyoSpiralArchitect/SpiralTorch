@@ -8,7 +8,7 @@ use st_tensor::PackedLayout;
 
 mod batching;
 mod causal;
-pub use causal::CausalLmQkvWindowStep;
+pub use causal::{CausalLmQkvRivalWindowStep, CausalLmQkvWindowStep};
 mod documents;
 pub use documents::CausalLmQkvDocumentStep;
 mod session;
