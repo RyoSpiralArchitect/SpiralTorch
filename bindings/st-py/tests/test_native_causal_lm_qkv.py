@@ -39,6 +39,40 @@ class NativeQkvTests(unittest.TestCase):
     def new(self):
         return st.NativeCausalLmQkvAdamW(self.model, 0)
 
+    def test_rival_window_control_and_native_report(self):
+        ids = [1, 2, 3, 4, 5, 6, 7, 8]
+        labels = [-100, -100, 3, 4, -100, -100, 7, 8]
+        ce, control, rival = self.new(), self.new(), self.new()
+        ordinary = ce.loss_gradients(ids, [2, 4], labels=labels)
+        off = control.rival_loss_gradients(ids, [2, 4], rivals=2, mix=0., labels=labels)
+        on = rival.rival_loss_gradients(ids, [2, 4], rivals=2, mix=.5, labels=labels)
+        self.assertEqual(off["competition"]["loss"], ordinary["objective_loss"])
+        self.assertEqual(off["gradient_f32le"], ordinary["gradient_f32le"])
+        self.assertEqual(off["competition"]["target_tokens"], 4)
+        self.assertNotEqual(on["gradient_f32le"], ordinary["gradient_f32le"])
+        ce.step_windows(ids, [2, 4], labels=labels, learning_rate=.03)
+        control.step_rival_windows(ids, [2, 4], rivals=2, mix=0., labels=labels, learning_rate=.03)
+        self.assertEqual(ce.checkpoint_with_id(), control.checkpoint_with_id())
+        report = rival.step_rival_windows(ids, [2, 4], rivals=2, mix=.5, labels=labels,
+                                          learning_rate=.03)
+        self.assertEqual((report["steps"], report["competition"]["target_tokens"]), (1, 4))
+        self.assertIn("mean_target_minus_best_rival", report["competition"])
+        restored = st.NativeCausalLmQkvAdamW.from_bytes(self.model, *rival.checkpoint_with_id())
+        kw = dict(rivals=2, mix=.5, labels=labels, learning_rate=.03)
+        self.assertEqual(rival.step_rival_windows(ids, [2, 4], **kw),
+                         restored.step_rival_windows(ids, [2, 4], **kw))
+        self.assertEqual(rival.checkpoint_with_id(), restored.checkpoint_with_id())
+
+        class Unreadable:
+            def __len__(self): return len(ids)
+            def __getitem__(self, index): raise AssertionError("tokens read before recipe admission")
+        before = rival.checkpoint_with_id()
+        for bad in (0, True):
+            with self.assertRaises((ValueError, TypeError)):
+                rival.step_rival_windows(Unreadable(), [2, 4], rivals=bad, mix=.5,
+                                          learning_rate=.03)
+            self.assertEqual(rival.checkpoint_with_id(), before)
+
     def test_held_out_evaluation_tracks_exact_qkv_snapshot(self):
         docs = [[1, 2, 3, 4], [4, 5, 6]]
         labels = [[-100, -100, 3, 4], [-100, 5, 6]]

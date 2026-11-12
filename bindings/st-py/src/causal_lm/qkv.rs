@@ -352,6 +352,40 @@ impl PyQkv {
         Ok(out.into_any().unbind())
     }
 
+    #[pyo3(signature=(windows, window_shape, *, rivals, mix, labels=None))]
+    fn rival_loss_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        window_shape: &Bound<'_, PyAny>,
+        rivals: &Bound<'_, PyAny>,
+        mix: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let recipe = competition_recipe(rivals, mix)?;
+        let shape = shape(window_shape)?;
+        let count = self
+            .inner
+            .rival_loss_input_count(shape, labels.is_some(), recipe)
+            .map_err(error)?;
+        let ids = tokens(windows, count)?;
+        let labels = loss_labels(labels, count)?;
+        let (report, gradient) = py
+            .detach(|| {
+                self.inner
+                    .rival_loss_gradients(&ids, shape, labels.as_deref(), recipe)
+            })
+            .map_err(error)?;
+        let out = PyDict::new(py);
+        out.set_item(
+            "competition",
+            crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)?,
+        )?;
+        out.set_item("gradient_shape", gradient.shape())?;
+        out.set_item("gradient_f32le", bytes(py, gradient.data())?)?;
+        Ok(out.into_any().unbind())
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature=(windows, window_shape, *, learning_rate, labels=None, label_smoothing=None, weight_decay=None))]
     fn step_windows(
@@ -383,6 +417,38 @@ impl PyQkv {
                     objective.label_smoothing,
                     step,
                 )
+                .map_err(error)?;
+            serde_json::to_value(report).map_err(error)
+        })?;
+        crate::json::json_to_py(py, &report)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(windows, window_shape, *, rivals, mix, learning_rate, labels=None, weight_decay=None))]
+    fn step_rival_windows(
+        &mut self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        window_shape: &Bound<'_, PyAny>,
+        rivals: &Bound<'_, PyAny>,
+        mix: &Bound<'_, PyAny>,
+        learning_rate: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        weight_decay: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let recipe = competition_recipe(rivals, mix)?;
+        let step = adamw_step(learning_rate, weight_decay)?;
+        let shape = shape(window_shape)?;
+        let count = self
+            .inner
+            .rival_loss_input_count(shape, labels.is_some(), recipe)
+            .map_err(error)?;
+        let ids = tokens(windows, count)?;
+        let labels = loss_labels(labels, count)?;
+        let report = py.detach(|| -> PyResult<serde_json::Value> {
+            let report = self
+                .inner
+                .step_rival_windows(&ids, shape, labels.as_deref(), recipe, step)
                 .map_err(error)?;
             serde_json::to_value(report).map_err(error)
         })?;
