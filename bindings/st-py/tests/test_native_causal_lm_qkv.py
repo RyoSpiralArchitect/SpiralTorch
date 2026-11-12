@@ -69,6 +69,37 @@ class NativeQkvTests(unittest.TestCase):
             qkv.evaluate_documents([OversizeRow()], 4)
         self.assertEqual(qkv.checkpoint_with_id(), restored.checkpoint_with_id())
 
+    def test_paired_evaluation_retains_source_and_projection_identity(self):
+        docs = [[1, 2, 3, 4], [4, 5, 6]]
+        labels = [[-100, -100, 3, 4], [-100, 5, 6]]
+        qkv = self.new()
+        qkv.step_documents(docs, labels=labels, learning_rate=.03)
+        before = qkv.checkpoint_with_id()
+        pair = qkv.evaluate_against_source(self.model, docs, 4, labels=labels)
+        independent = qkv.evaluate_documents(docs, 4, labels=labels)
+        baseline = self.model.evaluate_documents(docs, 4, labels=labels)
+        self.assertIn("NativeCausalLmQkvComparison", st.__all__)
+        self.assertEqual((pair.serving_id, pair.layer, pair.steps), (qkv.serving_id, 0, 1))
+        self.assertEqual(pair.shared_prefix_layers, 0)
+        self.assertEqual([score.nll for score in pair.evaluations],
+                         [baseline.nll, independent.evaluation.nll])
+        self.assertEqual(pair.evaluations[0].data_id, pair.evaluations[1].data_id)
+        self.assertEqual(json.loads(pair.to_json())["comparison"]["evaluations"][1]["nll"],
+                         independent.evaluation.nll)
+        self.assertEqual(qkv.checkpoint_with_id(), before)
+
+        other = st.NativeCausalLm.from_gpt2(*fixture())
+        class UnreadableRow:
+            def __len__(self): return 2
+            def __getitem__(self, index): raise AssertionError("read before source admission")
+        with self.assertRaises(ValueError):
+            qkv.evaluate_against_source(other, [UnreadableRow()], 4)
+
+        plain = st.NativeCausalLm.from_gpt2(*fixture())
+        late = st.NativeCausalLmQkvAdamW(plain, 1)
+        late_pair = late.evaluate_against_source(plain, docs, 4, labels=labels)
+        self.assertEqual(late_pair.shared_prefix_layers, 1)
+
     def test_optional_elliptic_exports_resolve_only_when_requested(self):
         names = ("EllipticWarpFunction", "elliptic_warp_autograd",
                  "elliptic_warp_features", "elliptic_warp_partial")

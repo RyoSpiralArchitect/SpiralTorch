@@ -91,6 +91,62 @@ fn qkv_evaluation_binds_trained_projection_and_survives_restore() {
 }
 
 #[test]
+fn qkv_paired_evaluation_matches_independent_scores_without_sharing_trained_layer() {
+    let base = load();
+    let source = base
+        .with_lora(1, 2, 1.)
+        .unwrap()
+        .with_geometry(artifact(&base, "transformer.h.1.attn", 0.2))
+        .unwrap();
+    let (docs, labels) = corpus();
+    let config = CausalLmEvaluationConfig {
+        context_length: 4,
+        microbatch_windows: 2,
+    };
+    for layer in [0, 1] {
+        let mut snapshot =
+            NativeCausalLmQkvAdamW::new(&source, layer, AdamWConfig::default()).unwrap();
+        snapshot
+            .step_windows(
+                &[1, 2, 3],
+                [1, 3],
+                None,
+                0.,
+                AdamWStep::new(0.03, 0.).unwrap(),
+            )
+            .unwrap();
+        let paired = snapshot
+            .evaluate_against_source(&source, &docs, Some(&labels), config)
+            .unwrap();
+        let source_score = source
+            .evaluate_documents(&docs, Some(&labels), config)
+            .unwrap();
+        let trained_score = snapshot
+            .evaluate_documents(&docs, Some(&labels), config)
+            .unwrap();
+        assert_eq!(paired.comparison.shared_prefix_layers, layer);
+        assert_eq!(paired.serving_id, snapshot.serving_id());
+        assert_eq!(paired.steps, 1);
+        assert_eq!(paired.comparison.evaluations.len(), 2);
+        assert_eq!(
+            paired.comparison.evaluations[0].nll.to_bits(),
+            source_score.nll.to_bits()
+        );
+        assert_eq!(
+            paired.comparison.evaluations[1].nll.to_bits(),
+            trained_score.evaluation.nll.to_bits()
+        );
+        assert_eq!(
+            paired.comparison.evaluations[0].data_id,
+            paired.comparison.evaluations[1].data_id
+        );
+        assert!(snapshot
+            .source_comparison_plan(&base, &[4], config, true)
+            .is_err());
+    }
+}
+
+#[test]
 fn qkv_session_matches_explicit_target_covering_windows_and_all_restart_boundaries() {
     let base = load();
     let model = base

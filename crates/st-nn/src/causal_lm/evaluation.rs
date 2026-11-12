@@ -181,7 +181,17 @@ impl NativeCausalLm {
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
     ) -> CausalLmResult<CausalLmEvaluationComparison> {
-        let shared_prefix_layers = Self::comparison_prefix_layers(models)?;
+        Self::evaluate_variants_with_prefix_cap(models, documents, labels, config, usize::MAX)
+    }
+
+    pub(super) fn evaluate_variants_with_prefix_cap(
+        models: &[&Self],
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+        prefix_cap: usize,
+    ) -> CausalLmResult<CausalLmEvaluationComparison> {
+        let shared_prefix_layers = Self::comparison_prefix_layers(models)?.min(prefix_cap);
         let evaluations = models[0].evaluate_corpus(
             models,
             shared_prefix_layers,
