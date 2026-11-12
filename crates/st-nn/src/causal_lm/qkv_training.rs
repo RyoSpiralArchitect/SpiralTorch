@@ -81,6 +81,16 @@ pub struct CausalLmQkvComparison {
     pub comparison: CausalLmEvaluationComparison,
 }
 
+/// Answer-level source/QKV scores bound to the same trained serving projection.
+#[derive(Debug, Serialize)]
+pub struct CausalLmQkvAnswerComparison {
+    pub schema: &'static str,
+    pub serving_id: String,
+    pub layer: usize,
+    pub steps: u32,
+    pub comparison: CausalLmAnswerComparison,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Header {
@@ -241,6 +251,17 @@ impl NativeCausalLmQkvAdamW {
         NativeCausalLm::comparison_plan(&[source, &self.model], lengths, config, has_labels)
     }
 
+    pub fn source_answer_comparison_plan(
+        &self,
+        source: &NativeCausalLm,
+        lengths: &[usize],
+        config: CausalLmEvaluationConfig,
+        has_labels: bool,
+    ) -> CausalLmResult<CausalDocumentWindows> {
+        self.ensure_source(source)?;
+        NativeCausalLm::answer_comparison_plan(&[source, &self.model], lengths, config, has_labels)
+    }
+
     /// Evaluate the frozen source and this snapshot in one pass. The QKV layer
     /// itself and every later block execute separately even without adapters.
     pub fn evaluate_against_source(
@@ -260,6 +281,31 @@ impl NativeCausalLmQkvAdamW {
         )?;
         Ok(CausalLmQkvComparison {
             schema: "spiraltorch.native_causal_lm_qkv_comparison.v1",
+            serving_id: self.serving_id(),
+            layer: self.layer,
+            steps: self.steps,
+            comparison,
+        })
+    }
+
+    /// Retain contiguous supervised-answer scores without sharing the trained layer.
+    pub fn evaluate_against_source_by_answer(
+        &self,
+        source: &NativeCausalLm,
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+    ) -> CausalLmResult<CausalLmQkvAnswerComparison> {
+        self.ensure_source(source)?;
+        let comparison = NativeCausalLm::evaluate_variants_by_answer_with_prefix_cap(
+            &[source, &self.model],
+            documents,
+            labels,
+            config,
+            self.layer,
+        )?;
+        Ok(CausalLmQkvAnswerComparison {
+            schema: "spiraltorch.native_causal_lm_qkv_answer_comparison.v1",
             serving_id: self.serving_id(),
             layer: self.layer,
             steps: self.steps,

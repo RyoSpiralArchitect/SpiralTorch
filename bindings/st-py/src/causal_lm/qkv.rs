@@ -209,6 +209,27 @@ impl PyQkv {
         )
     }
 
+    #[pyo3(signature=(source, token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_against_source_by_answer(
+        &self,
+        py: Python<'_>,
+        source: &PyNativeCausalLm,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<super::evaluation::PyNativeCausalLmQkvAnswerComparison> {
+        super::evaluation::compare_qkv_answers(
+            &self.inner,
+            source,
+            py,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
     #[pyo3(signature=(prompt, *, max_cache_values=None))]
     fn prefill(
         &self,
