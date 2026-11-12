@@ -27,3 +27,7 @@ the private validation store. This public note contains no model or corpus
 payloads. The stored inputs and snapshot are identified in
 [the prior qualification](GPT2-QKV-RESUME.md); their SHA-256 hashes identify
 retained bytes, not authentication.
+
+A later, separately frozen [paired-path diagnostic](GPT2-QKV-PAIRED-EVAL.md)
+completed on the same previously scored corpus. It does not turn these first
+failures into successful attempts.
