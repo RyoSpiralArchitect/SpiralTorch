@@ -229,3 +229,127 @@ fn causal_qkv_single_target_agrees_with_answer_update_and_full_response_resumes(
         .unwrap();
     assert_eq!(windows.checkpoint().unwrap(), before);
 }
+
+#[test]
+fn causal_qkv_rivals_preserve_ce_control_and_resume_exactly() {
+    let model = adapted(1);
+    let ids = [1, 2, 3, 4, 5, 6, 7, 8];
+    let labels = [-100, -100, 3, 4, -100, -100, 7, 8];
+    let step = AdamWStep::new(0.03, 0.01).unwrap();
+    let mut ce = NativeCausalLmQkvAdamW::new(&model, 0, AdamWConfig::default()).unwrap();
+    let mut control = ce.clone();
+    let mut rival = ce.clone();
+    let off = RivalCrossEntropy { rivals: 2, mix: 0. };
+    let on = RivalCrossEntropy {
+        rivals: 2,
+        mix: 0.5,
+    };
+    let (ce_loss, ce_gradient, count) = ce
+        .causal_loss_gradients(&ids, [2, 4], Some(&labels), 0.)
+        .unwrap();
+    let (off_report, off_gradient) = control
+        .rival_loss_gradients(&ids, [2, 4], Some(&labels), off)
+        .unwrap();
+    let (on_report, on_gradient) = rival
+        .rival_loss_gradients(&ids, [2, 4], Some(&labels), on)
+        .unwrap();
+    assert_eq!(off_report.target_tokens, count);
+    assert_eq!(off_report.loss.to_bits(), ce_loss.to_bits());
+    assert_eq!(off_gradient, ce_gradient);
+    assert_eq!(on_report.target_tokens, count);
+    assert_ne!(on_gradient, ce_gradient);
+
+    ce.step_windows(&ids, [2, 4], Some(&labels), 0., step)
+        .unwrap();
+    let control_report = control
+        .step_rival_windows(&ids, [2, 4], Some(&labels), off, step)
+        .unwrap();
+    assert_eq!(control_report.competition.loss.to_bits(), ce_loss.to_bits());
+    assert_eq!(ce.checkpoint().unwrap(), control.checkpoint().unwrap());
+    let first = rival
+        .step_rival_windows(&ids, [2, 4], Some(&labels), on, step)
+        .unwrap();
+    assert_eq!(first.competition.target_tokens, count);
+    assert_ne!(rival.checkpoint().unwrap(), control.checkpoint().unwrap());
+    let (raw, pin) = rival.checkpoint().unwrap();
+    let mut restored = NativeCausalLmQkvAdamW::restore(&model, &raw, &pin).unwrap();
+    let next = rival
+        .step_rival_windows(&ids, [2, 4], Some(&labels), on, step)
+        .unwrap();
+    let replay = restored
+        .step_rival_windows(&ids, [2, 4], Some(&labels), on, step)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(next).unwrap(),
+        serde_json::to_value(replay).unwrap()
+    );
+    assert_eq!(rival.checkpoint().unwrap(), restored.checkpoint().unwrap());
+
+    let before = rival.checkpoint().unwrap();
+    for invalid in [
+        RivalCrossEntropy {
+            rivals: 0,
+            mix: 0.5,
+        },
+        RivalCrossEntropy {
+            rivals: 2,
+            mix: f64::NAN,
+        },
+    ] {
+        assert!(rival.rival_loss_input_count([2, 4], true, invalid).is_err());
+        assert!(rival
+            .step_rival_windows(&ids, [2, 4], Some(&labels), invalid, step)
+            .is_err());
+        assert_eq!(rival.checkpoint().unwrap(), before);
+    }
+}
+
+#[test]
+fn causal_qkv_rival_derivative_matches_physical_weight_edits() {
+    let ids = [1, 2, 3, 4, 5];
+    let labels = [-100, -100, 3, 4, 5];
+    let recipe = RivalCrossEntropy {
+        rivals: 2,
+        mix: 0.5,
+    };
+    let make = |p: &BTreeMap<String, (Vec<usize>, Vec<f32>)>| {
+        NativeCausalLm::from_gpt2_json(
+            &serde_json::to_vec(&config()).unwrap(),
+            &archive(p),
+            Default::default(),
+        )
+        .unwrap()
+    };
+    let trainer =
+        NativeCausalLmQkvAdamW::new(&make(&parameters()), 0, AdamWConfig::default()).unwrap();
+    let (report, gradient) = trainer
+        .rival_loss_gradients(&ids, [1, 5], Some(&labels), recipe)
+        .unwrap();
+    assert_eq!(report.target_tokens, 3);
+    for (output, input) in [(0, 0), (3, 2), (7, 0), (11, 2)] {
+        let loss = |sign: f32| {
+            let mut p = parameters();
+            p.get_mut("h.0.attn.c_attn.weight").unwrap().1[input * 12 + output] += sign * 0.002;
+            let model = make(&p);
+            let prepared = model
+                .prepare_objective(&ids, [1, 5], Some(&labels), CausalLmObjective::default())
+                .unwrap();
+            let hidden = model
+                .decode_hidden(&prepared.input, prepared.shape)
+                .unwrap();
+            let logits = model.causal_logits(hidden, &prepared).unwrap();
+            f64::from(
+                logits
+                    .rival_cross_entropy_mean_gradient(&prepared.labels, recipe)
+                    .unwrap()
+                    .0
+                    .loss,
+            )
+        };
+        let numerical = (loss(1.) - loss(-1.)) / 0.004;
+        assert!(
+            (numerical - f64::from(gradient.data()[output * 4 + input])).abs() < 2e-4,
+            "QKV rival derivative mismatch at ({output}, {input})"
+        );
+    }
+}
