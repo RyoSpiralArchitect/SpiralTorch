@@ -13,6 +13,8 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import protocol
+sys.path.insert(0, str(protocol.HERE.parents[2] / "tools"))
+from owned_process import run as run_owned
 
 
 def require(condition, message):
@@ -269,10 +271,31 @@ def main():
     parser.add_argument("--deadline", type=int, required=True)
     parser.add_argument("--tokenizers-site", type=Path)
     parser.add_argument("--manifest-pin")
+    parser.add_argument("--owned-worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     require((args.action == "prepare" and args.tokenizers_site and not args.manifest_pin) or
             (args.action == "fit" and args.manifest_pin and not args.tokenizers_site),
             "phase arguments mismatch")
+    if not args.owned_worker:
+        remaining = args.deadline - time.time()
+        require(0 < remaining <= 3601, "invalid or expired one-hour deadline")
+        try:
+            outcome = run_owned([sys.executable, "-I", "-B", str(Path(__file__).resolve()),
+                                 *sys.argv[1:], "--owned-worker"],
+                                timeout=min(remaining, 3600), stdout=sys.stdout)
+        except Exception as exc:
+            if args.output.is_dir():
+                path = args.output / (args.action + "-failure.json")
+                if not path.exists():
+                    save(path, {"type": type(exc).__name__, "message": str(exc),
+                                "epoch": time.time()})
+            raise
+        if outcome.returncode != 0 and args.output.is_dir():
+            path = args.output / (args.action + "-failure.json")
+            if not path.exists():
+                save(path, {"type": "WorkerExit", "returncode": outcome.returncode,
+                            "epoch": time.time()})
+        raise SystemExit(outcome.returncode)
     try:
         (prepare if args.action == "prepare" else fit)(args)
     except Exception as exc:
