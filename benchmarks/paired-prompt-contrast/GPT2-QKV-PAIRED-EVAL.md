@@ -58,5 +58,46 @@ different pilot. It is not a fresh blind confirmation, a matched ordinary-FT
 ablation, evidence that WaveGate caused the change, or a general language
 quality or throughput claim. The newer
 [`evaluate_against_source_by_answer`](../../docs/python/native-qkv-run.md)
-can expose the distribution of answer-level changes, but was not used in this
-run; no answer-level outcome is implied by the aggregate NLL.
+was not used in this original run; its separate follow-up is reported below.
+
+## Answer-Level Follow-Up
+
+The same 48 previously scored documents and 74 selected targets were evaluated
+once through `evaluate_against_source_by_answer`, with the same frozen source,
+two-update QKV snapshot, context 64, microbatch 1, f32 readout, one Rayon
+thread and disabled autotune. No training, generation or GPU execution occurred.
+The first attempt stopped **before model construction**: the HF config path was
+a symlink, but the new runner passed it to a regular-file-only reader without
+resolving it. Its empty stdout and first stderr were retained. A separately
+versioned runner resolved that path as the successful aggregate runner had;
+its first attempt exited 0 under a 1,500-second wall ceiling. No scored
+outcome was retried.
+
+| Answer-level measure | Frozen source | Source plus two QKV updates |
+| --- | ---: | ---: |
+| Top-1 correct target tokens | 31 / 74 | 31 / 74 |
+| Fully top-1-correct answers | 5 / 48 | 5 / 48 |
+
+Candidate-minus-source token-weighted answer NLL was
+`-0.08554528779211315`; the answer-weighted mean was
+`-0.09502612483759613`. Each answer's delta was negative, ranging from
+`-0.19252084172089656` to `-0.023251323823020087`. No answer gained or lost
+a top-1-correct token. The follow-up's parsed aggregate comparison object
+exactly matched the original paired receipt, and its QKV checkpoint and
+evaluation corpus retained their original hashes. Thus this is a consistent
+within-set probability shift, **not** an observed accuracy improvement.
+
+The private v2 result JSON SHA-256 is
+`9a63eb8d55e91c10de4e0316ed557cbdb1e78db9153cf56e0852b139852bac98`;
+v2 stderr is `4579fd99e7b2bd7c2000325e64cf40f39a24546b32188396bff2a0e17338845f`,
+v2 runner is `9aeff657a74e8b40ee4f04ce2985b6961ab1503019e5d1a3eb7afc553f892d71`,
+and the failed first stderr is
+`8e33e894c3f0e2473fb50b16cdd78ead1535c514fe4ad32ceb3244b60b6cb718`.
+The engineering wheel SHA-256 is
+`e5d99071de25bc7568eba737ecb8485b0d103500f533990605d0b7fcace25053`.
+Its PR-test merge tree equals the merged main tree
+`678f6f933dac99e6ee2eb79fcbcf9764ff98637b`, but the wheel is not a
+signed release artifact. Private inputs and outputs remain local, so hashes
+alone do not make the exact follow-up publicly reproducible. The result is
+still not a fresh blind confirmation, a matched ordinary-FT ablation, or
+evidence that WaveGate caused the improvement.
