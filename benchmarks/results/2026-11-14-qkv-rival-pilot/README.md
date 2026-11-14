@@ -43,3 +43,12 @@ source bytes, then writes per-step and per-answer receipts without replacing
 earlier files. A first failure remains in the output directory; do not reuse
 that directory for another attempt. The runner has not yet been exercised
 against a real model or wheel, so it is not qualified by the model-free tests.
+
+Run `run.py` with `python3 -I -B`, **not** `-S`: the runner must import the
+installed wheel, and it verifies the loaded native extension against the
+specified wheel archive. Pass `prepare` a fresh `--output`, the pinned
+`--model-dir` and `--source-dir`, `--wheel` and its `--wheel-pin`, an absolute
+`--deadline`, and `--tokenizers-site`. Then pass `fit` the same inputs and
+deadline with `--manifest-pin` equal to the SHA-256 of the resulting
+`manifest.json`, omitting `--tokenizers-site`. The final result is only valid
+if `result.json` exists and its receipt hashes verify.
