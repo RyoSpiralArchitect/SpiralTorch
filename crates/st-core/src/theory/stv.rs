@@ -765,12 +765,8 @@ impl Matrix3 {
 
 impl fmt::Display for Matrix3 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for i in 0..3 {
-            writeln!(
-                f,
-                "[{:.6}, {:.6}, {:.6}]",
-                self.data[i][0], self.data[i][1], self.data[i][2]
-            )?;
+        for row in &self.data {
+            writeln!(f, "[{:.6}, {:.6}, {:.6}]", row[0], row[1], row[2])?;
         }
         Ok(())
     }

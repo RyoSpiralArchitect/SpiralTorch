@@ -1762,18 +1762,13 @@ impl RiemannTensor {
 
     /// Checks whether every component is within a tolerance of zero.
     pub fn is_near_zero(&self, tolerance: f64) -> bool {
-        for sigma in 0..DIM {
-            for mu in 0..DIM {
-                for nu in 0..DIM {
-                    for rho in 0..DIM {
-                        if self.components[sigma][mu][nu][rho].abs() > tolerance {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-        true
+        !self
+            .components
+            .iter()
+            .flatten()
+            .flatten()
+            .flatten()
+            .any(|value| value.abs() > tolerance)
     }
 }
 /// Ricci tensor R_{μν} obtained by contracting the Riemann tensor.
@@ -1810,14 +1805,11 @@ impl RicciTensor {
 
     /// Returns whether every component is close to zero within the provided tolerance.
     pub fn is_near_zero(&self, tolerance: f64) -> bool {
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                if self.components[mu][nu].abs() > tolerance {
-                    return false;
-                }
-            }
-        }
-        true
+        !self
+            .components
+            .iter()
+            .flatten()
+            .any(|value| value.abs() > tolerance)
     }
 
     /// Computes the scalar curvature R = g^{μν} R_{μν}.
