@@ -1,0 +1,41 @@
+"""Model-free scoring checks for the prospective runner."""
+
+import importlib.util
+from pathlib import Path
+import unittest
+
+
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location("qkv_rival_pilot_run", HERE / "run.py")
+runner = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(runner)
+
+
+def scores(nll, top1):
+    return {"answers": [
+        {"document": i, "start": 3, "end": 5,
+         "scores": [{"nll": 1.0, "top1_correct": 1},
+                    {"nll": nll if i == 0 else 2.0, "top1_correct": top1 if i == 0 else 1}]}
+        for i in range(48)
+    ]}
+
+
+class ScoringTests(unittest.TestCase):
+    def test_teacher_forced_answer_and_nll_contrast(self):
+        outcome = runner.contrast(scores(2.0, 1), scores(1.5, 2))
+        self.assertEqual(outcome["all_top1_delta"], 1)
+        self.assertEqual(outcome["ordinary_token_top1"], 48)
+        self.assertEqual(outcome["rival_token_top1"], 49)
+        self.assertEqual((outcome["improved_nll"], outcome["tied_nll"],
+                          outcome["regressed_nll"]), (1, 47, 0))
+        self.assertAlmostEqual(outcome["token_weighted_delta_nll"], -0.5 / 48)
+
+    def test_source_mismatch_is_not_a_contrast(self):
+        ordinary, rival = scores(2.0, 1), scores(1.5, 2)
+        rival["answers"][0]["scores"][0]["nll"] = 1.1
+        with self.assertRaisesRegex(ValueError, "unmatched source"):
+            runner.contrast(ordinary, rival)
+
+
+if __name__ == "__main__":
+    unittest.main()

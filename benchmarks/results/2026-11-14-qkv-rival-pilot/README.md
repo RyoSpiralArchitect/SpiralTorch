@@ -1,6 +1,6 @@
 # Prospective GPT-2 QKV objective pilot
 
-Status: **protocol only; no model execution or result**. This comparison is
+Status: **protocol and unexecuted runner; no model execution or result**. This comparison is
 held until the post-merge `main` CI for the QKV objective and its Rust 1.100
 repair is green. The first failed attempt, if any, must be retained rather
 than retried for a favorable score.
@@ -29,10 +29,17 @@ Model-free preflight:
 
 ```bash
 python3 -I -S -B benchmarks/results/2026-11-14-qkv-rival-pilot/test_protocol.py -v
+python3 -I -S -B benchmarks/results/2026-11-14-qkv-rival-pilot/test_run.py -v
 python3 -I -S -B benchmarks/results/2026-11-14-qkv-rival-pilot/protocol.py
 ```
 
 The protocol lists SHA-256 pins for the source model, tokenizer, source
-checkpoint, predecessor generators, record sets, and orders. The runner and
-encoded-input manifest are not yet implemented; publishing this protocol
-does not claim that a run took place.
+checkpoint, predecessor generators, record sets, and orders. `run.py` has
+separate `prepare` and `fit` phases; both require an explicit installed wheel
+hash and a common absolute deadline within one hour. Preparation creates an
+exclusive output directory, encodes the frozen answer masks, and emits a
+manifest. Fit requires that manifest's SHA-256, verifies the same wheel and
+source bytes, then writes per-step and per-answer receipts without replacing
+earlier files. A first failure remains in the output directory; do not reuse
+that directory for another attempt. The runner has not yet been exercised
+against a real model or wheel, so it is not qualified by the model-free tests.
