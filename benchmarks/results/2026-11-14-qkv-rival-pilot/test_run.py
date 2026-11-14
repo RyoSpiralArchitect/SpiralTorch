@@ -22,13 +22,16 @@ def scores(nll, top1):
 
 class ScoringTests(unittest.TestCase):
     def test_teacher_forced_answer_and_nll_contrast(self):
-        outcome = runner.contrast(scores(2.0, 1), scores(1.5, 2))
+        ordinary, rival = scores(2.0, 1), scores(1.5, 3)
+        ordinary["answers"][0]["end"] = rival["answers"][0]["end"] = 6
+        outcome = runner.contrast(ordinary, rival)
         self.assertEqual(outcome["all_top1_delta"], 1)
         self.assertEqual(outcome["ordinary_token_top1"], 48)
-        self.assertEqual(outcome["rival_token_top1"], 49)
+        self.assertEqual(outcome["rival_token_top1"], 50)
         self.assertEqual((outcome["improved_nll"], outcome["tied_nll"],
                           outcome["regressed_nll"]), (1, 47, 0))
-        self.assertAlmostEqual(outcome["token_weighted_delta_nll"], -0.5 / 48)
+        self.assertAlmostEqual(outcome["token_weighted_delta_nll"], -1.5 / 97)
+        self.assertAlmostEqual(outcome["answer_weighted_delta_nll"], -0.5 / 48)
 
     def test_source_mismatch_is_not_a_contrast(self):
         ordinary, rival = scores(2.0, 1), scores(1.5, 2)

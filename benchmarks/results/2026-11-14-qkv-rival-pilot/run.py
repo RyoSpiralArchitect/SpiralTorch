@@ -127,6 +127,7 @@ def contrast(ordinary, rival):
     a, b = ordinary["answers"], rival["answers"]
     require(len(a) == len(b) == 48, "evaluation size changed")
     nll_delta = 0.0
+    answer_nll_delta = 0.0
     tokens = 0
     out = {"ordinary_all_top1": 0, "rival_all_top1": 0,
            "ordinary_token_top1": 0, "rival_token_top1": 0,
@@ -140,6 +141,7 @@ def contrast(ordinary, rival):
         delta = right["nll"] - left["nll"]
         require(math.isfinite(delta), "nonfinite answer score")
         nll_delta += delta * count
+        answer_nll_delta += delta
         tokens += count
         out["ordinary_all_top1"] += left["top1_correct"] == count
         out["rival_all_top1"] += right["top1_correct"] == count
@@ -148,6 +150,7 @@ def contrast(ordinary, rival):
         out["improved_nll" if delta < 0 else "regressed_nll" if delta > 0 else "tied_nll"] += 1
     out["all_top1_delta"] = out["rival_all_top1"] - out["ordinary_all_top1"]
     out["token_weighted_delta_nll"] = nll_delta / tokens
+    out["answer_weighted_delta_nll"] = answer_nll_delta / len(a)
     return out
 
 
