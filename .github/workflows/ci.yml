@@ -654,7 +654,7 @@ jobs:
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
