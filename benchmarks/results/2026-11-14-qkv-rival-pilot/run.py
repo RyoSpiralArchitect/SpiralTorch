@@ -161,6 +161,10 @@ def contrast(ordinary, rival):
 
 
 def fit(args):
+    save(args.output / "fit-attempt.json", {
+        "started_epoch": time.time(), "manifest_sha256": args.manifest_pin,
+        "deadline_epoch": args.deadline, "no_retry": True,
+    })
     manifest_path = args.output / "manifest.json"
     require(sha(manifest_path) == args.manifest_pin, "manifest pin mismatch")
     manifest = read(manifest_path)
@@ -171,10 +175,6 @@ def fit(args):
             and set(manifest["files_sha256"]) == {"train", "eval"}
             and manifest["prepare_deadline_epoch"] <= args.deadline,
             "frozen protocol, runner, wheel or deadline changed")
-    save(args.output / "fit-attempt.json", {
-        "started_epoch": time.time(), "manifest_sha256": args.manifest_pin,
-        "deadline_epoch": args.deadline, "no_retry": True,
-    })
     pilot, paths = inputs(args)
     pilot.admit_time(args.deadline, manifest["prepare_cpu_seconds"])
     st, installed = package(pilot, args)

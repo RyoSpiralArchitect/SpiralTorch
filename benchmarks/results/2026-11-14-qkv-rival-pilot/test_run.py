@@ -3,6 +3,8 @@
 import importlib.util
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
 
@@ -22,6 +24,18 @@ def scores(nll, top1):
 
 
 class ScoringTests(unittest.TestCase):
+    def test_first_fit_input_error_consumes_attempt(self):
+        with TemporaryDirectory() as root:
+            args = SimpleNamespace(output=Path(root), manifest_pin="not-the-manifest",
+                                   deadline=1)
+            with self.assertRaises(FileNotFoundError):
+                runner.fit(args)
+            attempt = args.output / "fit-attempt.json"
+            self.assertEqual(json.loads(attempt.read_bytes())["manifest_sha256"],
+                             "not-the-manifest")
+            with self.assertRaises(FileExistsError):
+                runner.fit(args)
+
     def test_native_qkv_answer_wrapper_is_unwrapped(self):
         class Result:
             document_count = 48

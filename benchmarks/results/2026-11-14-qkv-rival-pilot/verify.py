@@ -49,7 +49,11 @@ def verify(directory, manifest_pin):
         counts[split] = len(data["keys"])
     result_path = directory / "result.json"
     if not result_path.exists():
-        return {"status": "prepared_only", "counts": counts, "manifest_sha256": manifest_pin}
+        status = ("failed_or_incomplete" if (directory / "fit-attempt.json").exists()
+                  or (directory / "fit-failure.json").exists() else "prepared_only")
+        return {"status": status, "counts": counts, "manifest_sha256": manifest_pin}
+    require(not (directory / "fit-failure.json").exists(),
+            "result and fit failure marker coexist")
     result = json.loads(result_path.read_bytes())
     require(result["schema"] == "spiraltorch.gpt2_qkv_rival_result.v1"
             and result["manifest_sha256"] == manifest_pin
