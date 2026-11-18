@@ -274,12 +274,8 @@ fn hip_env_available() -> bool {
     }
 
     let mut seen = HashSet::new();
-    let mut push_candidate = |candidate: PathBuf| {
-        if seen.insert(candidate.clone()) && candidate.exists() {
-            return true;
-        }
-        false
-    };
+    let mut push_candidate =
+        |candidate: PathBuf| seen.insert(candidate.clone()) && candidate.exists();
 
     for root in gather_rocm_roots() {
         if push_rocm_markers(&root, &mut push_candidate) {
