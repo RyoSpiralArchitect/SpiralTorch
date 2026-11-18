@@ -54,4 +54,7 @@ intentional whole-package inventory check. Pass `prepare` a fresh `--output`, th
 `--deadline`, and `--tokenizers-site`. Then pass `fit` the same inputs and
 an unexpired new deadline with `--manifest-pin` equal to the SHA-256 of the resulting
 `manifest.json`, omitting `--tokenizers-site`. The final result is only valid
-if `result.json` exists and its receipt hashes verify.
+if `result.json` exists and its receipt hashes verify. `verify.py DIRECTORY
+--manifest-pin SHA256` checks the prepared input without importing a model;
+after fit, it also checks the complete receipt inventory and recomputes the
+stored contrasts from the per-answer scores.
