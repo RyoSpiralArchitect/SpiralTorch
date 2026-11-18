@@ -36,7 +36,8 @@ python3 -I -S -B benchmarks/results/2026-11-14-qkv-rival-pilot/protocol.py
 The protocol lists SHA-256 pins for the source model, tokenizer, source
 checkpoint, predecessor generators, record sets, and orders. `run.py` has
 separate `prepare` and `fit` phases; both require an explicit installed wheel
-hash and a common absolute deadline within one hour. Preparation creates an
+hash and their own absolute deadline within one hour of each phase's start.
+Preparation creates an
 exclusive output directory, encodes the frozen answer masks, and emits a
 manifest. Fit requires that manifest's SHA-256, verifies the same wheel and
 source bytes, then writes per-step and per-answer receipts without replacing
@@ -51,6 +52,6 @@ specified wheel archive. Install the wheel into an isolated environment with
 intentional whole-package inventory check. Pass `prepare` a fresh `--output`, the pinned
 `--model-dir` and `--source-dir`, `--wheel` and its `--wheel-pin`, an absolute
 `--deadline`, and `--tokenizers-site`. Then pass `fit` the same inputs and
-deadline with `--manifest-pin` equal to the SHA-256 of the resulting
+an unexpired new deadline with `--manifest-pin` equal to the SHA-256 of the resulting
 `manifest.json`, omitting `--tokenizers-site`. The final result is only valid
 if `result.json` exists and its receipt hashes verify.

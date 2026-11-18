@@ -97,6 +97,7 @@ def prepare(args):
         save(path, {"keys": [row["key"] for row in rows],
                     "token_documents": docs, "labels": labels})
         files[name] = sha(path)
+    require(time.time() < args.deadline, "deadline expired before input manifest")
     save(args.output / "manifest.json", {
         "schema": "spiraltorch.gpt2_qkv_rival_inputs.v1",
         "protocol_sha256": protocol.pin(frozen),
@@ -105,7 +106,7 @@ def prepare(args):
         "installed": installed,
         "files_sha256": files,
         "tokenizers_version": codec.__version__,
-        "deadline_epoch": args.deadline,
+        "prepare_deadline_epoch": args.deadline,
         "prepare_cpu_seconds": time.process_time(),
     })
 
@@ -165,11 +166,11 @@ def fit(args):
             and manifest["runner_sha256"] == sha(__file__)
             and manifest["wheel_sha256"] == args.wheel_pin
             and set(manifest["files_sha256"]) == {"train", "eval"}
-            and manifest["deadline_epoch"] == args.deadline,
+            and manifest["prepare_deadline_epoch"] <= args.deadline,
             "frozen protocol, runner, wheel or deadline changed")
     save(args.output / "fit-attempt.json", {
         "started_epoch": time.time(), "manifest_sha256": args.manifest_pin,
-        "no_retry": True,
+        "deadline_epoch": args.deadline, "no_retry": True,
     })
     pilot, paths = inputs(args)
     pilot.admit_time(args.deadline, manifest["prepare_cpu_seconds"])
