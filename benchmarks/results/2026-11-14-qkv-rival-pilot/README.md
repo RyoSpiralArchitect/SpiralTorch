@@ -1,9 +1,10 @@
-# Prospective GPT-2 QKV objective pilot
+# GPT-2 QKV objective pilot
 
-Status: **protocol and unexecuted runner; no model execution or result**. This comparison is
-held until the post-merge `main` CI for the QKV objective and its Rust 1.100
-repair is green. The first failed attempt, if any, must be retained rather
-than retried for a favorable score.
+Status: **one completed CPU GPT-2 small comparison**. Post-merge `main` CI
+and this PR's CI both passed before fit. Fit was attempted once, with no
+retry. The original receipts and checkpoints are retained locally. This
+public summary records results and SHA-256 identities without publishing
+model weights or encoded input records.
 
 `protocol.py` deterministically selects 24 training and 48 evaluation
 records from the synthetic field-extraction grid. The 72 selected triples
@@ -25,6 +26,42 @@ are unsmoothed NLL, answer-level NLL, token-level top-1 count, and per-answer
 win/tie/loss. This is not free-running generation, a geometry ablation, or
 evidence of general language quality.
 
+## Observed result
+
+Each order used the same 24 training records for both arms and the same 48
+evaluation answers. Positive top-1 deltas favor top-rival; positive NLL deltas
+mean top-rival was worse. NLL wins and losses compare each answer, not
+independent examples across orders.
+
+| Order | Ordinary all-top-1 | Top-rival all-top-1 | Delta | Top-rival NLL wins / losses | Answer-weighted NLL delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 31 | 8 | 8 | 0 | 6 / 42 | +0.027790 |
+| 47 | 6 | 7 | +1 | 11 / 37 | +0.017897 |
+| 59 | 7 | 7 | 0 | 3 / 45 | +0.027894 |
+
+The primary count improved in only one order, while NLL regressed in all
+three. This pilot does **not** establish a quality gain for the top-rival
+objective. Order variants reuse the same training and evaluation records;
+they are not independent replications. The source LoRA and WaveGate were
+frozen, so this compares objectives at layer-11 QKV, not geometry.
+
+Evidence (SHA-256):
+
+| Artifact | Digest |
+| --- | --- |
+| Frozen input manifest | `bedfecca07516bccc7502c769f4acbc94ad19b3dc180fee66f8e8ed828c340b1` |
+| Runner `run.py` | `8589f121ede6de92a0bf174becf0cc7aba7699b4664152429b026c0c955f5d2a` |
+| Installed macOS wheel | `068415bc4ed000343b504453dba0bccbf4db847ac225e9cb6ec46d6a77b9204c` |
+| Training input | `4481e44363d824cce81fd493cd3ae6963f37dbc7382f2e62f986444259556522` |
+| Evaluation input | `3a4141f0f458db1ad5afec4e51086ac759096dc096d53446c11d36a8cc60049d` |
+| Result with 21 receipt hashes | `322d19a3f969f9c8c9126e5dc5e11f93f3a975f6d0ed9363524251b03d574315` |
+
+The read-only verifier returned `receipts_verified` with 24 train and 48 eval
+records. The three step journals each contain 24 paired updates (144 arm
+updates total). The initial 48 scores were identical across arms. The verifier
+checks the manifest and input pins, receipt inventory and hashes, and
+recomputes each contrast from stored per-answer scores.
+
 Model-free preflight:
 
 ```bash
@@ -42,8 +79,8 @@ exclusive output directory, encodes the frozen answer masks, and emits a
 manifest. Fit requires that manifest's SHA-256, verifies the same wheel and
 source bytes, then writes per-step and per-answer receipts without replacing
 earlier files. A first failure remains in the output directory; do not reuse
-that directory for another attempt. The runner has not yet been exercised
-against a real model or wheel, so it is not qualified by the model-free tests.
+that directory for another attempt. The model-free tests alone do not qualify
+real-model execution; the result above comes from the pinned GPT-2 and wheel.
 
 Run `run.py` with `python3 -I -B`, **not** `-S`: the runner must import the
 installed wheel, and it verifies the loaded native extension against the
