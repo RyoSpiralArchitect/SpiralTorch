@@ -119,11 +119,14 @@ def scored(optimizer, source, data):
     require(result.document_count == result.scored_documents == len(data["keys"]),
             "answer coverage mismatch")
     raw = json.loads(result.to_json())
-    require(len(raw["answers"]) == len(data["keys"])
+    require(raw["layer"] == protocol.RECIPE["layer"] and raw["steps"] >= 0,
+            "QKV score owner mismatch")
+    comparison = raw["comparison"]
+    require(len(comparison["answers"]) == len(data["keys"])
             and all(row["document"] == i and len(row["scores"]) == 2
-                    for i, row in enumerate(raw["answers"])),
+                    for i, row in enumerate(comparison["answers"])),
             "answer mapping mismatch")
-    return raw
+    return comparison
 
 
 def contrast(ordinary, rival):

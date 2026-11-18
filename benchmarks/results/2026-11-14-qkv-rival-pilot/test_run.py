@@ -1,6 +1,7 @@
 """Model-free scoring checks for the prospective runner."""
 
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -21,6 +22,23 @@ def scores(nll, top1):
 
 
 class ScoringTests(unittest.TestCase):
+    def test_native_qkv_answer_wrapper_is_unwrapped(self):
+        class Result:
+            document_count = 48
+            scored_documents = 48
+
+            def to_json(self):
+                return json.dumps({"schema": "spiraltorch.causal_lm_qkv_answer_comparison.v1",
+                                   "serving_id": "sha256:fixture", "layer": 11, "steps": 0,
+                                   "comparison": scores(2.0, 1)})
+
+        class Optimizer:
+            def evaluate_against_source_by_answer(self, *args, **kwargs):
+                return Result()
+
+        data = {"keys": list(range(48)), "token_documents": [], "labels": []}
+        self.assertEqual(runner.scored(Optimizer(), None, data), scores(2.0, 1))
+
     def test_teacher_forced_answer_and_nll_contrast(self):
         ordinary, rival = scores(2.0, 1), scores(1.5, 3)
         ordinary["answers"][0]["end"] = rival["answers"][0]["end"] = 6
