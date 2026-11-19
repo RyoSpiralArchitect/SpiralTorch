@@ -224,10 +224,8 @@ impl CausalLmConditionalMarginRetention {
         self.mass.as_ref().and_then(MassFloor::log_pair_limit)
     }
 
-    pub(super) fn verify_owner(
-        &self,
-        projection: &NativeCausalLmRankOneProjection,
-    ) -> CausalLmResult<()> {
+    /// Check trajectory ownership and current work limits without reading training inputs.
+    pub fn verify_owner(&self, projection: &NativeCausalLmRankOneProjection) -> CausalLmResult<()> {
         if self.owner != projection.projection_id() {
             return Err(
                 "conditional margin retention belongs to a different projection state".into(),

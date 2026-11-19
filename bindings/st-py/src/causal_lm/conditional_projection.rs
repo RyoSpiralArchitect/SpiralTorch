@@ -170,6 +170,7 @@ pub(super) fn restore(
         ));
     }
     let pairs = pairs(answer_pairs, count)?;
+    plan.admit_roster_pairs(&pairs).map_err(error)?;
     let ids = read_prompts(rows, count, |lengths| plan.roster_input_count(lengths))?;
     py.detach(|| plan.restore(&ids, &pairs))
         .map(|(state, guard)| (PyRankOne(state), PyConditionalRetention(guard)))
@@ -295,6 +296,9 @@ impl PyRankOne {
         retention: Option<PyRefMut<'_, PyConditionalRetention>>,
     ) -> PyResult<Py<PyAny>> {
         let config = config(length, max_trials, mass_inward_cosine)?;
+        if let Some(guard) = retention.as_deref() {
+            guard.0.verify_owner(&self.0).map_err(error)?;
+        }
         let (ids, pairs) =
             paired_prompts(&self.0, rows, answer_pairs, PromptUse::Training(config))?;
         self.update(py, Update::Raw(&ids), &pairs, config, retention)
@@ -314,6 +318,12 @@ impl PyRankOne {
         retention: Option<PyRefMut<'_, PyConditionalRetention>>,
     ) -> PyResult<Py<PyAny>> {
         let config = config(length, max_trials, mass_inward_cosine)?;
+        self.0
+            .admit_conditional_prefix_bank(&bank.0)
+            .map_err(error)?;
+        if let Some(guard) = retention.as_deref() {
+            guard.0.verify_owner(&self.0).map_err(error)?;
+        }
         let count = roster_size(indices, MAX_OUTPUT_CONTRAST_ROWS)?;
         let pairs = pairs(answer_pairs, count)?;
         self.0

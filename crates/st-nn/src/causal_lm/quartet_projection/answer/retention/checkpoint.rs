@@ -217,6 +217,18 @@ impl CausalLmConditionalRetentionRestore {
         self.plan.baseline.margin_bits.len()
     }
 
+    /// Admit the pair metadata before a binding extracts any prompt tokens.
+    /// The full ordered roster digest is still verified during restore.
+    pub fn admit_roster_pairs(&self, pairs: &[[usize; 2]]) -> CausalLmResult<()> {
+        if pairs.len() != self.roster_len() {
+            return Err("conditional retention checkpoint roster length changed".into());
+        }
+        for &[gold, alternative] in pairs {
+            self.source.check_contrast_candidates(gold, alternative)?;
+        }
+        Ok(())
+    }
+
     /// Admit exactly the expected number of rows and their prefix workspace.
     pub fn roster_input_count(&self, steps: &[usize]) -> CausalLmResult<usize> {
         if steps.len() != self.roster_len() {
@@ -248,9 +260,10 @@ impl CausalLmConditionalRetentionRestore {
         NativeCausalLmRankOneProjection,
         CausalLmConditionalMarginRetention,
     )> {
-        if prompts.len() != self.roster_len() || prompts.len() != pairs.len() {
+        if prompts.len() != self.roster_len() {
             return Err("conditional retention checkpoint roster length changed".into());
         }
+        self.admit_roster_pairs(pairs)?;
         self.roster_input_count(&prompts.iter().map(Vec::len).collect::<Vec<_>>())?;
         if roster_id(prompts, pairs) != self.plan.roster_id {
             return Err("conditional retention checkpoint roster changed".into());

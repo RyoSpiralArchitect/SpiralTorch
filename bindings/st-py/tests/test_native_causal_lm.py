@@ -166,6 +166,9 @@ class NativeCausalLmTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             projection.prefill(ReadTrap(3), max_cache_values=1)
         bank = projection.prepare_prefix_bank([[1, 2]])
+        other = self.model.rank_one_projection("query", layer=1, left_f64le=axis)
+        with self.assertRaisesRegex(ValueError, "different projection origin"):
+            other.step_indexed(bank, ReadTrap(1), [[2, 7]], length=.01)
         for bad, labels in (([1], [[2, 7]]), ([0], [[2, 2]]), ([0], [])):
             with self.assertRaises(ValueError):
                 projection.step_indexed(bank, bad, labels, length=.01)
@@ -197,12 +200,29 @@ class NativeCausalLmTests(unittest.TestCase):
             def __len__(self):
                 raise AssertionError("roster read before the checkpoint was admitted")
 
+        class UnreadableItems:
+            def __len__(self):
+                return len(rows)
+
+            def __getitem__(self, _):
+                raise AssertionError("roster items read before metadata admission")
+
         with self.assertRaisesRegex(ValueError, "digest mismatch"):
             self.model.restore_rank_one_with_retention(payload + b" ", pin, Unreadable(), Unreadable())
         with self.assertRaisesRegex(ValueError, "different projection recipe"):
             self.model.with_readout_accumulator("f64").restore_rank_one_with_retention(
                 payload, pin, Unreadable(), Unreadable(),
             )
+        for invalid_pair in ([2, 2], [2, 11]):
+            with self.assertRaises(ValueError):
+                self.model.restore_rank_one_with_retention(
+                    payload, pin, UnreadableItems(), [invalid_pair, *pairs[1:]],
+                )
+        original = self.model.rank_one_projection(
+            "output", layer=1, left_f64le=axis, right_f64le=initial_right,
+        )
+        with self.assertRaisesRegex(ValueError, "different projection state"):
+            original.step(UnreadableItems(), pairs, length=.01, retention=guard)
         with self.assertRaisesRegex(ValueError, "roster changed"):
             self.model.restore_rank_one_with_retention(payload, pin, rows[::-1], pairs[::-1])
         restored, rehydrated = self.model.restore_rank_one_with_retention(payload, pin, rows, pairs)

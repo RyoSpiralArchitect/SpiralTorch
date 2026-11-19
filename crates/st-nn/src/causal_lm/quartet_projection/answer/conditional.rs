@@ -358,13 +358,21 @@ impl NativeCausalLmRankOneProjection {
         Ok(())
     }
 
+    /// Check that the bank belongs to this trajectory before reading its index roster.
+    pub fn admit_conditional_prefix_bank(
+        &self,
+        bank: &CausalLmConditionalAnswerPrefixBank,
+    ) -> CausalLmResult<()> {
+        self.verify_conditional_origin(&bank.origin, bank.spec)
+    }
+
     fn select_conditional_rows(
         &self,
         bank: &CausalLmConditionalAnswerPrefixBank,
         indices: &[usize],
         pairs: &[[usize; 2]],
     ) -> CausalLmResult<PreparedConditionalRows> {
-        self.verify_conditional_origin(&bank.origin, bank.spec)?;
+        self.admit_conditional_prefix_bank(bank)?;
         let m = &self.current;
         if indices.len() != pairs.len() || !(1..=MAX_OUTPUT_CONTRAST_ROWS).contains(&indices.len())
         {
