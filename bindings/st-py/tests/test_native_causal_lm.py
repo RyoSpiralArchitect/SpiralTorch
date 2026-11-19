@@ -313,6 +313,11 @@ class NativeCausalLmTests(unittest.TestCase):
         trainer = st.NativeCausalLmConditionalAnswerSession(state, guard, rows, schedule, length=.01)
         initial_id = state.projection_id
         with tempfile.TemporaryDirectory() as tmp:
+            start = Path(tmp) / "start.ck"
+            initial = trainer.checkpoint_with_id()
+            self.assertEqual(trainer.save_checkpoint_new(start), initial[1])
+            self.assertEqual(start.read_bytes(), initial[0])
+            self.assertEqual(trainer.checkpoint_with_id(), initial)
             path = Path(tmp) / "first.ck"
             reports, pin = trainer.advance_to_checkpoint_new(1, path)
             raw = path.read_bytes()

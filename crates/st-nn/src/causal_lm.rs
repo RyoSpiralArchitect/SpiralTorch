@@ -43,6 +43,7 @@ mod session;
 mod sum;
 mod training;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
+pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
 pub use common_geometry::{
     CausalLmCommonGeometryStep, CausalLmGeometrySteeringStep, CausalLmGeometryStepGuard,
@@ -57,7 +58,7 @@ pub use evaluation::{
 };
 pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,
-    NativeCausalLmGenerator,
+    CausalLmPreparedGenerationInterval, NativeCausalLmGenerator,
 };
 pub use geometry_cohort::{
     CausalLmGeometryCohortStep, MAX_GEOMETRY_COHORT_ELEMENTS, MAX_GEOMETRY_COHORT_MEMBERS,
