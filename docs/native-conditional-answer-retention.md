@@ -125,6 +125,9 @@ The child keeps the exact weights and original guard and starts its own
 counters at zero. Its v4 checkpoint pins the immediate predecessor's
 digest; standalone sessions keep the v3 format. The digest links the
 checkpoints but does not prove the predecessor's training history.
+An unchanged restored session emits the exact admitted bytes, including
+its original header encoding. Consuming a batch replaces that checkpoint
+identity, even when the candidate update was refused.
 
 `serving_from_checkpoint` reconstructs the pinned projection without the
 prompt pool, original guard roster, or training workspace. It checks the

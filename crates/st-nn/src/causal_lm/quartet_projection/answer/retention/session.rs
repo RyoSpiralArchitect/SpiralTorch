@@ -76,8 +76,15 @@ pub struct NativeCausalLmConditionalAnswerSession {
     max_prefix_values: usize,
     plan_id: String,
     predecessor_checkpoint_id: Option<String>,
+    restored_checkpoint: Option<PinnedCheckpoint>,
     position: u64,
     accepted_updates: u64,
+}
+
+#[derive(Clone)]
+struct PinnedCheckpoint {
+    bytes: Arc<[u8]>,
+    pin: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -109,6 +116,7 @@ pub struct CausalLmConditionalAnswerSessionRestore {
     policy: CausalLmConditionalAnswerConfig,
     retained: CausalLmConditionalRetentionRestore,
     batches_per_epoch: usize,
+    checkpoint: PinnedCheckpoint,
 }
 
 fn declared_predecessor<'de, D: serde::Deserializer<'de>>(
@@ -328,6 +336,7 @@ impl NativeCausalLmConditionalAnswerSession {
             pool: Arc::new(pool),
             plan_id: plan_id(prompts, &batches, epochs),
             predecessor_checkpoint_id: None,
+            restored_checkpoint: None,
             batches: batches.into(),
             epochs,
             policy,
@@ -410,6 +419,7 @@ impl NativeCausalLmConditionalAnswerSession {
         )?;
         self.position += 1;
         self.accepted_updates += u64::from(report.step.committed);
+        self.restored_checkpoint = None;
         Ok(Some(CausalLmConditionalAnswerSessionStep {
             position: self.position,
             accepted_updates: self.accepted_updates,
@@ -419,6 +429,9 @@ impl NativeCausalLmConditionalAnswerSession {
     }
 
     pub fn checkpoint(&self) -> CausalLmResult<(Vec<u8>, String)> {
+        if let Some(checkpoint) = &self.restored_checkpoint {
+            return Ok((checkpoint.bytes.to_vec(), checkpoint.pin.clone()));
+        }
         let (retained, guard_pin) = self.projection.checkpoint_with_retention(&self.guard)?;
         let header = serde_json::to_vec(&Record {
             schema: if self.predecessor_checkpoint_id.is_some() {
@@ -546,6 +559,10 @@ impl NativeCausalLmConditionalAnswerSession {
             policy,
             retained,
             batches_per_epoch,
+            checkpoint: PinnedCheckpoint {
+                bytes: bytes.into(),
+                pin: expected_id.to_owned(),
+            },
         })
     }
 }
@@ -648,6 +665,7 @@ impl CausalLmConditionalAnswerSessionRestore {
             policy: self.policy,
             plan_id: id,
             predecessor_checkpoint_id: self.record.predecessor_checkpoint_id,
+            restored_checkpoint: Some(self.checkpoint),
             max_prefix_values: self.record.max_prefix_values,
             position: self.record.position,
             accepted_updates: self.record.accepted_updates,

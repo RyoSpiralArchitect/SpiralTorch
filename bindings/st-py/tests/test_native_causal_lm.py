@@ -25,7 +25,7 @@ import spiraltorch as st  # noqa: E402
 
 
 def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weights=False,
-            pair_mass_underflow=False):
+            constant_logits=None):
     config = {"model_type": "gpt2", "vocab_size": vocabulary, "n_positions": positions,
               "n_embd": width, "n_head": heads, "n_layer": layers}
     header, payload = {}, bytearray()
@@ -34,6 +34,7 @@ def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weigh
         count = math.prod(shape)
         if values is None:
             values = [1. if "ln_" in name and name.endswith("weight")
+                      else 0. if constant_logits is not None
                       else math.sin((i * 7 + len(header) * 3) * .23) * .15 for i in range(count)]
         start = len(payload)
         payload.extend(struct.pack("<" + "f" * count, *values))
@@ -49,12 +50,13 @@ def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weigh
                                                 ("mlp.c_fc", width, 4*width), ("mlp.c_proj", 4*width, width)):
             add(f"h.{layer}.{name}.weight", [input_width, output_width])
             add(f"h.{layer}.{name}.bias", [output_width])
-    if pair_mass_underflow:
+    if constant_logits is not None:
+        assert len(constant_logits) == vocabulary
         config["tie_word_embeddings"] = False
         add("ln_f.weight", [width], [0.] * width)
         add("ln_f.bias", [width], [1.] + [0.] * (width - 1))
         head = [0.] * (vocabulary * width)
-        head[width], head[2 * width] = -1., 800.
+        head[::width] = constant_logits
         add("lm_head.weight", [vocabulary, width], head)
     else:
         add("ln_f.weight", [width])
@@ -436,6 +438,19 @@ assert session.checkpoint_with_id() == restored.checkpoint_with_id()
             end = 4 + struct.unpack_from("<I", raw)[0]
             return json.loads(raw[4:end]), raw[end:]
 
+        def assert_exact_predecessor(raw, old_pool, old_plan):
+            header, original_retained = unframe(raw)
+            rewritten = json.dumps(header, sort_keys=True, indent=2).encode()
+            payload = struct.pack("<I", len(rewritten)) + rewritten + original_retained
+            self.assertNotEqual(payload, raw)
+            pin = "sha256:" + hashlib.sha256(payload).hexdigest()
+            loaded = session.from_bytes(self.model, payload, pin, old_pool, old_plan, rows, pairs)
+            self.assertTrue(loaded.exhausted)
+            self.assertIsNone(loaded.step())
+            self.assertEqual(loaded.checkpoint_with_id(), (payload, pin))
+            self.assertEqual(loaded.next_phase(pool, plan, length=.02).predecessor_checkpoint_id, pin)
+
+        assert_exact_predecessor(parent_raw, rows, schedule)
         child_raw, _ = child.checkpoint_with_id()
         meta, retained = unframe(child_raw)
         self.assertEqual(retained, unframe(parent_raw)[1])
@@ -470,6 +485,7 @@ assert session.checkpoint_with_id() == restored.checkpoint_with_id()
         self.assertEqual(resumed.checkpoint_with_id(), child.checkpoint_with_id())
         self.assertTrue(resumed.exhausted)
         self.assertIsNone(resumed.step())
+        assert_exact_predecessor(resumed.checkpoint_with_id()[0], pool, plan)
         self.assertEqual(parent.checkpoint_with_id(), (parent_raw, parent_id))
 
         grandchild = resumed.next_phase(pool, plan, length=.02)
@@ -480,6 +496,25 @@ assert session.checkpoint_with_id() == restored.checkpoint_with_id()
         self.assertEqual(grandchild.predecessor_checkpoint_id, child.checkpoint_with_id()[1])
         self.assertEqual(session.from_bytes(self.model, raw, pin, pool, plan, rows, pairs)
                          .checkpoint_with_id(), (raw, pin))
+
+    def test_conditional_session_reads_a_fixed_v3_checkpoint_from_previous_wheel(self):
+        path = Path(__file__).with_name("fixtures") / "conditional_session_v3.json"
+        fixture_record = json.loads(path.read_text(encoding="utf-8"))
+        payload = bytes.fromhex(fixture_record["payload_hex"])
+        pin = fixture_record["checkpoint_id"]
+        model = st.NativeCausalLm.from_gpt2(*fixture(vocabulary=2, constant_logits=[1., 0.]))
+        rows, pairs = [[0, 1]], [[0, 1]]
+        schedule = [([0], pairs)]
+        cls = st.NativeCausalLmConditionalAnswerSession
+        resumed = cls.from_bytes(model, payload, pin, rows, schedule, rows, pairs)
+        self.assertEqual(resumed.checkpoint_with_id(), (payload, pin))
+        before = cls.serving_from_checkpoint(model, payload, pin)
+        self.assertEqual(before.projection_id, fixture_record["projection_id"])
+        self.assertEqual(before.prefill(rows[0]).logits_f32le().hex(), fixture_record["logits_hex"])
+        after = resumed.step()
+        self.assertEqual(after["position"], 2)
+        self.assertFalse(after["report"]["step"]["committed"])
+        self.assertEqual(resumed.checkpoint_with_id()[1], fixture_record["next_checkpoint_id"])
 
     def test_conditional_checkpoint_serves_without_training_workspace(self):
         model = self.model.with_readout_accumulator("f64").with_lora(0, 2, 4.)
@@ -559,7 +594,7 @@ assert session.checkpoint_with_id() == restored.checkpoint_with_id()
         self.assertEqual(projection.projection_id, before)
 
     def test_rank_one_checkpoint_exposes_authoritative_log_floor(self):
-        config, weights = fixture(pair_mass_underflow=True)
+        config, weights = fixture(constant_logits=[0., -1., 800.] + [0.] * 8)
         model = st.NativeCausalLm.from_gpt2(config, weights)
         projection = model.rank_one_projection("value", layer=1, left_f64le=struct.pack("<4d", 1., 0., 0., 0.))
         rows, pairs = [[1, 2, 3]], [[0, 1]]
