@@ -261,6 +261,51 @@ class NativeCausalLmTests(unittest.TestCase):
         self.assertEqual(state.checkpoint_with_retention(guard), restored.checkpoint_with_retention(rehydrated))
         self.assertEqual(state.prefill(rows[0]).logits_f32le(), restored.prefill(rows[0]).logits_f32le())
 
+    def test_conditional_schedule_start_binding_and_legacy_readback(self):
+        state, guard, rows, pairs, schedule = conditional_session_inputs(self.model)
+        trainer = st.NativeCausalLmConditionalAnswerSession(state, guard, rows, schedule, length=.01)
+        self.assertTrue(trainer.step()["report"]["step"]["committed"])
+        raw, pin = trainer.checkpoint_with_id()
+        size = struct.unpack_from("<I", raw)[0]
+        header = json.loads(raw[4:4 + size])
+
+        def frame(record):
+            encoded = json.dumps(record, separators=(",", ":")).encode()
+            return struct.pack("<I", len(encoded)) + encoded + raw[4 + size:]
+
+        class Unreadable:
+            def __len__(self):
+                raise AssertionError("input read before checkpoint admission")
+
+        changed = frame(dict(header, position=0, accepted_updates=0))
+        with self.assertRaisesRegex(ValueError, "digest mismatch"):
+            st.NativeCausalLmConditionalAnswerSession.from_bytes(
+                self.model, changed, pin, Unreadable(), Unreadable(), Unreadable(), Unreadable(),
+            )
+        changed_pin = "sha256:" + hashlib.sha256(changed).hexdigest()
+        with self.assertRaisesRegex(ValueError, "projection changed with zero accepted updates"):
+            st.NativeCausalLmConditionalAnswerSession.from_bytes(
+                self.model, changed, changed_pin,
+                Unreadable(), Unreadable(), Unreadable(), Unreadable(),
+            )
+
+        self.assertEqual(header.pop("start_projection_id"), state.projection_id)
+        header["schema"] = "spiraltorch.native_conditional_answer_session.v3"
+        legacy = frame(header)
+        legacy_pin = "sha256:" + hashlib.sha256(legacy).hexdigest()
+        null_start = frame(dict(header, start_projection_id=None))
+        null_pin = "sha256:" + hashlib.sha256(null_start).hexdigest()
+        with self.assertRaisesRegex(ValueError, "expected a string"):
+            st.NativeCausalLmConditionalAnswerSession.from_bytes(
+                self.model, null_start, null_pin,
+                Unreadable(), Unreadable(), Unreadable(), Unreadable(),
+            )
+        restored = st.NativeCausalLmConditionalAnswerSession.from_bytes(
+            self.model, legacy, legacy_pin, rows, schedule, rows, pairs,
+        )
+        self.assertEqual(restored.checkpoint_with_id(), (legacy, legacy_pin))
+        self.assertEqual(restored.step(), trainer.step())
+
     def test_conditional_schedule_restore_continues_at_next_batch(self):
         state, guard, rows, pairs, schedule = conditional_session_inputs(self.model)
         trainer = st.NativeCausalLmConditionalAnswerSession(state, guard, rows, schedule, length=.01)

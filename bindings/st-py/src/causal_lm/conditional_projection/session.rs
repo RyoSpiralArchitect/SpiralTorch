@@ -1,5 +1,6 @@
 //! Transport for Rust-owned conditional schedules and checkpoint publication.
 use super::*;
+use pyo3::types::{PyString, PyTuple};
 use st_nn::causal_lm::{CausalLmConditionalAnswerBatch, NativeCausalLmConditionalAnswerSession};
 use std::path::PathBuf;
 
@@ -180,18 +181,22 @@ impl PyConditionalSession {
         py.detach(|| self.0.save_checkpoint_new(path))
             .map_err(error)
     }
-    fn advance_to_checkpoint_new(
+    fn advance_to_checkpoint_new<'py>(
         &mut self,
-        py: Python<'_>,
+        py: Python<'py>,
         stop: &Bound<'_, PyAny>,
         path: PathBuf,
-    ) -> PyResult<(Py<PyAny>, String)> {
+    ) -> PyResult<Bound<'py, PyTuple>> {
         reject_bool(stop)?;
         let stop = stop.extract::<u64>()?;
-        let (reports, pin) = py
-            .detach(|| self.0.advance_to_checkpoint_new(stop, path))
+        let staged = py
+            .detach(|| self.0.prepare_checkpoint_interval(stop, path))
             .map_err(error)?;
-        Ok((as_py(py, reports)?, pin))
+        let reports = as_py(py, staged.reports())?.into_bound(py);
+        let pin = PyString::new(py, staged.checkpoint_id()).into_any();
+        let result = PyTuple::new(py, [reports, pin])?;
+        py.detach(|| staged.publish()).map_err(error)?;
+        Ok(result)
     }
 }
 

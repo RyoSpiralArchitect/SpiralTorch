@@ -3,9 +3,10 @@ use super::super::conditional::{conditional_bank_input_values, MAX_PREPARED_PREF
 use super::checkpoint::fingerprint;
 use super::*;
 use crate::causal_lm::checkpoint as files;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
+const LEGACY_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
+const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.start_bound.v1";
 const HEADER_LIMIT: usize = 4096;
 
 /// A complete checkpoint was installed but publication did not finish.
@@ -74,8 +75,35 @@ pub struct NativeCausalLmConditionalAnswerSession {
     policy: CausalLmConditionalAnswerConfig,
     max_prefix_values: usize,
     plan_id: String,
+    start_projection_id: Option<String>,
     position: u64,
     accepted_updates: u64,
+}
+
+/// A staged interval. Dropping it leaves the session and filesystem unchanged.
+pub struct CausalLmPreparedConditionalAnswerInterval<'a> {
+    live: &'a mut NativeCausalLmConditionalAnswerSession,
+    next: NativeCausalLmConditionalAnswerSession,
+    reports: Vec<CausalLmConditionalAnswerSessionStep>,
+    checkpoint: (Vec<u8>, String),
+    path: PathBuf,
+}
+
+impl CausalLmPreparedConditionalAnswerInterval<'_> {
+    pub fn reports(&self) -> &[CausalLmConditionalAnswerSessionStep] {
+        &self.reports
+    }
+
+    pub fn checkpoint_id(&self) -> &str {
+        &self.checkpoint.1
+    }
+
+    /// Publish without clobbering the destination, then advance the live session.
+    pub fn publish(self) -> CausalLmResult<(Vec<CausalLmConditionalAnswerSessionStep>, String)> {
+        let pin = publish_checkpoint(&self.path, self.checkpoint)?;
+        *self.live = self.next;
+        Ok((self.reports, pin))
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -93,6 +121,19 @@ struct Record {
     max_trials: usize,
     mass_inward_cosine_bits: Option<u64>,
     max_prefix_values: usize,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "read_start_projection_id"
+    )]
+    start_projection_id: Option<String>,
+}
+
+fn read_start_projection_id<'de, D: serde::Deserializer<'de>>(
+    reader: D,
+) -> Result<Option<String>, D::Error> {
+    // Missing is valid for v3, but an explicit null is not an omitted field.
+    String::deserialize(reader).map(Some)
 }
 
 /// Byte-admitted restore handle, with no training or prompt evaluation yet performed.
@@ -263,6 +304,7 @@ impl NativeCausalLmConditionalAnswerSession {
             epochs,
             policy,
             max_prefix_values,
+            start_projection_id: Some(projection.projection_id()),
             position: 0,
             accepted_updates: 0,
         })
@@ -316,7 +358,11 @@ impl NativeCausalLmConditionalAnswerSession {
     pub fn checkpoint(&self) -> CausalLmResult<(Vec<u8>, String)> {
         let (retained, guard_pin) = self.projection.checkpoint_with_retention(&self.guard)?;
         let header = serde_json::to_vec(&Record {
-            schema: SCHEMA.into(),
+            schema: if self.start_projection_id.is_some() {
+                SCHEMA.into()
+            } else {
+                LEGACY_SCHEMA.into()
+            },
             plan_id: self.plan_id.clone(),
             guard_pin,
             pool_rows: self.pool.len(),
@@ -328,6 +374,7 @@ impl NativeCausalLmConditionalAnswerSession {
             max_trials: self.policy.max_trials,
             mass_inward_cosine_bits: self.policy.mass_inward_cosine.map(f64::to_bits),
             max_prefix_values: self.max_prefix_values,
+            start_projection_id: self.start_projection_id.clone(),
         })?;
         if header.len() > HEADER_LIMIT {
             return Err("conditional session header exceeds limit".into());
@@ -351,15 +398,29 @@ impl NativeCausalLmConditionalAnswerSession {
         stop: u64,
         path: impl AsRef<Path>,
     ) -> CausalLmResult<(Vec<CausalLmConditionalAnswerSessionStep>, String)> {
+        self.prepare_checkpoint_interval(stop, path)?.publish()
+    }
+
+    /// Stage updates, reports and checkpoint bytes without publishing or advancing.
+    /// A binding may prepare its return values before committing the interval.
+    pub fn prepare_checkpoint_interval(
+        &mut self,
+        stop: u64,
+        path: impl AsRef<Path>,
+    ) -> CausalLmResult<CausalLmPreparedConditionalAnswerInterval<'_>> {
         let count = files::count(self.position(), self.total_batches(), stop)?;
-        files::advance_new_with(
-            self,
-            count,
-            path.as_ref(),
-            Self::step,
-            Self::checkpoint,
-            publish_checkpoint,
-        )
+        let path = std::path::absolute(path.as_ref())?;
+        files::admit_new(&path)?;
+        let mut next = self.clone();
+        let reports = files::steps(&mut next, count, Self::step)?;
+        let checkpoint = next.checkpoint()?;
+        Ok(CausalLmPreparedConditionalAnswerInterval {
+            live: self,
+            next,
+            reports,
+            checkpoint,
+            path,
+        })
     }
 
     pub fn prepare_resume(
@@ -379,7 +440,15 @@ impl NativeCausalLmConditionalAnswerSession {
         }
         let (header, retained) = bytes[4..].split_at(size);
         let record: Record = serde_json::from_slice(header)?;
-        if record.schema != SCHEMA || record.epochs == 0 {
+        let supported_start = match (
+            record.schema.as_str(),
+            record.start_projection_id.as_deref(),
+        ) {
+            (SCHEMA, Some(id)) => crate::geometry_artifact::is_sha256_id(id),
+            (LEGACY_SCHEMA, None) => true,
+            _ => false,
+        };
+        if !supported_start || record.epochs == 0 {
             return Err("invalid conditional session checkpoint repeat policy".into());
         }
         let epochs = record.epochs;
@@ -404,6 +473,14 @@ impl NativeCausalLmConditionalAnswerSession {
             retained,
             &record.guard_pin,
         )?;
+        if record.accepted_updates == 0
+            && record
+                .start_projection_id
+                .as_deref()
+                .is_some_and(|id| id != retained.projection_id())
+        {
+            return Err("conditional session projection changed with zero accepted updates".into());
+        }
         Ok(CausalLmConditionalAnswerSessionRestore {
             record,
             policy,
@@ -508,6 +585,7 @@ impl CausalLmConditionalAnswerSessionRestore {
             policy: self.policy,
             plan_id: id,
             max_prefix_values: self.record.max_prefix_values,
+            start_projection_id: self.record.start_projection_id,
             position: self.record.position,
             accepted_updates: self.record.accepted_updates,
         })

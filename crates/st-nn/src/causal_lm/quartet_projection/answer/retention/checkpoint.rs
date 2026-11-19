@@ -218,6 +218,10 @@ impl NativeCausalLmRankOneProjection {
 }
 
 impl CausalLmConditionalRetentionRestore {
+    pub(super) fn projection_id(&self) -> &str {
+        &self.plan.projection_id
+    }
+
     pub fn roster_len(&self) -> usize {
         self.plan.baseline.margin_bits.len()
     }

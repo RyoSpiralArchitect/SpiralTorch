@@ -158,6 +158,7 @@ fn conditional_session_pins_schedule_and_publishes_before_advancing() {
         &[0.01, -0.02, -0., 0.03],
     )
     .unwrap();
+    let original_id = p.projection_id();
     let rows = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
     let labels = p
         .score_answer_pairs(&rows, &[[2, 7]; 3])
@@ -213,6 +214,21 @@ fn conditional_session_pins_schedule_and_publishes_before_advancing() {
     assert!(session.advance_to_checkpoint_new(1, &path).is_err());
     assert_eq!(session.checkpoint().unwrap(), before);
     assert_eq!(std::fs::read(path).unwrap(), before.0);
+
+    let abandoned = temp.path().join("abandoned.ck");
+    let staged = session.prepare_checkpoint_interval(1, &abandoned).unwrap();
+    assert!(staged.reports()[0].report.step.committed);
+    assert!(!abandoned.exists());
+    drop(staged);
+    assert_eq!(session.checkpoint().unwrap(), before);
+    assert!(!abandoned.exists());
+
+    let collision = temp.path().join("collision.ck");
+    let staged = session.prepare_checkpoint_interval(1, &collision).unwrap();
+    std::fs::write(&collision, b"prior bytes").unwrap();
+    assert!(staged.publish().is_err());
+    assert_eq!(session.checkpoint().unwrap(), before);
+    assert_eq!(std::fs::read(collision).unwrap(), b"prior bytes");
 
     let path = temp.path().join("slot2.ck");
     let (reports, digest) = session.advance_to_checkpoint_new(1, &path).unwrap();
@@ -272,6 +288,25 @@ fn conditional_session_pins_schedule_and_publishes_before_advancing() {
         restored.projection().last_logits(&rows[0]).unwrap()
     );
     assert!(restored.step().unwrap().is_none());
+
+    // A new session can start from a projection different from the guard baseline.
+    assert_ne!(p.projection_id(), original_id);
+    let restarted = NativeCausalLmConditionalAnswerSession::new(
+        &p,
+        &guard,
+        &rows,
+        schedule.clone(),
+        policy,
+        44,
+    )
+    .unwrap();
+    let (raw, pin) = restarted.checkpoint().unwrap();
+    let recovered = NativeCausalLmConditionalAnswerSession::prepare_resume(&m, &raw, &pin)
+        .unwrap()
+        .resume(&rows, schedule, &rows, &labels)
+        .unwrap();
+    assert_eq!(recovered.accepted_updates(), 0);
+    assert_eq!(recovered.projection().projection_id(), p.projection_id());
 }
 
 #[test]

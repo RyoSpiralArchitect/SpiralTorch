@@ -9,8 +9,8 @@ mod session;
 pub use checkpoint::CausalLmConditionalRetentionRestore;
 pub use session::{
     CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
-    CausalLmConditionalAnswerSessionStep, ConditionalCheckpointPublicationUncertain,
-    NativeCausalLmConditionalAnswerSession,
+    CausalLmConditionalAnswerSessionStep, CausalLmPreparedConditionalAnswerInterval,
+    ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
 };
 
 struct Anchor {

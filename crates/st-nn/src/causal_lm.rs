@@ -109,9 +109,10 @@ pub use quartet_projection::{
     CausalLmConditionalRetentionLogOutsideCheck, CausalLmConditionalRetentionMassCheck,
     CausalLmConditionalRetentionOutsideCheck, CausalLmConditionalRetentionRestore,
     CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmPreparedConditionalAnswerBatch,
-    CausalLmQuartetObjective, CausalLmQuartetStep, CausalLmRetainedConditionalAnswerStep,
-    ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
-    NativeCausalLmProjectionPrefix, NativeCausalLmRankOneProjection, MAX_CONDITIONAL_BANK_ROWS,
+    CausalLmPreparedConditionalAnswerInterval, CausalLmQuartetObjective, CausalLmQuartetStep,
+    CausalLmRetainedConditionalAnswerStep, ConditionalCheckpointPublicationUncertain,
+    NativeCausalLmConditionalAnswerSession, NativeCausalLmProjectionPrefix,
+    NativeCausalLmRankOneProjection, MAX_CONDITIONAL_BANK_ROWS,
 };
 pub use readout_policy::{CausalLmHeadPrecision, CausalLmReadoutAccumulator};
 pub use repetition::CausalLmRepetition;
