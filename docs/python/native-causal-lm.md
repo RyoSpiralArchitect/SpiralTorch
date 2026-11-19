@@ -1414,6 +1414,11 @@ The result includes the top token but does not export a vocabulary row.
 It requires every gold label to belong to the nominated pair and keeps
 the existing quartet training objective unchanged. The diagnostic uses
 one forward and three projection pullbacks per prompt, returns the
-projection identity, and does not update the weights. These measures
+projection identity, and does not update the weights. The mass
+diagnostic averages outside-minus-inside head weight differences in f64
+without rounding the probability coefficients before contraction. It
+applies the (possibly tiny) outside probability after the decoder
+pullback. This is independent of the model's training readout
+precision policy; it does not alter the ordinary CE gradient. These measures
 distinguish putting more probability on the pair from selecting the
 right member; neither is evidence of improved held-out generation.

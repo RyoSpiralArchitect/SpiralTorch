@@ -2,6 +2,104 @@ use super::*;
 use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
+fn five_token_readout(head: [f32; 20], norm: Option<([f32; 4], [f32; 4])>) -> NativeCausalLm {
+    let mut c = config();
+    c["vocab_size"] = json!(5);
+    c["tie_word_embeddings"] = json!(false);
+    let mut p = parameters();
+    let (shape, values) = p.get_mut("wte.weight").unwrap();
+    shape[0] = 5;
+    values.truncate(20);
+    if let Some((gain, bias)) = norm {
+        p.get_mut("ln_f.weight").unwrap().1 = gain.to_vec();
+        p.get_mut("ln_f.bias").unwrap().1 = bias.to_vec();
+    }
+    p.insert("lm_head.weight".into(), (vec![5, 4], head.to_vec()));
+    NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&c).unwrap(),
+        &archive(&p),
+        Default::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn binding_observation_ignores_common_vocabulary_weight() {
+    let model = five_token_readout(
+        std::array::from_fn(|i| if i % 4 == 0 { 67_108_864. } else { 0. }),
+        None,
+    );
+    let prompts = vec![vec![4, 2, 1], vec![2, 1], vec![3, 1, 2], vec![1, 2]];
+    let binding = CausalLmAnswerBinding {
+        ids: [0, 1],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    for precision in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F32WideBackward,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let m = model.with_readout_accumulator(precision);
+        let p = NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4])
+            .unwrap();
+        let out = p
+            .observe_binding_gradients(&prompts, &[0, 1, 1, 0], binding)
+            .unwrap();
+        assert!((out.candidate_mass.loss - (2.5_f64).ln()).abs() < 1e-14);
+        assert_eq!(out.candidate_mass.gradient, [0.; 4], "{precision:?}");
+        assert_eq!(out.conditional.gradient, [0.; 4], "{precision:?}");
+    }
+}
+
+#[test]
+fn binding_observation_retains_saturated_mass_after_decoder_pullback() {
+    let m = five_token_readout(
+        [
+            0., 0., 0., 0., 0., 0., 0., 0., -110., 1., 0., 0., -110., 1., 0., 0., -110., 1., 0., 0.,
+        ],
+        Some(([0., 1., 1., 1.], [1., 0., 0., 0.])),
+    )
+    .with_readout_accumulator(CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![vec![4, 2, 1], vec![2, 1], vec![3, 1, 2], vec![1, 2]];
+    let binding = CausalLmAnswerBinding {
+        ids: [0, 1],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    let spec = CausalLmProjectionSpec {
+        layer: 1,
+        site: Output,
+        basis: Diagonal,
+    };
+    let left = [0., 1., 0., 0.];
+    let p =
+        NativeCausalLmRankOneProjection::new(&m, spec.layer, spec.site, &left, &[0.; 4]).unwrap();
+    let o = p
+        .observe_binding_gradients(&prompts, &[0, 1, 1, 0], binding)
+        .unwrap();
+    let (mut loss, mut right) = (sum::Sum::default(), [0.; 4]);
+    for prompt in &prompts {
+        let z = p.last_logits(prompt).unwrap();
+        assert_eq!(z[..2], [0.; 2]);
+        assert!(z[2..].iter().all(|&x| x == z[2]));
+        let ratio = 1.5 * f64::from(z[2]).exp();
+        let share = ratio / (1. + ratio);
+        assert!(share > 0. && share as f32 == 0.);
+        loss.add(ratio.ln_1p());
+        let (_, gradient) = m.fixed_left_contrast(prompt, 2, 0, spec, &left).unwrap();
+        for (reference, normalized) in right.iter_mut().zip(gradient) {
+            *reference += share * normalized / prompts.len() as f64;
+        }
+    }
+    let loss = loss.value() / prompts.len() as f64;
+    assert!((o.candidate_mass.loss / loss - 1.).abs() < 1e-12);
+    assert!(right.iter().any(|x| x.abs() > 1e-51));
+    for (actual, reference) in o.candidate_mass.gradient.iter().zip(right) {
+        assert!((actual - reference).abs() <= reference.abs() * 1e-6);
+    }
+}
+
 #[test]
 fn binding_observation_splits_ce_without_changing_the_training_adjoint() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);

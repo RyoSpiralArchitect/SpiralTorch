@@ -90,6 +90,19 @@ impl CausalLmPairedAnswerScore {
     }
 }
 
+fn answer_capture_work(
+    tokens: usize,
+    width: usize,
+    seeds: usize,
+    label: &'static str,
+) -> CausalLmResult<usize> {
+    product(
+        &[tokens, width, seeds],
+        output_margin::MAX_CAPTURE_TERMS,
+        label,
+    )
+}
+
 impl NativeCausalLmRankOneProjection {
     /// Read-only next-token scoring with no gradient, mutation or logits export.
     /// Each pair is ordered [gold, alternative]; equal candidates are rejected.
@@ -163,9 +176,10 @@ impl NativeCausalLmRankOneProjection {
                     "paired gradient observation requires gold inside the candidate pair".into(),
                 );
             }
-            product(
-                &[prompts.iter().map(Vec::len).sum(), w, 3],
-                output_margin::MAX_CAPTURE_TERMS,
+            answer_capture_work(
+                prompts.iter().map(Vec::len).sum(),
+                w,
+                3,
                 "binding observation capture work",
             )?;
             Some(PairObservation::new(w))
@@ -199,12 +213,9 @@ impl NativeCausalLmRankOneProjection {
                 let g = m.fixed_left_seed(row.clone(), d, self.spec, &self.left)?;
                 if let Some(observer) = &mut split {
                     let mass_seed = candidate_mass_seed(z, b.ids)?;
-                    let mut mass = m.fixed_left_seed(
-                        row.clone(),
-                        &mass_seed.normalized,
-                        self.spec,
-                        &self.left,
-                    )?;
+                    let upstream = mass_seed.readout_upstream(m)?;
+                    let mut mass =
+                        m.fixed_left_upstream(row.clone(), upstream, self.spec, &self.left)?;
                     for g in &mut mass {
                         *g *= mass_seed.outside_share;
                     }
@@ -296,9 +307,10 @@ impl NativeCausalLmRankOneProjection {
                 return Err("invalid answer prompt token".into());
             }
         }
-        product(
-            &[tokens, w, 1 + usize::from(backward && binding.is_some())],
-            output_margin::MAX_CAPTURE_TERMS,
+        answer_capture_work(
+            tokens,
+            w,
+            1 + usize::from(backward && binding.is_some()),
             "answer projection capture work",
         )?;
         if let Some(b) = binding {
@@ -332,6 +344,20 @@ impl NativeCausalLmRankOneProjection {
 #[cfg(test)]
 mod scoring_tests {
     use super::*;
+
+    #[test]
+    fn observation_capture_cap_counts_all_three_pullbacks() {
+        let width = 768;
+        let cap = output_margin::MAX_CAPTURE_TERMS;
+        let max_tokens = cap / (width * 3);
+        assert_eq!(
+            answer_capture_work(max_tokens, width, 3, "observation").unwrap(),
+            max_tokens * width * 3
+        );
+        assert!(answer_capture_work(max_tokens + 1, width, 2, "training").is_ok());
+        assert!(answer_capture_work(max_tokens + 1, width, 3, "observation").is_err());
+        assert!(answer_capture_work(usize::MAX, width, 3, "observation").is_err());
+    }
 
     #[test]
     fn paired_scores_keep_small_positive_nll_and_first_top_token() {

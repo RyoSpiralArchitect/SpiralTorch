@@ -21,6 +21,11 @@ impl Sum {
         self.add(other.low);
     }
 
+    pub(super) fn add_scaled(&mut self, other: &Self, scale: f64) {
+        self.add(other.high * scale);
+        self.add(other.low * scale);
+    }
+
     pub(super) fn value(&self) -> f64 {
         self.high + self.low
     }
