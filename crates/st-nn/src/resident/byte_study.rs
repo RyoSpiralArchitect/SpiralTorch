@@ -790,17 +790,17 @@ impl ByteCorpusStudy {
             .0)
     }
 
-    /// Observe each submitted update before the next forward or scheduled drain.
+    /// Observe each submitted update before reading its acceptance receipt.
     ///
     /// The callback receives the case name, one-based attempted update, and an
     /// immutable model. Submission is not acceptance: ordinary receipt checks
     /// still apply. Returning an error aborts the observed run.
     ///
     /// A caller can retain `model.checkpoint_snapshot()` and read it only after
-    /// this run returns, freezing weights and optimizer state without a per-step
-    /// CPU wait. Alternatively, retain `model.retain_checkpoint()` and submit its
-    /// `snapshot()` copies only after this run returns. The former adds GPU
-    /// copies between updates; both change resource lifetimes and host work.
+    /// this run returns, freezing weights and optimizer state without adding
+    /// another per-update CPU wait. Alternatively, retain `model.retain_checkpoint()`
+    /// and submit its `snapshot()` copies only after this run returns. The former
+    /// adds GPU copies between updates; both change resource lifetimes and host work.
     /// A passing observed run does not establish that `run()` is deterministic.
     /// An ordinary `run()` does not install observers or take observer-requested snapshots.
     #[cfg(feature = "wgpu")]
