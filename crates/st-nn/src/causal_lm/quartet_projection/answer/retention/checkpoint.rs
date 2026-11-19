@@ -17,6 +17,8 @@ struct MassBaseline {
     minimum_mean_pair_mass_bits: u64,
     maximum_mean_outside_mass_bits: u64,
     minimum_log_mean_pair_mass_bits: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    maximum_log_mean_outside_mass_bits: Option<u64>,
 }
 
 impl Baseline {
@@ -33,10 +35,12 @@ impl Baseline {
             let minimum = f64::from_bits(mass.minimum_mean_pair_mass_bits);
             let outside = f64::from_bits(mass.maximum_mean_outside_mass_bits);
             let log_minimum = mass.minimum_log_mean_pair_mass_bits.map(f64::from_bits);
+            let log_maximum = mass.maximum_log_mean_outside_mass_bits.map(f64::from_bits);
             if !(0.0..=1.0).contains(&mean)
                 || !(0.0..=mean).contains(&minimum)
                 || !(0.0..=1.0).contains(&outside)
                 || log_minimum.is_some_and(|x| !x.is_finite() || x >= f64::MIN_POSITIVE.ln())
+                || log_maximum.is_some_and(|x| !x.is_finite() || x >= f64::MIN_POSITIVE.ln())
             {
                 return Err("invalid conditional retention checkpoint mass floor".into());
             }
@@ -112,6 +116,7 @@ impl CausalLmConditionalMarginRetention {
                 minimum_mean_pair_mass_bits: floor.minimum.to_bits(),
                 maximum_mean_outside_mass_bits: floor.maximum_outside.to_bits(),
                 minimum_log_mean_pair_mass_bits: floor.log_pair_limit().map(f64::to_bits),
+                maximum_log_mean_outside_mass_bits: floor.log_outside_limit().map(f64::to_bits),
             }),
         }
     }
@@ -126,7 +131,7 @@ impl NativeCausalLmRankOneProjection {
         &self,
         guard: &CausalLmConditionalMarginRetention,
     ) -> CausalLmResult<(Vec<u8>, String)> {
-        guard.verify_owner(self)?;
+        guard.verify_checkpoint_owner(self)?;
         let payload = serde_json::to_vec(&Record {
             schema: SCHEMA.into(),
             layer: self.spec.layer,
@@ -217,6 +222,18 @@ impl CausalLmConditionalRetentionRestore {
         self.plan.baseline.margin_bits.len()
     }
 
+    /// Admit the pair metadata before a binding extracts any prompt tokens.
+    /// The full ordered roster digest is still verified during restore.
+    pub fn admit_roster_pairs(&self, pairs: &[[usize; 2]]) -> CausalLmResult<()> {
+        if pairs.len() != self.roster_len() {
+            return Err("conditional retention checkpoint roster length changed".into());
+        }
+        for &[gold, alternative] in pairs {
+            self.source.check_contrast_candidates(gold, alternative)?;
+        }
+        Ok(())
+    }
+
     /// Admit exactly the expected number of rows and their prefix workspace.
     pub fn roster_input_count(&self, steps: &[usize]) -> CausalLmResult<usize> {
         if steps.len() != self.roster_len() {
@@ -248,9 +265,10 @@ impl CausalLmConditionalRetentionRestore {
         NativeCausalLmRankOneProjection,
         CausalLmConditionalMarginRetention,
     )> {
-        if prompts.len() != self.roster_len() || prompts.len() != pairs.len() {
+        if prompts.len() != self.roster_len() {
             return Err("conditional retention checkpoint roster length changed".into());
         }
+        self.admit_roster_pairs(pairs)?;
         self.roster_input_count(&prompts.iter().map(Vec::len).collect::<Vec<_>>())?;
         if roster_id(prompts, pairs) != self.plan.roster_id {
             return Err("conditional retention checkpoint roster changed".into());

@@ -180,9 +180,14 @@ class NativeCausalLmTests(unittest.TestCase):
             projection.score_pairs([ReadTrap(4)], [[2, 2]])
         with self.assertRaisesRegex(ValueError, "mass allowance"):
             projection.prepare_retention([ReadTrap(4)], [[2, 7]], max_mean_mass_drop=-1.)
+        with self.assertRaisesRegex(ValueError, "mass allowance"):
+            projection.prepare_retention(ReadTrap(1), [[2, 7]], max_mean_mass_drop=-1.)
         with self.assertRaises(ValueError):
             projection.prefill(ReadTrap(3), max_cache_values=1)
         bank = projection.prepare_prefix_bank([[1, 2]])
+        other = self.model.rank_one_projection("query", layer=1, left_f64le=axis)
+        with self.assertRaisesRegex(ValueError, "different projection origin"):
+            other.step_indexed(bank, ReadTrap(1), [[2, 7]], length=.01)
         for bad, labels in (([1], [[2, 7]]), ([0], [[2, 2]]), ([0], [])):
             with self.assertRaises(ValueError):
                 projection.step_indexed(bank, bad, labels, length=.01)
@@ -214,12 +219,29 @@ class NativeCausalLmTests(unittest.TestCase):
             def __len__(self):
                 raise AssertionError("roster read before the checkpoint was admitted")
 
+        class UnreadableItems:
+            def __len__(self):
+                return len(rows)
+
+            def __getitem__(self, _):
+                raise AssertionError("roster items read before metadata admission")
+
         with self.assertRaisesRegex(ValueError, "digest mismatch"):
             self.model.restore_rank_one_with_retention(payload + b" ", pin, Unreadable(), Unreadable())
         with self.assertRaisesRegex(ValueError, "different projection recipe"):
             self.model.with_readout_accumulator("f64").restore_rank_one_with_retention(
                 payload, pin, Unreadable(), Unreadable(),
             )
+        for invalid_pair in ([2, 2], [2, 11]):
+            with self.assertRaises(ValueError):
+                self.model.restore_rank_one_with_retention(
+                    payload, pin, UnreadableItems(), [invalid_pair, *pairs[1:]],
+                )
+        original = self.model.rank_one_projection(
+            "output", layer=1, left_f64le=axis, right_f64le=initial_right,
+        )
+        with self.assertRaisesRegex(ValueError, "different projection state"):
+            original.step(UnreadableItems(), pairs, length=.01, retention=guard)
         with self.assertRaisesRegex(ValueError, "roster changed"):
             self.model.restore_rank_one_with_retention(payload, pin, rows[::-1], pairs[::-1])
         restored, rehydrated = self.model.restore_rank_one_with_retention(payload, pin, rows, pairs)
@@ -259,6 +281,22 @@ class NativeCausalLmTests(unittest.TestCase):
             def __len__(self):
                 raise AssertionError("input read before checkpoint admission")
 
+        with self.assertRaisesRegex(ValueError, "different projection state"):
+            st.NativeCausalLmConditionalAnswerSession(
+                trainer.projection_snapshot(), guard, Unreadable(), Unreadable(), length=.01,
+            )
+
+        class UnreadableRows:
+            def __len__(self):
+                return len(rows)
+
+            def __getitem__(self, _):
+                raise AssertionError("pool items read before guard pair admission")
+
+        with self.assertRaises(ValueError):
+            st.NativeCausalLmConditionalAnswerSession.from_bytes(
+                self.model, raw, pin, UnreadableRows(), schedule, rows, [[2, 2], *pairs[1:]],
+            )
         with self.assertRaisesRegex(ValueError, "digest mismatch"):
             st.NativeCausalLmConditionalAnswerSession.from_bytes(
                 self.model, raw + b"0", pin, Unreadable(), Unreadable(), Unreadable(), Unreadable(),
@@ -427,6 +465,33 @@ assert session.checkpoint_with_id() == restored.checkpoint_with_id()
         restored, restored_guard = model.restore_rank_one_with_retention(payload, pin, rows, pairs)
         self.assertEqual(guard.minimum_log_mean_pair_mass, restored_guard.minimum_log_mean_pair_mass)
         self.assertEqual(restored.checkpoint_with_retention(restored_guard), (payload, pin))
+        self.assertIsNone(guard.maximum_log_mean_outside_mass)
+        outside_pairs = [[2, 0]]
+        outside_guard = projection.prepare_retention(rows, outside_pairs, max_mean_mass_drop=0.)
+        self.assertEqual(outside_guard.minimum_mean_pair_mass, 1.)
+        self.assertIsNone(outside_guard.minimum_log_mean_pair_mass)
+        self.assertLess(outside_guard.maximum_log_mean_outside_mass, -790.)
+        body, outside_pin = projection.checkpoint_with_retention(outside_guard)
+        resumed, resume_guard = model.restore_rank_one_with_retention(body, outside_pin, rows, outside_pairs)
+        self.assertEqual(resume_guard.maximum_log_mean_outside_mass, outside_guard.maximum_log_mean_outside_mass)
+        self.assertEqual(resumed.checkpoint_with_retention(resume_guard), (body, outside_pin))
+
+    def test_rank_one_empty_outside_probability_keeps_legacy_checkpoint_encoding(self):
+        config, weights = fixture(vocabulary=2)
+        model = st.NativeCausalLm.from_gpt2(config, weights)
+        projection = model.rank_one_projection("output", layer=1, left_f64le=struct.pack("<4d", 1., 0., 0., 0.))
+        rows = [[0, 1]]
+        pair = [0, 1]
+        score, = projection.score_pairs(rows, [pair])
+        self.assertNotEqual(score["gold_minus_alternative"], 0.)
+        if score["gold_minus_alternative"] < 0.:
+            pair.reverse()
+        guard = projection.prepare_retention(rows, [pair], max_mean_mass_drop=float.fromhex("0x0.0000000000001p-1022"))
+        payload, pin = projection.checkpoint_with_retention(guard)
+        self.assertIsNone(guard.maximum_log_mean_outside_mass)
+        self.assertNotIn("maximum_log_mean_outside_mass_bits", json.loads(payload)["baseline"]["mass"])
+        restored, guard = model.restore_rank_one_with_retention(payload, pin, rows, [pair])
+        self.assertEqual(restored.checkpoint_with_retention(guard), (payload, pin))
 
     def test_scalar_output_real_step_and_bit_exact_restore(self):
         from hashlib import sha256

@@ -240,7 +240,7 @@ impl NativeCausalLmConditionalAnswerSession {
         max_prefix_values: usize,
         epochs: u32,
     ) -> CausalLmResult<Self> {
-        guard.verify_owner(projection)?;
+        guard.verify_checkpoint_owner(projection)?;
         if !(1..=MAX_CONDITIONAL_BANK_ROWS).contains(&prompts.len()) {
             return Err("invalid conditional session pool length".into());
         }

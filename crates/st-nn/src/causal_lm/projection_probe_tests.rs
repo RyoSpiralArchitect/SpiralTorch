@@ -3,6 +3,104 @@ use sha2::{Digest, Sha256};
 use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
+fn five_token_readout(head: [f32; 20], norm: Option<([f32; 4], [f32; 4])>) -> NativeCausalLm {
+    let mut c = config();
+    c["vocab_size"] = json!(5);
+    c["tie_word_embeddings"] = json!(false);
+    let mut p = parameters();
+    let (shape, values) = p.get_mut("wte.weight").unwrap();
+    shape[0] = 5;
+    values.truncate(20);
+    if let Some((gain, bias)) = norm {
+        p.get_mut("ln_f.weight").unwrap().1 = gain.to_vec();
+        p.get_mut("ln_f.bias").unwrap().1 = bias.to_vec();
+    }
+    p.insert("lm_head.weight".into(), (vec![5, 4], head.to_vec()));
+    NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&c).unwrap(),
+        &archive(&p),
+        Default::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn binding_observation_ignores_common_vocabulary_weight() {
+    let model = five_token_readout(
+        std::array::from_fn(|i| if i % 4 == 0 { 67_108_864. } else { 0. }),
+        None,
+    );
+    let prompts = vec![vec![4, 2, 1], vec![2, 1], vec![3, 1, 2], vec![1, 2]];
+    let binding = CausalLmAnswerBinding {
+        ids: [0, 1],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    for precision in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F32WideBackward,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let m = model.with_readout_accumulator(precision);
+        let p = NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4])
+            .unwrap();
+        let out = p
+            .observe_binding_gradients(&prompts, &[0, 1, 1, 0], binding)
+            .unwrap();
+        assert!((out.candidate_mass.loss - (2.5_f64).ln()).abs() < 1e-14);
+        assert_eq!(out.candidate_mass.gradient, [0.; 4], "{precision:?}");
+        assert_eq!(out.conditional.gradient, [0.; 4], "{precision:?}");
+    }
+}
+
+#[test]
+fn binding_observation_retains_saturated_mass_after_decoder_pullback() {
+    let m = five_token_readout(
+        [
+            0., 0., 0., 0., 0., 0., 0., 0., -110., 1., 0., 0., -110., 1., 0., 0., -110., 1., 0., 0.,
+        ],
+        Some(([0., 1., 1., 1.], [1., 0., 0., 0.])),
+    )
+    .with_readout_accumulator(CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![vec![4, 2, 1], vec![2, 1], vec![3, 1, 2], vec![1, 2]];
+    let binding = CausalLmAnswerBinding {
+        ids: [0, 1],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    let spec = CausalLmProjectionSpec {
+        layer: 1,
+        site: Output,
+        basis: Diagonal,
+    };
+    let left = [0., 1., 0., 0.];
+    let p =
+        NativeCausalLmRankOneProjection::new(&m, spec.layer, spec.site, &left, &[0.; 4]).unwrap();
+    let o = p
+        .observe_binding_gradients(&prompts, &[0, 1, 1, 0], binding)
+        .unwrap();
+    let (mut loss, mut right) = (sum::Sum::default(), [0.; 4]);
+    for prompt in &prompts {
+        let z = p.last_logits(prompt).unwrap();
+        assert_eq!(z[..2], [0.; 2]);
+        assert!(z[2..].iter().all(|&x| x == z[2]));
+        let ratio = 1.5 * f64::from(z[2]).exp();
+        let share = ratio / (1. + ratio);
+        assert!(share > 0. && share as f32 == 0.);
+        loss.add(ratio.ln_1p());
+        let (_, gradient) = m.fixed_left_contrast(prompt, 2, 0, spec, &left).unwrap();
+        for (reference, normalized) in right.iter_mut().zip(gradient) {
+            *reference += share * normalized / prompts.len() as f64;
+        }
+    }
+    let loss = loss.value() / prompts.len() as f64;
+    assert!((o.candidate_mass.loss / loss - 1.).abs() < 1e-12);
+    assert!(right.iter().any(|x| x.abs() > 1e-51));
+    for (actual, reference) in o.candidate_mass.gradient.iter().zip(right) {
+        assert!((actual - reference).abs() <= reference.abs() * 1e-6);
+    }
+}
+
 #[test]
 fn conditional_session_admits_even_the_unanchored_guard_rows() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
@@ -770,6 +868,181 @@ fn retention_rechecks_anchor_limits_on_an_identical_receiving_projection() {
     assert!(wide_again
         .step_conditional_answers_retaining(&prompts, &keep, cfg, &mut guard)
         .is_ok());
+}
+
+#[test]
+fn sign_only_checkpoint_refuses_when_a_nonanchor_cannot_be_restored() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let make = |m| {
+        NativeCausalLmRankOneProjection::new(m, 1, Output, &[0., 1., 0., 0.], &[0.; 4]).unwrap()
+    };
+    let wide = make(&m);
+    let rows = vec![vec![4, 8], vec![4, 8, 2, 1]];
+    let scores = wide.score_answer_pairs(&rows, &[[2, 7]; 2]).unwrap();
+    let mut pairs = [[2, 7]; 2];
+    for (i, s) in scores.iter().enumerate() {
+        assert_ne!(s.gold_minus_alternative, 0.);
+        if (s.gold_minus_alternative > 0.) != (i == 0) {
+            pairs[i].reverse();
+        }
+    }
+    let guard = wide
+        .prepare_conditional_margin_retention(&rows, &pairs)
+        .unwrap();
+    assert_eq!(guard.protected_count(), 1);
+    let mut limited = m.clone();
+    limited.limits.max_attention_pairs = limited.config.layers * limited.config.heads * 4;
+    let narrow = make(&limited);
+    assert_eq!(narrow.projection_id(), wide.projection_id());
+    assert!(guard.verify_owner(&narrow).is_ok());
+    assert!(narrow
+        .checkpoint_with_retention(&guard)
+        .unwrap_err()
+        .to_string()
+        .contains("attention pairs"));
+    let (bytes, pin) = wide.checkpoint_with_retention(&guard).unwrap();
+    let (restored, guard) =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &pin)
+            .unwrap()
+            .restore(&rows, &pairs)
+            .unwrap();
+    assert_eq!(
+        restored.checkpoint_with_retention(&guard).unwrap(),
+        (bytes, pin)
+    );
+}
+
+#[test]
+fn guarded_checkpoint_pins_the_underflowed_outside_ceiling() {
+    let m = five_token_readout(
+        [
+            0., 0., 0., 0., -1., 0., 0., 0., -800., 0., 0., 0., -800., 0., 0., 0., -801., 0., 0.,
+            0.,
+        ],
+        Some(([0.; 4], [1., 0., 0., 0.])),
+    );
+    let p =
+        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4]).unwrap();
+    let rows = vec![vec![1, 2]];
+    let pairs = [[0, 1]];
+    let guard = p
+        .prepare_conditional_margin_and_mass_retention(&rows, &pairs, 0.)
+        .unwrap();
+    let (bytes, pin) = p.checkpoint_with_retention(&guard).unwrap();
+    let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let log_bits = record["baseline"]["mass"]["maximum_log_mean_outside_mass_bits"]
+        .as_u64()
+        .unwrap();
+    assert!(f64::from_bits(log_bits) < -790.);
+    let (restored, guard) =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &pin)
+            .unwrap()
+            .restore(&rows, &pairs)
+            .unwrap();
+    assert_eq!(
+        restored.checkpoint_with_retention(&guard).unwrap(),
+        (bytes, pin)
+    );
+    record["baseline"]["mass"]
+        .as_object_mut()
+        .unwrap()
+        .remove("maximum_log_mean_outside_mass_bits");
+    let legacy = serde_json::to_vec(&record).unwrap();
+    let legacy_pin = format!("sha256:{:x}", Sha256::digest(&legacy));
+    let plan = NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &legacy, &legacy_pin)
+        .unwrap();
+    assert!(
+        matches!(plan.restore(&rows, &pairs), Err(e) if e.to_string().contains("baseline does not reproduce"))
+    );
+}
+
+#[test]
+fn both_mass_guards_reject_an_underflowed_regression_on_the_same_real_candidate() {
+    let make = |outside: f32| {
+        let m = five_token_readout(
+            [
+                0., 1., 0., 0., 0., -1., 0., 0., -800., outside, 0., 0., -800., outside, 0., 0.,
+                -800., outside, 0., 0.,
+            ],
+            Some(([0., 1., 1., 1.], [1., 0., 0., 0.])),
+        );
+        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4]).unwrap()
+    };
+    let rows = vec![vec![4, 2, 1]];
+    let probe = make(2.);
+    let gap = probe.score_answer_pairs(&rows, &[[0, 1]]).unwrap()[0].gold_minus_alternative;
+    assert_ne!(gap, 0.);
+    // Improving the oriented margin increases the outside log-odds:
+    // the outside logit has slope 2 along the gold coordinate, while
+    // logsumexp of the two inside logits has slope at most 1.
+    let (start, pairs) = if gap > 0. {
+        (probe, [[0, 1]])
+    } else {
+        (make(-2.), [[1, 0]])
+    };
+    let cfg = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 1,
+        mass_inward_cosine: None,
+    };
+    let id = start.projection_id();
+    let mut direct = start.clone();
+    let accepted = direct.step_conditional_answers(&rows, &pairs, cfg).unwrap();
+    assert!(accepted.committed);
+    assert!(accepted.after.conditional_ce < accepted.before.conditional_ce);
+    assert_eq!(
+        (
+            accepted.before.candidate_mass_nll,
+            accepted.after.candidate_mass_nll
+        ),
+        (0., 0.)
+    );
+    assert!(
+        accepted.after.log_candidate_mass_nll.unwrap()
+            > accepted.before.log_candidate_mass_nll.unwrap()
+    );
+
+    let mut batch = start.clone();
+    let held = batch
+        .step_conditional_answers(
+            &rows,
+            &pairs,
+            CausalLmConditionalAnswerConfig {
+                mass_inward_cosine: Some(0.),
+                ..cfg
+            },
+        )
+        .unwrap();
+    assert!(!held.committed);
+    assert_eq!(held.mass_gradient_l2, Some(0.));
+    assert_eq!(
+        held.trials[0].projection_id,
+        accepted.trials[0].projection_id
+    );
+    assert_eq!(held.trials[0].point, accepted.after);
+    assert_eq!(batch.projection_id(), id);
+
+    let mut roster = start;
+    let mut guard = roster
+        .prepare_conditional_margin_and_mass_retention(&rows, &pairs, 0.)
+        .unwrap();
+    let checkpoint = roster.checkpoint_with_retention(&guard).unwrap();
+    let held = roster
+        .step_conditional_answers_retaining(&rows, &pairs, cfg, &mut guard)
+        .unwrap();
+    assert!(!held.step.committed);
+    assert_eq!(
+        held.step.trials[0].projection_id,
+        accepted.trials[0].projection_id
+    );
+    let check = held.retention[0].as_ref().unwrap();
+    assert_eq!(check.nonpositive, 0);
+    let outside = check.mass.as_ref().unwrap().log_outside.as_ref().unwrap();
+    assert!(outside.log_mean_outside_mass.unwrap() > outside.maximum_log_mean_outside_mass);
+    assert_eq!(
+        roster.checkpoint_with_retention(&guard).unwrap(),
+        checkpoint
+    );
 }
 
 #[test]

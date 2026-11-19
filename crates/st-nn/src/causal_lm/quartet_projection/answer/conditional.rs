@@ -1,5 +1,5 @@
 //! Optimize two-candidate choice itself, optionally retaining candidate mass.
-use super::observation::candidate_mass_loss;
+use super::observation::{candidate_mass_measure, CandidateMassMeasure};
 use super::*;
 use crate::causal_lm::scalar_output::logistic;
 use std::sync::Weak;
@@ -115,6 +115,20 @@ pub struct CausalLmConditionalAnswerPoint {
     pub conditional_ce: f64,
     /// Mean -log(P(gold)+P(alternative)), not minus log of the batch mean.
     pub candidate_mass_nll: f64,
+    /// Natural log of the mean mass loss when positive but subnormal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_candidate_mass_nll: Option<f64>,
+}
+
+impl CausalLmConditionalAnswerPoint {
+    fn permits_mass_update(&self, before: &Self) -> bool {
+        match (self.log_candidate_mass_nll, before.log_candidate_mass_nll) {
+            (Some(after), Some(before)) => after <= before,
+            (Some(_), None) => before.candidate_mass_nll > 0.,
+            (None, Some(_)) => self.candidate_mass_nll == 0.,
+            (None, None) => self.candidate_mass_nll <= before.candidate_mass_nll,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -215,17 +229,23 @@ fn direction(choice: &[f64], mass: Option<(&[f64], f64)>) -> Option<(Vec<f64>, b
 struct PointSum {
     ce: sum::Sum,
     mass: sum::Sum,
+    log_mass: Option<f64>,
 }
 
 impl PointSum {
-    fn add(&mut self, ce: f64, mass: f64) {
+    fn add(&mut self, ce: f64, mass: CandidateMassMeasure) {
         self.ce.add(ce);
-        self.mass.add(mass);
+        self.mass.add(mass.loss);
+        self.log_mass = sum::add_logs(self.log_mass, mass.log_loss);
     }
     fn finish(self, n: usize) -> CausalLmConditionalAnswerPoint {
         CausalLmConditionalAnswerPoint {
             conditional_ce: self.ce.mean(n as u64),
             candidate_mass_nll: self.mass.mean(n as u64),
+            log_candidate_mass_nll: self
+                .log_mass
+                .map(|log| log - (n as f64).ln())
+                .filter(|&log| log < f64::MIN_POSITIVE.ln()),
         }
     }
 }
@@ -371,13 +391,21 @@ impl NativeCausalLmRankOneProjection {
         Ok(())
     }
 
+    /// Check that the bank belongs to this trajectory before reading its index roster.
+    pub fn admit_conditional_prefix_bank(
+        &self,
+        bank: &CausalLmConditionalAnswerPrefixBank,
+    ) -> CausalLmResult<()> {
+        self.verify_conditional_origin(&bank.origin, bank.spec)
+    }
+
     fn select_conditional_rows(
         &self,
         bank: &CausalLmConditionalAnswerPrefixBank,
         indices: &[usize],
         pairs: &[[usize; 2]],
     ) -> CausalLmResult<PreparedConditionalRows> {
-        self.verify_conditional_origin(&bank.origin, bank.spec)?;
+        self.admit_conditional_prefix_bank(bank)?;
         let m = &self.current;
         if indices.len() != pairs.len() || !(1..=MAX_OUTPUT_CONTRAST_ROWS).contains(&indices.len())
         {
@@ -628,16 +656,17 @@ impl NativeCausalLmRankOneProjection {
             )?;
             let z = row.logits.data();
             let (ce, slope) = logistic(f64::from(z[y]) - f64::from(z[a]));
-            let mass_loss = if let Some(out) = &mut mass {
-                let (loss, gradient) = self.candidate_mass_gradient(row.clone(), [y, a])?;
+            let mass_measure = if let Some(out) = &mut mass {
+                let (measure, gradient) =
+                    self.candidate_mass_measured_gradient(row.clone(), [y, a])?;
                 for (s, g) in out.iter_mut().zip(gradient) {
                     s.add(g);
                 }
-                loss
+                measure
             } else {
-                candidate_mass_loss(z, [y, a])?
+                candidate_mass_measure(z, [y, a])?
             };
-            point.add(ce, mass_loss);
+            point.add(ce, mass_measure);
             let mut v = vec![0.; z.len()];
             v[y] = 1.;
             v[a] = -1.;
@@ -723,14 +752,13 @@ impl NativeCausalLmRankOneProjection {
                 let z = logits.data();
                 point.add(
                     logistic(f64::from(z[y]) - f64::from(z[a])).0,
-                    candidate_mass_loss(z, [y, a])?,
+                    candidate_mass_measure(z, [y, a])?,
                 );
             }
             let after = point.finish(n);
             let drop = before.conditional_ce - after.conditional_ce;
-            let ordinary_accepted = drop > 0.
-                && drop >= required
-                && (!guarded || after.candidate_mass_nll <= before.candidate_mass_nll);
+            let ordinary_accepted =
+                drop > 0. && drop >= required && (!guarded || after.permits_mass_update(&before));
             let mut accepted = ordinary_accepted;
             if let Some(deck) = retention {
                 let check = ordinary_accepted
@@ -764,6 +792,31 @@ impl NativeCausalLmRankOneProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guarded_mass_objective_compares_losses_below_f64_range() {
+        let point = |row: &[f32]| {
+            let mut sum = PointSum::default();
+            sum.add(
+                logistic(f64::from(row[0]) - f64::from(row[1])).0,
+                candidate_mass_measure(row, [0, 1]).unwrap(),
+            );
+            sum.finish(1)
+        };
+        let before = point(&[0., -1., -800.]);
+        let regress = point(&[0., -2., -799.]);
+        let improve = point(&[0., -2., -801.]);
+        let empty = point(&[0., -1.]);
+        assert_eq!(
+            (before.candidate_mass_nll, regress.candidate_mass_nll),
+            (0., 0.)
+        );
+        assert!(regress.conditional_ce < before.conditional_ce);
+        assert!(!regress.permits_mass_update(&before));
+        assert!(improve.permits_mass_update(&before));
+        assert!(!before.permits_mass_update(&empty));
+        assert!(empty.permits_mass_update(&before));
+    }
 
     #[test]
     fn projected_direction_gains_on_both_objectives_or_holds() {

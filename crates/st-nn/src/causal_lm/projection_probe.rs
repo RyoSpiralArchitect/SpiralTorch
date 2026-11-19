@@ -365,13 +365,23 @@ impl NativeCausalLm {
         seed: &Tensor,
         capture: &mut dyn ProjectionCapture,
     ) -> CausalLmResult<()> {
+        let upstream = self.vocabulary_head_pullback(seed)?;
+        self.pull_projection_upstream(row, spec, upstream, capture)
+    }
+
+    pub(super) fn pull_projection_upstream(
+        &self,
+        row: ProjectionLastRow,
+        spec: CausalLmProjectionSpec,
+        upstream: Tensor,
+        capture: &mut dyn ProjectionCapture,
+    ) -> CausalLmResult<()> {
         let ProjectionLastRow {
             steps,
             checkpoints,
             selected,
             ..
         } = row;
-        let upstream = self.vocabulary_head_pullback(seed)?;
         self.decoder_parameter_pullback(
             checkpoints,
             steps,

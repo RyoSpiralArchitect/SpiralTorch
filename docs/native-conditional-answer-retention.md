@@ -57,12 +57,17 @@ fn train(
   reproduce the verdict unless `log_pair` is present. A positive floor
   below the normal f64 probability range is compared in log space;
   use `log_mean_pair_mass >= minimum_log_mean_pair_mass` in that
-  receipt. These are logarithms of arithmetic means, not means of
-  logarithms. All measurements refer to the same rows.
+  receipt. If `log_outside` is present, compare
+  `log_mean_outside_mass <= maximum_log_mean_outside_mass` instead.
+  This handles a positive outside ceiling below the normal f64 range.
+  These are logarithms of arithmetic means, not means of logarithms.
+  All measurements refer to the same rows.
 - `mass_inward_cosine` controls a different check: it can project the
   search direction and require non-increasing mean negative log pair
-  mass on the **update batch**. Set it to `None` for direct conditional
-  descent under the same roster floor. For accepted trials read
+  mass on the **update batch**. The optional `log_candidate_mass_nll`
+  reports the log of that mean loss when it is positive but subnormal.
+  Set `mass_inward_cosine` to `None` for direct conditional descent
+  under the same roster floor. For accepted trials read
   `step.committed`; inspected trials expose their roster checks in
   `retention`, including the mass and its floor when enabled.
 - Keep the guard with that projection trajectory. A hold preserves
@@ -93,7 +98,9 @@ let (mut projection, mut guard) = plan.restore(guard_prompts, guard_pairs)?;
 Admission checks the size, pin, format and both projection identities
 without any model evaluation. Restoration requires the exact original
 ordered guard roster, checks its work budget, and replays it at the
-original factors. The signed margins, mean mass floor, outside ceiling,
+original factors. Saving also checks that the entire original roster,
+including non-anchors, fits the current model's work budget. The signed
+margins, mean mass floor, outside ceiling,
 and active log-space floor must reproduce bit-for-bit. The saved endpoint
 must pass that reconstructed guard before it is returned.
 
@@ -101,8 +108,10 @@ This projection checkpoint binds the guard and projection, not a training-data
 cursor or schedule. It contains factors, summary statistics, and a roster digest,
 not prompt rows or cached activations; treat it as training data rather than
 as a redacted export. The v3 format does not load older research-only
-checkpoints. A different baseline or schema is an error, not permission
-to start a new guard at the saved endpoint.
+checkpoints. A v3 checkpoint that predates the log-outside field is
+rejected if rebuilding the roster requires that field. A different
+baseline or schema is an error, not permission to start a new guard
+at the saved endpoint.
 
 For a fixed ordered schedule, use `NativeCausalLmConditionalAnswerSession`
 to bind those weights and the guard to a batch cursor. It supports repeated

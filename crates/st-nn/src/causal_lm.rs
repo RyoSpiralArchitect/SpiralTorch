@@ -106,12 +106,12 @@ pub use quartet_projection::{
     CausalLmConditionalAnswerSessionStep, CausalLmConditionalAnswerStep,
     CausalLmConditionalAnswerTrial, CausalLmConditionalMarginRetention,
     CausalLmConditionalRetentionCheck, CausalLmConditionalRetentionLogMassCheck,
-    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
-    CausalLmConditionalRetentionRestore, CausalLmLossGradient, CausalLmPairedAnswerScore,
-    CausalLmPreparedConditionalAnswerBatch, CausalLmQuartetObjective, CausalLmQuartetStep,
-    CausalLmRetainedConditionalAnswerStep, ConditionalCheckpointPublicationUncertain,
-    NativeCausalLmConditionalAnswerSession, NativeCausalLmProjectionPrefix,
-    NativeCausalLmRankOneProjection, MAX_CONDITIONAL_BANK_ROWS,
+    CausalLmConditionalRetentionLogOutsideCheck, CausalLmConditionalRetentionMassCheck,
+    CausalLmConditionalRetentionOutsideCheck, CausalLmConditionalRetentionRestore,
+    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmPreparedConditionalAnswerBatch,
+    CausalLmQuartetObjective, CausalLmQuartetStep, CausalLmRetainedConditionalAnswerStep,
+    ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
+    NativeCausalLmProjectionPrefix, NativeCausalLmRankOneProjection, MAX_CONDITIONAL_BANK_ROWS,
 };
 pub use readout_policy::{CausalLmHeadPrecision, CausalLmReadoutAccumulator};
 pub use repetition::CausalLmRepetition;

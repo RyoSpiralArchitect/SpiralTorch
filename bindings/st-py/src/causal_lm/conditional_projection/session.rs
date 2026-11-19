@@ -59,6 +59,10 @@ impl PyConditionalSession {
     ) -> PyResult<Self> {
         let policy = config(length, max_trials, mass_inward_cosine)?;
         let cap = limit(max_prefix_values, 1 << 20)?;
+        retention
+            .0
+            .verify_checkpoint_owner(&projection.0)
+            .map_err(error)?;
         let n = roster_size(schedule, Self::MAX_BATCHES)?;
         let epochs = u32::try_from(limit(epochs, 1)?).map_err(error)?;
         NativeCausalLmConditionalAnswerSession::scheduled_positions(n, epochs).map_err(error)?;
@@ -117,8 +121,12 @@ impl PyConditionalSession {
         {
             return Err(error("conditional session resume input shape changed"));
         }
-        let schedule = batches(schedule, batch_count)?;
         let pairs = pairs(guard_pairs, guard_count)?;
+        resume
+            .guard_plan()
+            .admit_roster_pairs(&pairs)
+            .map_err(error)?;
+        let schedule = batches(schedule, batch_count)?;
         let pool = read_prompts(pool, n, |lengths| {
             resume.pool_input_values(lengths, &schedule)
         })?;
