@@ -75,9 +75,18 @@ impl PairObservation {
     }
 }
 
-/// Gradient of -ln(P(a)+P(b)). Factoring out the outside mass avoids
-/// subtracting two nearly equal probabilities for the inside candidates.
-pub(super) fn candidate_mass_seed(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResult<(f64, Tensor)> {
+pub(super) struct CandidateMassSeed {
+    pub(super) loss: f64,
+    pub(super) outside_share: f64,
+    pub(super) normalized: Tensor,
+}
+
+/// Factor the gradient of -ln(P(a)+P(b)) before rounding the seed to f32.
+/// Apply the outside share in f64 after the linear pullback.
+pub(super) fn candidate_mass_seed(
+    z: &[f32],
+    [a, b]: [usize; 2],
+) -> CausalLmResult<CandidateMassSeed> {
     if z.iter().any(|x| !x.is_finite()) {
         return Err("nonfinite binding observation logits".into());
     }
@@ -89,7 +98,11 @@ pub(super) fn candidate_mass_seed(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResu
     };
     let outside_max = outside().fold(f64::NEG_INFINITY, f64::max);
     if outside_max == f64::NEG_INFINITY {
-        return Ok((0., Tensor::from_vec(1, z.len(), vec![0.; z.len()])?));
+        return Ok(CandidateMassSeed {
+            loss: 0.,
+            outside_share: 0.,
+            normalized: Tensor::from_vec(1, z.len(), vec![0.; z.len()])?,
+        });
     }
     let outside_den = outside().map(|v| (v - outside_max).exp()).sum::<f64>();
     let pair_max = f64::from(z[a].max(z[b]));
@@ -98,21 +111,23 @@ pub(super) fn candidate_mass_seed(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResu
     let pair_den = ga + gb;
     let outside_vs_pair = (outside_max - pair_max) + outside_den.ln() - pair_den.ln();
     let (loss, negative_share) = logistic(-outside_vs_pair);
-    let share = -negative_share;
-    let scale = share / outside_den;
     let seed = z
         .iter()
         .enumerate()
         .map(|(i, &v)| {
             let g = match i {
-                i if i == a => -share * ga / pair_den,
-                i if i == b => -share * gb / pair_den,
-                _ => scale * (f64::from(v) - outside_max).exp(),
+                i if i == a => -ga / pair_den,
+                i if i == b => -gb / pair_den,
+                _ => (f64::from(v) - outside_max).exp() / outside_den,
             };
             g as f32
         })
         .collect();
-    Ok((loss, Tensor::from_vec(1, z.len(), seed)?))
+    Ok(CandidateMassSeed {
+        loss,
+        outside_share: -negative_share,
+        normalized: Tensor::from_vec(1, z.len(), seed)?,
+    })
 }
 
 #[cfg(test)]
@@ -121,13 +136,25 @@ mod tests {
 
     #[test]
     fn saturated_pair_mass_keeps_the_outside_probability_and_seed() {
-        let (loss, seed) = candidate_mass_seed(&[45., 44., 0.], [0, 1]).unwrap();
-        assert!(loss > 0. && loss < 1e-19);
-        assert!(seed.data()[0] < 0. && seed.data()[1] < 0. && seed.data()[2] > 0.);
-        assert!(f64::from(seed.data().iter().sum::<f32>()).abs() < 1e-26);
-        let (loss, seed) = candidate_mass_seed(&[45., 44.], [1, 0]).unwrap();
-        assert_eq!(loss, 0.);
-        assert_eq!(seed.data(), &[0., 0.]);
+        let seed = candidate_mass_seed(&[45., 44., 0.], [0, 1]).unwrap();
+        assert!(seed.loss > 0. && seed.loss < 1e-19);
+        let [a, b, outside] = seed.normalized.data() else {
+            panic!("expected a three-token seed");
+        };
+        assert!(*a < 0. && *b < 0. && *outside == 1.);
+        assert!((f64::from(*a) + f64::from(*b) + 1.).abs() < 1e-7);
+        let empty = candidate_mass_seed(&[45., 44.], [1, 0]).unwrap();
+        assert_eq!(empty.loss, 0.);
+        assert_eq!(empty.outside_share, 0.);
+        assert_eq!(empty.normalized.data(), &[0., 0.]);
         assert!(candidate_mass_seed(&[0., f32::NAN, 0.], [0, 1]).is_err());
+    }
+
+    #[test]
+    fn outside_share_can_be_below_f32_range_without_losing_the_seed() {
+        let seed = candidate_mass_seed(&[0., 0., -104.], [0, 1]).unwrap();
+        assert!(seed.loss > 0. && seed.outside_share > 0.);
+        assert_eq!(seed.outside_share as f32, 0.);
+        assert_eq!(seed.normalized.data(), &[-0.5, -0.5, 1.]);
     }
 }

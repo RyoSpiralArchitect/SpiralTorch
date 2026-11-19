@@ -56,6 +56,67 @@ fn binding_observation_splits_ce_without_changing_the_training_adjoint() {
 }
 
 #[test]
+fn binding_observation_components_match_separate_finite_differences() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![
+        vec![4, 8, 2, 1],
+        vec![8, 4, 1],
+        vec![7, 1, 2, 3],
+        vec![1, 2, 3],
+    ];
+    let binding = CausalLmAnswerBinding {
+        ids: [2, 7],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    let start = [0.01, -0.02, 0., 0.03];
+    let eps = 0.01;
+    for site in [Query, Key, Value, Output] {
+        let projection = |right: &[f64]| {
+            NativeCausalLmRankOneProjection::new(&m, 1, site, &[0., 0.6, -0.8, 0.], right).unwrap()
+        };
+        let base = projection(&start);
+        for gold in [[2, 7, 7, 2], [7, 2, 2, 7]] {
+            let observed = base
+                .observe_binding_gradients(&prompts, &gold, binding)
+                .unwrap();
+            let reference = |right: &[f64]| {
+                let p = projection(right);
+                let mut losses = [0., 0.];
+                for (ids, y) in prompts.iter().zip(gold) {
+                    let z = p.last_logits(ids).unwrap();
+                    let pair = binding.ids.map(|i| f64::from(z[i]).exp());
+                    let full = z.iter().map(|&v| f64::from(v).exp()).sum::<f64>();
+                    losses[0] += (full / (pair[0] + pair[1])).ln();
+                    losses[1] += (pair[0] + pair[1]).ln() - f64::from(z[y]);
+                }
+                losses.map(|loss| loss / prompts.len() as f64)
+            };
+            let components = [&observed.candidate_mass, &observed.conditional];
+            for (component, loss) in components.into_iter().zip(reference(&start)) {
+                assert!((component.loss - loss).abs() < 1e-12);
+            }
+            for i in 0..start.len() {
+                let mut plus = start;
+                let mut minus = start;
+                plus[i] += eps;
+                minus[i] -= eps;
+                let above = reference(&plus);
+                let below = reference(&minus);
+                for (j, component) in components.into_iter().enumerate() {
+                    let finite = (above[j] - below[j]) / (2. * eps);
+                    let actual = component.gradient[i];
+                    assert!(
+                        (finite - actual).abs() < 1e-5 + finite.abs() * 2e-3,
+                        "{site:?} component {j} coordinate {i}: {finite} vs {actual}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn paired_answer_scores_match_serving_logits_at_each_placement() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let prompts = vec![vec![4, 8, 2, 1], vec![8, 4, 1]];

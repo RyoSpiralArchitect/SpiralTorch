@@ -198,10 +198,18 @@ impl NativeCausalLmRankOneProjection {
                 let gap = f64::from(z[b.ids[0]]) - f64::from(z[b.ids[1]]);
                 let g = m.fixed_left_seed(row.clone(), d, self.spec, &self.left)?;
                 if let Some(observer) = &mut split {
-                    let (mass_loss, mass_seed) = candidate_mass_seed(z, b.ids)?;
-                    let mass = m.fixed_left_seed(row.clone(), &mass_seed, self.spec, &self.left)?;
+                    let mass_seed = candidate_mass_seed(z, b.ids)?;
+                    let mut mass = m.fixed_left_seed(
+                        row.clone(),
+                        &mass_seed.normalized,
+                        self.spec,
+                        &self.left,
+                    )?;
+                    for g in &mut mass {
+                        *g *= mass_seed.outside_share;
+                    }
                     observer.add(
-                        mass_loss,
+                        mass_seed.loss,
                         mass,
                         gap,
                         if y == b.ids[0] { 1. } else { -1. },
