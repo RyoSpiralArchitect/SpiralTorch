@@ -11,6 +11,45 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 
+/// An atomic publication error with the visibility of the new destination.
+#[derive(Debug)]
+pub struct AtomicPublishError {
+    source: io::Error,
+    destination_installed: bool,
+}
+
+impl AtomicPublishError {
+    /// The complete file was installed, but cleanup or directory sync failed.
+    pub fn destination_installed(&self) -> bool {
+        self.destination_installed
+    }
+
+    pub fn into_io_error(self) -> io::Error {
+        self.source
+    }
+}
+
+impl From<io::Error> for AtomicPublishError {
+    fn from(source: io::Error) -> Self {
+        Self {
+            source,
+            destination_installed: false,
+        }
+    }
+}
+
+impl std::fmt::Display for AtomicPublishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(f)
+    }
+}
+
+impl std::error::Error for AtomicPublishError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 const MAX_TEMPFILE_ATTEMPTS: u32 = 128;
 
 /// Write a complete byte snapshot and atomically replace `path`.
@@ -29,11 +68,26 @@ pub fn atomic_create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     publish_with(path, true, |f| f.write_all(bytes))
 }
 
+/// Publish without replacing an existing file, distinguishing post-install errors.
+pub fn atomic_create_new_with_status(path: &Path, bytes: &[u8]) -> Result<(), AtomicPublishError> {
+    publish_detailed(path, true, |f| f.write_all(bytes), sync_parent)
+}
+
 fn publish_with(
     path: &Path,
     create_only: bool,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> io::Result<()> {
+    publish_detailed(path, create_only, write, sync_parent)
+        .map_err(AtomicPublishError::into_io_error)
+}
+
+fn publish_detailed(
+    path: &Path,
+    create_only: bool,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+    finish: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<(), AtomicPublishError> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -58,30 +112,50 @@ fn publish_with(
                 last_collision = Some(source);
                 continue;
             }
-            Err(source) => return Err(source),
+            Err(source) => return Err(source.into()),
         };
+        let mut destination_installed = false;
         let result = (|| {
             write(&mut file)?;
             file.flush()?;
             file.sync_all()?;
             close_before_replace(file);
             install(&temporary, path, create_only)?;
-            #[cfg(unix)]
-            File::open(parent)?.sync_all()?;
+            destination_installed = true;
+            #[cfg(not(windows))]
+            if create_only {
+                fs::remove_file(&temporary)?;
+            }
+            finish(parent)?;
             Ok::<(), io::Error>(())
         })();
         if let Err(source) = result {
             let _ = fs::remove_file(&temporary);
-            return Err(source);
+            return Err(AtomicPublishError {
+                source,
+                destination_installed,
+            });
         }
         return Ok(());
     }
-    Err(last_collision.unwrap_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "could not reserve an atomic runtime-state file",
-        )
-    }))
+    Err(last_collision
+        .unwrap_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "could not reserve an atomic runtime-state file",
+            )
+        })
+        .into())
+}
+
+fn sync_parent(parent: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return File::open(parent)?.sync_all();
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        Ok(())
+    }
 }
 
 fn close_before_replace(file: fs::File) {
@@ -94,8 +168,7 @@ fn close_before_replace(file: fs::File) {
 #[cfg(not(windows))]
 fn install(source: &Path, destination: &Path, create_only: bool) -> io::Result<()> {
     if create_only {
-        fs::hard_link(source, destination)?;
-        fs::remove_file(source)
+        fs::hard_link(source, destination)
     } else {
         fs::rename(source, destination)
     }
@@ -148,15 +221,39 @@ mod tests {
         let previous = dir.path().join("previous.json");
         let failed = dir.path().join("next.json");
         atomic_create_new(&previous, b"retained").unwrap();
-        let result = publish_with(&failed, true, |f| {
-            f.write_all(b"partial")?;
-            assert!(!failed.exists());
-            Err(io::Error::other("injected write failure"))
-        });
-        assert!(result.is_err());
+        let result = publish_detailed(
+            &failed,
+            true,
+            |f| {
+                f.write_all(b"partial")?;
+                assert!(!failed.exists());
+                Err(io::Error::other("injected write failure"))
+            },
+            sync_parent,
+        );
+        assert!(!result.unwrap_err().destination_installed());
         assert!(!failed.exists());
         assert_eq!(fs::read(previous).unwrap(), b"retained");
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failure_after_install_reports_visibility_without_clobbering() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("next.bin");
+        let error = publish_detailed(
+            &dest,
+            true,
+            |f| f.write_all(b"complete"),
+            |_| Err(io::Error::other("injected directory sync failure")),
+        )
+        .unwrap_err();
+        assert!(error.destination_installed());
+        assert_eq!(fs::read(&dest).unwrap(), b"complete");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        let collision = atomic_create_new_with_status(&dest, b"other").unwrap_err();
+        assert!(!collision.destination_installed());
+        assert_eq!(fs::read(&dest).unwrap(), b"complete");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

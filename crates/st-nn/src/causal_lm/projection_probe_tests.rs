@@ -4,6 +4,52 @@ use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
 #[test]
+fn conditional_session_admits_even_the_unanchored_guard_rows() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let make = |m| {
+        NativeCausalLmRankOneProjection::new(m, 1, Output, &[0., 0.6, -0.8, 0.], &[0.; 4]).unwrap()
+    };
+    let wide = make(&m);
+    let rows = vec![vec![4, 8], vec![4, 8, 2, 1]];
+    let scored = wide.score_answer_pairs(&rows, &[[2, 7]; 2]).unwrap();
+    let pairs: Vec<_> = scored
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if (s.gold_minus_alternative > 0.) == (i == 0) {
+                [2, 7]
+            } else {
+                [7, 2]
+            }
+        })
+        .collect();
+    let guard = wide
+        .prepare_conditional_margin_retention(&rows, &pairs)
+        .unwrap();
+    assert_eq!(guard.protected_count(), 1);
+    assert!(guard.baseline_margins()[1] < 0.);
+    let mut limited = m.clone();
+    limited.limits.max_attention_pairs = limited.config.layers * limited.config.heads * 4;
+    let narrow = make(&limited);
+    assert_eq!(wide.projection_id(), narrow.projection_id());
+    assert!(narrow.score_answer_pairs(&rows[..1], &pairs[..1]).is_ok());
+    let policy = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 1,
+        mass_inward_cosine: None,
+    };
+    let result = NativeCausalLmConditionalAnswerSession::new(
+        &narrow,
+        &guard,
+        &rows[..1],
+        vec![(vec![0], pairs[..1].to_vec())],
+        policy,
+        8,
+    );
+    assert!(matches!(result, Err(e) if e.to_string().contains("attention pairs")));
+}
+
+#[test]
 fn conditional_session_pins_schedule_and_publishes_before_advancing() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let mut p = NativeCausalLmRankOneProjection::new(

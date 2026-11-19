@@ -158,8 +158,11 @@ impl PyConditionalSession {
         PyRankOne(self.0.projection().clone())
     }
     fn step(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let report = py.detach(|| self.0.step()).map_err(error)?;
-        as_py(py, report)
+        let mut next = self.0.clone();
+        let report = py.detach(|| next.step()).map_err(error)?;
+        let result = as_py(py, report)?;
+        self.0 = next;
+        Ok(result)
     }
     fn checkpoint_with_id<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyBytes>, String)> {
         let (raw, pin) = py.detach(|| self.0.checkpoint()).map_err(error)?;

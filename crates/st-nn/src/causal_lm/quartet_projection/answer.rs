@@ -22,7 +22,7 @@ pub use retention::{
     CausalLmConditionalRetentionCheck, CausalLmConditionalRetentionLogMassCheck,
     CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
     CausalLmConditionalRetentionRestore, CausalLmRetainedConditionalAnswerStep,
-    NativeCausalLmConditionalAnswerSession,
+    ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
 };
 
 /// Optional supervision on the relationship between four indexed prompts.

@@ -8,6 +8,50 @@ use std::path::Path;
 const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
 const HEADER_LIMIT: usize = 4096;
 
+/// A complete checkpoint was installed but publication did not finish.
+/// The live cursor did not advance. Verify any retained file with this pin
+/// before using it for an explicit recovery.
+#[derive(Debug)]
+pub struct ConditionalCheckpointPublicationUncertain {
+    checkpoint_id: String,
+    source: st_core::runtime::AtomicPublishError,
+}
+
+impl ConditionalCheckpointPublicationUncertain {
+    pub fn checkpoint_id(&self) -> &str {
+        &self.checkpoint_id
+    }
+}
+
+impl std::fmt::Display for ConditionalCheckpointPublicationUncertain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "conditional checkpoint installed but publication incomplete (pin {}): {}",
+            self.checkpoint_id, self.source
+        )
+    }
+}
+
+impl std::error::Error for ConditionalCheckpointPublicationUncertain {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+fn publish_checkpoint(path: &Path, (bytes, pin): (Vec<u8>, String)) -> CausalLmResult<String> {
+    match st_core::runtime::atomic_create_new_with_status(path, &bytes) {
+        Ok(()) => Ok(pin),
+        Err(source) if source.destination_installed() => {
+            Err(Box::new(ConditionalCheckpointPublicationUncertain {
+                checkpoint_id: pin,
+                source,
+            }))
+        }
+        Err(source) => Err(source.into_io_error().into()),
+    }
+}
+
 /// Each scheduled occurrence has an ordered pair, even when indices repeat.
 pub type CausalLmConditionalAnswerBatch = (Vec<usize>, Vec<[usize; 2]>);
 
@@ -298,7 +342,7 @@ impl NativeCausalLmConditionalAnswerSession {
 
     pub fn save_checkpoint_new(&self, path: impl AsRef<Path>) -> CausalLmResult<String> {
         files::admit_new(path.as_ref())?;
-        files::save(path.as_ref(), self.checkpoint()?)
+        publish_checkpoint(path.as_ref(), self.checkpoint()?)
     }
 
     /// Publish a complete interval before advancing the live session.
@@ -308,7 +352,14 @@ impl NativeCausalLmConditionalAnswerSession {
         path: impl AsRef<Path>,
     ) -> CausalLmResult<(Vec<CausalLmConditionalAnswerSessionStep>, String)> {
         let count = files::count(self.position(), self.total_batches(), stop)?;
-        files::advance_new(self, count, path.as_ref(), Self::step, Self::checkpoint)
+        files::advance_new_with(
+            self,
+            count,
+            path.as_ref(),
+            Self::step,
+            Self::checkpoint,
+            publish_checkpoint,
+        )
     }
 
     pub fn prepare_resume(
@@ -376,6 +427,30 @@ mod tests {
         }
         assert!(files::count(0, 2048, 1025).is_err());
         assert_eq!(files::count(1024, 2048, 2048).unwrap(), 1024);
+    }
+
+    #[test]
+    fn later_step_error_discards_the_staged_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("failed.bin");
+        let mut cursor = 0;
+        let result = files::advance_new_with(
+            &mut cursor,
+            2,
+            &path,
+            |next| {
+                if *next == 1 {
+                    return Err("injected second batch error".into());
+                }
+                *next += 1;
+                Ok(Some(*next))
+            },
+            |_| -> CausalLmResult<(Vec<u8>, String)> { panic!("invalid interval snapshot") },
+            publish_checkpoint,
+        );
+        assert!(result.unwrap_err().to_string().contains("second batch"));
+        assert_eq!(cursor, 0);
+        assert!(!path.exists());
     }
 }
 

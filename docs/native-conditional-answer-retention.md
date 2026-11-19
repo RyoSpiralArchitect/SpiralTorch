@@ -112,7 +112,13 @@ digest, policy, repeat count, cursor, and accepted-update count.
 `prepare_resume` checks the outer and inner pins before model evaluation.
 Resume requires the exact original pool, ordered batches, and guard roster.
 `advance_to_checkpoint_new` stages at most 1,024 positions and only advances
-the live session after successful no-clobber publication.
+the live session after successful no-clobber publication. If a complete file
+was installed but cleanup or parent-directory sync failed, the live session
+remains at the previous position. The
+`ConditionalCheckpointPublicationUncertain` error carries the staged pin.
+Do not overwrite the path or trust its durability. If the file remains
+readable, verify it against that pin and explicitly resume from it only if
+choosing that checkpoint over the prior live state.
 
 The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
 calls this same implementation without Torch. There is no WASM training

@@ -6,7 +6,8 @@ mod session;
 pub use checkpoint::CausalLmConditionalRetentionRestore;
 pub use session::{
     CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
-    CausalLmConditionalAnswerSessionStep, NativeCausalLmConditionalAnswerSession,
+    CausalLmConditionalAnswerSessionStep, ConditionalCheckpointPublicationUncertain,
+    NativeCausalLmConditionalAnswerSession,
 };
 
 struct Anchor {
@@ -24,6 +25,7 @@ pub struct CausalLmConditionalMarginRetention {
     layer: usize,
     owner: String,
     baseline: Vec<f64>,
+    roster_steps: Arc<[usize]>,
     protected_count: usize,
     mass: Option<MassFloor>,
     initial_projection_id: String,
@@ -241,10 +243,10 @@ impl CausalLmConditionalMarginRetention {
             );
         }
         // Projection identity binds the weights, not the receiving model's work budget.
-        for anchor in self.anchors.iter() {
+        for &steps in self.roster_steps.iter() {
             projection
                 .current
-                .projection_work_dimensions(anchor.steps, projection.spec, false)?;
+                .projection_work_dimensions(steps, projection.spec, false)?;
         }
         Ok(())
     }
@@ -390,6 +392,7 @@ impl NativeCausalLmRankOneProjection {
         Ok(CausalLmConditionalMarginRetention {
             anchors: anchors.into(),
             baseline,
+            roster_steps: prompts.iter().map(Vec::len).collect::<Vec<_>>().into(),
             layer,
             initial_projection_id: owner.clone(),
             owner,

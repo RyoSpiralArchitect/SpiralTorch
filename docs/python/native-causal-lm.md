@@ -1475,3 +1475,9 @@ position without incrementing `accepted_updates`. Training errors do
 not consume it. File checkpoints are no-clobber, and an interval becomes
 live only after its file is published successfully. Keep the pin and
 original inputs separately: the checkpoint carries no token rows.
+If publication reports an installed file but incomplete durability,
+the exception includes its staged pin and the live position is unchanged.
+Do not overwrite the path; verify the file and explicitly reopen it if
+you choose to recover from it. A Python error creating the returned
+reports can occur after successful publication; check the live position
+and `checkpoint_with_id()` before retrying in that case.
