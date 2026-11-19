@@ -1563,3 +1563,18 @@ pinned labeled corpus. Rust enforces the document and per-comparison token
 limits as the JSON is decoded. The example does not need the training
 roster or verify split independence. These are teacher-forced scores,
 not free-generation quality or a speed measurement.
+
+Add `--paired-greedy MAX_NEW_TOKENS STOP_ID` to the conditional comparison
+to run a separate prompt-only decoder on the same cases and pinned variants.
+Each document must have a nonempty masked prompt followed by an unmasked answer
+whose labels match the input IDs exactly, including one final stop ID. The
+whole prompt and generation budget must fit a single scoring window so neither
+route truncates the prompt. All variants get the same greedy full-prefix recipe.
+The decoder never gets the answer IDs or the answer's length.
+
+The private output includes generated token IDs, termination, first-token and
+exact answer-plus-stop matches, and per-answer teacher-forced NLL. The joint
+counts distinguish lower NLL without an exact-match gain from gains and losses.
+Exact match is on IDs, not decoded text or semantic equivalence. Only this mode
+has the smaller 2 MiB input, 128-case, 8,192-step and 131,072-prefix-token
+limits; it does not check that the inputs are fresh.

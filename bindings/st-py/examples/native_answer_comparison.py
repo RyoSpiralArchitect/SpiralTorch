@@ -28,6 +28,8 @@ def main(argv=None):
     parser.add_argument("--reference", required=True, help="variant to subtract from each other variant")
     parser.add_argument("--context", type=int, required=True)
     parser.add_argument("--microbatch-windows", type=int, default=1)
+    parser.add_argument("--paired-greedy", type=int, nargs=2, metavar=("MAX_NEW_TOKENS", "STOP_ID"),
+                        help="also compare prompt-only generation (conditional variants only)")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     conditional = args.conditional_variant is not None
@@ -44,11 +46,14 @@ def main(argv=None):
         parser.error("select 2 to 16 variants with distinct short names")
     if args.reference not in names:
         parser.error("reference must name a selected variant")
+    paired = args.paired_greedy
+    if paired is not None and (not conditional or not 1 <= paired[0] <= 128 or paired[1] < 0):
+        parser.error("paired greedy requires conditional variants, 1 to 128 new tokens and a nonnegative stop ID")
     if os.path.lexists(args.output):
         parser.error("output must be a new file")
     if not args.output.parent.is_dir():
         parser.error("output needs an existing parent directory")
-    raw = read_limited(args.documents, 256 * 1024 * 1024)
+    raw = read_limited(args.documents, (2 if paired is not None else 256) * 1024 * 1024)
     if hashlib.sha256(raw).hexdigest() != args.documents_sha256:
         parser.error("evaluation corpus differs from pinned SHA-256")
     read_corpus = getattr(st._rs, "_read_labeled_answer_corpus", None)
@@ -59,6 +64,12 @@ def main(argv=None):
     except ValueError as exc:
         parser.error(f"invalid labeled evaluation corpus: {exc}")
     del raw
+    prompts = None
+    if paired is not None:
+        try:
+            prompts = paired_prompts(documents, labels, len(names), args.context, *paired)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     snapshots = []
     if conditional:
@@ -85,7 +96,9 @@ def main(argv=None):
                 read_limited(args.source_geometry, 64 << 20).decode(), args.source_geometry_id, base.base_model_identity)
             base = base.with_geometry(geometry)
         decode = st.NativeCausalLmConditionalAnswerSession.serving_from_checkpoint
-        scored = serving.evaluate_variants_by_answer(base, [decode(base, *saved) for saved in snapshots], *common, **options)
+        owners = [decode(base, *saved) for saved in snapshots]
+        del snapshots
+        scored = serving.evaluate_variants_by_answer(base, owners, *common, **options)
         scores = json.loads(scored.to_json())
         boundaries = [dict(name="source", variant=0)] + [
             dict(name=names[entry["variant"]], **entry) for entry in scores["snapshots"]
@@ -108,6 +121,8 @@ def main(argv=None):
                   documents_sha256=args.documents_sha256, variants=boundaries,
                   contrasts={name:scored.contrast(ref,i) for i,name in enumerate(names) if i != ref},
                   scores=scores, training_documents_verified=False, split_independence_verified=False)
+    if prompts is not None:
+        result["paired_greedy"] = paired_generation(base, owners, names, ref, scored, prompts, documents, *paired)
     # Publish only the complete result; a raced output name is never overwritten.
     with tempfile.TemporaryDirectory(dir=args.output.parent) as tmp:
         staged = Path(tmp)/"result"
@@ -116,6 +131,65 @@ def main(argv=None):
             stream.write("\n")
         os.link(staged, args.output)
     print(json.dumps({"reference":args.reference, "answers":len(scored), "contrasts":result["contrasts"]}, allow_nan=False))
+
+
+def paired_prompts(documents, labels, variants, context, limit, stop):
+    if not 1 <= len(documents) <= 128 or variants * len(documents) * limit > 8192:
+        raise ValueError("paired greedy exceeds the case or generation step budget")
+    prompts = []
+    for doc, row in zip(documents, labels):
+        start = next((i for i, label in enumerate(row) if label != -100), len(row))
+        target = doc[start:]
+        if (start == 0 or not 2 <= len(target) <= limit or row[start:] != target
+                or target[-1] != stop or stop in target[:-1]):
+            raise ValueError("paired greedy needs a masked prompt and an exact answer suffix ending in one stop ID")
+        if start + limit > context:
+            raise ValueError("paired greedy requires the full prompt and generation budget to fit one scoring window")
+        prompts.append(doc[:start])
+    # Full-prefix decoding recomputes the whole prefix at every step.
+    if variants * sum(limit * len(p) + limit * (limit - 1) // 2 for p in prompts) > 131072:
+        raise ValueError("paired greedy exceeds the full-prefix token budget")
+    return prompts
+
+
+def paired_generation(base, owners, names, ref, scored, prompts, documents, limit, stop):
+    recipe = {"max_new_tokens": limit, "eos_token_ids": [stop],
+              "execution": {"kind": "full_prefix"}, "decoding": {"selection": "greedy"}}
+    config = json.dumps(recipe)
+    factories = [lambda prompt, policy: st.NativeCausalLmGenerator(base, prompt, policy)]
+    factories.extend(owner.generator for owner in owners)
+    rows = []
+    joint = {name: {} for i, name in enumerate(names) if i != ref}
+    if len(scored) != len(prompts):
+        raise ValueError("paired greedy expected one scored answer per document")
+    for j, (prompt, doc) in enumerate(zip(prompts, documents)):
+        target = doc[len(prompt):]
+        answer = scored.answer(j)
+        if (answer["document"], answer["start"], answer["end"]) != (j, len(prompt), len(doc)):
+            raise ValueError("paired greedy and supervised answer boundaries disagree")
+        results = {}
+        for i, (name, factory) in enumerate(zip(names, factories)):
+            generator = factory(prompt, config)
+            ids = generator.advance_ids(limit)
+            reason = "eos" if ids and ids[-1] == stop else "length"
+            if (not generator.finished or generator.finish_reason != reason or not 1 <= len(ids) <= limit
+                    or stop in ids[:-1] or (reason == "length" and len(ids) != limit)
+                    or generator.token_ids != prompt + ids):
+                raise ValueError("invalid paired greedy generation boundary")
+            results[name] = dict(generated_ids=ids, finish_reason=reason, exact=ids == target,
+                                 first_token_correct=ids[0] == target[0], nll=answer["scores"][i]["nll"])
+        reference = results[names[ref]]
+        for name, counts in joint.items():
+            candidate = results[name]
+            delta = "lower" if candidate["nll"] < reference["nll"] else (
+                "higher" if candidate["nll"] > reference["nll"] else "equal")
+            change = int(candidate["exact"]) - int(reference["exact"])
+            outcome = {-1: "lost", 0: "unchanged", 1: "gained"}[change]
+            key = f"nll_{delta}_exact_{outcome}"
+            counts[key] = counts.get(key, 0) + 1
+        rows.append(dict(document=j, variants=results))
+    return dict(schema="spiraltorch.native_paired_greedy.v1", recipe=recipe, cases=rows,
+                joint_counts=joint, exact_metric="answer_token_ids_including_stop")
 
 
 if __name__ == "__main__":

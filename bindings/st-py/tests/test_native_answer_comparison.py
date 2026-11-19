@@ -203,10 +203,59 @@ class AnswerComparisonTests(unittest.TestCase):
             self.assertFalse(report["training_documents_verified"])
             self.assertFalse(report["split_independence_verified"])
             self.assertNotIn(b"token_documents", out.read_bytes())
+            self.assertNotIn("paired_greedy", report)
+            paired_out = root / "paired"
+            with contextlib.redirect_stdout(io.StringIO()):
+                run([*args, later, "--model-dir", str(root), "--output", str(paired_out),
+                     "--paired-greedy", "3", "7"])
+            paired = json.loads(paired_out.read_bytes())
+            replay = paired.pop("paired_greedy")
+            self.assertEqual(replay["exact_metric"], "answer_token_ids_including_stop")
+            self.assertEqual(paired, report)
+            self.assertEqual(replay["cases"][0]["document"], 0)
+            case = replay["cases"][0]["variants"]
+            recipe = json.dumps(replay["recipe"])
+            direct = [st.NativeCausalLmGenerator(source, [5, 4], recipe)]
+            for path, pin in [(root / "before.ck", first), (root / "after.ck", later)]:
+                direct.append(kind.serving_from_checkpoint(source, path.read_bytes(), pin).generator([5, 4], recipe))
+            for name, generator in zip(("source", "before", "after"), direct):
+                while not generator.finished:
+                    generator.step()
+                self.assertEqual(case[name]["generated_ids"], generator.generated_ids)
+                self.assertEqual(case[name]["exact"], generator.generated_ids == [8, 2, 7])
+                self.assertEqual(case[name]["first_token_correct"], generator.generated_ids[0] == 8)
+                self.assertEqual(case[name]["finish_reason"], generator.finish_reason)
+            self.assertEqual(replay["joint_counts"]["source"], {"nll_equal_exact_unchanged": 1})
+            self.assertFalse(case["after"]["exact"])
+            self.assertFalse(case["before"]["exact"])
+            self.assertNotEqual(case["after"]["nll"], case["before"]["nll"])
+            direction = "lower" if case["after"]["nll"] < case["before"]["nll"] else "higher"
+            self.assertEqual(replay["joint_counts"]["after"], {f"nll_{direction}_exact_unchanged": 1})
             bad = root / "bad"
+            with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+                run([*args, later, "--model-dir", str(root / "missing"), "--output", str(bad),
+                     "--paired-greedy", "2", "7"])
+            self.assertIn("exact answer suffix", err.getvalue())
+            self.assertFalse(bad.exists())
             with self.assertRaisesRegex(ValueError, "conditional checkpoint differs from pinned identity"):
                 run([*args, "sha256:" + "0" * 64, "--model-dir", str(root / "missing"), "--output", str(bad)])
             self.assertFalse(bad.exists())
+
+    def test_paired_greedy_admits_only_matched_single_window_cases(self):
+        admit = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))["paired_prompts"]
+        doc, labels = [1, 2, 3, 4], [-100, -100, 3, 4]
+        self.assertEqual(admit([doc], [labels], 2, 5, 3, 4), [[1, 2]])
+        for row in ([1, 2, 3, 4], [-100]*4, [-100, 2, -100, 4], [-100, -100, 1, 4]):
+            with self.assertRaisesRegex(ValueError, "exact answer suffix"):
+                admit([doc], [row], 2, 5, 3, 4)
+        with self.assertRaisesRegex(ValueError, "one stop ID"):
+            admit([[1, 2, 4, 4]], [[-100, -100, 4, 4]], 2, 5, 3, 4)
+        with self.assertRaisesRegex(ValueError, "one scoring window"):
+            admit([doc], [labels], 2, 4, 3, 4)
+        with self.assertRaisesRegex(ValueError, "case or generation step budget"):
+            admit([doc]*9, [labels]*9, 16, 132, 64, 4)
+        with self.assertRaisesRegex(ValueError, "full-prefix token budget"):
+            admit([doc]*20, [labels]*20, 2, 132, 128, 4)
 
     def test_weightings_have_opposite_signs_even_when_top1_is_unchanged(self):
         _, _, bare, candidate = counterexample()
