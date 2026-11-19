@@ -267,12 +267,23 @@ impl NativeCausalLm {
         spec: CausalLmProjectionSpec,
         left: &[f64],
     ) -> CausalLmResult<Vec<f64>> {
+        let upstream = self.vocabulary_head_pullback(seed)?;
+        self.fixed_left_upstream(row, upstream, spec, left)
+    }
+
+    pub(super) fn fixed_left_upstream(
+        &self,
+        row: projection_probe::ProjectionLastRow,
+        upstream: Tensor,
+        spec: CausalLmProjectionSpec,
+        left: &[f64],
+    ) -> CausalLmResult<Vec<f64>> {
         let mut capture = FixedLeft {
             site: spec.site,
             left,
             right: None,
         };
-        self.pull_projection_seed(row, spec, seed, &mut capture)?;
+        self.pull_projection_upstream(row, spec, upstream, &mut capture)?;
         let g = capture.right.ok_or("unreached seeded projection")?;
         if g.iter().any(|x| !x.is_finite()) {
             return Err("nonfinite seeded projection adjoint".into());
