@@ -22,6 +22,17 @@ struct MassBaseline {
 }
 
 impl Baseline {
+    fn matches_legacy_replay(&self, mut replay: Self) -> bool {
+        if let (Some(saved), Some(recomputed)) = (&self.mass, &mut replay.mass) {
+            if saved.maximum_log_mean_outside_mass_bits.is_none() {
+                // Legacy writers omitted this field. Compare all saved fields;
+                // the live guard still enforces the recomputed log ceiling.
+                recomputed.maximum_log_mean_outside_mass_bits = None;
+            }
+        }
+        *self == replay
+    }
+
     fn validate_encoding(&self, with_mass: bool) -> CausalLmResult<()> {
         let margins = self.margin_bits.iter().copied().map(f64::from_bits);
         if margins.clone().any(|m| !m.is_finite())
@@ -81,7 +92,7 @@ pub(super) fn fingerprint(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-fn canonical_digest(id: &str) -> bool {
+pub(super) fn canonical_digest(id: &str) -> bool {
     id.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex
@@ -222,6 +233,16 @@ impl CausalLmConditionalRetentionRestore {
         &self.plan.projection_id
     }
 
+    pub(super) fn serving_endpoint(self) -> CausalLmResult<NativeCausalLmRankOneProjection> {
+        NativeCausalLmRankOneProjection::new(
+            &self.source,
+            self.spec.layer,
+            self.spec.site,
+            &self.left,
+            &self.right,
+        )
+    }
+
     pub fn roster_len(&self) -> usize {
         self.plan.baseline.margin_bits.len()
     }
@@ -259,12 +280,23 @@ impl CausalLmConditionalRetentionRestore {
         Ok(tokens)
     }
 
-    /// Recompute the baseline, then check saved current weights against it.
-    /// Repair or a new, weaker baseline is never attempted on mismatch.
+    /// Recompute the exact baseline, then check saved current weights against it.
     pub fn restore(
         self,
         prompts: &[Vec<usize>],
         pairs: &[[usize; 2]],
+    ) -> CausalLmResult<(
+        NativeCausalLmRankOneProjection,
+        CausalLmConditionalMarginRetention,
+    )> {
+        self.restore_session(prompts, pairs, false)
+    }
+
+    pub(super) fn restore_session(
+        self,
+        prompts: &[Vec<usize>],
+        pairs: &[[usize; 2]],
+        legacy: bool,
     ) -> CausalLmResult<(
         NativeCausalLmRankOneProjection,
         CausalLmConditionalMarginRetention,
@@ -285,7 +317,13 @@ impl CausalLmConditionalRetentionRestore {
             &self.initial_right,
         )?;
         let mut guard = state.prepare_conditional_retention(prompts, pairs, self.allowed_drop)?;
-        if guard.checkpoint_baseline() != self.plan.baseline {
+        let replayed = guard.checkpoint_baseline();
+        let baseline_matches = if legacy {
+            self.plan.baseline.matches_legacy_replay(replayed)
+        } else {
+            self.plan.baseline == replayed
+        };
+        if !baseline_matches {
             return Err("conditional retention checkpoint baseline does not reproduce".into());
         }
         state.install(self.right)?;

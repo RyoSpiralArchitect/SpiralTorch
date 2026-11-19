@@ -1491,7 +1491,27 @@ session or create the checkpoint.
 
 New session checkpoints also record the starting projection separately
 from the guard baseline. A checkpoint with zero accepted updates must
-still have that starting projection. Older v3 checkpoints restore and
+still have that starting projection. Older v3 and v4 checkpoints restore and
 re-save without this check; they did not record the starting projection.
 This consistency check does not replace a trusted pin or a replay of
 the training trajectory.
+
+### Start a new phase or load weights for inference
+
+Once `session.exhausted` is true, start a new schedule with
+`session.next_phase(new_pool, new_schedule, length=0.02)`. The returned
+session begins at position zero with the previous endpoint and unchanged
+guard, and exposes `predecessor_checkpoint_id`. The parent is not mutated.
+
+For read-only inference, the pinned session is enough:
+
+```python
+payload, pin = session.checkpoint_with_id()
+snapshot = NativeCausalLmConditionalAnswerSession.serving_from_checkpoint(model, payload, pin)
+prefix = snapshot.prefill(prompt_ids)
+next_logits = prefix.branch(next_token_id).logits_f32le()
+```
+
+Use the original frozen model, including its adapter and readout recipe.
+This reconstructs the weights and cached inference path without reading
+training tokens. It does not recheck the guard or permit training.
