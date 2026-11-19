@@ -330,6 +330,39 @@ class AnswerComparisonTests(unittest.TestCase):
             self.assertIn("attention pairs", err.getvalue())
             self.assertFalse(output.exists())
 
+    def test_paired_greedy_counts_exact_gain_and_loss_independently_of_nll(self):
+        cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
+        source = st.NativeCausalLm.from_gpt2(*FIXTURE())
+        projection = source.rank_one_projection(
+            "output", layer=1,
+            left_f64le=struct.pack("<4d", 0., .6, -.8, 0.),
+            right_f64le=struct.pack("<4d", .3691, -1.711, 1.7763, 1.2672),
+        )
+        rows, pairs = [[4, 8, 2, 1]], [[7, 2]]
+        kind = st.NativeCausalLmConditionalAnswerSession
+        session = kind(projection, projection.prepare_retention(rows, pairs),
+                       rows, [([0], pairs)], length=.01)
+        snapshot = kind.serving_from_checkpoint(source, *session.checkpoint_with_id())
+        documents, labels = [[1, 6, 7, 8]], [[-100, -100, 7, 8]]
+        prompts = cli["paired_prompts"](documents, labels, 2, 4, 2, 8)
+        recipe = cli["admit_paired_generation"](source, prompts, 2, 8)
+        scored = st.NativeCausalLmConditionalServingSnapshot.evaluate_variants_by_answer(
+            source, [snapshot], documents, 4, labels=labels,
+        )
+        names = ["source", "candidate"]
+        loss = cli["paired_generation"](source, [snapshot], names, 0, scored, prompts, documents, recipe)
+        case = loss["cases"][0]["variants"]
+        self.assertEqual(case["source"]["generated_ids"], [7, 8])
+        self.assertEqual(case["candidate"]["generated_ids"], [10, 10])
+        self.assertTrue(case["source"]["exact"])
+        self.assertFalse(case["candidate"]["exact"])
+        self.assertLess(case["candidate"]["nll"], case["source"]["nll"])
+        self.assertEqual(loss["joint_counts"], {"candidate": {"nll_lower_exact_lost": 1}})
+
+        gain = cli["paired_generation"](source, [snapshot], names, 1, scored, prompts, documents, recipe)
+        self.assertEqual(gain["cases"], loss["cases"])
+        self.assertEqual(gain["joint_counts"], {"source": {"nll_higher_exact_gained": 1}})
+
     def test_weightings_have_opposite_signs_even_when_top1_is_unchanged(self):
         _, _, bare, candidate = counterexample()
         detail = st.NativeCausalLm.evaluate_variants_by_answer([bare,candidate,bare],DOCS,4,
