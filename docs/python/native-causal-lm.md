@@ -1450,6 +1450,8 @@ The separate fixed guard enforces its arithmetic-mean probability floor
 on the protection set when configured.
 `guard.minimum_log_mean_pair_mass` is the authoritative floor when the
 positive ordinary probability is too small to compare reliably.
+`guard.maximum_log_mean_outside_mass` is its complementary ceiling when the
+positive probability outside the pair is subnormal.
 
 For repeated prompts, call `prepare_prefix_bank(rows)` with distinct rows
 and then `step_indexed(bank, indices, pairs, ...)`. Repeated indices still

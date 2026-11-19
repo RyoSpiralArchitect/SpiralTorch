@@ -163,6 +163,8 @@ class NativeCausalLmTests(unittest.TestCase):
             projection.score_pairs([ReadTrap(4)], [[2, 2]])
         with self.assertRaisesRegex(ValueError, "mass allowance"):
             projection.prepare_retention([ReadTrap(4)], [[2, 7]], max_mean_mass_drop=-1.)
+        with self.assertRaisesRegex(ValueError, "mass allowance"):
+            projection.prepare_retention(ReadTrap(1), [[2, 7]], max_mean_mass_drop=-1.)
         with self.assertRaises(ValueError):
             projection.prefill(ReadTrap(3), max_cache_values=1)
         bank = projection.prepare_prefix_bank([[1, 2]])
@@ -272,6 +274,16 @@ class NativeCausalLmTests(unittest.TestCase):
         restored, restored_guard = model.restore_rank_one_with_retention(payload, pin, rows, pairs)
         self.assertEqual(guard.minimum_log_mean_pair_mass, restored_guard.minimum_log_mean_pair_mass)
         self.assertEqual(restored.checkpoint_with_retention(restored_guard), (payload, pin))
+        self.assertIsNone(guard.maximum_log_mean_outside_mass)
+        outside_pairs = [[2, 0]]
+        outside_guard = projection.prepare_retention(rows, outside_pairs, max_mean_mass_drop=0.)
+        self.assertEqual(outside_guard.minimum_mean_pair_mass, 1.)
+        self.assertIsNone(outside_guard.minimum_log_mean_pair_mass)
+        self.assertLess(outside_guard.maximum_log_mean_outside_mass, -790.)
+        body, outside_pin = projection.checkpoint_with_retention(outside_guard)
+        resumed, resume_guard = model.restore_rank_one_with_retention(body, outside_pin, rows, outside_pairs)
+        self.assertEqual(resume_guard.maximum_log_mean_outside_mass, outside_guard.maximum_log_mean_outside_mass)
+        self.assertEqual(resumed.checkpoint_with_retention(resume_guard), (body, outside_pin))
 
     def test_scalar_output_real_step_and_bit_exact_restore(self):
         from hashlib import sha256

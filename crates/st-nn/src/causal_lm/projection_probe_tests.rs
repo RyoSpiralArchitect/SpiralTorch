@@ -681,6 +681,92 @@ fn retention_rechecks_anchor_limits_on_an_identical_receiving_projection() {
 }
 
 #[test]
+fn sign_only_checkpoint_refuses_when_a_nonanchor_cannot_be_restored() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let make = |m| {
+        NativeCausalLmRankOneProjection::new(m, 1, Output, &[0., 1., 0., 0.], &[0.; 4]).unwrap()
+    };
+    let wide = make(&m);
+    let rows = vec![vec![4, 8], vec![4, 8, 2, 1]];
+    let scores = wide.score_answer_pairs(&rows, &[[2, 7]; 2]).unwrap();
+    let mut pairs = [[2, 7]; 2];
+    for (i, s) in scores.iter().enumerate() {
+        assert_ne!(s.gold_minus_alternative, 0.);
+        if (s.gold_minus_alternative > 0.) != (i == 0) {
+            pairs[i].reverse();
+        }
+    }
+    let guard = wide
+        .prepare_conditional_margin_retention(&rows, &pairs)
+        .unwrap();
+    assert_eq!(guard.protected_count(), 1);
+    let mut limited = m.clone();
+    limited.limits.max_attention_pairs = limited.config.layers * limited.config.heads * 4;
+    let narrow = make(&limited);
+    assert_eq!(narrow.projection_id(), wide.projection_id());
+    assert!(guard.verify_owner(&narrow).is_ok());
+    assert!(narrow
+        .checkpoint_with_retention(&guard)
+        .unwrap_err()
+        .to_string()
+        .contains("attention pairs"));
+    let (bytes, pin) = wide.checkpoint_with_retention(&guard).unwrap();
+    let (restored, guard) =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &pin)
+            .unwrap()
+            .restore(&rows, &pairs)
+            .unwrap();
+    assert_eq!(
+        restored.checkpoint_with_retention(&guard).unwrap(),
+        (bytes, pin)
+    );
+}
+
+#[test]
+fn guarded_checkpoint_pins_the_underflowed_outside_ceiling() {
+    let m = five_token_readout(
+        [
+            0., 0., 0., 0., -1., 0., 0., 0., -800., 0., 0., 0., -800., 0., 0., 0., -801., 0., 0.,
+            0.,
+        ],
+        Some(([0.; 4], [1., 0., 0., 0.])),
+    );
+    let p =
+        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4]).unwrap();
+    let rows = vec![vec![1, 2]];
+    let pairs = [[0, 1]];
+    let guard = p
+        .prepare_conditional_margin_and_mass_retention(&rows, &pairs, 0.)
+        .unwrap();
+    let (bytes, pin) = p.checkpoint_with_retention(&guard).unwrap();
+    let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let log_bits = record["baseline"]["mass"]["maximum_log_mean_outside_mass_bits"]
+        .as_u64()
+        .unwrap();
+    assert!(f64::from_bits(log_bits) < -790.);
+    let (restored, guard) =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &pin)
+            .unwrap()
+            .restore(&rows, &pairs)
+            .unwrap();
+    assert_eq!(
+        restored.checkpoint_with_retention(&guard).unwrap(),
+        (bytes, pin)
+    );
+    record["baseline"]["mass"]
+        .as_object_mut()
+        .unwrap()
+        .remove("maximum_log_mean_outside_mass_bits");
+    let legacy = serde_json::to_vec(&record).unwrap();
+    let legacy_pin = format!("sha256:{:x}", Sha256::digest(&legacy));
+    let plan = NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &legacy, &legacy_pin)
+        .unwrap();
+    assert!(
+        matches!(plan.restore(&rows, &pairs), Err(e) if e.to_string().contains("baseline does not reproduce"))
+    );
+}
+
+#[test]
 fn conditional_mass_guard_changes_a_conflicting_real_decoder_step() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let a = NativeCausalLmRankOneProjection::new(

@@ -272,6 +272,8 @@ impl PyRankOne {
         max_mean_mass_drop: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyConditionalRetention> {
         let drop = max_mean_mass_drop.map(real).transpose()?;
+        NativeCausalLmRankOneProjection::validate_conditional_mass_allowance(drop)
+            .map_err(error)?;
         let (ids, pairs) = paired_prompts(&self.0, rows, answer_pairs, PromptUse::Retention(drop))?;
         py.detach(|| match drop {
             Some(d) => self
@@ -407,6 +409,11 @@ impl PyConditionalRetention {
     #[getter]
     fn minimum_log_mean_pair_mass(&self) -> Option<f64> {
         self.0.minimum_log_mean_pair_mass()
+    }
+
+    #[getter]
+    fn maximum_log_mean_outside_mass(&self) -> Option<f64> {
+        self.0.maximum_log_mean_outside_mass()
     }
 }
 

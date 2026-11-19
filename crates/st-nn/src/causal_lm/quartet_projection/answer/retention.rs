@@ -1,5 +1,8 @@
 //! Finite protection of individually correct two-candidate margins.
-use super::{observation::candidate_mass_loss, *};
+use super::{
+    observation::{candidate_mass_measure, CandidateMassMeasure},
+    *,
+};
 
 mod checkpoint;
 pub use checkpoint::CausalLmConditionalRetentionRestore;
@@ -23,6 +26,7 @@ pub struct CausalLmConditionalMarginRetention {
     initial_projection_id: String,
     initial_right: Vec<f64>,
     roster_id: String,
+    roster_steps: Vec<usize>,
     allowed_drop: Option<f64>,
 }
 
@@ -31,6 +35,7 @@ struct MassFloor {
     minimum: f64,
     maximum_outside: f64,
     minimum_log_pair: Option<f64>,
+    maximum_log_outside: Option<f64>,
 }
 
 #[derive(Default)]
@@ -38,20 +43,24 @@ struct PairMassMean {
     pair: sum::Sum,
     outside: sum::Sum,
     log_pair_sum: Option<f64>,
+    log_outside_sum: Option<f64>,
 }
 
 impl PairMassMean {
-    fn add_loss(&mut self, loss: f64) {
-        self.pair.add((-loss).exp());
-        self.outside.add(-(-loss).exp_m1());
-        let log_p = -loss;
-        self.log_pair_sum = Some(self.log_pair_sum.map_or(log_p, |sum| {
-            log_p.max(sum) + (-(log_p - sum).abs()).exp().ln_1p()
-        }));
+    fn add(&mut self, measure: CandidateMassMeasure) {
+        let log_p = -measure.loss;
+        self.pair.add(log_p.exp());
+        self.outside.add(-log_p.exp_m1());
+        self.log_pair_sum = sum::add_logs(self.log_pair_sum, Some(log_p));
+        self.log_outside_sum = sum::add_logs(self.log_outside_sum, measure.log_outside);
     }
 
     fn log_mean_pair(&self, rows: usize) -> Option<f64> {
         self.log_pair_sum.map(|sum| sum - (rows as f64).ln())
+    }
+
+    fn log_mean_outside(&self, rows: usize) -> Option<f64> {
+        self.log_outside_sum.map(|sum| sum - (rows as f64).ln())
     }
 }
 
@@ -59,6 +68,11 @@ impl MassFloor {
     fn log_pair_limit(&self) -> Option<f64> {
         self.minimum_log_pair
             .filter(|&floor| floor < f64::MIN_POSITIVE.ln())
+    }
+
+    fn log_outside_limit(&self) -> Option<f64> {
+        self.maximum_log_outside
+            .filter(|&ceiling| ceiling < f64::MIN_POSITIVE.ln())
     }
 
     fn from_baseline(mass: PairMassMean, rows: usize, drop: f64) -> Self {
@@ -69,12 +83,16 @@ impl MassFloor {
             let log_ratio = drop.ln() - log_mean;
             (log_ratio < 0.).then(|| log_mean + (-log_ratio.exp_m1()).ln())
         });
+        let log_drop = (drop > 0.).then(|| drop.ln());
+        let maximum_log_outside =
+            sum::add_logs(mass.log_mean_outside(rows), log_drop).map(|log| log.min(0.));
         let baseline = mass.pair.mean(rows as u64);
         Self {
             baseline,
             minimum: (baseline - drop).max(0.),
             maximum_outside: (mass.outside.mean(rows as u64) + drop).min(1.),
             minimum_log_pair,
+            maximum_log_outside,
         }
     }
 
@@ -87,6 +105,14 @@ impl MassFloor {
                 }
             },
         );
+        let log_outside = self
+            .log_outside_limit()
+            .map(
+                |maximum_log_mean_outside_mass| CausalLmConditionalRetentionLogOutsideCheck {
+                    log_mean_outside_mass: mass.log_mean_outside(rows),
+                    maximum_log_mean_outside_mass,
+                },
+            );
         let mean_pair_mass = mass.pair.mean(rows as u64);
         let mean_outside_mass = mass.outside.mean(rows as u64);
         let rounded_pass = mean_pair_mass >= self.minimum;
@@ -104,6 +130,7 @@ impl MassFloor {
             minimum_mean_pair_mass: self.minimum,
             outside,
             log_pair,
+            log_outside,
         }
     }
 }
@@ -122,6 +149,14 @@ pub struct CausalLmConditionalRetentionLogMassCheck {
     pub minimum_log_mean_pair_mass: f64,
 }
 
+/// Logarithms of mean probability outside the pair and its positive ceiling.
+#[derive(Clone, Debug, Serialize)]
+pub struct CausalLmConditionalRetentionLogOutsideCheck {
+    /// None denotes an exactly empty outside vocabulary.
+    pub log_mean_outside_mass: Option<f64>,
+    pub maximum_log_mean_outside_mass: f64,
+}
+
 /// Finite arithmetic mean of P(gold)+P(alternative) on the whole roster.
 #[derive(Clone, Debug, Serialize)]
 pub struct CausalLmConditionalRetentionMassCheck {
@@ -135,12 +170,20 @@ pub struct CausalLmConditionalRetentionMassCheck {
     /// Authoritative when the positive floor is too small for normal f64 probability arithmetic.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_pair: Option<CausalLmConditionalRetentionLogMassCheck>,
+    /// Authoritative when the positive outside ceiling is subnormal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_outside: Option<CausalLmConditionalRetentionLogOutsideCheck>,
 }
 
 impl CausalLmConditionalRetentionMassCheck {
     pub fn permits_commit(&self) -> bool {
         if let Some(log_pair) = &self.log_pair {
             return log_pair.log_mean_pair_mass >= log_pair.minimum_log_mean_pair_mass;
+        }
+        if let Some(outside) = &self.log_outside {
+            return outside
+                .log_mean_outside_mass
+                .is_none_or(|value| value <= outside.maximum_log_mean_outside_mass);
         }
         match &self.outside {
             Some(outside) => outside.mean_outside_mass <= outside.maximum_mean_outside_mass,
@@ -183,7 +226,7 @@ fn evaluate(
     steps: usize,
     [gold, rival]: [usize; 2],
     measure_mass: bool,
-) -> CausalLmResult<(f64, Option<f64>)> {
+) -> CausalLmResult<(f64, Option<CandidateMassMeasure>)> {
     let hidden = m.forward_blocks(prefix.clone(), [1, steps], layer..m.config.layers)?;
     let last = hidden.gather_rows(&[steps - 1])?;
     let normalized = m.final_norm.forward(&last, m.config.norm_epsilon)?;
@@ -194,7 +237,7 @@ fn evaluate(
         return Err("nonfinite protected conditional margin".into());
     }
     let loss = measure_mass
-        .then(|| candidate_mass_loss(z, [gold, rival]))
+        .then(|| candidate_mass_measure(z, [gold, rival]))
         .transpose()?;
     Ok((value, loss))
 }
@@ -222,6 +265,11 @@ impl CausalLmConditionalMarginRetention {
     /// Authoritative positive floor when ordinary f64 probability is too small.
     pub fn minimum_log_mean_pair_mass(&self) -> Option<f64> {
         self.mass.as_ref().and_then(MassFloor::log_pair_limit)
+    }
+
+    /// Authoritative ceiling when mean outside probability is subnormal.
+    pub fn maximum_log_mean_outside_mass(&self) -> Option<f64> {
+        self.mass.as_ref().and_then(MassFloor::log_outside_limit)
     }
 
     /// Check trajectory ownership and current work limits without reading training inputs.
@@ -260,8 +308,8 @@ impl CausalLmConditionalMarginRetention {
                 minimum = minimum.min(v);
                 nonpositive += usize::from(v <= 0.);
             }
-            if let Some(loss) = loss {
-                mean_mass.add_loss(loss);
+            if let Some(measure) = loss {
+                mean_mass.add(measure);
             }
         }
         Ok(CausalLmConditionalRetentionCheck {
@@ -287,7 +335,7 @@ impl NativeCausalLmRankOneProjection {
         steps: &[usize],
         allowed_drop: Option<f64>,
     ) -> CausalLmResult<usize> {
-        Self::validate_mass_allowance(allowed_drop)?;
+        Self::validate_conditional_mass_allowance(allowed_drop)?;
         let tokens = self.conditional_answer_input_count(steps, false)?;
         self.admit_conditional_retention_tokens(tokens)?;
         Ok(tokens)
@@ -302,7 +350,8 @@ impl NativeCausalLmRankOneProjection {
         Ok(())
     }
 
-    fn validate_mass_allowance(allowed_drop: Option<f64>) -> CausalLmResult<()> {
+    /// Validate the optional scalar allowance without inspecting a roster.
+    pub fn validate_conditional_mass_allowance(allowed_drop: Option<f64>) -> CausalLmResult<()> {
         if allowed_drop.is_some_and(|drop| !(0.0..=1.0).contains(&drop)) {
             return Err("invalid conditional retention mass allowance".into());
         }
@@ -340,7 +389,7 @@ impl NativeCausalLmRankOneProjection {
         pairs: &[[usize; 2]],
         allowed_drop: Option<f64>,
     ) -> CausalLmResult<CausalLmConditionalMarginRetention> {
-        Self::validate_mass_allowance(allowed_drop)?;
+        Self::validate_conditional_mass_allowance(allowed_drop)?;
         if prompts.len() != pairs.len() {
             return Err("invalid conditional retention roster".into());
         }
@@ -362,8 +411,8 @@ impl NativeCausalLmRankOneProjection {
             baseline.push(v);
             let protects_sign = v > 0.;
             protected_count += usize::from(protects_sign);
-            if let Some(loss) = loss {
-                mean_mass.add_loss(loss);
+            if let Some(measure) = loss {
+                mean_mass.add(measure);
             }
             if protects_sign || allowed_drop.is_some() {
                 anchors.push(Anchor {
@@ -387,6 +436,7 @@ impl NativeCausalLmRankOneProjection {
             protected_count,
             initial_right: self.right().to_vec(),
             roster_id: checkpoint::roster_id(prompts, pairs),
+            roster_steps: prompts.iter().map(Vec::len).collect(),
             allowed_drop,
             mass: allowed_drop.map(|drop| MassFloor::from_baseline(mean_mass, prompts.len(), drop)),
         })
@@ -400,7 +450,7 @@ mod tests {
     fn mass_for(rows: &[[f32; 3]]) -> PairMassMean {
         let mut mean = PairMassMean::default();
         for row in rows {
-            mean.add_loss(candidate_mass_loss(row, [0, 1]).unwrap());
+            mean.add(candidate_mass_measure(row, [0, 1]).unwrap());
         }
         mean
     }
@@ -427,6 +477,24 @@ mod tests {
         );
         assert_eq!(within_allowance.minimum, 1.);
         assert!(within_allowance.check(mass_for(&after), 2).permits_commit());
+    }
+
+    #[test]
+    fn saturated_outside_floor_detects_regression_below_f64_range() {
+        let before = [[0., -1., -800.], [0., -1., -801.]];
+        let after = [[0., -2., -799.], [0., -1., -801.]];
+        let floor = MassFloor::from_baseline(mass_for(&before), 2, 0.);
+        assert_eq!(floor.minimum, 1.);
+        assert_eq!(floor.maximum_outside, 0.);
+        assert!(floor.check(mass_for(&before), 2).permits_commit());
+        let check = floor.check(mass_for(&after), 2);
+        let log = check.log_outside.as_ref().unwrap();
+        assert_eq!(check.outside.as_ref().unwrap().mean_outside_mass, 0.);
+        assert!(log.log_mean_outside_mass.unwrap() > log.maximum_log_mean_outside_mass);
+        assert!(!check.permits_commit());
+
+        let released = MassFloor::from_baseline(mass_for(&before), 2, f64::from_bits(1));
+        assert!(released.check(mass_for(&after), 2).permits_commit());
     }
 
     #[test]

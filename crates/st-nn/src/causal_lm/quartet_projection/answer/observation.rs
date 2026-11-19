@@ -77,11 +77,19 @@ impl PairObservation {
 
 struct CandidateMassTerms {
     loss: f64,
+    log_odds: Option<f64>,
     outside_share: f64,
     outside_max: f64,
     outside_den: f64,
     pair: [usize; 2],
     second: f64,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CandidateMassMeasure {
+    pub(super) loss: f64,
+    pub(super) log_loss: Option<f64>,
+    pub(super) log_outside: Option<f64>,
 }
 
 fn add_weight_difference(sum: &mut sum::Sum, w: f64, base: f64, scale: f64) {
@@ -96,6 +104,17 @@ fn add_weight_difference(sum: &mut sum::Sum, w: f64, base: f64, scale: f64) {
 }
 
 impl CandidateMassTerms {
+    fn measure(&self) -> CandidateMassMeasure {
+        CandidateMassMeasure {
+            loss: self.loss,
+            log_outside: self.log_odds.map(|odds| -logistic(odds).0),
+            // In this tail, log(softplus(x)) rounds to x before softplus itself underflows.
+            log_loss: self
+                .log_odds
+                .map(|odds| if odds < -40. { odds } else { self.loss.ln() }),
+        }
+    }
+
     fn readout_upstream(&self, model: &NativeCausalLm, logits: &[f32]) -> CausalLmResult<Tensor> {
         // The native GPT-2 loader packs each vocabulary row as one contiguous column.
         let head = &model.head;
@@ -149,6 +168,15 @@ impl NativeCausalLmRankOneProjection {
         row: projection_probe::ProjectionLastRow,
         pair: [usize; 2],
     ) -> CausalLmResult<(f64, Vec<f64>)> {
+        self.candidate_mass_measured_gradient(row, pair)
+            .map(|(measure, gradient)| (measure.loss, gradient))
+    }
+
+    pub(super) fn candidate_mass_measured_gradient(
+        &self,
+        row: projection_probe::ProjectionLastRow,
+        pair: [usize; 2],
+    ) -> CausalLmResult<(CandidateMassMeasure, Vec<f64>)> {
         let logits = row.logits.data();
         let terms = candidate_mass_terms(logits, pair)?;
         let upstream = terms.readout_upstream(&self.current, logits)?;
@@ -159,12 +187,15 @@ impl NativeCausalLmRankOneProjection {
         for g in &mut gradient {
             *g *= terms.outside_share;
         }
-        Ok((terms.loss, gradient))
+        Ok((terms.measure(), gradient))
     }
 }
 
-pub(super) fn candidate_mass_loss(z: &[f32], pair: [usize; 2]) -> CausalLmResult<f64> {
-    Ok(candidate_mass_terms(z, pair)?.loss)
+pub(super) fn candidate_mass_measure(
+    z: &[f32],
+    pair: [usize; 2],
+) -> CausalLmResult<CandidateMassMeasure> {
+    Ok(candidate_mass_terms(z, pair)?.measure())
 }
 
 fn candidate_mass_terms(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResult<CandidateMassTerms> {
@@ -185,8 +216,8 @@ fn candidate_mass_terms(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResult<Candida
             .map(|(_, &v)| f64::from(v))
     };
     let outside_max = outside().fold(f64::NEG_INFINITY, f64::max);
-    let (outside_den, loss, outside_share) = if outside_max == f64::NEG_INFINITY {
-        (0., 0., 0.)
+    let (outside_den, loss, outside_share, log_odds) = if outside_max == f64::NEG_INFINITY {
+        (0., 0., 0., None)
     } else {
         let mut tail = sum::Sum::default();
         let mut skipped_max = false;
@@ -200,10 +231,11 @@ fn candidate_mass_terms(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResult<Candida
         let tail = tail.value();
         let outside_vs_pair = (outside_max - pair_max) + tail.ln_1p() - second.ln_1p();
         let (loss, negative_share) = logistic(-outside_vs_pair);
-        (1. + tail, loss, -negative_share)
+        (1. + tail, loss, -negative_share, Some(outside_vs_pair))
     };
     Ok(CandidateMassTerms {
         loss,
+        log_odds,
         outside_share,
         outside_max,
         outside_den,
@@ -267,7 +299,7 @@ mod tests {
             z[0] = 0.;
             z[1] = -1.;
             z[if max_first { 2 } else { 10_002 }] = 0.;
-            candidate_mass_loss(&z, [0, 1]).unwrap()
+            candidate_mass_measure(&z, [0, 1]).unwrap().loss
         };
         let before = loss(-40., true);
         let after = loss(-38., true);
