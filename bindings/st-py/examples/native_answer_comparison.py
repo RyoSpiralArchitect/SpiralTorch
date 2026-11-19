@@ -85,11 +85,11 @@ def main(argv=None):
                   else session.serving_from_checkpoint)
         if decode is None:
             parser.error("legacy conditional serving needs a matching SpiralTorch build")
-        for _, path, pin in variants:
-            raw = read_limited(Path(path), session.MAX_CHECKPOINT_BYTES)
-            if "sha256:" + hashlib.sha256(raw).hexdigest() != pin:
-                raise ValueError("conditional checkpoint differs from pinned identity")
-            snapshots.append((raw, pin))
+        if prompts is None:
+            snapshots = [
+                read_pinned_projection(path, pin, session.MAX_CHECKPOINT_BYTES)
+                for _, path, pin in variants
+            ]
 
     base = st.NativeCausalLm.from_gpt2(read_limited((args.model_dir/"config.json").resolve(strict=True), 1_048_576).decode(),
                                        st.SafeTensorArchive(args.model_dir/"model.safetensors"))
@@ -109,7 +109,12 @@ def main(argv=None):
                 recipe = admit_paired_generation(base, prompts, *paired)
             except ValueError as exc:
                 parser.error(f"invalid paired greedy request: {exc}")
-        owners = [decode(base, *saved) for saved in snapshots]
+            owners = [
+                decode(base, *read_pinned_projection(path, pin, session.MAX_CHECKPOINT_BYTES))
+                for _, path, pin in variants
+            ]
+        else:
+            owners = [decode(base, *saved) for saved in snapshots]
         del snapshots
         scored = serving.evaluate_variants_by_answer(base, owners, *common, **options)
         scores = json.loads(scored.to_json())
@@ -146,6 +151,13 @@ def main(argv=None):
             stream.write("\n")
         os.link(staged, args.output)
     print(json.dumps({"reference":args.reference, "answers":len(scored), "contrasts":result["contrasts"]}, allow_nan=False))
+
+
+def read_pinned_projection(path, pin, max_bytes):
+    raw = read_limited(Path(path), max_bytes)
+    if "sha256:" + hashlib.sha256(raw).hexdigest() != pin:
+        raise ValueError("conditional checkpoint differs from pinned identity")
+    return raw, pin
 
 
 def paired_prompts(documents, labels, variants, context, limit, stop):

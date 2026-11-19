@@ -275,6 +275,10 @@ class AnswerComparisonTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "conditional checkpoint differs from pinned identity"):
                 run([*args, "sha256:" + "0" * 64, "--model-dir", str(root / "missing"), "--output", str(bad)])
             self.assertFalse(bad.exists())
+            with self.assertRaisesRegex(ValueError, "conditional checkpoint differs from pinned identity"):
+                run([*args, "sha256:" + "0" * 64, "--model-dir", str(root), "--output", str(bad),
+                     "--paired-greedy", "3", "7"])
+            self.assertFalse(bad.exists())
 
     def test_paired_greedy_admits_only_matched_single_window_cases(self):
         admit = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))["paired_prompts"]
@@ -313,14 +317,12 @@ class AnswerComparisonTests(unittest.TestCase):
             corpus = json.dumps({"token_documents": [[1] * 160 + [3, 4]],
                                  "labels": [[-100] * 160 + [3, 4]]}).encode()
             (root / "labels.json").write_bytes(corpus)
-            checkpoint = b"not a conditional checkpoint"
-            (root / "projection.ck").write_bytes(checkpoint)
             output = root / "result.json"
             args = [
                 "--model-dir", str(root), "--documents", str(root / "labels.json"),
                 "--documents-sha256", hashlib.sha256(corpus).hexdigest(),
                 "--conditional-variant", "candidate", str(root / "projection.ck"),
-                "sha256:" + hashlib.sha256(checkpoint).hexdigest(),
+                "sha256:" + "0" * 64,
                 "--context", "176", "--reference", "source", "--output", str(output),
                 "--paired-greedy", "16", "4",
             ]
