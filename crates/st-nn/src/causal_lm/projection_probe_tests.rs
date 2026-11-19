@@ -271,10 +271,38 @@ fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
         let r = plain
             .step_conditional_answers(&prompts, &rival_objective, cfg)
             .unwrap();
-        if !r.committed || direct_margin(&plain) > 0. {
+        if !r.committed || !r.trials[0].accepted || direct_margin(&plain) > 0. {
             continue;
         }
         let plain_owner = plain.projection_id();
+        let bank = a
+            .prepare_conditional_answer_prefix_bank(&prompts, 16)
+            .unwrap();
+        let mut indexed = a.clone();
+        let mut indexed_guard = a
+            .prepare_conditional_margin_retention(&prompts, &keep)
+            .unwrap();
+        let before = indexed.checkpoint_with_retention(&indexed_guard).unwrap();
+        let veto = indexed
+            .step_indexed_conditional_answers_retaining(
+                &bank,
+                &[0],
+                &rival_objective,
+                CausalLmConditionalAnswerConfig {
+                    max_trials: 1,
+                    ..cfg
+                },
+                &mut indexed_guard,
+            )
+            .unwrap();
+        assert_eq!(veto.step.trials.len(), 1);
+        assert_eq!(veto.step.trials[0].projection_id, plain_owner);
+        assert!(!veto.step.committed);
+        assert_eq!(veto.retention[0].as_ref().unwrap().nonpositive, 1);
+        assert_eq!(
+            indexed.checkpoint_with_retention(&indexed_guard).unwrap(),
+            before
+        );
         assert!(plain
             .step_conditional_answers_retaining(&prompts, &rival_objective, cfg, &mut stale)
             .is_err());

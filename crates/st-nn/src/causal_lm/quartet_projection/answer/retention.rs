@@ -284,7 +284,12 @@ impl CausalLmConditionalMarginRetention {
 
 impl NativeCausalLmRankOneProjection {
     /// Admit the retention roster's prefix storage before copying token IDs.
-    pub fn conditional_retention_input_count(&self, steps: &[usize]) -> CausalLmResult<usize> {
+    pub fn conditional_retention_input_count(
+        &self,
+        steps: &[usize],
+        allowed_drop: Option<f64>,
+    ) -> CausalLmResult<usize> {
+        Self::validate_mass_allowance(allowed_drop)?;
         let tokens = self.conditional_answer_input_count(steps, false)?;
         self.admit_conditional_retention_tokens(tokens)?;
         Ok(tokens)
@@ -296,6 +301,13 @@ impl NativeCausalLmRankOneProjection {
             1 << 24,
             "retained margin-prefix elements",
         )?;
+        Ok(())
+    }
+
+    fn validate_mass_allowance(allowed_drop: Option<f64>) -> CausalLmResult<()> {
+        if allowed_drop.is_some_and(|drop| !(0.0..=1.0).contains(&drop)) {
+            return Err("invalid conditional retention mass allowance".into());
+        }
         Ok(())
     }
 
@@ -321,9 +333,6 @@ impl NativeCausalLmRankOneProjection {
         pairs: &[[usize; 2]],
         max_mean_mass_drop: f64,
     ) -> CausalLmResult<CausalLmConditionalMarginRetention> {
-        if !(0.0..=1.0).contains(&max_mean_mass_drop) {
-            return Err("invalid conditional retention mass allowance".into());
-        }
         self.prepare_conditional_retention(prompts, pairs, Some(max_mean_mass_drop))
     }
 
@@ -333,12 +342,11 @@ impl NativeCausalLmRankOneProjection {
         pairs: &[[usize; 2]],
         allowed_drop: Option<f64>,
     ) -> CausalLmResult<CausalLmConditionalMarginRetention> {
-        if prompts.len() != pairs.len() || pairs.len() > MAX_OUTPUT_CONTRAST_ROWS {
+        Self::validate_mass_allowance(allowed_drop)?;
+        if prompts.len() != pairs.len() {
             return Err("invalid conditional retention roster".into());
         }
-        for &[y, a] in pairs {
-            self.current.check_contrast_candidates(y, a)?;
-        }
+        self.admit_conditional_answer_pairs(pairs)?;
         let gold = pairs.iter().map(|p| p[0]).collect::<Vec<_>>();
         self.admit_answers(prompts, &gold, None, false)?;
         let layer = self.spec.layer;

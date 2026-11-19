@@ -153,6 +153,16 @@ class NativeCausalLmTests(unittest.TestCase):
             projection.step([ReadTrap(9)], [[2, 7]], length=.01)
         with self.assertRaisesRegex(ValueError, "step configuration"):
             projection.step([ReadTrap(4)], [[2, 7]], length=float("nan"))
+        with self.assertRaisesRegex(ValueError, "one answer pair"):
+            projection.step([ReadTrap(4)], [], length=.01)
+        with self.assertRaisesRegex(ValueError, "one answer pair"):
+            projection.score_pairs([ReadTrap(4)], [])
+        with self.assertRaisesRegex(ValueError, "one answer pair"):
+            projection.prepare_retention([ReadTrap(4)], [])
+        with self.assertRaises(ValueError):
+            projection.score_pairs([ReadTrap(4)], [[2, 2]])
+        with self.assertRaisesRegex(ValueError, "mass allowance"):
+            projection.prepare_retention([ReadTrap(4)], [[2, 7]], max_mean_mass_drop=-1.)
         with self.assertRaises(ValueError):
             projection.prefill(ReadTrap(3), max_cache_values=1)
         bank = projection.prepare_prefix_bank([[1, 2]])

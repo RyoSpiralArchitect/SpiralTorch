@@ -128,7 +128,8 @@ fn is_zero(n: &usize) -> bool {
 }
 
 impl CausalLmConditionalAnswerConfig {
-    fn validate(self) -> CausalLmResult<()> {
+    /// Validate scalar controls without reading a training roster.
+    pub fn validate(self) -> CausalLmResult<()> {
         if !self.length.is_finite()
             || self.length <= 0.
             || !(1..=8).contains(&self.max_trials)
@@ -207,6 +208,17 @@ impl PointSum {
 }
 
 impl NativeCausalLmRankOneProjection {
+    /// Validate the bounded candidate roster independently of prompt tokens.
+    pub fn admit_conditional_answer_pairs(&self, pairs: &[[usize; 2]]) -> CausalLmResult<()> {
+        if !(1..=MAX_OUTPUT_CONTRAST_ROWS).contains(&pairs.len()) {
+            return Err("invalid conditional answer roster length".into());
+        }
+        for &[gold, other] in pairs {
+            self.current.check_contrast_candidates(gold, other)?;
+        }
+        Ok(())
+    }
+
     /// Admit a labelled roster's lengths before a binding reads its token IDs.
     pub fn conditional_answer_input_count(
         &self,
@@ -539,13 +551,10 @@ impl NativeCausalLmRankOneProjection {
         prompts: &[Vec<usize>],
         pairs: &[[usize; 2]],
     ) -> CausalLmResult<usize> {
-        let m = &self.current;
-        if prompts.len() != pairs.len() || pairs.len() > MAX_OUTPUT_CONTRAST_ROWS {
+        if prompts.len() != pairs.len() {
             return Err("invalid conditional answer roster".into());
         }
-        for &[y, a] in pairs {
-            m.check_contrast_candidates(y, a)?;
-        }
+        self.admit_conditional_answer_pairs(pairs)?;
         let gold: Vec<_> = pairs.iter().map(|p| p[0]).collect();
         self.admit_answers(prompts, &gold, None, true)?;
         Ok(prompts.iter().map(Vec::len).sum())

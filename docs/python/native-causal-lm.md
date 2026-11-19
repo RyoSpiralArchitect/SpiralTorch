@@ -1439,8 +1439,10 @@ projection, guard = model.restore_rank_one_with_retention(payload, pin, guard_ro
 ```
 
 The update is applied only when `report["step"]["committed"]` is true.
-An optional `mass_inward_cosine` also protects pair mass on the update
-batch; the fixed guard controls the separate protection set.
+An optional `mass_inward_cosine` requires non-increasing mean negative log
+pair mass on the update batch. That is not a floor on mean pair probability.
+The separate fixed guard enforces its arithmetic-mean probability floor
+on the protection set when configured.
 `guard.minimum_log_mean_pair_mass` is the authoritative floor when the
 positive ordinary probability is too small to compare reliably.
 

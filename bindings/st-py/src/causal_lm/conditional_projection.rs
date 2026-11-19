@@ -30,11 +30,13 @@ fn config(
     max_trials: Option<&Bound<'_, PyAny>>,
     mass_inward_cosine: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<CausalLmConditionalAnswerConfig> {
-    Ok(CausalLmConditionalAnswerConfig {
+    let config = CausalLmConditionalAnswerConfig {
         length: real(length)?,
         max_trials: limit(max_trials, 2)?,
         mass_inward_cosine: mass_inward_cosine.map(real).transpose()?,
-    })
+    };
+    config.validate().map_err(error)?;
+    Ok(config)
 }
 
 fn roster_size(value: &Bound<'_, PyAny>, cap: usize) -> PyResult<usize> {
@@ -48,31 +50,30 @@ fn roster_size(value: &Bound<'_, PyAny>, cap: usize) -> PyResult<usize> {
 enum PromptUse {
     Training(CausalLmConditionalAnswerConfig),
     Forward,
-    Retention,
-    PrefixBank(usize),
+    Retention(Option<f64>),
 }
 
-fn prompts(
+type AnswerPrompts = (Vec<Vec<usize>>, Vec<[usize; 2]>);
+
+fn paired_prompts(
     projection: &NativeCausalLmRankOneProjection,
     value: &Bound<'_, PyAny>,
+    answer_pairs: &Bound<'_, PyAny>,
     usage: PromptUse,
-) -> PyResult<Vec<Vec<usize>>> {
-    let n = roster_size(
-        value,
-        if matches!(usage, PromptUse::PrefixBank(_)) {
-            MAX_CONDITIONAL_BANK_ROWS
-        } else {
-            MAX_OUTPUT_CONTRAST_ROWS
-        },
-    )?;
-    read_prompts(value, n, |counts| match usage {
+) -> PyResult<AnswerPrompts> {
+    let n = roster_size(value, MAX_OUTPUT_CONTRAST_ROWS)?;
+    let pairs = pairs(answer_pairs, n)?;
+    projection
+        .admit_conditional_answer_pairs(&pairs)
+        .map_err(error)?;
+    let prompts = read_prompts(value, n, |counts| match usage {
         PromptUse::Training(config) => {
             projection.conditional_answer_step_input_count(counts, config)
         }
         PromptUse::Forward => projection.conditional_answer_input_count(counts, false),
-        PromptUse::Retention => projection.conditional_retention_input_count(counts),
-        PromptUse::PrefixBank(cap) => projection.conditional_answer_bank_values(counts, cap),
-    })
+        PromptUse::Retention(drop) => projection.conditional_retention_input_count(counts, drop),
+    })?;
+    Ok((prompts, pairs))
 }
 
 fn read_prompts(
@@ -168,8 +169,8 @@ pub(super) fn restore(
             "conditional retention checkpoint roster length changed",
         ));
     }
-    let ids = read_prompts(rows, count, |lengths| plan.roster_input_count(lengths))?;
     let pairs = pairs(answer_pairs, count)?;
+    let ids = read_prompts(rows, count, |lengths| plan.roster_input_count(lengths))?;
     py.detach(|| plan.restore(&ids, &pairs))
         .map(|(state, guard)| (PyRankOne(state), PyConditionalRetention(guard)))
         .map_err(error)
@@ -252,7 +253,10 @@ impl PyRankOne {
         max_prefix_values: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyConditionalBank> {
         let cap = limit(max_prefix_values, 1 << 20)?;
-        let ids = prompts(&self.0, rows, PromptUse::PrefixBank(cap))?;
+        let count = roster_size(rows, MAX_CONDITIONAL_BANK_ROWS)?;
+        let ids = read_prompts(rows, count, |counts| {
+            self.0.conditional_answer_bank_values(counts, cap)
+        })?;
         py.detach(|| self.0.prepare_conditional_answer_prefix_bank(&ids, cap))
             .map(PyConditionalBank)
             .map_err(error)
@@ -267,8 +271,7 @@ impl PyRankOne {
         max_mean_mass_drop: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyConditionalRetention> {
         let drop = max_mean_mass_drop.map(real).transpose()?;
-        let ids = prompts(&self.0, rows, PromptUse::Retention)?;
-        let pairs = pairs(answer_pairs, ids.len())?;
+        let (ids, pairs) = paired_prompts(&self.0, rows, answer_pairs, PromptUse::Retention(drop))?;
         py.detach(|| match drop {
             Some(d) => self
                 .0
@@ -292,8 +295,8 @@ impl PyRankOne {
         retention: Option<PyRefMut<'_, PyConditionalRetention>>,
     ) -> PyResult<Py<PyAny>> {
         let config = config(length, max_trials, mass_inward_cosine)?;
-        let ids = prompts(&self.0, rows, PromptUse::Training(config))?;
-        let pairs = pairs(answer_pairs, ids.len())?;
+        let (ids, pairs) =
+            paired_prompts(&self.0, rows, answer_pairs, PromptUse::Training(config))?;
         self.update(py, Update::Raw(&ids), &pairs, config, retention)
     }
 
@@ -311,8 +314,12 @@ impl PyRankOne {
         retention: Option<PyRefMut<'_, PyConditionalRetention>>,
     ) -> PyResult<Py<PyAny>> {
         let config = config(length, max_trials, mass_inward_cosine)?;
-        let ids = tokens(indices, roster_size(indices, MAX_OUTPUT_CONTRAST_ROWS)?)?;
-        let pairs = pairs(answer_pairs, ids.len())?;
+        let count = roster_size(indices, MAX_OUTPUT_CONTRAST_ROWS)?;
+        let pairs = pairs(answer_pairs, count)?;
+        self.0
+            .admit_conditional_answer_pairs(&pairs)
+            .map_err(error)?;
+        let ids = tokens(indices, count)?;
         self.update(
             py,
             Update::Indexed(&bank.0, &ids),
@@ -328,8 +335,7 @@ impl PyRankOne {
         rows: &Bound<'_, PyAny>,
         answer_pairs: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        let ids = prompts(&self.0, rows, PromptUse::Forward)?;
-        let pairs = pairs(answer_pairs, ids.len())?;
+        let (ids, pairs) = paired_prompts(&self.0, rows, answer_pairs, PromptUse::Forward)?;
         let scores = py
             .detach(|| self.0.score_answer_pairs(&ids, &pairs))
             .map_err(error)?;

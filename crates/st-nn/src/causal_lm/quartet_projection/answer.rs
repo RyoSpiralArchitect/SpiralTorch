@@ -112,13 +112,10 @@ impl NativeCausalLmRankOneProjection {
         prompts: &[Vec<usize>],
         candidates: &[[usize; 2]],
     ) -> CausalLmResult<Vec<CausalLmPairedAnswerScore>> {
-        let m = &self.current;
-        if prompts.len() != candidates.len() || candidates.len() > MAX_OUTPUT_CONTRAST_ROWS {
+        if prompts.len() != candidates.len() {
             return Err("invalid paired answer roster".into());
         }
-        for &[gold, alt] in candidates {
-            m.check_contrast_candidates(gold, alt)?;
-        }
+        self.admit_conditional_answer_pairs(candidates)?;
         let gold: Vec<_> = candidates.iter().map(|p| p[0]).collect();
         self.admit_answers(prompts, &gold, None, false)?;
         prompts
