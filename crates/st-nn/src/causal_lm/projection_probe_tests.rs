@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
@@ -38,6 +39,21 @@ fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
             .step_conditional_answers_retaining(&prompts, &rival_objective, cfg, &mut stale)
             .is_err());
         assert_eq!(plain.projection_id(), plain_owner);
+        let (bytes, _) = a.checkpoint_with_retention(&stale).unwrap();
+        let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        record["projection_id"] = serde_json::json!(plain_owner);
+        record["right_bits"] = serde_json::json!(plain
+            .right()
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>());
+        let forged = serde_json::to_vec(&record).unwrap();
+        let digest = format!("sha256:{:x}", Sha256::digest(&forged));
+        let restore =
+            NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &forged, &digest)
+                .unwrap();
+        assert!(matches!(restore.restore(&prompts, &keep), Err(e)
+            if e.to_string().contains("violates the saved guard")));
         let mut guarded = a.clone();
         let mut deck = guarded
             .prepare_conditional_margin_retention(&prompts, &keep)
@@ -61,6 +77,144 @@ fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
         break;
     }
     assert!(found, "fixture should expose an unprotected distant flip");
+}
+
+#[test]
+fn retained_checkpoint_replays_the_same_next_update() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
+    let cfg = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 2,
+        mass_inward_cosine: None,
+    };
+    for allowance in [None, Some(0.02)] {
+        let mut a = NativeCausalLmRankOneProjection::new(
+            &m,
+            1,
+            Output,
+            &[0., 0.6, -0.8, 0.],
+            &[0.01, -0.02, -0.0, 0.03],
+        )
+        .unwrap();
+        assert_eq!(a.right()[2].to_bits(), (-0.0_f64).to_bits());
+        let pairs: Vec<_> = prompts
+            .iter()
+            .map(|p| {
+                let z = a.last_logits(p).unwrap();
+                if z[2] > z[7] {
+                    [2, 7]
+                } else {
+                    [7, 2]
+                }
+            })
+            .collect();
+        let mut guard = match allowance {
+            Some(d) => a.prepare_conditional_margin_and_mass_retention(&prompts, &pairs, d),
+            None => a.prepare_conditional_margin_retention(&prompts, &pairs),
+        }
+        .unwrap();
+        assert!(
+            a.step_conditional_answers_retaining(&prompts, &pairs, cfg, &mut guard)
+                .unwrap()
+                .step
+                .committed
+        );
+        let (bytes, pin) = a.checkpoint_with_retention(&guard).unwrap();
+        let admit = || NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &pin);
+        let changed = m.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+        assert!(
+            NativeCausalLmRankOneProjection::admit_retained_checkpoint(&changed, &bytes, &pin)
+                .is_err()
+        );
+        assert!(
+            NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, "wrong")
+                .is_err()
+        );
+        let mut reversed = pairs.clone();
+        reversed[0].reverse();
+        assert!(admit().unwrap().restore(&prompts, &reversed).is_err());
+        let restore = admit().unwrap();
+        assert!(restore.roster_input_count(&[4, 9, 4]).is_err());
+        let (mut b, mut restored) = restore.restore(&prompts, &pairs).unwrap();
+        assert_eq!(
+            b.checkpoint_with_retention(&restored).unwrap(),
+            (bytes, pin)
+        );
+        assert_eq!(guard.baseline_margins(), restored.baseline_margins());
+        let step = a
+            .step_conditional_answers_retaining(&prompts, &pairs, cfg, &mut guard)
+            .unwrap();
+        let resumed = b
+            .step_conditional_answers_retaining(&prompts, &pairs, cfg, &mut restored)
+            .unwrap();
+        assert!(step.step.committed);
+        assert_eq!(
+            serde_json::to_vec(&step).unwrap(),
+            serde_json::to_vec(&resumed).unwrap()
+        );
+        assert_eq!(a.projection_id(), b.projection_id());
+        assert_eq!(
+            a.checkpoint_with_retention(&guard).unwrap(),
+            b.checkpoint_with_retention(&restored).unwrap()
+        );
+        assert_eq!(
+            a.last_logits(&prompts[0]).unwrap(),
+            b.last_logits(&prompts[0]).unwrap()
+        );
+    }
+}
+
+#[test]
+fn retained_checkpoint_pins_a_floor_below_the_probability_range() {
+    let mut config = config();
+    config["tie_word_embeddings"] = serde_json::json!(false);
+    let mut weights = parameters();
+    weights.get_mut("ln_f.weight").unwrap().1.fill(0.);
+    weights.get_mut("ln_f.bias").unwrap().1 = vec![1., 0., 0., 0.];
+    let mut head = vec![0.; 11 * 4];
+    head[4] = -1.;
+    head[8] = 800.;
+    weights.insert("lm_head.weight".into(), (vec![11, 4], head));
+    let m = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&config).unwrap(),
+        &archive(&weights),
+        Default::default(),
+    )
+    .unwrap();
+    let state =
+        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[1., 0., 0., 0.], &[0.; 4]).unwrap();
+    let prompts = vec![vec![1, 2, 3]];
+    let pairs = [[0, 1]];
+    assert_eq!(
+        &state.last_logits(&prompts[0]).unwrap()[..3],
+        &[0., -1., 800.]
+    );
+    let guard = state
+        .prepare_conditional_margin_and_mass_retention(&prompts, &pairs, 0.)
+        .unwrap();
+    let (bytes, pin) = state.checkpoint_with_retention(&guard).unwrap();
+    let (restored, restored_guard) =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &pin)
+            .unwrap()
+            .restore(&prompts, &pairs)
+            .unwrap();
+    assert_eq!(
+        restored.checkpoint_with_retention(&restored_guard).unwrap(),
+        (bytes.clone(), pin)
+    );
+    let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let mass = &mut record["baseline"]["mass"];
+    assert_eq!(mass["minimum_mean_pair_mass_bits"], 0);
+    let log_floor = f64::from_bits(mass["minimum_log_mean_pair_mass_bits"].as_u64().unwrap());
+    assert!(log_floor < -790.);
+    mass["minimum_log_mean_pair_mass_bits"] = serde_json::json!((log_floor - 1.).to_bits());
+    let altered = serde_json::to_vec(&record).unwrap();
+    let id = format!("sha256:{:x}", Sha256::digest(&altered));
+    let plan =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &altered, &id).unwrap();
+    assert!(matches!(plan.restore(&prompts, &pairs), Err(e)
+        if e.to_string().contains("baseline does not reproduce")));
 }
 
 #[test]

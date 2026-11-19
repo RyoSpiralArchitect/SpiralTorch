@@ -13,8 +13,8 @@ pub use answer::{
     CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerStep, CausalLmConditionalAnswerTrial,
     CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
     CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionMassCheck,
-    CausalLmConditionalRetentionOutsideCheck, CausalLmLossGradient, CausalLmPairedAnswerScore,
-    CausalLmRetainedConditionalAnswerStep,
+    CausalLmConditionalRetentionOutsideCheck, CausalLmConditionalRetentionRestore,
+    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmRetainedConditionalAnswerStep,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,10 +208,14 @@ impl NativeCausalLmRankOneProjection {
     }
 
     fn install(&mut self, right: Vec<f64>) -> CausalLmResult<()> {
-        if right.iter().any(|x| !x.is_finite()) {
-            return Err("nonfinite rank-one update".into());
+        if right.len() != self.left.len() || right.iter().any(|x| !x.is_finite()) {
+            return Err("invalid rank-one update".into());
         }
-        if right == self.right {
+        if right
+            .iter()
+            .zip(&self.right)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+        {
             return Ok(());
         }
         let mut next = (*self.origin).clone();
@@ -259,21 +263,37 @@ impl NativeCausalLmRankOneProjection {
 
     /// Identity of the exact serving recipe, distinct from the frozen base ID.
     pub fn projection_id(&self) -> String {
+        Self::recipe_id(
+            &self.origin,
+            self.spec.layer,
+            self.spec.site,
+            &self.left,
+            &self.right,
+        )
+    }
+
+    fn recipe_id(
+        origin: &NativeCausalLm,
+        layer: usize,
+        site: CausalLmProjectionSite,
+        left: &[f64],
+        right: &[f64],
+    ) -> String {
         let mut h = Sha256::new();
         h.update(b"spiraltorch.rank_one_projection_prefix.v1\0");
         for s in [
-            self.origin.base_model_identity(),
-            self.origin.lora_artifact_id().unwrap_or(""),
-            self.origin.geometry_artifact_id().unwrap_or(""),
-            self.origin.readout_accumulator().as_str(),
-            self.spec.site.as_str(),
+            origin.base_model_identity(),
+            origin.lora_artifact_id().unwrap_or(""),
+            origin.geometry_artifact_id().unwrap_or(""),
+            origin.readout_accumulator().as_str(),
+            site.as_str(),
         ] {
             h.update((s.len() as u64).to_le_bytes());
             h.update(s.as_bytes());
         }
-        h.update((self.spec.layer as u64).to_le_bytes());
-        h.update((self.left.len() as u64).to_le_bytes());
-        for v in self.left.iter().chain(&self.right) {
+        h.update((layer as u64).to_le_bytes());
+        h.update((left.len() as u64).to_le_bytes());
+        for v in left.iter().chain(right) {
             h.update(v.to_bits().to_le_bytes());
         }
         format!("sha256:{:x}", h.finalize())

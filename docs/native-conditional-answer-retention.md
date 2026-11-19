@@ -76,5 +76,33 @@ Each call commits at most one step. A later error does not roll back
 earlier calls in the loop; record each returned step as it completes
 when you need a durable per-batch trace.
 
+## Restart without resetting the guard
+
+Call `projection.checkpoint_with_retention(&guard)` to get bytes and a
+SHA-256 pin. Save both, and keep the expected pin independently of the
+checkpoint being verified. Use the original frozen decoder, including its
+LoRA, geometry, and readout policy:
+
+```rust
+let plan = NativeCausalLmRankOneProjection::admit_retained_checkpoint(
+    &source, &bytes, &expected_pin,
+)?;
+let (mut projection, mut guard) = plan.restore(guard_prompts, guard_pairs)?;
+```
+
+Admission checks the size, pin, format and both projection identities
+without any model evaluation. Restoration requires the exact original
+ordered guard roster, checks its work budget, and replays it at the
+original factors. The signed margins, mean mass floor, outside ceiling,
+and active log-space floor must reproduce bit-for-bit. The saved endpoint
+must pass that reconstructed guard before it is returned.
+
+The checkpoint binds the guard and projection, not a training-data cursor
+or schedule. It contains factors, summary statistics, and a roster digest,
+not prompt rows or cached activations; treat it as training data rather than
+as a redacted export. The v3 format does not load older research-only
+checkpoints. A different baseline or schema is an error, not permission
+to start a new guard at the saved endpoint.
+
 This is a Rust-only API. It does not require Torch and does not expose
 a Python or WASM training entry point.

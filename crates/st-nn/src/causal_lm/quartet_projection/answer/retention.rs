@@ -1,6 +1,9 @@
 //! Finite protection of individually correct two-candidate margins.
 use super::{observation::candidate_mass_loss, *};
 
+mod checkpoint;
+pub use checkpoint::CausalLmConditionalRetentionRestore;
+
 struct Anchor {
     prefix: Tensor,
     steps: usize,
@@ -17,6 +20,10 @@ pub struct CausalLmConditionalMarginRetention {
     baseline: Vec<f64>,
     protected_count: usize,
     mass: Option<MassFloor>,
+    initial_projection_id: String,
+    initial_right: Vec<f64>,
+    roster_id: String,
+    allowed_drop: Option<f64>,
 }
 
 struct MassFloor {
@@ -49,6 +56,11 @@ impl PairMassMean {
 }
 
 impl MassFloor {
+    fn log_pair_limit(&self) -> Option<f64> {
+        self.minimum_log_pair
+            .filter(|&floor| floor < f64::MIN_POSITIVE.ln())
+    }
+
     fn from_baseline(mass: PairMassMean, rows: usize, drop: f64) -> Self {
         let minimum_log_pair = mass.log_mean_pair(rows).and_then(|log_mean| {
             if drop == 0. {
@@ -67,16 +79,14 @@ impl MassFloor {
     }
 
     fn check(&self, mass: PairMassMean, rows: usize) -> CausalLmConditionalRetentionMassCheck {
-        let log_pair = self
-            .minimum_log_pair
-            .filter(|&floor| floor < f64::MIN_POSITIVE.ln())
-            .zip(mass.log_mean_pair(rows))
-            .map(|(minimum_log_mean_pair_mass, log_mean_pair_mass)| {
+        let log_pair = self.log_pair_limit().zip(mass.log_mean_pair(rows)).map(
+            |(minimum_log_mean_pair_mass, log_mean_pair_mass)| {
                 CausalLmConditionalRetentionLogMassCheck {
                     log_mean_pair_mass,
                     minimum_log_mean_pair_mass,
                 }
-            });
+            },
+        );
         let mean_pair_mass = mass.pair.mean(rows as u64);
         let mean_outside_mass = mass.outside.mean(rows as u64);
         let rounded_pass = mean_pair_mass >= self.minimum;
@@ -344,12 +354,17 @@ impl NativeCausalLmRankOneProjection {
         if protected_count == 0 {
             return Err("conditional retention found no initially correct margins".into());
         }
+        let owner = self.projection_id();
         Ok(CausalLmConditionalMarginRetention {
             anchors,
             baseline,
             layer,
-            owner: self.projection_id(),
+            initial_projection_id: owner.clone(),
+            owner,
             protected_count,
+            initial_right: self.right().to_vec(),
+            roster_id: checkpoint::roster_id(prompts, pairs),
+            allowed_drop,
             mass: allowed_drop.map(|drop| MassFloor::from_baseline(mean_mass, prompts.len(), drop)),
         })
     }
