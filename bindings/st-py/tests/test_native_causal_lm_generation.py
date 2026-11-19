@@ -414,6 +414,29 @@ runpy.run_path(sys.argv[1])["main"](sys.argv[2:])
             })
             self.assertEqual(result["lora_artifact_id"], model.lora_artifact_id)
 
+            standalone = kind(state, guard, rows, schedule, length=.01, epochs=2)
+            standalone.step()
+            raw, modern_id = standalone.checkpoint_with_id()
+            (root / "standalone.ck").write_bytes(raw)
+            rec = fixtures["legacy_conditional_fixture"](raw, family=True)
+            raw, legacy_id = fixtures["legacy_conditional_bytes"](*rec)
+            (root / "legacy.ck").write_bytes(raw)
+            modern = run("modern", [*prompt, "--conditional-checkpoint", "standalone.ck"],
+                         conditional_id=modern_id)
+            legacy = run("legacy", [*prompt, "--conditional-checkpoint", "legacy.ck", "--legacy-conditional-checkpoint"],
+                         conditional_id=legacy_id)
+            for call in (modern, legacy):
+                self.assertEqual(call.returncode, 0, call.stderr)
+            self.assertEqual((root / "modern/generation.json").read_bytes(), (root / "legacy/generation.json").read_bytes())
+            info = json.loads(legacy.stdout)["conditional_snapshot"]
+            self.assertEqual(info["checkpoint_id"], legacy_id)
+            self.assertTrue(info["legacy_checkpoint"])
+            self.assertFalse(info["training_documents_verified"])
+            without_opt_in = run("without-opt-in", [*prompt, "--conditional-checkpoint", "legacy.ck"],
+                                 conditional_id=legacy_id)
+            self.assertNotEqual(without_opt_in.returncode, 0)
+            self.assertFalse((root / "without-opt-in").exists())
+
             rewritten = saved + "\n"
             (root / "rewritten.json").write_bytes(rewritten.encode("utf-8"))
             replay = run("reformatted", ["--resume", "rewritten.json", "--resume-id", pin(rewritten)])

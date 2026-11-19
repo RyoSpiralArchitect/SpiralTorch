@@ -1548,3 +1548,9 @@ The example emits the native generation pin on stderr immediately after
 publication, so it stays available if writing reports fails. On resume,
 `result.json` distinguishes the exact admitted `resume_input_id` from
 the canonical starting-state `initial_id`.
+
+For a pinned, archived repeated v2 or family v4 session, explicitly use
+`NativeCausalLmConditionalAnswerSession.serving_from_legacy_checkpoint`
+or pass `--legacy-conditional-checkpoint` to the example. This is a
+read-only path and requires the original frozen decoder, including any
+LoRA and readout policy. It does not admit those formats for training.

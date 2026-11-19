@@ -47,6 +47,8 @@ def main(argv=None):
     parser.add_argument("--qkv-checkpoint-id", help="separately retained QKV checkpoint SHA-256 identity")
     parser.add_argument("--conditional-checkpoint", type=Path, help="conditional rank-one session checkpoint for serving")
     parser.add_argument("--conditional-checkpoint-id", help="separately retained conditional checkpoint SHA-256 identity")
+    parser.add_argument("--legacy-conditional-checkpoint", action="store_true",
+                        help="read a historical repeated/family artifact for inference only")
     parser.add_argument("--conditional-source-lora", type=Path, help="original frozen LoRA JSON for conditional serving")
     parser.add_argument("--readout-accumulator", choices=("f32", "f32_wide_backward", "f64"),
                         help="original model arithmetic policy; must match the saved projection owner")
@@ -68,6 +70,9 @@ def main(argv=None):
     conditional = args.conditional_checkpoint is not None
     if conditional != (args.conditional_checkpoint_id is not None):
         parser.error("conditional inference needs conditional-checkpoint and its pinned conditional-checkpoint-id")
+    if args.legacy_conditional_checkpoint and (not conditional or not hasattr(
+            getattr(st, "NativeCausalLmConditionalAnswerSession", None), "serving_from_legacy_checkpoint")):
+        parser.error("legacy conditional serving requires a pinned conditional checkpoint and a matching build")
     if args.conditional_source_lora is not None and not conditional:
         parser.error("conditional-source-lora needs a conditional checkpoint")
     if conditional and all(qkv):
@@ -145,8 +150,9 @@ def main(argv=None):
     elif conditional_payload is not None:
         if args.conditional_source_lora is not None:
             model = model.with_lora_json(read(args.conditional_source_lora, 64 << 20))
-        projection = st.NativeCausalLmConditionalAnswerSession.serving_from_checkpoint(
-            model, conditional_payload, args.conditional_checkpoint_id)
+        cls = st.NativeCausalLmConditionalAnswerSession
+        serve = cls.serving_from_legacy_checkpoint if args.legacy_conditional_checkpoint else cls.serving_from_checkpoint
+        projection = serve(model, conditional_payload, args.conditional_checkpoint_id)
         del conditional_payload
     if args.resume:
         payload = read(args.resume, 1_048_576)
@@ -202,6 +208,8 @@ def main(argv=None):
             "position": projection.position, "total_batches": projection.total_batches,
             "training_documents_verified": False,
         }
+        if args.legacy_conditional_checkpoint:
+            result["conditional_snapshot"]["legacy_checkpoint"] = True
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")

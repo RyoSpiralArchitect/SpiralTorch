@@ -150,6 +150,12 @@ prompt pool, original guard roster, or training workspace. It checks the
 outer and inner pins and model recipe; it does not replay the guard.
 Use `prepare_resume` with the original inputs to resume training.
 
+The explicit read-only `serving_from_legacy_checkpoint` also admits archived
+repeated v2 and family v4 sessions with a v2 retention record. It checks
+both pins and both projection identities against the exact source decoder.
+Linked v4 phases use a different format. No checkpoint is converted, no
+guard is replayed, and these archived formats cannot resume training.
+
 The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
 calls this same implementation without Torch. There is no WASM training
 binding for this projection.

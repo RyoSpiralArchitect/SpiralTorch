@@ -777,6 +777,9 @@ class NativeCausalLmConditionalAnswerSession:
     @staticmethod
     def serving_from_checkpoint(model: NativeCausalLm, payload: bytes,
                                 expected_id: str) -> NativeCausalLmConditionalServingSnapshot: ...
+    @staticmethod
+    def serving_from_legacy_checkpoint(model: NativeCausalLm, payload: bytes,
+                                       expected_id: str) -> NativeCausalLmConditionalServingSnapshot: ...
     def next_phase(self, pool: Sequence[Sequence[int]], schedule: Sequence[tuple[Sequence[int], Sequence[Sequence[int]]]], *,
                    length: float, max_trials: int | None = None, mass_inward_cosine: float | None = None,
                    max_prefix_values: int | None = None, epochs: int | None = None) -> NativeCausalLmConditionalAnswerSession: ...

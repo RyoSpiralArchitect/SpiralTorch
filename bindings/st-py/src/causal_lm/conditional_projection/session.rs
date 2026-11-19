@@ -290,6 +290,26 @@ impl PyConditionalSession {
         .map_err(error)
     }
 
+    #[staticmethod]
+    fn serving_from_legacy_checkpoint(
+        py: Python<'_>,
+        model: &PyNativeCausalLm,
+        payload: &Bound<'_, PyBytes>,
+        expected_id: &Bound<'_, PyAny>,
+    ) -> PyResult<PyConditionalServing> {
+        let pin = session_input::pin(expected_id)?;
+        let bytes = payload.as_bytes();
+        py.detach(|| {
+            NativeCausalLmConditionalAnswerSession::serving_from_legacy_checkpoint(
+                &model.inner,
+                bytes,
+                &pin,
+            )
+        })
+        .map(PyConditionalServing)
+        .map_err(error)
+    }
+
     #[getter]
     fn position(&self) -> u64 {
         self.0.position()

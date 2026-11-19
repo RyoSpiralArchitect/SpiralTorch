@@ -5,6 +5,8 @@ use super::*;
 use crate::causal_lm::checkpoint as files;
 use std::path::Path;
 
+mod legacy;
+
 const LEGACY_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
 const LEGACY_PHASE_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v4";
 const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.start_bound.v1";
@@ -113,6 +115,20 @@ pub struct CausalLmConditionalAnswerSessionRestore {
 fn read_present_id<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
     // An omitted field is distinct from an explicitly supplied null.
     String::deserialize(input).map(Some)
+}
+
+fn frame<'a>(bytes: &'a [u8], expected_id: &str) -> CausalLmResult<(&'a [u8], &'a [u8])> {
+    if !(4..=NativeCausalLmConditionalAnswerSession::MAX_CHECKPOINT_BYTES).contains(&bytes.len())
+        || !canonical_digest(expected_id)
+        || fingerprint(bytes) != expected_id
+    {
+        return Err("conditional session checkpoint length or digest mismatch".into());
+    }
+    let size = u32::from_le_bytes(bytes[..4].try_into()?) as usize;
+    if size > HEADER_LIMIT || size > bytes.len() - 4 {
+        return Err("invalid conditional session checkpoint frame".into());
+    }
+    Ok(bytes[4..].split_at(size))
 }
 
 fn phase_plan_id(schedule: String, predecessor: Option<&str>) -> String {
@@ -580,17 +596,7 @@ impl NativeCausalLmConditionalAnswerSession {
         CausalLmConditionalRetentionRestore,
         usize,
     )> {
-        if !(4..=Self::MAX_CHECKPOINT_BYTES).contains(&bytes.len())
-            || !canonical_digest(expected_id)
-            || fingerprint(bytes) != expected_id
-        {
-            return Err("conditional session checkpoint length or digest mismatch".into());
-        }
-        let size = u32::from_le_bytes(bytes[..4].try_into()?) as usize;
-        if size > HEADER_LIMIT || size > bytes.len() - 4 {
-            return Err("invalid conditional session checkpoint frame".into());
-        }
-        let (header, retained) = bytes[4..].split_at(size);
+        let (header, retained) = frame(bytes, expected_id)?;
         let record: Record = serde_json::from_slice(header)?;
         match (
             record.schema.as_str(),
