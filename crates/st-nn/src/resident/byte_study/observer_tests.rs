@@ -334,6 +334,39 @@ fn retained_boundary_keeps_real_study_errors_before_and_after_capture() {
             }
         }
         let study = ByteCorpusStudy::from_json(value.to_string().as_bytes()).unwrap();
+        if !fail_before_capture {
+            assert!(study.total_updates() > 1);
+            assert!(!study.evaluation_boundary(1));
+            let mut forwards = Vec::new();
+            let run = pollster::block_on(study.execute(
+                runtime.clone(),
+                None,
+                study.total_updates(),
+                false,
+                None::<UpdateObserverFn>,
+                Some(
+                    |name: &str,
+                     update,
+                     _: &ResidentByteDecoder,
+                     _: &ResidentByteDecoderForward| {
+                        forwards.push((name.to_owned(), update));
+                        Ok(())
+                    },
+                ),
+            ));
+            let error = match run {
+                Ok(_) => panic!("the first update should be rejected"),
+                Err(error) => error,
+            };
+            assert!(
+                matches!(
+                    error.downcast_ref::<st_backend_wgpu::resident_training::TrainingError>(),
+                    Some(st_backend_wgpu::resident_training::TrainingError::Rejected { .. })
+                ),
+                "{error}"
+            );
+            assert_eq!(forwards, [(String::from("plain"), 1)]);
+        }
         let reference = tests::saved(&study, 1); // Structural reference, not a training claim.
         let observed = pollster::block_on(study.run_with_retained_boundary(
             runtime.clone(),

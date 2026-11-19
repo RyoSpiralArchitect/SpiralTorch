@@ -25,9 +25,14 @@ The immutable original failure reports and checkpoints remain the reference.
 
 `ByteCorpusStudy::run()` and `advance()` do not install an observer.
 `run_with_update_observer()` explicitly invokes a callback after every submitted
-update and before the next scheduled drain or forward. It passes a case name,
-one-based attempted update, and an immutable model. Submission is not acceptance;
-the existing receipt checks are unchanged. A callback error aborts that run.
+update and before reading that update's acceptance receipt. It passes a case
+name, one-based attempted update, and an immutable model. Submission is not
+acceptance; a rejected receipt or callback error aborts that run.
+
+This runner accepts each update before the next forward in ordinary and
+segmented runs. Evaluations still follow the original request schedule.
+Runs from this source are not timing-equivalent replays of historical
+ordinary runs that deferred receipt reads.
 
 The native `resident_byte_boundary_probe` example:
 
@@ -39,8 +44,8 @@ The native `resident_byte_boundary_probe` example:
   clones immutable parameter and optimizer handles at update 1. Diagnostic
   GPU copies are not submitted until the observed study has returned.
 - Neither mode maps the captured boundary until the observed study has returned.
-  Its original scheduled drains/evaluations still occur. Mode and limitations
-  are recorded in both the invocation and summary.
+  Ordinary per-update receipt reads and scheduled evaluations still occur.
+  Mode and limitations are recorded in both the invocation and summary.
 - Saves `run-outcome.json` **before** attempting the boundary readback. A
   failed study or diagnostic read does not replace the other result.
 - Saves both canonical model checkpoints, compares them exactly, and records
