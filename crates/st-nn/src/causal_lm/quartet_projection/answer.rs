@@ -1,10 +1,13 @@
 use super::*;
 
 mod guard;
+mod observation;
 pub use guard::{
     CausalLmAnswerCorrection, CausalLmAnswerGuard, CausalLmAnswerGuardStatus,
     CausalLmAnswerGuardStep, CausalLmAnswerPoint, CausalLmAnswerProtection, CausalLmAnswerTrial,
 };
+pub use observation::CausalLmBindingGradientObservation;
+use observation::{candidate_mass_seed, PairObservation};
 
 /// Optional supervision on the relationship between four indexed prompts.
 /// Gold CE labels are independent of the quartet orientation and contrast IDs.
@@ -47,7 +50,72 @@ pub struct CausalLmAnswerProjectionStep {
     pub projection_pullbacks: usize,
 }
 
+/// Two candidates scored from the same full-vocabulary next-token distribution.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+pub struct CausalLmPairedAnswerScore {
+    pub gold_nll: f64,
+    pub alternative_nll: f64,
+    /// Computed directly from logits, without subtracting rounded NLLs.
+    pub gold_minus_alternative: f64,
+    pub top_token: usize,
+}
+
+impl CausalLmPairedAnswerScore {
+    fn from_logits(z: &[f32], [gold, alt]: [usize; 2]) -> CausalLmResult<Self> {
+        let mut top_token = 0;
+        for (i, &logit) in z.iter().enumerate() {
+            if !logit.is_finite() {
+                return Err("nonfinite paired answer logits".into());
+            }
+            if logit > z[top_token] {
+                top_token = i;
+            }
+        }
+        let max = f64::from(z[top_token]);
+        let mut tail = sum::Sum::default();
+        for (i, &logit) in z.iter().enumerate() {
+            if i != top_token {
+                tail.add((f64::from(logit) - max).exp());
+            }
+        }
+        // Adding the maximum's unit term before ln would round away tiny tails.
+        let denom = tail.value().ln_1p();
+        let (g, a) = (f64::from(z[gold]), f64::from(z[alt]));
+        Ok(Self {
+            gold_nll: (max - g) + denom,
+            alternative_nll: (max - a) + denom,
+            gold_minus_alternative: g - a,
+            top_token,
+        })
+    }
+}
+
 impl NativeCausalLmRankOneProjection {
+    /// Read-only next-token scoring with no gradient, mutation or logits export.
+    /// Each pair is ordered [gold, alternative]; equal candidates are rejected.
+    pub fn score_answer_pairs(
+        &self,
+        prompts: &[Vec<usize>],
+        candidates: &[[usize; 2]],
+    ) -> CausalLmResult<Vec<CausalLmPairedAnswerScore>> {
+        let m = &self.current;
+        if prompts.len() != candidates.len() || candidates.len() > MAX_OUTPUT_CONTRAST_ROWS {
+            return Err("invalid paired answer roster".into());
+        }
+        for &[gold, alt] in candidates {
+            m.check_contrast_candidates(gold, alt)?;
+        }
+        let gold: Vec<_> = candidates.iter().map(|p| p[0]).collect();
+        self.admit_answers(prompts, &gold, None, false)?;
+        prompts
+            .iter()
+            .zip(candidates)
+            .map(|(prompt, &pair)| {
+                CausalLmPairedAnswerScore::from_logits(&self.last_logits(prompt)?, pair)
+            })
+            .collect()
+    }
+
     /// Mean next-token cross entropy over the entire vocabulary. Optional binding
     /// adds a separate, explicitly weighted interaction loss. The two adjoints
     /// share one factual forward per prompt, but not a prematurely rounded f32
@@ -58,10 +126,52 @@ impl NativeCausalLmRankOneProjection {
         gold: &[usize],
         binding: Option<CausalLmAnswerBinding<'_>>,
     ) -> CausalLmResult<CausalLmAnswerProjectionStep> {
+        self.answer_gradients_parts(prompts, gold, binding, false)
+            .map(|(training, _)| training)
+    }
+
+    /// Observe candidate-mass descent and conditional-answer descent at
+    /// the same sealed state and on the same forward pass as the training
+    /// objective. Every gold ID must be one of the two binding candidates.
+    pub fn observe_binding_gradients(
+        &self,
+        prompts: &[Vec<usize>],
+        gold: &[usize],
+        binding: CausalLmAnswerBinding<'_>,
+    ) -> CausalLmResult<CausalLmBindingGradientObservation> {
+        let (training, split) = self.answer_gradients_parts(prompts, gold, Some(binding), true)?;
+        split
+            .ok_or("missing paired gradient decomposition")?
+            .finish(self.projection_id(), training)
+    }
+
+    fn answer_gradients_parts(
+        &self,
+        prompts: &[Vec<usize>],
+        gold: &[usize],
+        binding: Option<CausalLmAnswerBinding<'_>>,
+        observe_pair: bool,
+    ) -> CausalLmResult<(CausalLmAnswerProjectionStep, Option<PairObservation>)> {
         self.admit_answers(prompts, gold, binding, true)?;
         let m = &self.current;
         let n = prompts.len();
         let w = m.config.width;
+        let mut split = if observe_pair {
+            let b = binding.ok_or("paired gradient observation requires binding candidates")?;
+            if gold.iter().any(|y| !b.ids.contains(y)) {
+                return Err(
+                    "paired gradient observation requires gold inside the candidate pair".into(),
+                );
+            }
+            product(
+                &[prompts.iter().map(Vec::len).sum(), w, 3],
+                output_margin::MAX_CAPTURE_TERMS,
+                "binding observation capture work",
+            )?;
+            Some(PairObservation::new(w))
+        } else {
+            None
+        };
         let seeds = 1 + usize::from(binding.is_some());
         let contrast_seed = if let Some(b) = binding {
             let mut v = vec![0.; m.config.vocabulary];
@@ -85,8 +195,21 @@ impl NativeCausalLmRankOneProjection {
             )?;
             if let (Some(b), Some(d)) = (binding, contrast_seed.as_ref()) {
                 let z = row.logits.data();
-                gaps.push(f64::from(z[b.ids[0]]) - f64::from(z[b.ids[1]]));
-                gap_grad.push(m.fixed_left_seed(row.clone(), d, self.spec, &self.left)?);
+                let gap = f64::from(z[b.ids[0]]) - f64::from(z[b.ids[1]]);
+                let g = m.fixed_left_seed(row.clone(), d, self.spec, &self.left)?;
+                if let Some(observer) = &mut split {
+                    let (mass_loss, mass_seed) = candidate_mass_seed(z, b.ids)?;
+                    let mass = m.fixed_left_seed(row.clone(), &mass_seed, self.spec, &self.left)?;
+                    observer.add(
+                        mass_loss,
+                        mass,
+                        gap,
+                        if y == b.ids[0] { 1. } else { -1. },
+                        &g,
+                    );
+                }
+                gaps.push(gap);
+                gap_grad.push(g);
             }
             ce_total.add(f64::from(loss));
             for (s, g) in ce_grad
@@ -123,14 +246,17 @@ impl NativeCausalLmRankOneProjection {
         } else {
             (None, answer.clone(), 0.)
         };
-        Ok(CausalLmAnswerProjectionStep {
-            answer,
-            interaction,
-            combined,
-            mix,
-            prompt_forwards: n,
-            projection_pullbacks: n * seeds,
-        })
+        Ok((
+            CausalLmAnswerProjectionStep {
+                answer,
+                interaction,
+                combined,
+                mix,
+                prompt_forwards: n,
+                projection_pullbacks: n * seeds,
+            },
+            split,
+        ))
     }
 
     fn admit_answers(
@@ -192,5 +318,29 @@ impl NativeCausalLmRankOneProjection {
         let r = self.answer_gradients(prompts, gold, binding)?;
         self.descend(&r.combined.gradient, r.combined.norm, length)?;
         Ok(r)
+    }
+}
+
+#[cfg(test)]
+mod scoring_tests {
+    use super::*;
+
+    #[test]
+    fn paired_scores_keep_small_positive_nll_and_first_top_token() {
+        let score = CausalLmPairedAnswerScore::from_logits(&[0., -45., -46.], [0, 1]).unwrap();
+        let expected = ((-45.0_f64).exp() + (-46.0_f64).exp()).ln_1p();
+        assert_eq!(score.gold_nll, expected);
+        assert!(score.gold_nll > 0. && score.gold_nll < f64::EPSILON);
+        assert_eq!(score.gold_minus_alternative, 45.);
+        let reversed = CausalLmPairedAnswerScore::from_logits(&[0., -45., -46.], [1, 0]).unwrap();
+        assert_eq!(reversed.alternative_nll, score.gold_nll);
+        assert_eq!(reversed.gold_minus_alternative, -45.);
+
+        let tie = CausalLmPairedAnswerScore::from_logits(&[1., 1.], [1, 0]).unwrap();
+        assert_eq!(tie.top_token, 0);
+        assert_eq!(tie.gold_nll, 2.0_f64.ln());
+        assert_eq!(tie.gold_nll, tie.alternative_nll);
+        assert_eq!(tie.gold_minus_alternative, 0.);
+        assert!(CausalLmPairedAnswerScore::from_logits(&[0., 1., f32::NAN], [0, 1]).is_err());
     }
 }
