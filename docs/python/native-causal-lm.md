@@ -1554,3 +1554,53 @@ For a pinned, archived repeated v2 or family v4 session, explicitly use
 or pass `--legacy-conditional-checkpoint` to the example. This is a
 read-only path and requires the original frozen decoder, including any
 LoRA and readout policy. It does not admit those formats for training.
+
+### Compare full supervised answers from saved projections
+
+```python
+from spiraltorch import NativeCausalLmConditionalServingSnapshot
+
+score = NativeCausalLmConditionalServingSnapshot.evaluate_variants_by_answer(
+    model, [before, after], documents, context_length=128, labels=answer_labels,
+)
+first_answer = score.answer(0)
+after_minus_before = score.contrast(1, 2)
+```
+
+Variant 0 is the frozen source model; the remaining variants follow the
+supplied snapshot order. All must agree on the base weights, LoRA,
+geometry and readout policy. Unshifted labels mark supervised targets:
+`-100` excludes the position from scoring, but model history still uses
+`token_documents`. The evaluator groups contiguous scored targets into
+answers, even when an answer spans covering windows. Context starts over
+at each window's start, so a long answer's NLL is not computed under one
+unbroken prefix. The report includes token-weighted and answer-weighted
+NLL differences. A negative candidate-minus-reference delta means lower NLL.
+
+Decoder work is shared only before the earliest changed projection.
+The `native_answer_comparison.py` example accepts pinned
+`--conditional-variant NAME CHECKPOINT PIN` entries and a separately
+pinned labeled corpus. Rust enforces the document and per-comparison token
+limits as the JSON is decoded. The example does not need the training
+roster or verify split independence. These are teacher-forced scores,
+not free-generation quality or a speed measurement.
+Archived conditional variants require `--legacy-conditional-checkpoints`
+and the same original source recipe; the CLI does not auto-detect them.
+
+Add `--paired-greedy MAX_NEW_TOKENS STOP_ID` (2 to 128 new tokens) to the
+conditional comparison to run a separate prompt-only decoder on the same cases
+and pinned variants.
+Each document must have a nonempty masked prompt followed by an unmasked answer
+whose labels match the input IDs exactly, including one final stop ID. The
+whole prompt and generation budget must fit a single scoring window so neither
+route truncates the prompt. All variants get the same greedy full-prefix recipe.
+Before scoring or generating, Rust checks the maximum generated prefix against
+the frozen source's native generation budget for every prompt length.
+The decoder never gets the answer IDs or the answer's length.
+
+The private output includes generated token IDs, termination, first-token and
+exact answer-plus-stop matches, and per-answer teacher-forced NLL. The joint
+counts distinguish lower NLL without an exact-match gain from gains and losses.
+Exact match is on IDs, not decoded text or semantic equivalence. Only this mode
+has the smaller 2 MiB input, 128-case, 8,192-step and 131,072-prefix-token
+limits; it does not check that the inputs are fresh.

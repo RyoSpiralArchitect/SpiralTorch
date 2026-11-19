@@ -7,10 +7,12 @@ use crate::language_windows::{
 use sha2::{Digest, Sha256};
 
 mod answers;
+mod labeled_corpus;
 pub use answers::{
     CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmScoredAnswer,
     MAX_ANSWER_SCORE_CELLS,
 };
+pub use labeled_corpus::CausalLmLabeledAnswerCorpus;
 
 pub const MAX_EVALUATION_TOKENS: usize = 16_777_216;
 pub const MAX_EVALUATION_VARIANTS: usize = 16;

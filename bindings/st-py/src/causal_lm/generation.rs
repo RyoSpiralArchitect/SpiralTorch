@@ -43,6 +43,20 @@ impl PyNativeCausalLmGenerator {
             .map_err(error)
     }
     #[staticmethod]
+    fn validate_prompt_length(
+        model: &PyNativeCausalLm,
+        prompt_length: &Bound<'_, PyAny>,
+        config_json: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let length = dimension(prompt_length)?;
+        let bytes = session_input::payload_with_limit(
+            config_json,
+            CausalLmGenerationConfig::MAX_JSON_BYTES,
+        )?;
+        let config = CausalLmGenerationConfig::from_json(bytes.as_bytes()).map_err(error)?;
+        config.validate(&model.inner, length).map_err(error)
+    }
+    #[staticmethod]
     fn from_json(
         py: Python<'_>,
         model: &PyNativeCausalLm,

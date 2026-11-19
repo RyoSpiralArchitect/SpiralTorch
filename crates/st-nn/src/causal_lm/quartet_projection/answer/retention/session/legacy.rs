@@ -167,6 +167,8 @@ impl NativeCausalLmConditionalAnswerSession {
         let projection = NativeCausalLmRankOneProjection::new(source, layer, site, &left, &right)?;
         Ok(NativeCausalLmConditionalServingSnapshot {
             projection_id: state.projection_id,
+            layer,
+            site,
             model: projection.current,
             checkpoint_id: expected_id.to_owned(),
             position: header.position,

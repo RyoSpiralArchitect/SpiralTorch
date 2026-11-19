@@ -1,10 +1,12 @@
 //! No scoring math here: bounded transport to the shared native evaluator.
 use super::{dimension, documents::documents, error, limit, PyNativeCausalLm};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use st_nn::causal_lm::{
-    CausalLmAnswerComparison, CausalLmEvaluation, CausalLmEvaluationComparison,
-    CausalLmEvaluationConfig, CausalLmQkvAnswerComparison, CausalLmQkvComparison,
-    CausalLmQkvEvaluation, CausalLmResult, NativeCausalLm, NativeCausalLmQkvAdamW,
+    CausalLmAnswerComparison, CausalLmConditionalAnswerComparison, CausalLmEvaluation,
+    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmLabeledAnswerCorpus,
+    CausalLmQkvAnswerComparison, CausalLmQkvComparison, CausalLmQkvEvaluation, CausalLmResult,
+    NativeCausalLm, NativeCausalLmConditionalServingSnapshot, NativeCausalLmQkvAdamW,
     MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_VARIANTS,
 };
 use st_nn::language_windows::CausalDocumentWindows;
@@ -31,6 +33,53 @@ pub struct PyNativeCausalLmQkvComparison {
 )]
 pub struct PyNativeCausalLmQkvAnswerComparison {
     inner: CausalLmQkvAnswerComparison,
+}
+
+#[pyclass(
+    name = "NativeCausalLmConditionalAnswerComparison",
+    module = "spiraltorch",
+    frozen
+)]
+pub struct PyConditionalAnswerComparison {
+    inner: CausalLmConditionalAnswerComparison,
+}
+
+#[pymethods]
+impl PyConditionalAnswerComparison {
+    fn __len__(&self) -> usize {
+        self.inner.comparison.answers().len()
+    }
+    #[getter]
+    fn document_count(&self) -> usize {
+        self.inner.comparison.document_count()
+    }
+    #[getter]
+    fn scored_documents(&self) -> usize {
+        self.inner.comparison.scored_documents()
+    }
+    #[getter]
+    fn shared_prefix_layers(&self) -> usize {
+        self.inner.comparison.comparison().shared_prefix_layers
+    }
+    #[getter]
+    fn evaluations(&self) -> Vec<PyNativeCausalLmEvaluation> {
+        wrap_scores(self.inner.comparison.comparison())
+    }
+    fn answer(&self, py: Python<'_>, index: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        answer_at(&self.inner.comparison, py, index)
+    }
+    fn contrast(
+        &self,
+        py: Python<'_>,
+        reference: &Bound<'_, PyAny>,
+        candidate: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        answer_contrast(&self.inner.comparison, py, reference, candidate)
+    }
+    fn to_json(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| serde_json::to_string(&self.inner))
+            .map_err(error)
+    }
 }
 
 #[pymethods]
@@ -406,6 +455,34 @@ pub(super) fn compare_qkv_answers(
     .map_err(error)
 }
 
+pub(super) fn compare_conditional_answers(
+    source: &PyNativeCausalLm,
+    snapshots: &[&NativeCausalLmConditionalServingSnapshot],
+    py: Python<'_>,
+    token_documents: &Bound<'_, PyAny>,
+    context_length: &Bound<'_, PyAny>,
+    microbatch_windows: Option<&Bound<'_, PyAny>>,
+    labels: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyConditionalAnswerComparison> {
+    type Snapshot = NativeCausalLmConditionalServingSnapshot;
+    let config = policy(context_length, microbatch_windows)?;
+    let source = &source.inner;
+    Snapshot::check_comparison_sources(source, snapshots).map_err(error)?;
+    let limit = NativeCausalLm::evaluation_token_limit(snapshots.len() + 1).map_err(error)?;
+    let (docs, labels) = documents(token_documents, labels, limit, |lengths, has_labels| {
+        py.detach(|| {
+            Snapshot::answer_comparison_plan(source, snapshots, lengths, config, has_labels)
+        })
+        .map(|_| ())
+        .map_err(error)
+    })?;
+    py.detach(|| {
+        Snapshot::evaluate_variants_by_answer(source, snapshots, &docs, labels.as_deref(), config)
+    })
+    .map(|inner| PyConditionalAnswerComparison { inner })
+    .map_err(error)
+}
+
 pub(super) fn compare(
     py: Python<'_>,
     variants: &Bound<'_, PyAny>,
@@ -493,11 +570,28 @@ fn compare_with<T: Send>(
         .map_err(error)
 }
 
+#[pyfunction]
+fn _read_labeled_answer_corpus<'py>(
+    py: Python<'py>,
+    payload: &Bound<'py, PyBytes>,
+    owners: usize,
+) -> PyResult<Bound<'py, PyAny>> {
+    let bytes = payload.as_bytes();
+    let corpus = py
+        .detach(|| CausalLmLabeledAnswerCorpus::from_json(bytes, owners))
+        .map_err(error)?;
+    Ok((corpus.token_documents, corpus.labels)
+        .into_pyobject(py)?
+        .into_any())
+}
+
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(_read_labeled_answer_corpus, module)?)?;
     module.add_class::<PyNativeCausalLmEvaluation>()?;
     module.add_class::<PyNativeCausalLmQkvEvaluation>()?;
     module.add_class::<PyNativeCausalLmQkvComparison>()?;
     module.add_class::<PyNativeCausalLmQkvAnswerComparison>()?;
+    module.add_class::<PyConditionalAnswerComparison>()?;
     module.add_class::<PyNativeCausalLmEvaluationComparison>()?;
     module.add_class::<PyNativeCausalLmAnswerComparison>()
 }
