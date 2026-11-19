@@ -864,6 +864,59 @@ fn retained_checkpoint_pins_a_floor_below_the_probability_range() {
 }
 
 #[test]
+fn retained_checkpoint_requires_the_subnormal_residual_after_near_cancellation() {
+    let mut config = config();
+    config["tie_word_embeddings"] = serde_json::json!(false);
+    let mut weights = parameters();
+    weights.get_mut("ln_f.weight").unwrap().1 = vec![0.; 4];
+    weights.get_mut("ln_f.bias").unwrap().1 = vec![1., 0., 0., 0.];
+    let mut head = vec![0.; 11 * 4];
+    head[4] = -1.;
+    head[8] = 700.;
+    weights.insert("lm_head.weight".into(), (vec![11, 4], head));
+    let m = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&config).unwrap(),
+        &archive(&weights),
+        Default::default(),
+    )
+    .unwrap();
+    let state =
+        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[1., 0., 0., 0.], &[0.; 4]).unwrap();
+    let prompts = vec![vec![1, 2, 3]];
+    let pairs = [[0, 1]];
+    let original = state
+        .prepare_conditional_margin_and_mass_retention(&prompts, &pairs, 0.)
+        .unwrap();
+    let baseline = original.baseline_mean_pair_mass().unwrap();
+    let drop = f64::from_bits(baseline.to_bits() - 1);
+    let guard = state
+        .prepare_conditional_margin_and_mass_retention(&prompts, &pairs, drop)
+        .unwrap();
+    let minimum = guard.minimum_mean_pair_mass().unwrap();
+    assert!(minimum.is_subnormal());
+    assert_eq!(guard.minimum_log_mean_pair_mass(), Some(minimum.ln()));
+    let (bytes, pin) = state.checkpoint_with_retention(&guard).unwrap();
+    let (resumed, restored) =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &pin)
+            .unwrap()
+            .restore(&prompts, &pairs)
+            .unwrap();
+    assert_eq!(
+        resumed.checkpoint_with_retention(&restored).unwrap(),
+        (bytes.clone(), pin)
+    );
+
+    let mut old: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    old["baseline"]["mass"]["minimum_log_mean_pair_mass_bits"] = serde_json::Value::Null;
+    let old = serde_json::to_vec(&old).unwrap();
+    let old_pin = format!("sha256:{:x}", Sha256::digest(&old));
+    let plan =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &old, &old_pin).unwrap();
+    assert!(matches!(plan.restore(&prompts, &pairs), Err(e)
+        if e.to_string().contains("baseline does not reproduce")));
+}
+
+#[test]
 fn retention_rechecks_anchor_limits_on_an_identical_receiving_projection() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let make_projection = |m| {
