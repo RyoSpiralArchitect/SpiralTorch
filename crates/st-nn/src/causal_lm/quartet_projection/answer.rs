@@ -17,10 +17,12 @@ pub use guard::{
 pub use observation::CausalLmBindingGradientObservation;
 use observation::PairObservation;
 pub use retention::{
-    CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
-    CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionMassCheck,
-    CausalLmConditionalRetentionOutsideCheck, CausalLmConditionalRetentionRestore,
-    CausalLmRetainedConditionalAnswerStep,
+    CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
+    CausalLmConditionalAnswerSessionStep, CausalLmConditionalMarginRetention,
+    CausalLmConditionalRetentionCheck, CausalLmConditionalRetentionLogMassCheck,
+    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
+    CausalLmConditionalRetentionRestore, CausalLmRetainedConditionalAnswerStep,
+    NativeCausalLmConditionalAnswerSession,
 };
 
 /// Optional supervision on the relationship between four indexed prompts.

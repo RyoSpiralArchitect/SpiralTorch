@@ -1,10 +1,15 @@
 """Installed whole-decoder execution with imports of foreign ML packages forbidden."""
+import hashlib
 import importlib.abc
 import json
 import math
+import os
 import struct
+import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 
 class NoForeignML(importlib.abc.MetaPathFinder):
@@ -69,6 +74,18 @@ def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False):
                         for name, values in [("gate", [gate, 0., -gate, gate]), ("bias", [0.] * 4)]],
         }],
     }))
+
+
+def conditional_session_inputs(model):
+    state = model.rank_one_projection(
+        "output", layer=1, left_f64le=struct.pack("<4d", 0., .6, -.8, 0.),
+    )
+    rows = [[4, 8, 2, 1], [8, 4, 1], [7, 1, 2, 3]]
+    pairs = [[2, 7] if row["gold_minus_alternative"] > 0 else [7, 2]
+             for row in state.score_pairs(rows, [[2, 7]] * len(rows))]
+    guard = state.prepare_retention(rows, pairs, max_mean_mass_drop=.02)
+    schedule = [([0, 1, 2], pairs), ([2, 0, 0], [pairs[2], pairs[0], pairs[0][::-1]])]
+    return state, guard, rows, pairs, schedule
 
 
 class NativeCausalLmTests(unittest.TestCase):
@@ -221,6 +238,164 @@ class NativeCausalLmTests(unittest.TestCase):
         )
         self.assertEqual(state.checkpoint_with_retention(guard), restored.checkpoint_with_retention(rehydrated))
         self.assertEqual(state.prefill(rows[0]).logits_f32le(), restored.prefill(rows[0]).logits_f32le())
+
+    def test_conditional_schedule_restore_continues_at_next_batch(self):
+        state, guard, rows, pairs, schedule = conditional_session_inputs(self.model)
+        trainer = st.NativeCausalLmConditionalAnswerSession(state, guard, rows, schedule, length=.01)
+        initial_id = state.projection_id
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "first.ck"
+            reports, pin = trainer.advance_to_checkpoint_new(1, path)
+            raw = path.read_bytes()
+            self.assertEqual(trainer.checkpoint_with_id(), (raw, pin))
+            self.assertTrue(reports[0]["report"]["step"]["committed"])
+            self.assertEqual((trainer.position, trainer.accepted_updates, trainer.total_batches),
+                             (1, 1, 2))
+            with self.assertRaises(ValueError):
+                trainer.advance_to_checkpoint_new(2, path)
+            self.assertEqual(trainer.checkpoint_with_id(), (raw, pin))
+
+        class Unreadable:
+            def __len__(self):
+                raise AssertionError("input read before checkpoint admission")
+
+        with self.assertRaisesRegex(ValueError, "digest mismatch"):
+            st.NativeCausalLmConditionalAnswerSession.from_bytes(
+                self.model, raw + b"0", pin, Unreadable(), Unreadable(), Unreadable(), Unreadable(),
+            )
+        with self.assertRaisesRegex(ValueError, "pool or schedule changed"):
+            st.NativeCausalLmConditionalAnswerSession.from_bytes(
+                self.model, raw, pin, rows, schedule[::-1], rows, pairs,
+            )
+        resumed = st.NativeCausalLmConditionalAnswerSession.from_bytes(
+            self.model, raw, pin, rows, schedule, rows, pairs,
+        )
+        self.assertEqual(resumed.plan_id, trainer.plan_id)
+        self.assertEqual(resumed.checkpoint_with_id(), trainer.checkpoint_with_id())
+        self.assertEqual(resumed.step(), trainer.step())
+        self.assertEqual(resumed.checkpoint_with_id(), trainer.checkpoint_with_id())
+        self.assertIsNone(resumed.step())
+        self.assertEqual(state.projection_id, initial_id)
+        self.assertEqual(
+            trainer.projection_snapshot().prefill(rows[0]).logits_f32le(),
+            resumed.projection_snapshot().prefill(rows[0]).logits_f32le(),
+        )
+
+    def test_conditional_epochs_match_expanded_order_across_two_restarts(self):
+        state, guard, rows, pairs, schedule = conditional_session_inputs(self.model)
+        session = st.NativeCausalLmConditionalAnswerSession
+        kwargs = dict(length=.01)
+
+        class UnreadablePool:
+            def __len__(self):
+                raise AssertionError("pool read before checking the epoch count")
+
+        for epochs in (True, 0, session.MAX_TOTAL_BATCHES):
+            with self.subTest(epochs=epochs), self.assertRaises((TypeError, ValueError)):
+                session(state, guard, UnreadablePool(), schedule, epochs=epochs, **kwargs)
+
+        class UnreadableTokens:
+            def __len__(self):
+                return 4
+
+            def __getitem__(self, _):
+                raise AssertionError("token read before validating schedule")
+
+        with self.assertRaisesRegex(ValueError, "index outside pool"):
+            session(state, guard, [UnreadableTokens()], [([1], [[2, 7]])], **kwargs)
+
+        plain = session(state, guard, rows, schedule, **kwargs)
+        single = session(state, guard, rows, schedule, epochs=1, **kwargs)
+        self.assertEqual(plain.checkpoint_with_id(), single.checkpoint_with_id())
+        expanded = session(state, guard, rows, schedule * 3, **kwargs)
+        original = session(state, guard, rows, schedule, epochs=3, **kwargs)
+        self.assertNotEqual(original.plan_id, expanded.plan_id)
+        self.assertNotEqual(original.plan_id, session(state, guard, rows, schedule, epochs=2, **kwargs).plan_id)
+        payload, _ = original.checkpoint_with_id()
+        valid_payload, valid_pin = original.checkpoint_with_id()
+        with self.assertRaisesRegex(ValueError, "index outside pool"):
+            session.from_bytes(
+                self.model, valid_payload, valid_pin, [UnreadableTokens()] * 3,
+                [([3], [[2, 7]]), schedule[1]], rows, pairs,
+            )
+        size = struct.unpack_from("<I", payload)[0]
+        header = json.loads(payload[4:4+size])
+        header.update(epochs=4, total_batches=8)
+        other = json.dumps(header, separators=(",", ":")).encode()
+        forged = struct.pack("<I", len(other)) + other + payload[4+size:]
+        forged_id = "sha256:" + hashlib.sha256(forged).hexdigest()
+        with self.assertRaisesRegex(ValueError, "pool or schedule changed"):
+            session.from_bytes(self.model, forged, forged_id, rows, schedule, rows, pairs)
+        expected = [expanded.step() for _ in range(6)]
+        reports = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for stop in (3, 5, 6):
+                path = Path(tmp) / f"slot-{stop}"
+                segment, pin = original.advance_to_checkpoint_new(stop, path)
+                reports.extend(segment)
+                raw = path.read_bytes()
+                original = session.from_bytes(self.model, raw, pin, rows, schedule, rows, pairs)
+                self.assertEqual(original.checkpoint_with_id(), (raw, pin))
+                self.assertEqual((original.position, original.epochs, original.batches_per_epoch,
+                                  original.total_batches), (stop, 3, 2, 6))
+        self.assertEqual(reports, expected)
+        self.assertTrue(any(row["report"]["step"]["committed"] for row in reports))
+        self.assertEqual(original.projection_snapshot().right_f64le(), expanded.projection_snapshot().right_f64le())
+        self.assertIsNone(original.step())
+
+    def test_conditional_repeats_cross_the_checkpoint_interval_cap(self):
+        state, guard, rows, pairs, schedule = conditional_session_inputs(self.model)
+        session = st.NativeCausalLmConditionalAnswerSession
+        interval = session.MAX_CHECKPOINT_INTERVAL
+        runner = session(state, guard, rows, schedule[:1], length=.01, epochs=interval + 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "interval"
+            with self.assertRaisesRegex(ValueError, "checkpoint interval"):
+                runner.advance_to_checkpoint_new(interval + 1, path)
+            segment, pin = runner.advance_to_checkpoint_new(interval, path)
+            resumed = session.from_bytes(self.model, path.read_bytes(), pin, rows, schedule[:1], rows, pairs)
+        self.assertEqual((len(segment), resumed.position, resumed.total_batches),
+                         (interval, interval, interval + 1))
+        self.assertEqual(resumed.step(), runner.step())
+        self.assertEqual(resumed.checkpoint_with_id(), runner.checkpoint_with_id())
+        self.assertIsNone(resumed.step())
+
+    @unittest.skipUnless(os.name == "posix", "requires a child-local file size limit")
+    def test_conditional_epoch_publish_failure_preserves_the_earlier_boundary(self):
+        script = r"""
+import errno, resource, runpy, signal, sys
+from pathlib import Path
+fixture = runpy.run_path(sys.argv[1])
+st = fixture["st"]
+model = st.NativeCausalLm.from_gpt2(*fixture["fixture"]())
+state, guard, rows, pairs, schedule = fixture["conditional_session_inputs"](model)
+session = st.NativeCausalLmConditionalAnswerSession(state, guard, rows, schedule, length=.01, epochs=2)
+root = Path(sys.argv[2])
+previous, target = root / "previous.ck", root / "next.ck"
+_, pin = session.advance_to_checkpoint_new(1, previous)
+raw = previous.read_bytes()
+limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (32, limits[1]))
+try:
+    session.advance_to_checkpoint_new(3, target)
+except ValueError as exc:
+    if f"os error {errno.EFBIG}" not in str(exc):
+        raise
+else:
+    raise AssertionError("the short write was not detected")
+finally:
+    resource.setrlimit(resource.RLIMIT_FSIZE, limits)
+assert session.position == 1 and session.checkpoint_with_id() == (raw, pin)
+assert previous.read_bytes() == raw and list(root.iterdir()) == [previous]
+restored = st.NativeCausalLmConditionalAnswerSession.from_bytes(model, raw, pin, rows, schedule, rows, pairs)
+assert [session.step(), session.step()] == [restored.step(), restored.step()]
+assert session.checkpoint_with_id() == restored.checkpoint_with_id()
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            child = subprocess.run([sys.executable, "-I", "-B", "-c", script, __file__, tmp],
+                                   capture_output=True, text=True, timeout=60)
+            self.assertEqual(child.returncode, 0, child.stderr)
 
     def test_rank_one_forward_does_not_need_training_checkpoint_budget(self):
         restricted = st.NativeCausalLm.from_gpt2(

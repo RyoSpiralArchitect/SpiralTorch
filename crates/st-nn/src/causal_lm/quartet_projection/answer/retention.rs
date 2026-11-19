@@ -2,7 +2,12 @@
 use super::{observation::candidate_mass_loss, *};
 
 mod checkpoint;
+mod session;
 pub use checkpoint::CausalLmConditionalRetentionRestore;
+pub use session::{
+    CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
+    CausalLmConditionalAnswerSessionStep, NativeCausalLmConditionalAnswerSession,
+};
 
 struct Anchor {
     prefix: Tensor,
@@ -13,8 +18,9 @@ struct Anchor {
 
 /// Prepared protection roster for one projection trajectory. Initially
 /// correct rows are sign-protected; optional mass protection uses all rows.
+#[derive(Clone)]
 pub struct CausalLmConditionalMarginRetention {
-    anchors: Vec<Anchor>,
+    anchors: Arc<[Anchor]>,
     layer: usize,
     owner: String,
     baseline: Vec<f64>,
@@ -26,6 +32,7 @@ pub struct CausalLmConditionalMarginRetention {
     allowed_drop: Option<f64>,
 }
 
+#[derive(Clone)]
 struct MassFloor {
     baseline: f64,
     minimum: f64,
@@ -234,7 +241,7 @@ impl CausalLmConditionalMarginRetention {
             );
         }
         // Projection identity binds the weights, not the receiving model's work budget.
-        for anchor in &self.anchors {
+        for anchor in self.anchors.iter() {
             projection
                 .current
                 .projection_work_dimensions(anchor.steps, projection.spec, false)?;
@@ -249,7 +256,7 @@ impl CausalLmConditionalMarginRetention {
         let mut minimum = f64::INFINITY;
         let mut nonpositive = 0;
         let mut mean_mass = PairMassMean::default();
-        for a in &self.anchors {
+        for a in self.anchors.iter() {
             let (v, loss) = evaluate(
                 &candidate.current,
                 &a.prefix,
@@ -381,7 +388,7 @@ impl NativeCausalLmRankOneProjection {
         }
         let owner = self.projection_id();
         Ok(CausalLmConditionalMarginRetention {
-            anchors,
+            anchors: anchors.into(),
             baseline,
             layer,
             initial_projection_id: owner.clone(),

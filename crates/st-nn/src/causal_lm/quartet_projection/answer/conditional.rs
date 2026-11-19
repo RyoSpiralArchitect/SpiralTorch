@@ -4,9 +4,32 @@ use super::*;
 use crate::causal_lm::scalar_output::logistic;
 use std::sync::Weak;
 
-const MAX_PREPARED_PREFIX_VALUES: usize = 1 << 24;
+pub(super) const MAX_PREPARED_PREFIX_VALUES: usize = 1 << 24;
 /// Maximum number of distinct prompts in an in-memory conditional prefix bank.
 pub const MAX_CONDITIONAL_BANK_ROWS: usize = 256;
+
+pub(super) fn conditional_bank_input_values(
+    model: &NativeCausalLm,
+    spec: CausalLmProjectionSpec,
+    count: usize,
+    mut steps: impl Iterator<Item = usize>,
+    max_prefix_values: usize,
+) -> CausalLmResult<usize> {
+    if !(1..=MAX_CONDITIONAL_BANK_ROWS).contains(&count) {
+        return Err("conditional answer prefix bank requires 1 to 256 distinct prompts".into());
+    }
+    let tokens = steps.try_fold(0usize, |total, n| -> CausalLmResult<usize> {
+        model.projection_work_dimensions(n, spec, true)?;
+        total
+            .checked_add(n)
+            .ok_or_else(|| "conditional prompt token overflow".into())
+    })?;
+    product(
+        &[tokens, model.config.width],
+        max_prefix_values.min(MAX_PREPARED_PREFIX_VALUES),
+        "conditional answer prefix bank values",
+    )
+}
 
 struct ConditionalPrefix {
     steps: usize,
@@ -288,17 +311,7 @@ impl NativeCausalLmRankOneProjection {
         steps: impl Iterator<Item = usize>,
         max_prefix_values: usize,
     ) -> CausalLmResult<usize> {
-        if !(1..=MAX_CONDITIONAL_BANK_ROWS).contains(&count) {
-            return Err("conditional answer prefix bank requires 1 to 256 distinct prompts".into());
-        }
-        product(
-            &[
-                self.conditional_prompt_tokens(steps, true)?,
-                self.current.config.width,
-            ],
-            max_prefix_values.min(MAX_PREPARED_PREFIX_VALUES),
-            "conditional answer prefix bank values",
-        )
+        conditional_bank_input_values(&self.current, self.spec, count, steps, max_prefix_values)
     }
 
     fn conditional_prefix(&self, prompt: &[usize]) -> CausalLmResult<ConditionalPrefix> {

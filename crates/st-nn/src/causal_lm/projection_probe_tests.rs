@@ -4,6 +4,133 @@ use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
 #[test]
+fn conditional_session_pins_schedule_and_publishes_before_advancing() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let mut p = NativeCausalLmRankOneProjection::new(
+        &m,
+        1,
+        Output,
+        &[0., 0.6, -0.8, 0.],
+        &[0.01, -0.02, -0., 0.03],
+    )
+    .unwrap();
+    let rows = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
+    let labels = p
+        .score_answer_pairs(&rows, &[[2, 7]; 3])
+        .unwrap()
+        .into_iter()
+        .map(|s| {
+            if s.gold_minus_alternative > 0. {
+                [2, 7]
+            } else {
+                [7, 2]
+            }
+        })
+        .collect::<Vec<_>>();
+    let schedule = vec![
+        (vec![0, 1, 2], labels.clone()),
+        (
+            vec![2, 0, 1, 1],
+            vec![
+                labels[2],
+                labels[0],
+                labels[1],
+                [labels[1][1], labels[1][0]],
+            ],
+        ),
+    ];
+    let mut guard = p
+        .prepare_conditional_margin_and_mass_retention(&rows, &labels, 0.02)
+        .unwrap();
+    let policy = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 2,
+        mass_inward_cosine: None,
+    };
+    let mut session = NativeCausalLmConditionalAnswerSession::new(
+        &p,
+        &guard,
+        &rows,
+        schedule.clone(),
+        policy,
+        44,
+    )
+    .unwrap();
+    let mut invalid = schedule.clone();
+    invalid[1].0[0] = rows.len();
+    assert!(
+        NativeCausalLmConditionalAnswerSession::new(&p, &guard, &rows, invalid, policy, 44,)
+            .is_err()
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("slot1.ck");
+    let before = session.checkpoint().unwrap();
+    assert_eq!(session.save_checkpoint_new(&path).unwrap(), before.1);
+    assert!(session.advance_to_checkpoint_new(1, &path).is_err());
+    assert_eq!(session.checkpoint().unwrap(), before);
+    assert_eq!(std::fs::read(path).unwrap(), before.0);
+
+    let path = temp.path().join("slot2.ck");
+    let (reports, digest) = session.advance_to_checkpoint_new(1, &path).unwrap();
+    let payload = std::fs::read(path).unwrap();
+    assert_eq!(
+        session.checkpoint().unwrap(),
+        (payload.clone(), digest.clone())
+    );
+    assert_eq!((session.position(), session.accepted_updates()), (1, 1));
+    assert_eq!(
+        reports[0].projection_id,
+        session.projection().projection_id()
+    );
+    let prep =
+        || NativeCausalLmConditionalAnswerSession::prepare_resume(&m, &payload, &digest).unwrap();
+    let mut swapped = schedule.clone();
+    swapped.swap(0, 1);
+    assert!(prep().resume(&rows, swapped, &rows, &labels).is_err());
+    let mut changed_pairs = schedule.clone();
+    changed_pairs[1].1[3].reverse();
+    assert!(prep().resume(&rows, changed_pairs, &rows, &labels).is_err());
+    let mut restored = prep()
+        .resume(&rows, schedule.clone(), &rows, &labels)
+        .unwrap();
+    assert_eq!(
+        restored.checkpoint().unwrap(),
+        session.checkpoint().unwrap()
+    );
+
+    let bank = p.prepare_conditional_answer_prefix_bank(&rows, 44).unwrap();
+    for (i, (indices, pairs)) in schedule.iter().enumerate() {
+        let manual = p
+            .step_indexed_conditional_answers_retaining(&bank, indices, pairs, policy, &mut guard)
+            .unwrap();
+        let slot = if i == 0 {
+            reports[0].clone()
+        } else {
+            let next = session.step().unwrap().unwrap();
+            assert_eq!(
+                serde_json::to_vec(&next).unwrap(),
+                serde_json::to_vec(&restored.step().unwrap().unwrap()).unwrap()
+            );
+            next
+        };
+        assert_eq!(
+            serde_json::to_vec(&manual).unwrap(),
+            serde_json::to_vec(&slot.report).unwrap()
+        );
+        assert_eq!(slot.projection_id, p.projection_id());
+    }
+    assert_eq!(
+        restored.checkpoint().unwrap(),
+        session.checkpoint().unwrap()
+    );
+    assert_eq!(
+        p.last_logits(&rows[0]).unwrap(),
+        restored.projection().last_logits(&rows[0]).unwrap()
+    );
+    assert!(restored.step().unwrap().is_none());
+}
+
+#[test]
 fn prepared_conditional_batch_matches_guarded_and_raw_training_across_updates() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let prompts = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
@@ -303,6 +430,23 @@ fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
             indexed.checkpoint_with_retention(&indexed_guard).unwrap(),
             before
         );
+        let mut session = NativeCausalLmConditionalAnswerSession::new(
+            &a,
+            &indexed_guard,
+            &prompts,
+            vec![(vec![0], rival_objective.to_vec())],
+            CausalLmConditionalAnswerConfig {
+                max_trials: 1,
+                ..cfg
+            },
+            16,
+        )
+        .unwrap();
+        let slot = session.step().unwrap().unwrap();
+        assert!(!slot.report.step.committed);
+        assert_eq!((slot.position, slot.accepted_updates), (1, 0));
+        assert_eq!(session.projection().projection_id(), a.projection_id());
+        assert!(session.step().unwrap().is_none());
         assert!(plain
             .step_conditional_answers_retaining(&prompts, &rival_objective, cfg, &mut stale)
             .is_err());

@@ -64,9 +64,9 @@ struct Record {
 /// Byte-admitted restore plan. It has performed no decoder work and
 /// still requires the caller's original, ordered training roster.
 pub struct CausalLmConditionalRetentionRestore {
-    source: NativeCausalLm,
+    pub(super) source: NativeCausalLm,
     plan: Record,
-    spec: CausalLmProjectionSpec,
+    pub(super) spec: CausalLmProjectionSpec,
     left: Vec<f64>,
     initial_right: Vec<f64>,
     right: Vec<f64>,

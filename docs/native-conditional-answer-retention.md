@@ -97,12 +97,22 @@ original factors. The signed margins, mean mass floor, outside ceiling,
 and active log-space floor must reproduce bit-for-bit. The saved endpoint
 must pass that reconstructed guard before it is returned.
 
-The checkpoint binds the guard and projection, not a training-data cursor
-or schedule. It contains factors, summary statistics, and a roster digest,
+This projection checkpoint binds the guard and projection, not a training-data
+cursor or schedule. It contains factors, summary statistics, and a roster digest,
 not prompt rows or cached activations; treat it as training data rather than
 as a redacted export. The v3 format does not load older research-only
 checkpoints. A different baseline or schema is an error, not permission
 to start a new guard at the saved endpoint.
+
+For a fixed ordered schedule, use `NativeCausalLmConditionalAnswerSession`
+to bind those weights and the guard to a batch cursor. It supports repeated
+epochs without expanding the schedule or rebasing the guard. The v3 session
+checkpoint embeds the pinned v3 projection checkpoint and adds the schedule
+digest, policy, repeat count, cursor, and accepted-update count.
+`prepare_resume` checks the outer and inner pins before model evaluation.
+Resume requires the exact original pool, ordered batches, and guard roster.
+`advance_to_checkpoint_new` stages at most 1,024 positions and only advances
+the live session after successful no-clobber publication.
 
 The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
 calls this same implementation without Torch. There is no WASM training
