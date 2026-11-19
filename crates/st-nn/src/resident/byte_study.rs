@@ -19,6 +19,8 @@ use st_backend_wgpu::{resident_tensor::ResidentTensor, runtime::WgpuRuntime};
 use st_kernel_contracts::classification::{ClassReduction, CrossEntropySpec};
 use st_tensor::NdLayout;
 use std::collections::BTreeSet;
+#[cfg(any(feature = "wgpu", all(test, not(target_arch = "wasm32"))))]
+use std::ops::AsyncFnMut;
 
 /// Errors retain the underlying model, JSON, GPU or study validation error.
 pub type ByteCorpusStudyResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -143,6 +145,20 @@ impl TrainingPoint {
             ce,
         })
     }
+}
+
+#[cfg(any(feature = "wgpu", all(test, not(target_arch = "wasm32"))))]
+async fn run_accepted_updates<S, B, U>(
+    state: &mut S,
+    batches: impl Iterator<Item = (usize, B)>,
+    mut submit: impl FnMut(&mut S, usize, B) -> Result<U>,
+    mut accept: impl AsyncFnMut(&mut S, usize, U) -> Result<()>,
+) -> Result<()> {
+    for (step, batch) in batches {
+        let submitted = submit(state, step, batch)?;
+        accept(state, step, submitted).await?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -758,7 +774,7 @@ impl ByteCorpusStudy {
         Ok(())
     }
 
-    /// Run without checkpoint capture, accepting each update before the next forward.
+    /// Run without returning a checkpoint, accepting each update before the next forward.
     #[cfg(feature = "wgpu")]
     pub async fn run(&self, runtime: WgpuRuntime) -> Result<Value> {
         Ok(self
@@ -786,7 +802,7 @@ impl ByteCorpusStudy {
     /// `snapshot()` copies only after this run returns. The former adds GPU
     /// copies between updates; both change resource lifetimes and host work.
     /// A passing observed run does not establish that `run()` is deterministic.
-    /// An ordinary `run()` does not install observers or capture model snapshots.
+    /// An ordinary `run()` does not install observers or take observer-requested snapshots.
     #[cfg(feature = "wgpu")]
     pub async fn run_with_update_observer(
         &self,
@@ -913,53 +929,66 @@ impl ByteCorpusStudy {
                 }
                 (Vec::new(), vec![evaluate(&mut model, r).await?])
             };
-            for (step, selections) in r
-                .train_batches
-                .iter()
-                .enumerate()
-                .take(stop_after)
-                .skip(start)
-            {
-                let batch = ByteLmBatch::from_documents(&documents, selections, r.config.steps)?;
-                let resident = model.prepare_batch(&batch)?;
-                let tape = model.forward(&resident)?;
-                let loss =
-                    tape.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
-                if let Some(observe) = forward_observer.as_mut() {
-                    observe(&case.name, step + 1, &model, &tape)?;
-                }
-                let gradients = model.backward(&tape, loss.prediction_gradient())?;
-                let update = match (&adamw_steps, gradient_clip) {
-                    (Some(steps), Some(clip)) => {
-                        model.adamw_with_steps_clipped(&gradients, steps, clip)?
+            run_accepted_updates(
+                &mut model,
+                r.train_batches
+                    .iter()
+                    .enumerate()
+                    .take(stop_after)
+                    .skip(start),
+                |model, step, selections| {
+                    let batch =
+                        ByteLmBatch::from_documents(&documents, selections, r.config.steps)?;
+                    let resident = model.prepare_batch(&batch)?;
+                    let tape = model.forward(&resident)?;
+                    let loss = tape.next_byte_loss(CrossEntropySpec::new(
+                        ClassReduction::Mean,
+                        -100,
+                        0.,
+                    )?)?;
+                    if let Some(observe) = forward_observer.as_mut() {
+                        observe(&case.name, step + 1, model, &tape)?;
                     }
-                    (None, Some(clip)) => model.sgd_with_rates_clipped(&gradients, &rates, clip)?,
-                    (Some(steps), None) => model.adamw_with_steps(&gradients, steps)?,
-                    (None, None) => model.sgd_with_rates(&gradients, &rates)?,
-                };
-                if let Some(observe) = observer.as_mut() {
-                    observe(
-                        &case.name,
-                        step + 1,
-                        SubmittedStep {
-                            model: &model,
-                            tape: &tape,
-                            gradients: &gradients,
-                        },
-                    )?;
-                }
-                // Both execution modes must confirm the same update before
-                // using its parameters for evaluation or another forward.
-                let receipt = update.snapshot_with_scalar(loss.value())?;
-                #[cfg(not(target_arch = "wasm32"))]
-                let (revision, ce) = receipt.read()?;
-                #[cfg(target_arch = "wasm32")]
-                let (revision, ce) = receipt.read_async().await?;
-                training.push(TrainingPoint::from_accepted_update(step + 1, revision, ce)?);
-                if self.evaluation_boundary(step + 1) {
-                    evaluations.push(evaluate(&mut model, r).await?);
-                }
-            }
+                    let gradients = model.backward(&tape, loss.prediction_gradient())?;
+                    let update = match (&adamw_steps, gradient_clip) {
+                        (Some(steps), Some(clip)) => {
+                            model.adamw_with_steps_clipped(&gradients, steps, clip)?
+                        }
+                        (None, Some(clip)) => {
+                            model.sgd_with_rates_clipped(&gradients, &rates, clip)?
+                        }
+                        (Some(steps), None) => model.adamw_with_steps(&gradients, steps)?,
+                        (None, None) => model.sgd_with_rates(&gradients, &rates)?,
+                    };
+                    if let Some(observe) = observer.as_mut() {
+                        observe(
+                            &case.name,
+                            step + 1,
+                            SubmittedStep {
+                                model,
+                                tape: &tape,
+                                gradients: &gradients,
+                            },
+                        )?;
+                    }
+                    Ok((update, loss, (gradients, tape, resident)))
+                },
+                async |model, step, (update, loss, submitted_values)| {
+                    let receipt = update.snapshot_with_scalar(loss.value())?;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let (revision, ce) = receipt.read()?;
+                    #[cfg(target_arch = "wasm32")]
+                    let (revision, ce) = receipt.read_async().await?;
+                    training.push(TrainingPoint::from_accepted_update(step + 1, revision, ce)?);
+                    if self.evaluation_boundary(step + 1) {
+                        evaluations.push(evaluate(model, r).await?);
+                    }
+                    // Keep the original forward and VJP resources alive through the readback.
+                    drop(submitted_values);
+                    Ok(())
+                },
+            )
+            .await?;
             let final_values = read_many(&model, model.parameter_snapshot().values()).await?;
             if case
                 .parameters
@@ -1059,6 +1088,29 @@ mod tests {
         }
         for ce in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
             assert!(TrainingPoint::from_accepted_update(2, 2, ce).is_err());
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn rejected_non_evaluation_update_prevents_the_next_forward() {
+        for start in [0, 2] {
+            let mut evidence = Vec::new();
+            let result = pollster::block_on(run_accepted_updates(
+                &mut evidence,
+                (start..start + 2).map(|step| (step, ())),
+                |evidence, step, ()| {
+                    evidence.push(("forward", step + 1));
+                    Ok(step + 1)
+                },
+                async |evidence, step, revision| {
+                    assert_eq!(revision, step + 1);
+                    evidence.push(("rejected", revision));
+                    Err("rejected update".into())
+                },
+            ));
+            assert!(matches!(result, Err(e) if e.to_string() == "rejected update"));
+            assert_eq!(evidence, [("forward", start + 1), ("rejected", start + 1)]);
         }
     }
 
