@@ -68,6 +68,30 @@ def pinned_inputs(root):
 
 
 class AnswerComparisonTests(unittest.TestCase):
+    def test_cli_rejects_ambiguous_pinned_corpus_before_opening_model(self):
+        run = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))["main"]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path, output = root / "eval.json", root / "result"
+            for raw, reason in (
+                (b'{"labels":[[1]],"token_documents":[[1]],"labels":[[1]]}', "duplicate field"),
+                (b'{"labels":[[1]],"token_documents":[[]]}', "labels must match token document shape"),
+                (b'{"labels":[[1]],"token_documents":[[true]]}', "invalid type"),
+            ):
+                with self.subTest(raw=raw):
+                    path.write_bytes(raw)
+                    args = [
+                        "--model-dir", str(root / "missing"), "--documents", str(path),
+                        "--documents-sha256", hashlib.sha256(raw).hexdigest(),
+                        "--conditional-variant", "after", str(root / "missing.ck"), "unused",
+                        "--context", "8", "--reference", "source", "--output", str(output),
+                    ]
+                    with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+                        run(args)
+                    self.assertIn("invalid labeled evaluation corpus", err.getvalue())
+                    self.assertIn(reason, err.getvalue())
+                    self.assertFalse(output.exists())
+
     def test_conditional_snapshot_scores_match_independent_full_answers(self):
         source = st.NativeCausalLm.from_gpt2(*FIXTURE())
         axis, guard, rows, pairs, schedule = FIXTURES["conditional_session_inputs"](source)

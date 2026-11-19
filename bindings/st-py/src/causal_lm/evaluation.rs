@@ -1,12 +1,13 @@
 //! No scoring math here: bounded transport to the shared native evaluator.
 use super::{dimension, documents::documents, error, limit, PyNativeCausalLm};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use st_nn::causal_lm::{
     CausalLmAnswerComparison, CausalLmConditionalAnswerComparison, CausalLmEvaluation,
-    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmQkvAnswerComparison,
-    CausalLmQkvComparison, CausalLmQkvEvaluation, CausalLmResult, NativeCausalLm,
-    NativeCausalLmConditionalServingSnapshot, NativeCausalLmQkvAdamW, MAX_ANSWER_SCORE_CELLS,
-    MAX_EVALUATION_VARIANTS,
+    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmLabeledAnswerCorpus,
+    CausalLmQkvAnswerComparison, CausalLmQkvComparison, CausalLmQkvEvaluation, CausalLmResult,
+    NativeCausalLm, NativeCausalLmConditionalServingSnapshot, NativeCausalLmQkvAdamW,
+    MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_VARIANTS,
 };
 use st_nn::language_windows::CausalDocumentWindows;
 
@@ -569,7 +570,23 @@ fn compare_with<T: Send>(
         .map_err(error)
 }
 
+#[pyfunction]
+fn _read_labeled_answer_corpus<'py>(
+    py: Python<'py>,
+    payload: &Bound<'py, PyBytes>,
+    owners: usize,
+) -> PyResult<Bound<'py, PyAny>> {
+    let bytes = payload.as_bytes();
+    let corpus = py
+        .detach(|| CausalLmLabeledAnswerCorpus::from_json(bytes, owners))
+        .map_err(error)?;
+    Ok((corpus.token_documents, corpus.labels)
+        .into_pyobject(py)?
+        .into_any())
+}
+
 pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(_read_labeled_answer_corpus, module)?)?;
     module.add_class::<PyNativeCausalLmEvaluation>()?;
     module.add_class::<PyNativeCausalLmQkvEvaluation>()?;
     module.add_class::<PyNativeCausalLmQkvComparison>()?;

@@ -1548,14 +1548,18 @@ after_minus_before = score.contrast(1, 2)
 
 Variant 0 is the frozen source model; the remaining variants follow the
 supplied snapshot order. All must agree on the base weights, LoRA,
-geometry and readout policy. Unshifted labels mark supervised targets;
-`-100` masks a token. The evaluator groups contiguous scored targets
-into answers and reports both token-weighted and answer-weighted NLL
-differences. A negative candidate-minus-reference delta means lower NLL.
+geometry and readout policy. Unshifted labels mark supervised targets:
+`-100` excludes the position from scoring, but model history still uses
+`token_documents`. The evaluator groups contiguous scored targets into
+answers, even when an answer spans covering windows. Context starts over
+at each window's start, so a long answer's NLL is not computed under one
+unbroken prefix. The report includes token-weighted and answer-weighted
+NLL differences. A negative candidate-minus-reference delta means lower NLL.
 
 Decoder work is shared only before the earliest changed projection.
 The `native_answer_comparison.py` example accepts pinned
 `--conditional-variant NAME CHECKPOINT PIN` entries and a separately
-pinned labeled corpus. It does not need the training roster or verify
-split independence. These are teacher-forced scores, not free-generation
-quality or a speed measurement.
+pinned labeled corpus. Rust enforces the document and per-comparison token
+limits as the JSON is decoded. The example does not need the training
+roster or verify split independence. These are teacher-forced scores,
+not free-generation quality or a speed measurement.

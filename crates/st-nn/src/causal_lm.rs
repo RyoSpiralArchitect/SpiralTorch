@@ -53,8 +53,8 @@ pub use competition_pair::{CausalLmGeometryCompetitionPair, CausalLmGeometryComp
 pub use context::NativeCausalLmContext;
 pub use evaluation::{
     CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
-    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmScoredAnswer,
-    MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
+    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmLabeledAnswerCorpus,
+    CausalLmScoredAnswer, MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
 };
 pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,

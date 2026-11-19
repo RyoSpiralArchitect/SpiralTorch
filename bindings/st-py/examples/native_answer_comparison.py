@@ -51,11 +51,14 @@ def main(argv=None):
     raw = read_limited(args.documents, 256 * 1024 * 1024)
     if hashlib.sha256(raw).hexdigest() != args.documents_sha256:
         parser.error("evaluation corpus differs from pinned SHA-256")
-    data = json.loads(raw)
+    read_corpus = getattr(st._rs, "_read_labeled_answer_corpus", None)
+    if read_corpus is None:
+        parser.error("bounded answer corpus loading needs a matching SpiralTorch build")
+    try:
+        documents, labels = read_corpus(raw, len(names))
+    except ValueError as exc:
+        parser.error(f"invalid labeled evaluation corpus: {exc}")
     del raw
-    if (not isinstance(data, dict) or set(data) != {"token_documents", "labels"}
-            or not all(isinstance(v, list) for v in data.values())):
-        parser.error("answer scoring needs explicit token_documents and labels arrays")
 
     snapshots = []
     if conditional:
@@ -70,8 +73,8 @@ def main(argv=None):
 
     base = st.NativeCausalLm.from_gpt2(read_limited((args.model_dir/"config.json").resolve(strict=True), 1_048_576).decode(),
                                        st.SafeTensorArchive(args.model_dir/"model.safetensors"))
-    common = (data["token_documents"], args.context)
-    options = dict(microbatch_windows=args.microbatch_windows, labels=data["labels"])
+    common = (documents, args.context)
+    options = dict(microbatch_windows=args.microbatch_windows, labels=labels)
     if conditional:
         if args.source_readout is not None:
             base = base.with_readout_accumulator(args.source_readout)
