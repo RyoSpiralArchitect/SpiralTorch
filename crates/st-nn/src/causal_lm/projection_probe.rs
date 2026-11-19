@@ -331,10 +331,20 @@ impl NativeCausalLm {
     ) -> CausalLmResult<ProjectionLastRow> {
         let steps = prompt.len();
         self.projection_work_dimensions(steps, spec, true)?;
+        self.projection_last_row_from_hidden(self.embed(prompt, [1, steps])?, steps, 0, spec)
+    }
+
+    pub(super) fn projection_last_row_from_hidden(
+        &self,
+        input: Tensor,
+        steps: usize,
+        start: usize,
+        spec: CausalLmProjectionSpec,
+    ) -> CausalLmResult<ProjectionLastRow> {
         let shape = [1, steps];
         let last = [steps - 1];
         let (hidden, checkpoints) =
-            self.checkpointed_hidden(self.embed(prompt, shape)?, shape, 0, spec.layer, None)?;
+            self.checkpointed_hidden(input, shape, start, spec.layer, None)?;
         let selected = hidden.gather_rows(&last)?;
         let normalized = self
             .final_norm

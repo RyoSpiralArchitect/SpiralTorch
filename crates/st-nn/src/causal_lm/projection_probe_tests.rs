@@ -3,6 +3,297 @@ use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
 #[test]
+fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![vec![4, 8, 2, 1]];
+    let a = NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 0.6, -0.8, 0.], &[0.; 4])
+        .unwrap();
+    let z = a.last_logits(&prompts[0]).unwrap();
+    let [y, b] = if z[2] > z[7] { [2, 7] } else { [7, 2] };
+    let keep = [[y, b]];
+    let rival_objective = [[b, y]];
+    let direct_margin = |p: &NativeCausalLmRankOneProjection| {
+        p.score_answer_pairs(&prompts, &keep).unwrap()[0].gold_minus_alternative
+    };
+    let mut found = false;
+    for length in [0.04, 0.1, 0.3, 1., 3.] {
+        let cfg = CausalLmConditionalAnswerConfig {
+            length,
+            max_trials: 2,
+            mass_inward_cosine: None,
+        };
+        let mut plain = a.clone();
+        let mut stale = plain
+            .prepare_conditional_margin_retention(&prompts, &keep)
+            .unwrap();
+        assert_eq!(stale.baseline_margins(), &[direct_margin(&a)]);
+        let r = plain
+            .step_conditional_answers(&prompts, &rival_objective, cfg)
+            .unwrap();
+        if !r.committed || direct_margin(&plain) > 0. {
+            continue;
+        }
+        let plain_owner = plain.projection_id();
+        assert!(plain
+            .step_conditional_answers_retaining(&prompts, &rival_objective, cfg, &mut stale)
+            .is_err());
+        assert_eq!(plain.projection_id(), plain_owner);
+        let mut guarded = a.clone();
+        let mut deck = guarded
+            .prepare_conditional_margin_retention(&prompts, &keep)
+            .unwrap();
+        let r = guarded
+            .step_conditional_answers_retaining(&prompts, &rival_objective, cfg, &mut deck)
+            .unwrap();
+        assert_eq!(r.retention.len(), r.step.trials.len());
+        assert!(r
+            .retention
+            .iter()
+            .flatten()
+            .any(|c| c.checked == 1 && c.nonpositive == 1));
+        assert!(direct_margin(&guarded) > 0.);
+        assert_ne!(guarded.projection_id(), plain_owner);
+        guarded
+            .step_conditional_answers_retaining(&prompts, &rival_objective, cfg, &mut deck)
+            .unwrap();
+        assert!(direct_margin(&guarded) > 0.);
+        found = true;
+        break;
+    }
+    assert!(found, "fixture should expose an unprotected distant flip");
+}
+
+#[test]
+fn conditional_mass_guard_changes_a_conflicting_real_decoder_step() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let a = NativeCausalLmRankOneProjection::new(
+        &m,
+        1,
+        Query,
+        &[0., 0.6, -0.8, 0.],
+        &[0.01, -0.02, 0.0, 0.03],
+    )
+    .unwrap();
+    let prompts = vec![vec![4, 8, 2, 1]];
+    let config = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 2,
+        mass_inward_cosine: None,
+    };
+    for gold in 0..m.config().vocabulary {
+        for rival in 0..m.config().vocabulary {
+            if gold == rival {
+                continue;
+            }
+            let pair = [[gold, rival]];
+            let mut direct = a.clone();
+            let d = direct
+                .step_conditional_answers(&prompts, &pair, config)
+                .unwrap();
+            if !d.committed || d.after.candidate_mass_nll <= d.before.candidate_mass_nll {
+                continue;
+            }
+            let mut guarded = a.clone();
+            let g = guarded
+                .step_conditional_answers(
+                    &prompts,
+                    &pair,
+                    CausalLmConditionalAnswerConfig {
+                        mass_inward_cosine: Some(0.05),
+                        ..config
+                    },
+                )
+                .unwrap();
+            assert_eq!(d.before, g.before);
+            if g.committed {
+                assert!(g.projected || (g.trials.len() > 1 && !g.trials[0].accepted));
+                assert!(g.after.conditional_ce < g.before.conditional_ce);
+                assert!(g.after.candidate_mass_nll <= g.before.candidate_mass_nll);
+                assert_ne!(guarded.projection_id(), direct.projection_id());
+                return;
+            }
+        }
+    }
+    panic!("fixture did not exhibit a committed two-objective descent");
+}
+
+#[test]
+fn finite_mass_floor_covers_initially_wrong_rows_and_refuses_a_sign_safe_step() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let a = NativeCausalLmRankOneProjection::new(
+        &m,
+        1,
+        Query,
+        &[0., 0.6, -0.8, 0.],
+        &[0.01, -0.02, 0.0, 0.03],
+    )
+    .unwrap();
+    let rows = vec![vec![4, 8, 2, 1], vec![8, 4, 1]];
+    let z = a.last_logits(&rows[1]).unwrap();
+    let wrong = if z[2] > z[7] { [7, 2] } else { [2, 7] };
+    let cfg = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 1,
+        mass_inward_cosine: None,
+    };
+    for bad in [-0.01, f64::NAN, 1.01] {
+        assert!(a
+            .prepare_conditional_margin_and_mass_retention(&rows, &[[2, 7], wrong], bad)
+            .is_err());
+    }
+    let z = a.last_logits(&rows[0]).unwrap();
+    for gold in 0..m.config().vocabulary {
+        for rival in 0..m.config().vocabulary {
+            if z[gold] <= z[rival] {
+                continue;
+            }
+            let keep = [[gold, rival], wrong];
+            let objective = &keep[..1];
+            let measure = |model: &NativeCausalLmRankOneProjection| {
+                model
+                    .score_answer_pairs(&rows, &keep)
+                    .unwrap()
+                    .iter()
+                    .map(|s| (-s.gold_nll).exp() + (-s.alternative_nll).exp())
+                    .sum::<f64>()
+                    / 2.
+            };
+            let mut plain = a.clone();
+            let mut sign = plain
+                .prepare_conditional_margin_retention(&rows, &keep)
+                .unwrap();
+            let ordinary = plain
+                .step_conditional_answers_retaining(&rows[..1], objective, cfg, &mut sign)
+                .unwrap();
+            if !ordinary.step.committed || measure(&plain) >= measure(&a) - 1e-10 {
+                continue;
+            }
+            let mut protected = a.clone();
+            let mut guard = protected
+                .prepare_conditional_margin_and_mass_retention(&rows, &keep, 0.)
+                .unwrap();
+            assert_eq!(guard.protected_count(), 1);
+            let floor = guard.minimum_mean_pair_mass().unwrap();
+            assert!((floor - measure(&a)).abs() < 1e-14);
+            let held = protected
+                .step_conditional_answers_retaining(&rows[..1], objective, cfg, &mut guard)
+                .unwrap();
+            let check = held.retention[0].as_ref().unwrap();
+            let mass = check.mass.as_ref().unwrap();
+            assert_eq!((check.checked, check.nonpositive, mass.rows), (1, 0, 2));
+            assert!((mass.mean_pair_mass - measure(&plain)).abs() < 1e-14);
+            assert_eq!(mass.minimum_mean_pair_mass, floor);
+            assert_eq!(
+                held.step.trials[0].projection_id,
+                ordinary.step.trials[0].projection_id
+            );
+            assert!(!held.step.committed);
+            assert_eq!(protected.projection_id(), a.projection_id());
+            let mut allowed = protected
+                .prepare_conditional_margin_and_mass_retention(
+                    &rows,
+                    &keep,
+                    0.01 + floor - measure(&plain),
+                )
+                .unwrap();
+            assert!(
+                protected
+                    .step_conditional_answers_retaining(&rows[..1], objective, cfg, &mut allowed)
+                    .unwrap()
+                    .step
+                    .committed
+            );
+            assert_eq!(protected.projection_id(), plain.projection_id());
+            return;
+        }
+    }
+    panic!("fixture did not isolate a finite mass-only refusal");
+}
+
+#[test]
+fn conditional_step_replays_exact_suffix_and_commits_only_verified_trials() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![
+        vec![4, 8, 2, 1],
+        vec![8, 4, 1],
+        vec![7, 1, 2, 3],
+        vec![1, 2, 3],
+    ];
+    let pairs = [[2, 7], [7, 2], [2, 7], [2, 7]];
+    let evaluate = |a: &NativeCausalLmRankOneProjection| {
+        let scores = a.score_answer_pairs(&prompts, &pairs).unwrap();
+        let mut c = 0.;
+        let mut mass = 0.;
+        for s in scores {
+            let x = s.gold_minus_alternative;
+            let ce = (-x).max(0.) + (-x.abs()).exp().ln_1p();
+            c += ce;
+            mass += s.gold_nll - ce;
+        }
+        [c / 4., mass / 4.]
+    };
+    let mut guarded_commits = 0;
+    for site in [Output, Query, Key] {
+        for guard in [None, Some(0.05)] {
+            let mut a = NativeCausalLmRankOneProjection::new(
+                &m,
+                1,
+                site,
+                &[0., 0.6, -0.8, 0.],
+                &[0.01, -0.02, 0.01, 0.03],
+            )
+            .unwrap();
+            let full_before = evaluate(&a);
+            let owner = a.projection_id();
+            let cfg = CausalLmConditionalAnswerConfig {
+                length: 0.005,
+                max_trials: 4,
+                mass_inward_cosine: guard,
+            };
+            let r = a.step_conditional_answers(&prompts, &pairs, cfg).unwrap();
+            let full_after = evaluate(&a);
+            for (point, full) in [(r.before, full_before), (r.after, full_after)] {
+                assert!((point.conditional_ce - full[0]).abs() < 1e-12);
+                assert!((point.candidate_mass_nll - full[1]).abs() < 1e-12);
+            }
+            assert!(r.trials.len() <= cfg.max_trials);
+            assert_eq!(r.trial_forwards, r.trials.len() * 4);
+            assert_eq!(r.reused_prefix_block_calls, r.trial_forwards);
+            assert_eq!(r.projection_pullbacks, if guard.is_some() { 8 } else { 4 });
+            assert_eq!(a.projection_id() != owner, r.committed);
+            if r.committed {
+                assert!(full_after[0] < full_before[0]);
+                assert_eq!(a.projection_id(), r.trials.last().unwrap().projection_id);
+                if guard.is_some() {
+                    assert!(full_after[1] <= full_before[1]);
+                    guarded_commits += 1;
+                }
+            } else {
+                assert_eq!(r.before, r.after);
+            }
+            let prior = a.projection_id();
+            assert!(a
+                .step_conditional_answers(&prompts, &[[2, 7], [7, 2], [7, 7], [2, 7]], cfg)
+                .is_err());
+            assert!(
+                !a.step_conditional_answers(
+                    &prompts,
+                    &pairs,
+                    CausalLmConditionalAnswerConfig {
+                        length: f64::MIN_POSITIVE,
+                        ..cfg
+                    }
+                )
+                .unwrap()
+                .committed
+            );
+            assert_eq!(a.projection_id(), prior);
+        }
+    }
+    assert!(guarded_commits > 0);
+}
+
+#[test]
 fn binding_observation_splits_ce_without_changing_the_training_adjoint() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let rows = vec![

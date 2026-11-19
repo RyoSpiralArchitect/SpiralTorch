@@ -100,8 +100,12 @@ pub use quartet_projection::{
     CausalLmAnswerBinding, CausalLmAnswerCorrection, CausalLmAnswerGuard,
     CausalLmAnswerGuardStatus, CausalLmAnswerGuardStep, CausalLmAnswerPoint,
     CausalLmAnswerProjectionStep, CausalLmAnswerProtection, CausalLmAnswerTrial,
-    CausalLmBindingGradientObservation, CausalLmLossGradient, CausalLmPairedAnswerScore,
-    CausalLmQuartetObjective, CausalLmQuartetStep, NativeCausalLmProjectionPrefix,
+    CausalLmBindingGradientObservation, CausalLmConditionalAnswerConfig,
+    CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerStep, CausalLmConditionalAnswerTrial,
+    CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
+    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
+    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmQuartetObjective, CausalLmQuartetStep,
+    CausalLmRetainedConditionalAnswerStep, NativeCausalLmProjectionPrefix,
     NativeCausalLmRankOneProjection,
 };
 pub use readout_policy::{CausalLmHeadPrecision, CausalLmReadoutAccumulator};

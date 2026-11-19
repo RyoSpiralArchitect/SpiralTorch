@@ -9,7 +9,11 @@ pub use answer::{
     CausalLmAnswerBinding, CausalLmAnswerCorrection, CausalLmAnswerGuard,
     CausalLmAnswerGuardStatus, CausalLmAnswerGuardStep, CausalLmAnswerPoint,
     CausalLmAnswerProjectionStep, CausalLmAnswerProtection, CausalLmAnswerTrial,
-    CausalLmBindingGradientObservation, CausalLmLossGradient, CausalLmPairedAnswerScore,
+    CausalLmBindingGradientObservation, CausalLmConditionalAnswerConfig,
+    CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerStep, CausalLmConditionalAnswerTrial,
+    CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
+    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
+    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmRetainedConditionalAnswerStep,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

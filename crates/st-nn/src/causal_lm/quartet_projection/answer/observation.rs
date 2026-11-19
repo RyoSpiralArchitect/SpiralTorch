@@ -75,18 +75,68 @@ impl PairObservation {
     }
 }
 
-pub(super) struct CandidateMassSeed {
-    pub(super) loss: f64,
-    pub(super) outside_share: f64,
-    pub(super) normalized: Tensor,
+struct CandidateMassSeed {
+    loss: f64,
+    outside_share: f64,
+    normalized: Tensor,
+}
+
+struct CandidateMassTerms {
+    loss: f64,
+    outside_share: f64,
+    outside_max: f64,
+    outside_den: f64,
+    pair_weights: [f64; 2],
+}
+
+impl NativeCausalLmRankOneProjection {
+    pub(super) fn candidate_mass_gradient(
+        &self,
+        row: projection_probe::ProjectionLastRow,
+        pair: [usize; 2],
+    ) -> CausalLmResult<(f64, Vec<f64>)> {
+        let seed = candidate_mass_seed(row.logits.data(), pair)?;
+        let mut gradient =
+            self.current
+                .fixed_left_seed(row, &seed.normalized, self.spec, &self.left)?;
+        for g in &mut gradient {
+            *g *= seed.outside_share;
+        }
+        Ok((seed.loss, gradient))
+    }
+}
+
+pub(super) fn candidate_mass_loss(z: &[f32], pair: [usize; 2]) -> CausalLmResult<f64> {
+    Ok(candidate_mass_terms(z, pair)?.loss)
 }
 
 /// Factor the gradient of -ln(P(a)+P(b)) before rounding the seed to f32.
 /// Apply the outside share in f64 after the linear pullback.
-pub(super) fn candidate_mass_seed(
-    z: &[f32],
-    [a, b]: [usize; 2],
-) -> CausalLmResult<CandidateMassSeed> {
+fn candidate_mass_seed(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResult<CandidateMassSeed> {
+    let terms = candidate_mass_terms(z, [a, b])?;
+    let seed = if terms.outside_max == f64::NEG_INFINITY {
+        vec![0.; z.len()]
+    } else {
+        z.iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let g = match i {
+                    i if i == a => -terms.pair_weights[0],
+                    i if i == b => -terms.pair_weights[1],
+                    _ => (f64::from(v) - terms.outside_max).exp() / terms.outside_den,
+                };
+                g as f32
+            })
+            .collect()
+    };
+    Ok(CandidateMassSeed {
+        loss: terms.loss,
+        outside_share: terms.outside_share,
+        normalized: Tensor::from_vec(1, z.len(), seed)?,
+    })
+}
+
+fn candidate_mass_terms(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResult<CandidateMassTerms> {
     if z.iter().any(|x| !x.is_finite()) {
         return Err("nonfinite binding observation logits".into());
     }
@@ -97,36 +147,24 @@ pub(super) fn candidate_mass_seed(
             .map(|(_, &v)| f64::from(v))
     };
     let outside_max = outside().fold(f64::NEG_INFINITY, f64::max);
-    if outside_max == f64::NEG_INFINITY {
-        return Ok(CandidateMassSeed {
-            loss: 0.,
-            outside_share: 0.,
-            normalized: Tensor::from_vec(1, z.len(), vec![0.; z.len()])?,
-        });
-    }
-    let outside_den = outside().map(|v| (v - outside_max).exp()).sum::<f64>();
     let pair_max = f64::from(z[a].max(z[b]));
     let ga = (f64::from(z[a]) - pair_max).exp();
     let gb = (f64::from(z[b]) - pair_max).exp();
     let pair_den = ga + gb;
-    let outside_vs_pair = (outside_max - pair_max) + outside_den.ln() - pair_den.ln();
-    let (loss, negative_share) = logistic(-outside_vs_pair);
-    let seed = z
-        .iter()
-        .enumerate()
-        .map(|(i, &v)| {
-            let g = match i {
-                i if i == a => -ga / pair_den,
-                i if i == b => -gb / pair_den,
-                _ => (f64::from(v) - outside_max).exp() / outside_den,
-            };
-            g as f32
-        })
-        .collect();
-    Ok(CandidateMassSeed {
+    let (outside_den, loss, outside_share) = if outside_max == f64::NEG_INFINITY {
+        (1., 0., 0.)
+    } else {
+        let den = outside().map(|v| (v - outside_max).exp()).sum::<f64>();
+        let outside_vs_pair = (outside_max - pair_max) + den.ln() - pair_den.ln();
+        let (loss, negative_share) = logistic(-outside_vs_pair);
+        (den, loss, -negative_share)
+    };
+    Ok(CandidateMassTerms {
         loss,
-        outside_share: -negative_share,
-        normalized: Tensor::from_vec(1, z.len(), seed)?,
+        outside_share,
+        outside_max,
+        outside_den,
+        pair_weights: [ga / pair_den, gb / pair_den],
     })
 }
 

@@ -1417,3 +1417,7 @@ one forward and three projection pullbacks per prompt, returns the
 projection identity, and does not update the weights. These measures
 distinguish putting more probability on the pair from selecting the
 right member; neither is evidence of improved held-out generation.
+
+The same Rust projection supports [conditional answer retention](../native-conditional-answer-retention.md):
+optimize choice within a pair while protecting explicit training margins
+and the total candidate probability before each commit.
