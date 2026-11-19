@@ -4,6 +4,246 @@ use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
 #[test]
+fn prepared_conditional_batch_matches_guarded_and_raw_training_across_updates() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
+    let pairs = [[2, 7], [7, 2], [7, 2]];
+    let left = [0., 0.6, -0.8, 0.];
+    let zero = [0.; 4];
+    let new = |site| NativeCausalLmRankOneProjection::new(&m, 1, site, &left, &zero).unwrap();
+    let mut commits = 0;
+    for site in [Query, Key] {
+        let a = new(site);
+        assert!(a
+            .prepare_conditional_answer_batch(&prompts, &pairs, 43)
+            .is_err());
+        assert!(a
+            .prepare_conditional_answer_batch(&prompts, &pairs[..2], 44)
+            .is_err());
+        assert!(a
+            .prepare_conditional_answer_batch(&prompts, &[[2, 7], [7, 7], [7, 2]], 44)
+            .is_err());
+        let prepared = a
+            .prepare_conditional_answer_batch(&prompts, &pairs, 44)
+            .unwrap();
+        assert_eq!((prepared.len(), prepared.prefix_values()), (3, 44));
+        assert!(!prepared.is_empty());
+        let cfg = CausalLmConditionalAnswerConfig {
+            length: 0.01,
+            max_trials: 2,
+            mass_inward_cosine: Some(0.05),
+        };
+        let mut unrelated = new(site);
+        let owner = unrelated.projection_id();
+        assert!(unrelated
+            .step_prepared_conditional_answers(&prepared, cfg)
+            .is_err());
+        assert_eq!(owner, unrelated.projection_id());
+
+        let guards: Vec<_> = prompts
+            .iter()
+            .map(|p| {
+                let logits = a.last_logits(p).unwrap();
+                if logits[2] > logits[7] {
+                    [2, 7]
+                } else {
+                    [7, 2]
+                }
+            })
+            .collect();
+        let favorable = a
+            .prepare_conditional_answer_batch(&prompts, &guards, 44)
+            .unwrap();
+        for (retained, cone) in [(false, false), (false, true), (true, false), (true, true)] {
+            let (prepared, labels, cfg) = if cone {
+                (&prepared, &pairs[..], cfg)
+            } else {
+                (
+                    &favorable,
+                    guards.as_slice(),
+                    CausalLmConditionalAnswerConfig {
+                        mass_inward_cosine: None,
+                        ..cfg
+                    },
+                )
+            };
+            let (mut raw, mut cached) = (a.clone(), a.clone());
+            let mut raw_guard = a
+                .prepare_conditional_margin_and_mass_retention(&prompts, &guards, 0.02)
+                .unwrap();
+            let mut cache_guard = a
+                .prepare_conditional_margin_and_mass_retention(&prompts, &guards, 0.02)
+                .unwrap();
+            for _ in 0..3 {
+                let (mut cache, ordinary) = if retained {
+                    (
+                        serde_json::to_value(
+                            cached
+                                .step_prepared_conditional_answers_retaining(
+                                    prepared,
+                                    cfg,
+                                    &mut cache_guard,
+                                )
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                        serde_json::to_value(
+                            raw.step_conditional_answers_retaining(
+                                &prompts,
+                                labels,
+                                cfg,
+                                &mut raw_guard,
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                } else {
+                    (
+                        serde_json::to_value(
+                            cached
+                                .step_prepared_conditional_answers(prepared, cfg)
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                        serde_json::to_value(
+                            raw.step_conditional_answers(&prompts, labels, cfg).unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                };
+                let step = if retained {
+                    &mut cache["step"]
+                } else {
+                    &mut cache
+                };
+                assert_eq!(
+                    step.as_object_mut()
+                        .unwrap()
+                        .remove("reused_prepared_prefix_block_calls"),
+                    Some(serde_json::json!(3))
+                );
+                commits += usize::from(step["committed"].as_bool().unwrap());
+                assert_eq!(cache, ordinary);
+                assert_eq!(cached.projection_id(), raw.projection_id());
+                assert_eq!(cached.right(), raw.right());
+            }
+        }
+    }
+    assert!(commits >= 2);
+}
+
+#[test]
+fn indexed_conditional_batches_keep_multiplicity_and_skip_real_qkv_calls() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn measure<T>(run: impl FnOnce() -> T) -> (T, usize) {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let captured = hits.clone();
+        let old = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            if event.op_name == "matmul_prepacked_bias"
+                && event.data["inner"] == 4
+                && event.data["cols"] == 12
+            {
+                captured.fetch_add(1, Ordering::Relaxed);
+            }
+        })));
+        let result = run();
+        st_tensor::set_thread_meta_observer(old);
+        (result, hits.load(Ordering::Relaxed))
+    }
+
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let new = || {
+        NativeCausalLmRankOneProjection::new(&m, 1, Query, &[0., 0.6, -0.8, 0.], &[0.; 4]).unwrap()
+    };
+    let base = new();
+    let prompts = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
+    let (bank, prep_calls) = measure(|| {
+        base.prepare_conditional_answer_prefix_bank(&prompts, 44)
+            .unwrap()
+    });
+    assert_eq!((bank.len(), bank.prefix_values(), prep_calls), (3, 44, 3));
+    assert!(!bank.is_empty());
+    assert!(base
+        .prepare_conditional_answer_prefix_bank(&prompts, 43)
+        .is_err());
+    assert!(base
+        .prepare_conditional_answer_prefix_bank(&[prompts[0].clone(), prompts[0].clone()], 44)
+        .is_err());
+    let config = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 2,
+        mass_inward_cosine: None,
+    };
+    assert!(new()
+        .step_indexed_conditional_answers(&bank, &[0], &[[2, 7]], config)
+        .is_err());
+    let (mut plain, mut indexed) = (base.clone(), base.clone());
+    let owner = indexed.projection_id();
+    for (indices, labels) in [
+        (&[3][..], &[[2, 7]][..]),
+        (&[0], &[[2, 2]]),
+        (&[0, 1], &[[2, 7]]),
+    ] {
+        assert!(indexed
+            .step_indexed_conditional_answers(&bank, indices, labels, config)
+            .is_err());
+        assert_eq!(indexed.projection_id(), owner);
+    }
+    let gold: Vec<[usize; 2]> = prompts
+        .iter()
+        .map(|p| {
+            let logits = base.last_logits(p).unwrap();
+            if logits[2] > logits[7] {
+                [2, 7]
+            } else {
+                [7, 2]
+            }
+        })
+        .collect();
+    let mut a = base
+        .prepare_conditional_margin_and_mass_retention(&prompts, &gold, 0.02)
+        .unwrap();
+    let mut b = base
+        .prepare_conditional_margin_and_mass_retention(&prompts, &gold, 0.02)
+        .unwrap();
+    let mut saw_commit = false;
+    for (round, selected) in [[2, 0, 2], [1, 2, 0], [0, 2, 1]].into_iter().enumerate() {
+        let raw: Vec<_> = selected.iter().map(|&i| prompts[i].clone()).collect();
+        let mut labels = selected.map(|i| gold[i]);
+        if round == 0 {
+            labels[2].reverse(); // The repeated prompt contributes a different pair.
+        }
+        let (x, raw_calls) = measure(|| {
+            plain
+                .step_conditional_answers_retaining(&raw, &labels, config, &mut a)
+                .unwrap()
+        });
+        let (y, bank_calls) = measure(|| {
+            indexed
+                .step_indexed_conditional_answers_retaining(
+                    &bank, &selected, &labels, config, &mut b,
+                )
+                .unwrap()
+        });
+        let mut report = serde_json::to_value(&y).unwrap();
+        assert_eq!(
+            report["step"]
+                .as_object_mut()
+                .unwrap()
+                .remove("reused_prepared_prefix_block_calls"),
+            Some(serde_json::json!(3))
+        );
+        assert_eq!(report, serde_json::to_value(&x).unwrap());
+        assert_eq!(raw_calls, bank_calls + selected.len());
+        assert_eq!(plain.projection_id(), indexed.projection_id());
+        saw_commit |= y.step.committed;
+    }
+    assert!(saw_commit);
+}
+
+#[test]
 fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let prompts = vec![vec![4, 8, 2, 1]];

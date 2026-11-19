@@ -10,11 +10,13 @@ pub use answer::{
     CausalLmAnswerGuardStatus, CausalLmAnswerGuardStep, CausalLmAnswerPoint,
     CausalLmAnswerProjectionStep, CausalLmAnswerProtection, CausalLmAnswerTrial,
     CausalLmBindingGradientObservation, CausalLmConditionalAnswerConfig,
-    CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerStep, CausalLmConditionalAnswerTrial,
+    CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerPrefixBank,
+    CausalLmConditionalAnswerStep, CausalLmConditionalAnswerTrial,
     CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
     CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionMassCheck,
     CausalLmConditionalRetentionOutsideCheck, CausalLmConditionalRetentionRestore,
-    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmRetainedConditionalAnswerStep,
+    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmPreparedConditionalAnswerBatch,
+    CausalLmRetainedConditionalAnswerStep, MAX_CONDITIONAL_BANK_ROWS,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -310,6 +312,15 @@ impl NativeCausalLmRankOneProjection {
             prompt,
             max_cache_values,
         )
+    }
+
+    /// Admit the serving cache budget before a binding copies prompt tokens.
+    pub fn prefill_input_count(
+        &self,
+        steps: usize,
+        max_cache_values: usize,
+    ) -> CausalLmResult<usize> {
+        self.current.context_prefill_count(steps, max_cache_values)
     }
 
     pub fn last_logits(&self, prompt: &[usize]) -> CausalLmResult<Vec<f32>> {

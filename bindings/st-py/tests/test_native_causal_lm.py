@@ -19,15 +19,17 @@ if __name__ == "__main__":
 import spiraltorch as st  # noqa: E402
 
 
-def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weights=False):
+def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weights=False,
+            pair_mass_underflow=False):
     config = {"model_type": "gpt2", "vocab_size": vocabulary, "n_positions": positions,
               "n_embd": width, "n_head": heads, "n_layer": layers}
     header, payload = {}, bytearray()
 
-    def add(name, shape):
+    def add(name, shape, values=None):
         count = math.prod(shape)
-        values = [1. if "ln_" in name and name.endswith("weight")
-                  else math.sin((i * 7 + len(header) * 3) * .23) * .15 for i in range(count)]
+        if values is None:
+            values = [1. if "ln_" in name and name.endswith("weight")
+                      else math.sin((i * 7 + len(header) * 3) * .23) * .15 for i in range(count)]
         start = len(payload)
         payload.extend(struct.pack("<" + "f" * count, *values))
         header[name] = {"dtype": "F32", "shape": shape, "data_offsets": [start, len(payload)]}
@@ -42,8 +44,16 @@ def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weigh
                                                 ("mlp.c_fc", width, 4*width), ("mlp.c_proj", 4*width, width)):
             add(f"h.{layer}.{name}.weight", [input_width, output_width])
             add(f"h.{layer}.{name}.bias", [output_width])
-    add("ln_f.weight", [width])
-    add("ln_f.bias", [width])
+    if pair_mass_underflow:
+        config["tie_word_embeddings"] = False
+        add("ln_f.weight", [width], [0.] * width)
+        add("ln_f.bias", [width], [1.] + [0.] * (width - 1))
+        head = [0.] * (vocabulary * width)
+        head[width], head[2 * width] = -1., 800.
+        add("lm_head.weight", [vocabulary, width], head)
+    else:
+        add("ln_f.weight", [width])
+        add("ln_f.bias", [width])
     raw = json.dumps(header).encode()
     weights = struct.pack("<Q", len(raw)) + raw + payload
     return json.dumps(config), bytes(weights) if raw_weights else st.SafeTensorArchive.from_bytes(weights)
@@ -65,6 +75,173 @@ class NativeCausalLmTests(unittest.TestCase):
     def setUp(self):
         self.config, self.weights = fixture()
         self.model = st.NativeCausalLm.from_gpt2(self.config, self.weights)
+
+    def test_rank_one_indexed_updates_match_and_serve_the_trained_snapshot(self):
+        axis = struct.pack("<4d", 0., .6, -.8, 0.)
+        spec = dict(site="output", layer=1, left_f64le=axis)
+        raw = self.model.rank_one_projection(**spec)
+        indexed = self.model.rank_one_projection(**spec)
+        self.assertIsInstance(indexed, st.NativeCausalLmRankOneProjection)
+        self.assertEqual(raw.projection_id, indexed.projection_id)
+        rows = [[4, 8, 2, 1], [8, 4, 1], [7, 1, 2, 3]]
+        pairs = [[2, 7] if row["gold_minus_alternative"] > 0 else [7, 2]
+                 for row in indexed.score_pairs(rows, [[2, 7]] * len(rows))]
+        cache = indexed.prepare_prefix_bank(rows, max_prefix_values=44)
+        self.assertIsInstance(cache, st.NativeCausalLmConditionalPrefixBank)
+        self.assertEqual((len(cache), cache.prefix_values), (3, 44))
+        raw_guard = raw.prepare_retention(rows, pairs, max_mean_mass_drop=.02)
+        stale_guard = raw.prepare_retention(rows, pairs, max_mean_mass_drop=.02)
+        guard = indexed.prepare_retention(rows, pairs, max_mean_mass_drop=.02)
+        self.assertIsInstance(guard, st.NativeCausalLmConditionalRetention)
+        self.assertEqual(guard.protected_count, len(rows))
+        self.assertAlmostEqual(guard.baseline_mean_pair_mass - guard.minimum_mean_pair_mass, .02)
+        old_prefix = indexed.prefill(rows[0])
+        original_id = old_prefix.serving_id
+        old_branch = old_prefix.branch(5).logits_f32le()
+        commits = 0
+        for i, indices in enumerate(([2, 0, 2], [1, 2, 0], [0, 2, 1])):
+            labels = [pairs[j] for j in indices]
+            if i == 0:
+                labels[-1] = labels[-1][::-1]
+            uncached = raw.step([rows[j] for j in indices], labels, length=.01, retention=raw_guard)
+            cached = indexed.step_indexed(cache, indices, labels, length=.01, retention=guard)
+            self.assertEqual(cached["step"].pop("reused_prepared_prefix_block_calls"), 3)
+            self.assertEqual(uncached, cached)
+            self.assertEqual(raw.right_f64le(), indexed.right_f64le())
+            self.assertEqual(raw.projection_id, indexed.projection_id)
+            commits += cached["step"]["committed"]
+        self.assertGreater(commits, 0)
+        self.assertNotEqual(indexed.projection_id, original_id)
+        owner = raw.projection_id
+        with self.assertRaisesRegex(ValueError, "different projection state"):
+            raw.step(rows, pairs, length=.01, retention=stale_guard)
+        self.assertEqual(raw.projection_id, owner)
+        self.assertEqual(old_prefix.branch(5).logits_f32le(), old_branch)
+        restored = self.model.rank_one_projection(**spec, right_f64le=indexed.right_f64le())
+        self.assertEqual(restored.projection_id, indexed.projection_id)
+        now = indexed.prefill(rows[0])
+        self.assertEqual(now.serving_id, indexed.projection_id)
+        self.assertEqual(now.branch(5).logits_f32le(), restored.prefill(rows[0] + [5]).logits_f32le())
+        scores = indexed.score_pairs(rows, pairs)
+        self.assertTrue(all(row["gold_minus_alternative"] > 0 for row in scores))
+        mean_mass = sum(math.exp(-row["gold_nll"]) + math.exp(-row["alternative_nll"])
+                        for row in scores) / len(rows)
+        self.assertGreaterEqual(mean_mass + 1e-12, guard.minimum_mean_pair_mass)
+        with self.assertRaisesRegex(ValueError, "different projection origin"):
+            restored.step_indexed(cache, [0], [pairs[0]], length=.01)
+
+    def test_rank_one_admission_refuses_before_copy_or_mutation(self):
+        axis = struct.pack("<4d", 1., 0., 0., 0.)
+        projection = self.model.rank_one_projection("query", layer=1, left_f64le=axis)
+        owner = projection.projection_id
+
+        class ReadTrap:
+            def __init__(self, size):
+                self.size = size
+
+            def __len__(self):
+                return self.size
+
+            def __getitem__(self, _):
+                raise AssertionError("input was read before admission")
+
+        with self.assertRaises(ValueError):
+            projection.prepare_prefix_bank(ReadTrap(257))
+        with self.assertRaises(ValueError):
+            projection.prepare_prefix_bank([ReadTrap(4)], max_prefix_values=15)
+        with self.assertRaises(ValueError):
+            projection.step([ReadTrap(9)], [[2, 7]], length=.01)
+        with self.assertRaisesRegex(ValueError, "step configuration"):
+            projection.step([ReadTrap(4)], [[2, 7]], length=float("nan"))
+        with self.assertRaises(ValueError):
+            projection.prefill(ReadTrap(3), max_cache_values=1)
+        bank = projection.prepare_prefix_bank([[1, 2]])
+        for bad, labels in (([1], [[2, 7]]), ([0], [[2, 2]]), ([0], [])):
+            with self.assertRaises(ValueError):
+                projection.step_indexed(bank, bad, labels, length=.01)
+        with self.assertRaises((ValueError, TypeError)):
+            projection.step_indexed(bank, [True], [[2, 7]], length=.01)
+        with self.assertRaises((ValueError, TypeError)):
+            projection.step_indexed(bank, [0], [[2, 7]], length=True)
+        self.assertEqual(projection.projection_id, owner)
+        self.assertEqual(projection.right_f64le(), bytes(32))
+
+    def test_rank_one_checkpoint_resumes_original_protection_without_rebasing(self):
+        axis = struct.pack("<4d", 0., .6, -.8, 0.)
+        initial_right = struct.pack("<4d", .01, -.02, -0., .03)
+        state = self.model.rank_one_projection(
+            "output", layer=1, left_f64le=axis, right_f64le=initial_right,
+        )
+        rows = [[4, 8, 2, 1], [8, 4, 1], [7, 1, 2, 3]]
+        pairs = [[2, 7] if row["gold_minus_alternative"] > 0 else [7, 2]
+                 for row in state.score_pairs(rows, [[2, 7]] * len(rows))]
+        guard = state.prepare_retention(rows, pairs, max_mean_mass_drop=.02)
+        bank = state.prepare_prefix_bank(rows)
+        first = state.step_indexed(bank, [0, 1, 2], pairs, length=.01, retention=guard)
+        self.assertTrue(first["step"]["committed"])
+        payload, pin = state.checkpoint_with_retention(guard)
+        self.assertRegex(pin, r"^sha256:[0-9a-f]{64}$")
+        self.assertFalse({"prompts", "tokens", "pairs"} & json.loads(payload).keys())
+
+        class Unreadable:
+            def __len__(self):
+                raise AssertionError("roster read before the checkpoint was admitted")
+
+        with self.assertRaisesRegex(ValueError, "digest mismatch"):
+            self.model.restore_rank_one_with_retention(payload + b" ", pin, Unreadable(), Unreadable())
+        with self.assertRaisesRegex(ValueError, "different projection recipe"):
+            self.model.with_readout_accumulator("f64").restore_rank_one_with_retention(
+                payload, pin, Unreadable(), Unreadable(),
+            )
+        with self.assertRaisesRegex(ValueError, "roster changed"):
+            self.model.restore_rank_one_with_retention(payload, pin, rows[::-1], pairs[::-1])
+        restored, rehydrated = self.model.restore_rank_one_with_retention(payload, pin, rows, pairs)
+        self.assertEqual(restored.checkpoint_with_retention(rehydrated), (payload, pin))
+        self.assertEqual(guard.baseline_margins, rehydrated.baseline_margins)
+        self.assertEqual(guard.minimum_mean_pair_mass, rehydrated.minimum_mean_pair_mass)
+        self.assertEqual(state.right_f64le(), restored.right_f64le())
+        with self.assertRaisesRegex(ValueError, "different projection origin"):
+            restored.step_indexed(bank, [0], [pairs[0]], length=.01, retention=rehydrated)
+        fresh_bank = restored.prepare_prefix_bank(rows)
+        seq = [2, 1, 0, 1]
+        ordered_pairs = [pairs[j] for j in seq]
+        self.assertEqual(
+            state.step_indexed(bank, seq, ordered_pairs, length=.01, retention=guard),
+            restored.step_indexed(fresh_bank, seq, ordered_pairs, length=.01, retention=rehydrated),
+        )
+        self.assertEqual(state.checkpoint_with_retention(guard), restored.checkpoint_with_retention(rehydrated))
+        self.assertEqual(state.prefill(rows[0]).logits_f32le(), restored.prefill(rows[0]).logits_f32le())
+
+    def test_rank_one_forward_does_not_need_training_checkpoint_budget(self):
+        restricted = st.NativeCausalLm.from_gpt2(
+            self.config, self.weights, max_training_checkpoint_elements=1,
+        )
+        projection = restricted.rank_one_projection(
+            "query", layer=1, left_f64le=struct.pack("<4d", 1., 0., 0., 0.),
+        )
+        rows, pairs = [[4, 8, 2, 1]], [[2, 7]]
+        score, = projection.score_pairs(rows, pairs)
+        if score["gold_minus_alternative"] < 0:
+            pairs[0].reverse()
+        guard = projection.prepare_retention(rows, pairs)
+        self.assertEqual(guard.protected_count, 1)
+        before = projection.projection_id
+        with self.assertRaisesRegex(ValueError, "projection checkpoints"):
+            projection.step(rows, pairs, length=.01, retention=guard)
+        self.assertEqual(projection.projection_id, before)
+
+    def test_rank_one_checkpoint_exposes_authoritative_log_floor(self):
+        config, weights = fixture(pair_mass_underflow=True)
+        model = st.NativeCausalLm.from_gpt2(config, weights)
+        projection = model.rank_one_projection("value", layer=1, left_f64le=struct.pack("<4d", 1., 0., 0., 0.))
+        rows, pairs = [[1, 2, 3]], [[0, 1]]
+        guard = projection.prepare_retention(rows, pairs, max_mean_mass_drop=0.)
+        self.assertEqual(guard.minimum_mean_pair_mass, 0.)
+        self.assertLess(guard.minimum_log_mean_pair_mass, -790.)
+        payload, pin = projection.checkpoint_with_retention(guard)
+        restored, restored_guard = model.restore_rank_one_with_retention(payload, pin, rows, pairs)
+        self.assertEqual(guard.minimum_log_mean_pair_mass, restored_guard.minimum_log_mean_pair_mass)
+        self.assertEqual(restored.checkpoint_with_retention(restored_guard), (payload, pin))
 
     def test_scalar_output_real_step_and_bit_exact_restore(self):
         from hashlib import sha256

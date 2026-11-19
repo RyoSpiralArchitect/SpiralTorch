@@ -5,8 +5,10 @@ mod guard;
 mod observation;
 mod retention;
 pub use conditional::{
-    CausalLmConditionalAnswerConfig, CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerStep,
-    CausalLmConditionalAnswerTrial,
+    CausalLmConditionalAnswerConfig, CausalLmConditionalAnswerPoint,
+    CausalLmConditionalAnswerPrefixBank, CausalLmConditionalAnswerStep,
+    CausalLmConditionalAnswerTrial, CausalLmPreparedConditionalAnswerBatch,
+    MAX_CONDITIONAL_BANK_ROWS,
 };
 pub use guard::{
     CausalLmAnswerCorrection, CausalLmAnswerGuard, CausalLmAnswerGuardStatus,

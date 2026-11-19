@@ -13,6 +13,7 @@ use st_nn::causal_lm::{
 use std::collections::BTreeMap;
 
 mod accumulation;
+mod conditional_projection;
 mod context;
 mod declared;
 mod documents;
@@ -293,6 +294,41 @@ impl PyNativeCausalLmLoraGradients {
 
 #[pymethods]
 impl PyNativeCausalLm {
+    /// Train a fixed-left rank-one update in a native attention projection.
+    #[pyo3(signature=(site, *, layer, left_f64le, right_f64le=None))]
+    fn rank_one_projection(
+        &self,
+        py: Python<'_>,
+        site: &str,
+        layer: &Bound<'_, PyAny>,
+        left_f64le: &Bound<'_, PyBytes>,
+        right_f64le: Option<&Bound<'_, PyBytes>>,
+    ) -> PyResult<conditional_projection::PyRankOne> {
+        conditional_projection::build(
+            py,
+            &self.inner,
+            dimension(layer)?,
+            site,
+            left_f64le,
+            right_f64le,
+        )
+    }
+
+    /// Rebuild both current projection weights and the original finite guard.
+    fn restore_rank_one_with_retention(
+        &self,
+        py: Python<'_>,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
+        rows: &Bound<'_, PyAny>,
+        answer_pairs: &Bound<'_, PyAny>,
+    ) -> PyResult<(
+        conditional_projection::PyRankOne,
+        conditional_projection::PyConditionalRetention,
+    )> {
+        conditional_projection::restore(py, &self.inner, payload, expected_id, rows, answer_pairs)
+    }
+
     /// Capture each unique prompt once; indexed pair and group changes need no further decoder calls.
     #[pyo3(signature=(prompts,target_id,alternative_id,*,layer,left_f64le=None))]
     fn output_contrast_bank(
@@ -1547,6 +1583,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyNativeCausalLm>()?;
     module.add_class::<scalar_output::PyScalarOutput>()?;
     output_margin::register(module)?;
+    conditional_projection::register(module)?;
     module.add_class::<PyNativeCausalLmAccumulator>()?;
     module.add_class::<PyNativeCausalLmGradients>()?;
     module.add_class::<PyNativeCausalLmLoraGradients>()?;

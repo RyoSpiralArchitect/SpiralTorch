@@ -104,5 +104,6 @@ as a redacted export. The v3 format does not load older research-only
 checkpoints. A different baseline or schema is an error, not permission
 to start a new guard at the saved endpoint.
 
-This is a Rust-only API. It does not require Torch and does not expose
-a Python or WASM training entry point.
+The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
+calls this same implementation without Torch. There is no WASM training
+binding for this projection.

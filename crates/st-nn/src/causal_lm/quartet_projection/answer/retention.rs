@@ -219,6 +219,11 @@ impl CausalLmConditionalMarginRetention {
         self.mass.as_ref().map(|mass| mass.minimum)
     }
 
+    /// Authoritative positive floor when ordinary f64 probability is too small.
+    pub fn minimum_log_mean_pair_mass(&self) -> Option<f64> {
+        self.mass.as_ref().and_then(MassFloor::log_pair_limit)
+    }
+
     pub(super) fn verify_owner(
         &self,
         projection: &NativeCausalLmRankOneProjection,
@@ -278,6 +283,22 @@ impl CausalLmConditionalMarginRetention {
 }
 
 impl NativeCausalLmRankOneProjection {
+    /// Admit the retention roster's prefix storage before copying token IDs.
+    pub fn conditional_retention_input_count(&self, steps: &[usize]) -> CausalLmResult<usize> {
+        let tokens = self.conditional_answer_input_count(steps, false)?;
+        self.admit_conditional_retention_tokens(tokens)?;
+        Ok(tokens)
+    }
+
+    fn admit_conditional_retention_tokens(&self, tokens: usize) -> CausalLmResult<()> {
+        product(
+            &[tokens, self.current.config.width],
+            1 << 24,
+            "retained margin-prefix elements",
+        )?;
+        Ok(())
+    }
+
     /// Snapshot the signs of explicitly supplied training margins. A retained
     /// margin must stay strictly positive in every committed guarded step.
     /// This does not preserve its original size, the full-vocabulary winner,
@@ -322,11 +343,7 @@ impl NativeCausalLmRankOneProjection {
         self.admit_answers(prompts, &gold, None, false)?;
         let layer = self.spec.layer;
         let m = &self.current;
-        product(
-            &[prompts.iter().map(Vec::len).sum(), m.config.width],
-            1 << 24,
-            "retained margin-prefix elements",
-        )?;
+        self.admit_conditional_retention_tokens(prompts.iter().map(Vec::len).sum())?;
         let mut baseline = Vec::with_capacity(prompts.len());
         let mut anchors = Vec::new();
         let mut protected_count = 0;
