@@ -57,7 +57,10 @@ fn train(
   reproduce the verdict unless `log_pair` is present. A positive floor
   below the normal f64 probability range is compared in log space;
   use `log_mean_pair_mass >= minimum_log_mean_pair_mass` in that
-  receipt. If `log_outside` is present, compare
+  receipt. For near cancellation from a normal baseline, the
+  represented mean and allowance are subtracted before taking the
+  logarithm, so a positive floor is not lost to rounded logarithms.
+  If `log_outside` is present, compare
   `log_mean_outside_mass <= maximum_log_mean_outside_mass` instead.
   This handles a positive outside ceiling below the normal f64 range.
   These are logarithms of arithmetic means, not means of logarithms.
@@ -109,9 +112,11 @@ or schedule. It contains factors, summary statistics, and a roster digest,
 not prompt rows or cached activations; treat it as training data rather than
 as a redacted export. The v3 format does not load older research-only
 checkpoints. A v3 checkpoint that predates the log-outside field is
-rejected if rebuilding the roster requires that field. A different
-baseline or schema is an error, not permission to start a new guard
-at the saved endpoint.
+rejected if rebuilding the roster requires that field. Likewise,
+an old v3 checkpoint that omitted or recorded a different active log
+pair floor after near cancellation is rejected on restore. A
+different baseline or schema is an error, not permission to start a
+new guard at the saved endpoint.
 
 The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
 calls this same implementation without Torch. There is no WASM training

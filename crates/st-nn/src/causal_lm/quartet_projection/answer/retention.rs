@@ -76,22 +76,31 @@ impl MassFloor {
     }
 
     fn from_baseline(mass: PairMassMean, rows: usize, drop: f64) -> Self {
-        let minimum_log_pair = mass.log_mean_pair(rows).and_then(|log_mean| {
-            if drop == 0. {
-                return Some(log_mean);
-            }
-            let log_ratio = drop.ln() - log_mean;
-            (log_ratio < 0.).then(|| log_mean + (-log_ratio.exp_m1()).ln())
-        });
+        let log_mean_pair = mass.log_mean_pair(rows);
         let log_drop = (drop > 0.).then(|| drop.ln());
         let maximum_log_outside = mass
             .log_mean_outside(rows)
             .and_then(|log| sum::add_logs(Some(log), log_drop))
             .map(|log| log.min(0.));
         let baseline = mass.pair.mean(rows as u64);
+        let minimum = (baseline - drop).max(0.);
+        let minimum_log_pair =
+            if baseline.is_normal() && drop >= 0.5 * baseline && minimum.is_subnormal() {
+                // Subtract the nearby represented probabilities exactly before
+                // log rounding can erase their residual.
+                Some(minimum.ln())
+            } else {
+                log_mean_pair.and_then(|log_mean| match log_drop {
+                    None => Some(log_mean),
+                    Some(log_drop) => {
+                        let log_ratio = log_drop - log_mean;
+                        (log_ratio < 0.).then(|| log_mean + (-log_ratio.exp_m1()).ln())
+                    }
+                })
+            };
         Self {
             baseline,
-            minimum: (baseline - drop).max(0.),
+            minimum,
             maximum_outside: (mass.outside.mean(rows as u64) + drop).min(1.),
             minimum_log_pair,
             maximum_log_outside,
@@ -551,5 +560,22 @@ mod tests {
         let below = floor.check(mass_for(&[[0., -1., 743.6]]), 1);
         assert!(within.log_pair.is_some() && within.permits_commit());
         assert!(below.log_pair.is_some() && !below.permits_commit());
+    }
+
+    #[test]
+    fn almost_equal_normal_allowance_preserves_a_subnormal_floor() {
+        let before = [[0., -1., 700.]];
+        let baseline = mass_for(&before).pair.mean(1);
+        let drop = f64::from_bits(baseline.to_bits() - 1);
+        let floor = MassFloor::from_baseline(mass_for(&before), 1, drop);
+        assert!(floor.minimum > 0. && floor.minimum.is_subnormal());
+        assert!(floor.check(mass_for(&before), 1).permits_commit());
+
+        let below = floor.check(mass_for(&[[0., -2., 736.24927]]), 1);
+        let within = floor.check(mass_for(&[[0., -2., 736.2492]]), 1);
+        assert_eq!(below.mean_pair_mass, floor.minimum);
+        assert_eq!(within.mean_pair_mass, floor.minimum);
+        assert!(below.log_pair.is_some() && !below.permits_commit());
+        assert!(within.log_pair.is_some() && within.permits_commit());
     }
 }
