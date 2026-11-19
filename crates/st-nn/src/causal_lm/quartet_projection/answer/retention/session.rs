@@ -9,49 +9,7 @@ const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
 const PHASE_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v4";
 const HEADER_LIMIT: usize = 4096;
 
-/// A complete checkpoint was installed but publication did not finish.
-/// The live cursor did not advance. Verify any retained file with this pin
-/// before using it for an explicit recovery.
-#[derive(Debug)]
-pub struct ConditionalCheckpointPublicationUncertain {
-    checkpoint_id: String,
-    source: st_core::runtime::AtomicPublishError,
-}
-
-impl ConditionalCheckpointPublicationUncertain {
-    pub fn checkpoint_id(&self) -> &str {
-        &self.checkpoint_id
-    }
-}
-
-impl std::fmt::Display for ConditionalCheckpointPublicationUncertain {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "conditional checkpoint installed but publication incomplete (pin {}): {}",
-            self.checkpoint_id, self.source
-        )
-    }
-}
-
-impl std::error::Error for ConditionalCheckpointPublicationUncertain {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
-    }
-}
-
-fn publish_checkpoint(path: &Path, (bytes, pin): (Vec<u8>, String)) -> CausalLmResult<String> {
-    match st_core::runtime::atomic_create_new_with_status(path, &bytes) {
-        Ok(()) => Ok(pin),
-        Err(source) if source.destination_installed() => {
-            Err(Box::new(ConditionalCheckpointPublicationUncertain {
-                checkpoint_id: pin,
-                source,
-            }))
-        }
-        Err(source) => Err(source.into_io_error().into()),
-    }
-}
+pub use files::CheckpointPublicationUncertain as ConditionalCheckpointPublicationUncertain;
 
 /// Each scheduled occurrence has an ordered pair, even when indices repeat.
 pub type CausalLmConditionalAnswerBatch = (Vec<usize>, Vec<[usize; 2]>);
@@ -158,6 +116,44 @@ impl NativeCausalLmConditionalServingSnapshot {
     pub fn total_batches(&self) -> u64 {
         self.total_batches
     }
+    /// Admit the whole generation budget before transferring prompt tokens.
+    pub fn generation_input_count(
+        &self,
+        steps: usize,
+        config: &CausalLmGenerationConfig,
+    ) -> CausalLmResult<usize> {
+        config.validate(&self.model, steps)?;
+        Ok(steps)
+    }
+
+    /// Reuse the native generator with the exact saved projection as its owner.
+    pub fn generator(
+        &self,
+        prompt: Vec<usize>,
+        config: CausalLmGenerationConfig,
+    ) -> CausalLmResult<NativeCausalLmGenerator> {
+        NativeCausalLmGenerator::new_owned(
+            self.model.clone(),
+            prompt,
+            config,
+            Some(self.projection_id.clone()),
+        )
+    }
+
+    /// Restore the same projection and token policy, without training data.
+    pub fn restore_generator(
+        &self,
+        payload: &[u8],
+        expected_id: &str,
+    ) -> CausalLmResult<NativeCausalLmGenerator> {
+        NativeCausalLmGenerator::from_json_owned(
+            self.model.clone(),
+            payload,
+            expected_id,
+            Some(self.projection_id.clone()),
+        )
+    }
+
     pub fn prefill_input_count(
         &self,
         steps: usize,
@@ -466,7 +462,7 @@ impl NativeCausalLmConditionalAnswerSession {
 
     pub fn save_checkpoint_new(&self, path: impl AsRef<Path>) -> CausalLmResult<String> {
         files::admit_new(path.as_ref())?;
-        publish_checkpoint(path.as_ref(), self.checkpoint()?)
+        files::save_with_status(path.as_ref(), self.checkpoint()?)
     }
 
     /// Publish a complete interval before advancing the live session.
@@ -482,7 +478,7 @@ impl NativeCausalLmConditionalAnswerSession {
             path.as_ref(),
             Self::step,
             Self::checkpoint,
-            publish_checkpoint,
+            files::save_with_status,
         )
     }
 
@@ -600,7 +596,7 @@ mod tests {
                 Ok(Some(*next))
             },
             |_| -> CausalLmResult<(Vec<u8>, String)> { panic!("invalid interval snapshot") },
-            publish_checkpoint,
+            files::save_with_status,
         );
         assert!(result.unwrap_err().to_string().contains("second batch"));
         assert_eq!(cursor, 0);

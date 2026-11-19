@@ -1,8 +1,10 @@
 //! Transport for Rust-owned conditional schedules and checkpoint publication.
 use super::*;
+use crate::causal_lm::generation::PyNativeCausalLmGenerator;
 use st_nn::causal_lm::{
-    CausalLmConditionalAnswerBatch, NativeCausalLmConditionalAnswerSession,
-    NativeCausalLmConditionalServingSnapshot,
+    CausalLmConditionalAnswerBatch, CausalLmGenerationConfig,
+    NativeCausalLmConditionalAnswerSession, NativeCausalLmConditionalServingSnapshot,
+    NativeCausalLmGenerator,
 };
 use std::path::PathBuf;
 
@@ -36,6 +38,44 @@ impl PyConditionalServing {
     #[getter]
     fn total_batches(&self) -> u64 {
         self.0.total_batches()
+    }
+
+    fn generator(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        config_json: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmGenerator> {
+        let bytes = session_input::payload_with_limit(
+            config_json,
+            CausalLmGenerationConfig::MAX_JSON_BYTES,
+        )?;
+        let config = CausalLmGenerationConfig::from_json(bytes.as_bytes()).map_err(error)?;
+        let count = self
+            .0
+            .generation_input_count(prompt_ids.len()?, &config)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, count)?;
+        py.detach(|| self.0.generator(ids, config))
+            .map(PyNativeCausalLmGenerator::from_native)
+            .map_err(error)
+    }
+
+    fn restore_generator(
+        &self,
+        py: Python<'_>,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmGenerator> {
+        let pin = session_input::pin(expected_id)?;
+        let bytes = session_input::payload_with_limit(
+            payload,
+            NativeCausalLmGenerator::MAX_CHECKPOINT_BYTES,
+        )?;
+        let payload = bytes.as_bytes();
+        py.detach(|| self.0.restore_generator(payload, &pin))
+            .map(PyNativeCausalLmGenerator::from_native)
+            .map_err(error)
     }
 
     #[pyo3(signature=(prompt, *, max_cache_values=None))]

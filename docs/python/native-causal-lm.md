@@ -1501,3 +1501,31 @@ next_logits = prefix.branch(next_token_id).logits_f32le()
 Use the original frozen model, including its adapter and readout recipe.
 This reconstructs the weights and cached inference path without reading
 training tokens. It does not recheck the guard or permit training.
+
+To generate and resume a continuation from those weights:
+
+```python
+from pathlib import Path
+
+generator = snapshot.generator(prompt_ids, recipe_json)
+reports, generation_pin = generator.advance_to_checkpoint_new(8, "generation-0008.json")
+generator = snapshot.restore_generator(
+    Path("generation-0008.json").read_bytes(), generation_pin,
+)
+```
+
+The generation checkpoint pins the projection owner as well as the token
+history, random draw position, EOS policy and decoding configuration.
+Use the same projection when restoring, not the unprojected base.
+`advance_to_checkpoint_new` takes an absolute new-token position within
+the configured limit, may stop early at EOS, and never overwrites a file.
+It commits the staged cursor only after successful publication. A
+post-install cleanup or sync failure leaves the prior live cursor and
+reports the staged pin; verify any file that remains before recovery.
+Python allocation of the returned reports can fail after publication,
+so inspect the live cursor and checkpoint before retrying.
+
+The `native_geometry_generation.py` example accepts
+`--conditional-checkpoint` and `--conditional-checkpoint-id` for this path.
+Keep that serving pin separate from the generation pin passed to
+`--resume-id`. Supply the frozen model recipe, not the training roster.

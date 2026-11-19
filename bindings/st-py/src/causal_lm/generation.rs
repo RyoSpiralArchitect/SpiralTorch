@@ -1,7 +1,8 @@
 //! Bounded transport only: sampling, EOS, control and random continuation belong to Rust.
-use super::{error, tokens, PyNativeCausalLm};
+use super::{checkpoint_error, dimension, error, session_input, tokens, PyNativeCausalLm};
 use pyo3::prelude::*;
 use st_nn::causal_lm::{CausalLmGenerationConfig, CausalLmGenerationStep, NativeCausalLmGenerator};
+use std::path::PathBuf;
 
 #[pyclass(name = "NativeCausalLmGenerator", module = "spiraltorch")]
 pub struct PyNativeCausalLmGenerator {
@@ -26,9 +27,13 @@ impl PyNativeCausalLmGenerator {
         py: Python<'_>,
         model: &PyNativeCausalLm,
         prompt_ids: &Bound<'_, PyAny>,
-        config_json: &str,
+        config_json: &Bound<'_, PyAny>,
     ) -> PyResult<Self> {
-        let config = CausalLmGenerationConfig::from_json(config_json.as_bytes()).map_err(error)?;
+        let bytes = session_input::payload_with_limit(
+            config_json,
+            CausalLmGenerationConfig::MAX_JSON_BYTES,
+        )?;
+        let config = CausalLmGenerationConfig::from_json(bytes.as_bytes()).map_err(error)?;
         let length = prompt_ids.len()?;
         config.validate(&model.inner, length).map_err(error)?;
         let prompt = tokens(prompt_ids, length)?;
@@ -40,14 +45,18 @@ impl PyNativeCausalLmGenerator {
     fn from_json(
         py: Python<'_>,
         model: &PyNativeCausalLm,
-        payload: &str,
-        expected_id: &str,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
     ) -> PyResult<Self> {
-        py.detach(|| {
-            NativeCausalLmGenerator::from_json(model.inner.clone(), payload.as_bytes(), expected_id)
-        })
-        .map(|inner| Self { inner })
-        .map_err(error)
+        let pin = session_input::pin(expected_id)?;
+        let bytes = session_input::payload_with_limit(
+            payload,
+            NativeCausalLmGenerator::MAX_CHECKPOINT_BYTES,
+        )?;
+        let bytes = bytes.as_bytes();
+        py.detach(|| NativeCausalLmGenerator::from_json(model.inner.clone(), bytes, &pin))
+            .map(|inner| Self { inner })
+            .map_err(error)
     }
     fn step(&mut self, py: Python<'_>) -> PyResult<Option<PyNativeCausalLmGenerationStep>> {
         py.detach(|| self.inner.step())
@@ -58,7 +67,7 @@ impl PyNativeCausalLmGenerator {
         py.detach(|| self.inner.step_token_id()).map_err(error)
     }
     fn advance_ids(&mut self, py: Python<'_>, count: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
-        let count = super::dimension(count)?;
+        let count = dimension(count)?;
         py.detach(|| self.inner.advance_ids(count)).map_err(error)
     }
     #[getter]
@@ -90,6 +99,31 @@ impl PyNativeCausalLmGenerator {
     }
     fn to_json(&self) -> PyResult<String> {
         self.inner.to_json().map_err(error)
+    }
+    fn checkpoint_with_id(&self, py: Python<'_>) -> PyResult<(String, String)> {
+        py.detach(|| self.inner.checkpoint_with_id()).map_err(error)
+    }
+    fn save_checkpoint_new(&self, py: Python<'_>, path: PathBuf) -> PyResult<String> {
+        py.detach(|| self.inner.save_checkpoint_new(path))
+            .map_err(checkpoint_error)
+    }
+    fn advance_to_checkpoint_new(
+        &mut self,
+        py: Python<'_>,
+        stop_after: &Bound<'_, PyAny>,
+        path: PathBuf,
+    ) -> PyResult<(Vec<PyNativeCausalLmGenerationStep>, String)> {
+        let stop = dimension(stop_after)?;
+        let (steps, pin) = py
+            .detach(|| self.inner.advance_to_checkpoint_new(stop, path))
+            .map_err(checkpoint_error)?;
+        Ok((
+            steps
+                .into_iter()
+                .map(|inner| PyNativeCausalLmGenerationStep { inner })
+                .collect(),
+            pin,
+        ))
     }
 }
 

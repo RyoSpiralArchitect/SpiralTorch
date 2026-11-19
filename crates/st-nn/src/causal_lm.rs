@@ -43,6 +43,7 @@ mod session;
 mod sum;
 mod training;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
+pub use checkpoint::CheckpointPublicationUncertain;
 pub use common_geometry::hull::CommonDirectionRefusal;
 pub use common_geometry::{
     CausalLmCommonGeometryStep, CausalLmGeometrySteeringStep, CausalLmGeometryStepGuard,

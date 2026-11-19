@@ -1,4 +1,5 @@
 //! Native generation with explicit full-prefix or owned KV execution, never a foreign fallback.
+use super::checkpoint as files;
 use super::{
     CausalLmReadoutAccumulator, CausalLmResult, NativeCausalLm, NativeCausalLmContext,
     NativeCausalLmTrainer,
@@ -11,10 +12,10 @@ use st_core::inference::token_decoding::{
     greedy_token_id_f32, prepare_token_candidates_f32, TokenDecision, TokenDecodingConfig,
     TokenSelection, MAX_HISTORY,
 };
+use std::path::Path;
 
 const SCHEMA: &str = "spiraltorch.native_causal_lm_generation.v1";
 const RNG: &str = "rand_chacha_0_3_chacha20_seed_u64_top53.v1";
-const MAX_CHECKPOINT_BYTES: usize = 1_048_576;
 const MAX_NEW_TOKENS: usize = 1024;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -52,8 +53,10 @@ pub struct CausalLmGenerationConfig {
 }
 
 impl CausalLmGenerationConfig {
+    pub const MAX_JSON_BYTES: usize = 65_536;
+
     pub fn from_json(bytes: &[u8]) -> CausalLmResult<Self> {
-        if bytes.len() > 65_536 {
+        if bytes.len() > Self::MAX_JSON_BYTES {
             return Err("generation config exceeds byte budget".into());
         }
         Ok(serde_json::from_slice(bytes)?)
@@ -159,6 +162,8 @@ impl NativeCausalLm {
 }
 
 impl NativeCausalLmGenerator {
+    pub const MAX_CHECKPOINT_BYTES: usize = 1_048_576;
+
     pub fn new(
         model: NativeCausalLm,
         prompt: Vec<usize>,
@@ -333,13 +338,60 @@ impl NativeCausalLmGenerator {
             readout_accumulator: self.model.readout_accumulator,
             projection_id: self.projection_id.clone(),
         })?;
-        if json.len() > MAX_CHECKPOINT_BYTES {
+        if json.len() > Self::MAX_CHECKPOINT_BYTES {
             return Err("generation checkpoint exceeds byte budget".into());
         }
         Ok(json)
     }
     pub fn checkpoint_id(&self) -> CausalLmResult<String> {
-        Ok(identity(self.to_json()?.as_bytes()))
+        Ok(self.checkpoint_with_id()?.1)
+    }
+
+    pub fn checkpoint_with_id(&self) -> CausalLmResult<(String, String)> {
+        let json = self.to_json()?;
+        let pin = identity(json.as_bytes());
+        Ok((json, pin))
+    }
+
+    /// Save the current generation state without overwriting any existing name.
+    pub fn save_checkpoint_new(&self, path: impl AsRef<Path>) -> CausalLmResult<String> {
+        files::admit_new(path.as_ref())?;
+        files::save_with_status(path.as_ref(), self.checkpoint_with_id()?)
+    }
+
+    /// Generate up to an absolute cursor, stopping early at EOS. The live
+    /// cursor and cache advance only after the checkpoint has been published
+    /// successfully. On post-publication I/O errors, the new file may exist.
+    pub fn advance_to_checkpoint_new(
+        &mut self,
+        stop: usize,
+        path: impl AsRef<Path>,
+    ) -> CausalLmResult<(Vec<CausalLmGenerationStep>, String)> {
+        let count = stop
+            .checked_sub(self.generated_ids().len())
+            .filter(|_| stop <= self.config.max_new_tokens)
+            .ok_or("generation boundary must be between the current cursor and sealed end")?;
+        let path = path.as_ref();
+        files::admit_new(path)?;
+        if count == 0 || self.finished() {
+            return Ok((
+                Vec::new(),
+                files::save_with_status(path, self.checkpoint_with_id()?)?,
+            ));
+        }
+        files::transaction(self, |next| {
+            let mut reports = Vec::with_capacity(count);
+            for _ in 0..count {
+                let Some(report) = next.step()? else {
+                    break;
+                };
+                reports.push(report);
+            }
+            Ok((
+                reports,
+                files::save_with_status(path, next.checkpoint_with_id()?)?,
+            ))
+        })
     }
     pub fn from_json(
         model: NativeCausalLm,
@@ -355,7 +407,7 @@ impl NativeCausalLmGenerator {
         expected_id: &str,
         projection_id: Option<String>,
     ) -> CausalLmResult<Self> {
-        if bytes.len() > MAX_CHECKPOINT_BYTES {
+        if bytes.len() > Self::MAX_CHECKPOINT_BYTES {
             return Err("generation checkpoint exceeds byte budget".into());
         }
         if identity(bytes) != expected_id {

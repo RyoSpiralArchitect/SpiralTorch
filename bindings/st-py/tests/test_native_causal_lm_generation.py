@@ -1,14 +1,15 @@
 """Rust-owned generation in an interpreter that forbids foreign ML imports."""
+import contextlib
 import hashlib
 import importlib.abc
-import contextlib
 import io
 import json
 import os
 from pathlib import Path
 import runpy
-import sys
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -91,6 +92,90 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
         self.assertEqual(ids.finish_reason,"eos")
         self.assertEqual(ids.advance_ids(3),[])
 
+    def test_generation_checkpoint_intervals_match_continuous_sampling(self):
+        policy = {"execution": {"kind": "kv_cache", "max_values": 1024}, "seed": 41,
+                  "decoding": {"selection": "sample",
+                               "distribution": {"kind": "zspace", "config": {"curvature": -1.}}}}
+        full, split = self.generator(**policy), self.generator(**policy)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            zero, partial, final = (root / name for name in ("zero.json", "partial.json", "final.json"))
+            empty, initial = split.advance_to_checkpoint_new(0, zero)
+            self.assertEqual(empty, [])
+            self.assertEqual(split.checkpoint_with_id(), (zero.read_text(encoding="utf-8"), initial))
+            with self.assertRaises(FileExistsError):
+                split.advance_to_checkpoint_new(2, zero)
+            self.assertEqual(split.checkpoint_with_id(), (zero.read_text(encoding="utf-8"), initial))
+            for bad_stop in (-1, True, 6):
+                with self.assertRaises((TypeError, ValueError, OverflowError)):
+                    split.advance_to_checkpoint_new(bad_stop, partial)
+                self.assertFalse(partial.exists())
+
+            a, partial_id = split.advance_to_checkpoint_new(2, partial)
+            self.assertEqual(split.checkpoint_with_id(), (partial.read_text(encoding="utf-8"), partial_id))
+            split = st.NativeCausalLmGenerator.from_json(
+                self.model, partial.read_text(encoding="utf-8"), partial_id,
+            )
+            b, final_id = split.advance_to_checkpoint_new(5, final)
+            self.assertEqual([report.to_json() for report in a + b], [full.step().to_json() for _ in range(5)])
+            self.assertEqual((final.read_text(encoding="utf-8"), final_id), full.checkpoint_with_id())
+            self.assertEqual(split.checkpoint_with_id(), full.checkpoint_with_id())
+            if os.name == "posix":
+                self.assertEqual(final.stat().st_mode & 0o777, 0o600)
+
+    def test_generation_checkpoint_can_stop_early_at_eos(self):
+        token = self.generator().step_token_id()
+        generator = self.generator(eos_token_ids=[token])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            steps, eos_id = generator.advance_to_checkpoint_new(5, root / "eos.json")
+            self.assertEqual([(s.token_id, s.finish_reason) for s in steps], [(token, "eos")])
+            self.assertTrue(generator.finished)
+            self.assertEqual(generator.generated_ids, [token])
+            self.assertEqual(generator.advance_to_checkpoint_new(5, root / "copy.json"), ([], eos_id))
+            self.assertEqual((root / "eos.json").read_bytes(), (root / "copy.json").read_bytes())
+
+    @unittest.skipUnless(os.name == "posix", "requires a child-local file size limit")
+    def test_generation_short_write_preserves_prior_checkpoint_and_warm_cache(self):
+        script = r"""
+import errno, resource, runpy, signal, sys
+from pathlib import Path
+
+test = runpy.run_path(sys.argv[1])["NativeCausalLmGenerationTests"]()
+test.setUp()
+root = Path(sys.argv[2])
+previous, failed = root / "previous.json", root / "failed.json"
+recipe = dict(execution={"kind": "kv_cache", "max_values": 1024},
+              seed=39, decoding={"selection": "sample"})
+generator, reference = test.generator(**recipe), test.generator(**recipe)
+assert generator.step().to_json() == reference.step().to_json()
+saved = generator.checkpoint_with_id()
+assert generator.save_checkpoint_new(previous) == saved[1]
+limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (32, limits[1]))
+try:
+    generator.advance_to_checkpoint_new(4, failed)
+except OSError as exc:
+    assert exc.errno == errno.EFBIG, exc
+else:
+    raise AssertionError("32-byte cap did not reject the generation checkpoint")
+finally:
+    resource.setrlimit(resource.RLIMIT_FSIZE, limits)
+assert generator.checkpoint_with_id() == saved
+assert previous.read_bytes() == saved[0].encode() and list(root.iterdir()) == [previous]
+reports, pin = generator.advance_to_checkpoint_new(4, root / "complete.json")
+assert [step.to_json() for step in reports] == [reference.step().to_json() for _ in range(3)]
+assert generator.checkpoint_with_id() == reference.checkpoint_with_id()
+assert pin == reference.checkpoint_id
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            run = subprocess.run(
+                [sys.executable, "-I", "-B", "-c", script, str(Path(__file__).resolve()), directory],
+                capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(run.returncode, 0, run.stderr)
+
     def test_sampled_zspace_exact_resume_and_control_does_not_disappear(self):
         generator = self.generator(seed=132, decoding={"selection": "sample", "top_k": 6, "top_p": .8,
                                   "distribution": {"kind": "zspace", "config": {"curvature": -1.}}})
@@ -127,6 +212,13 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
                 return [1, 2][index]
             def __iter__(self):
                 raise AssertionError("iterator must not be consumed")
+        for config in (b" " * 65_537, "\U0001f300" * 16_385):
+            with self.assertRaisesRegex(ValueError, "byte budget"):
+                st.NativeCausalLmGenerator(self.model, TooLong(), config)
+        with self.assertRaisesRegex(ValueError, "byte budget"):
+            st.NativeCausalLmGenerator.from_json(
+                self.model, b" " * (1_048_576 + 1), "sha256:" + "0" * 64,
+            )
         with self.assertRaises(ValueError):
             self.generator(TooLong())
         self.assertEqual(self.generator(Indexed()).token_ids, [1, 2])
@@ -169,6 +261,12 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 generator.step()
             self.assertEqual(generator.to_json(), saved)
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "invalid.json"
+            with self.assertRaises(ValueError):
+                generator.advance_to_checkpoint_new(2, checkpoint)
+            self.assertFalse(checkpoint.exists())
+            self.assertEqual(generator.to_json(), saved)
 
     def test_training_checkpoint_handoff_preserves_learned_geometry(self):
         optimizer = st.NativeGeometryAdamW(self.model.geometry_artifact(), max_gradient_norm=.1)
@@ -183,6 +281,121 @@ class NativeCausalLmGenerationTests(unittest.TestCase):
             self.assertEqual(a.step().to_json(), b.step().to_json())
         with self.assertRaisesRegex(ValueError, "pinned"):
             st.NativeCausalLm.from_training_checkpoint(self.base, trainer.to_json(), "wrong")
+
+    def test_conditional_snapshot_rng_and_generation_ownership(self):
+        state, guard, rows, pairs, schedule = fixtures["conditional_session_inputs"](self.base)
+        kind = st.NativeCausalLmConditionalAnswerSession
+        session = kind(state, guard, rows, schedule, length=.01)
+        earlier = kind.serving_from_checkpoint(self.base, *session.checkpoint_with_id())
+        repeated = kind(state, guard, rows, schedule, length=.01, epochs=2)
+        same_weights = kind.serving_from_checkpoint(self.base, *repeated.checkpoint_with_id())
+        self.assertNotEqual(earlier.checkpoint_id, same_weights.checkpoint_id)
+        self.assertEqual(earlier.projection_id, same_weights.projection_id)
+        empty = earlier.generator([1, 2], '{"max_new_tokens":1}')
+        self.assertEqual(same_weights.restore_generator(empty.to_json(), empty.checkpoint_id).to_json(),
+                         empty.to_json())
+        self.assertTrue(session.step()["report"]["step"]["committed"])
+        snapshot = kind.serving_from_checkpoint(self.base, *session.checkpoint_with_id())
+        self.assertNotEqual(earlier.projection_id, snapshot.projection_id)
+        prompt = [4, 8, 2, 1]
+        logits = struct.unpack("<11f", snapshot.prefill(prompt).logits_f32le())
+        greedy = snapshot.generator(prompt, '{"max_new_tokens":1,"execution":{"kind":"kv_cache","max_values":1024}}')
+        self.assertEqual(greedy.step_token_id(), max(range(len(logits)), key=logits.__getitem__))
+        for execution in ({"kind": "full_prefix"}, {"kind": "kv_cache", "max_values": 1024}):
+            with self.subTest(execution=execution):
+                recipe = json.dumps({
+                    "max_new_tokens": 4, "seed": 81, "execution": execution,
+                    "decoding": {"selection": "sample", "top_k": 6,
+                                 "distribution": {"kind": "zspace", "config": {"curvature": -1.}}},
+                })
+                full = snapshot.generator(prompt, recipe)
+                self.assertEqual(full.projection_id, snapshot.projection_id)
+                report = json.loads(full.step().to_json())
+                self.assertEqual(report["zspace_contract"], "spiraltorch.zspace_generation_control.v1")
+                full.step()
+                saved, saved_id = full.to_json(), full.checkpoint_id
+                self.assertEqual(json.loads(saved)["projection_id"], snapshot.projection_id)
+                with self.assertRaisesRegex(ValueError, "projection owner mismatch"):
+                    earlier.restore_generator(saved, saved_id)
+                with self.assertRaisesRegex(ValueError, "projection owner mismatch"):
+                    st.NativeCausalLmGenerator.from_json(self.base, saved, saved_id)
+                with self.assertRaisesRegex(ValueError, "pinned identity"):
+                    snapshot.restore_generator(saved + " ", saved_id)
+                resumed = snapshot.restore_generator(saved.encode(), saved_id)
+                for _ in range(2):
+                    self.assertEqual(full.step().to_json(), resumed.step().to_json())
+                self.assertEqual((full.checkpoint_id, full.to_json()), (resumed.checkpoint_id, resumed.to_json()))
+
+        class NoValueRead:
+            def __len__(self):
+                return 100_000
+
+            def __getitem__(self, _):
+                raise AssertionError("prompt IDs read before generation budget")
+
+        with self.assertRaisesRegex(ValueError, "generation token count exceeds budget"):
+            snapshot.generator(NoValueRead(), b'{"max_new_tokens":4}')
+
+    def test_conditional_generation_example_resumes_without_training_data(self):
+        config, weights = fixtures["fixture"](raw_weights=True)
+        model = self.base.with_readout_accumulator("f64").with_lora(0, 2, 4.)
+        geometry = fixtures["artifact"](model, path="transformer.h.0.attn", trainable=True)
+        model = model.with_geometry(geometry)
+        state, guard, rows, pairs, schedule = fixtures["conditional_session_inputs"](model)
+        kind = st.NativeCausalLmConditionalAnswerSession
+        session = kind(state, guard, rows, schedule, length=.01)
+        for _ in schedule:
+            session.step()
+        phase = session.next_phase(rows[::-1], [([0], [pairs[-1]])], length=.02, epochs=2)
+        phase.step()
+        raw, expected = phase.checkpoint_with_id()
+        example = Path(__file__).resolve().parents[1] / "examples/native_geometry_generation.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.json").write_text(config, encoding="utf-8")
+            (root / "model.safetensors").write_bytes(weights)
+            (root / "phase.ck").write_bytes(raw)
+            (root / "lora.json").write_text(model.lora_to_json(), encoding="utf-8")
+            (root / "geometry.json").write_text(geometry.to_json(), encoding="utf-8")
+            (root / "prompt.json").write_text("[1,2]", encoding="utf-8")
+            (root / "recipe.json").write_text(json.dumps({
+                "max_new_tokens": 4, "seed": 41, "execution": {"kind": "kv_cache", "max_values": 1024},
+                "decoding": {"selection": "sample",
+                             "distribution": {"kind": "zspace", "config": {"curvature": -1.}}},
+            }), encoding="utf-8")
+            base = [sys.executable, "-I", "-B", str(example), "--conditional-checkpoint", "phase.ck",
+                    "--conditional-source-lora", "lora.json", "--artifact", "geometry.json",
+                    "--artifact-id", geometry.artifact_id, "--readout-accumulator", "f64"]
+            prompt = ["--prompt-json", "prompt.json", "--recipe-json", "recipe.json"]
+
+            def run(output, args, *, model_dir=".", conditional_id=expected):
+                return subprocess.run(
+                    [*base, "--model-dir", model_dir, "--conditional-checkpoint-id", conditional_id,
+                     "--output", output, *args], cwd=root, capture_output=True, text=True, timeout=30)
+
+            bad = run("bad", prompt, model_dir="missing", conditional_id="sha256:" + "0" * 64)
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("conditional checkpoint differs from pinned identity", bad.stderr)
+            self.assertFalse((root / "bad").exists())
+            both = run("bad", [*prompt, "--qkv-checkpoint", "missing", "--qkv-checkpoint-id", "pin"])
+            self.assertEqual(both.returncode, 2)
+            self.assertIn("choose either a QKV projection or a conditional projection", both.stderr)
+            self.assertFalse((root / "bad").exists())
+            for label, args in (("full", prompt), ("part", [*prompt, "--stop-after", "2"])):
+                call = run(label, args)
+                self.assertEqual(call.returncode, 0, call.stderr)
+            saved = (root / "part/generation.json").read_text(encoding="utf-8")
+            continued = run("continued", ["--resume", "part/generation.json", "--resume-id", pin(saved)])
+            self.assertEqual(continued.returncode, 0, continued.stderr)
+            self.assertEqual((root / "full/generation.json").read_bytes(), (root / "continued/generation.json").read_bytes())
+            self.assertEqual((root / "full/steps.jsonl").read_bytes(),
+                             (root / "part/steps.jsonl").read_bytes() + (root / "continued/steps.jsonl").read_bytes())
+            result = json.loads(continued.stdout)
+            self.assertEqual(result["conditional_snapshot"], {
+                "checkpoint_id": expected, "projection_id": phase.projection_snapshot().projection_id,
+                "position": 1, "total_batches": 2, "training_documents_verified": False,
+            })
+            self.assertEqual(result["lora_artifact_id"], model.lora_artifact_id)
 
     def test_public_example_full_and_resumed_private_outputs_match(self):
         for execution in (None, {"kind": "full_prefix"}, {"kind": "kv_cache", "max_values": 100000}):
