@@ -21,6 +21,58 @@ fn pin(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn generation_publication_failures_keep_the_live_seeded_cursor() {
+    let model = load();
+    let mut config = policy();
+    config.decoding.selection = TokenSelection::Sample;
+    config.execution = CausalLmGenerationExecution::KvCache { max_values: 1024 };
+    let mut live = NativeCausalLmGenerator::new(model.clone(), vec![1, 2], config).unwrap();
+    live.step().unwrap();
+    let before = live.checkpoint_with_id().unwrap();
+    let mut reference = live.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let race = dir.path().join("race.json");
+    let error = live
+        .advance_to_checkpoint_with(3, &race, |path, snapshot| {
+            std::fs::write(path, b"winner")?;
+            checkpoint::save_with_status(path, snapshot)
+        })
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::AlreadyExists,
+    );
+    assert_eq!(std::fs::read(&race).unwrap(), b"winner");
+    assert_eq!(live.checkpoint_with_id().unwrap(), before);
+
+    let installed = dir.path().join("installed.json");
+    let error = live
+        .advance_to_checkpoint_with(3, &installed, |path, snapshot| {
+            let pin = checkpoint::save_with_status(path, snapshot)?;
+            Err(Box::new(
+                CheckpointPublicationUncertain::from_installed_file(
+                    pin,
+                    std::io::Error::other("injected post-install failure"),
+                ),
+            ))
+        })
+        .unwrap_err();
+    let staged_pin = error
+        .downcast_ref::<CheckpointPublicationUncertain>()
+        .unwrap()
+        .checkpoint_id();
+    let payload = std::fs::read(&installed).unwrap();
+    let staged = NativeCausalLmGenerator::from_json(model, &payload, staged_pin).unwrap();
+    assert_eq!(staged.generated_ids().len(), 3);
+    assert_eq!(live.checkpoint_with_id().unwrap(), before);
+    assert_eq!(live.step().unwrap(), reference.step().unwrap());
+    assert_eq!(
+        live.checkpoint_with_id().unwrap(),
+        reference.checkpoint_with_id().unwrap()
+    );
+}
+
+#[test]
 fn generation_checkpoint_binds_readout_policy_and_keeps_default_bytes() {
     for execution in [
         CausalLmGenerationExecution::FullPrefix,

@@ -1529,3 +1529,7 @@ The `native_geometry_generation.py` example accepts
 `--conditional-checkpoint` and `--conditional-checkpoint-id` for this path.
 Keep that serving pin separate from the generation pin passed to
 `--resume-id`. Supply the frozen model recipe, not the training roster.
+The example emits the native generation pin on stderr immediately after
+publication, so it stays available if writing reports fails. On resume,
+`result.json` distinguishes the exact admitted `resume_input_id` from
+the canonical starting-state `initial_id`.

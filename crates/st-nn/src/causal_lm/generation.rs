@@ -367,17 +367,22 @@ impl NativeCausalLmGenerator {
         stop: usize,
         path: impl AsRef<Path>,
     ) -> CausalLmResult<(Vec<CausalLmGenerationStep>, String)> {
+        self.advance_to_checkpoint_with(stop, path.as_ref(), files::save_with_status)
+    }
+
+    pub(super) fn advance_to_checkpoint_with(
+        &mut self,
+        stop: usize,
+        path: &Path,
+        publish: impl FnOnce(&Path, (String, String)) -> CausalLmResult<String>,
+    ) -> CausalLmResult<(Vec<CausalLmGenerationStep>, String)> {
         let count = stop
             .checked_sub(self.generated_ids().len())
             .filter(|_| stop <= self.config.max_new_tokens)
             .ok_or("generation boundary must be between the current cursor and sealed end")?;
-        let path = path.as_ref();
         files::admit_new(path)?;
         if count == 0 || self.finished() {
-            return Ok((
-                Vec::new(),
-                files::save_with_status(path, self.checkpoint_with_id()?)?,
-            ));
+            return Ok((Vec::new(), publish(path, self.checkpoint_with_id()?)?));
         }
         files::transaction(self, |next| {
             let mut reports = Vec::with_capacity(count);
@@ -387,10 +392,7 @@ impl NativeCausalLmGenerator {
                 };
                 reports.push(report);
             }
-            Ok((
-                reports,
-                files::save_with_status(path, next.checkpoint_with_id()?)?,
-            ))
+            Ok((reports, publish(path, next.checkpoint_with_id()?)?))
         })
     }
     pub fn from_json(

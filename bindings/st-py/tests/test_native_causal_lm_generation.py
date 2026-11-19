@@ -368,9 +368,25 @@ assert pin == reference.checkpoint_id
                     "--artifact-id", geometry.artifact_id, "--readout-accumulator", "f64"]
             prompt = ["--prompt-json", "prompt.json", "--recipe-json", "recipe.json"]
 
-            def run(output, args, *, model_dir=".", conditional_id=expected):
+            fail_script = r"""
+import pathlib
+import runpy
+import sys
+
+open_original = pathlib.Path.open
+def fail_reports(self, *args, **kwargs):
+    if self.name == "steps.jsonl":
+        raise OSError("injected report write failure")
+    return open_original(self, *args, **kwargs)
+
+pathlib.Path.open = fail_reports
+runpy.run_path(sys.argv[1])["main"](sys.argv[2:])
+"""
+
+            def run(output, args, *, model_dir=".", conditional_id=expected, fail_reports=False):
+                entry = [*base[:3], "-c", fail_script, *base[3:]] if fail_reports else base
                 return subprocess.run(
-                    [*base, "--model-dir", model_dir, "--conditional-checkpoint-id", conditional_id,
+                    [*entry, "--model-dir", model_dir, "--conditional-checkpoint-id", conditional_id,
                      "--output", output, *args], cwd=root, capture_output=True, text=True, timeout=30)
 
             bad = run("bad", prompt, model_dir="missing", conditional_id="sha256:" + "0" * 64)
@@ -391,11 +407,32 @@ assert pin == reference.checkpoint_id
             self.assertEqual((root / "full/steps.jsonl").read_bytes(),
                              (root / "part/steps.jsonl").read_bytes() + (root / "continued/steps.jsonl").read_bytes())
             result = json.loads(continued.stdout)
+            self.assertEqual(result["resume_input_id"], pin(saved))
             self.assertEqual(result["conditional_snapshot"], {
                 "checkpoint_id": expected, "projection_id": phase.projection_snapshot().projection_id,
                 "position": 1, "total_batches": 2, "training_documents_verified": False,
             })
             self.assertEqual(result["lora_artifact_id"], model.lora_artifact_id)
+
+            rewritten = saved + "\n"
+            (root / "rewritten.json").write_bytes(rewritten.encode("utf-8"))
+            replay = run("reformatted", ["--resume", "rewritten.json", "--resume-id", pin(rewritten)])
+            self.assertEqual(replay.returncode, 0, replay.stderr)
+            logged = json.loads(replay.stdout)
+            self.assertEqual(logged["resume_input_id"], pin(rewritten))
+            self.assertEqual(logged["initial_id"], pin(saved))
+
+            failed = run("missing-report", [*prompt, "--stop-after", "2"], fail_reports=True)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("injected report write failure", failed.stderr)
+            event, = [json.loads(line) for line in failed.stderr.splitlines()
+                      if line.startswith('{"event": "generation_checkpoint_published"')]
+            self.assertEqual(event["path"], str(Path("missing-report/generation.json")))
+            self.assertFalse((root / "missing-report/result.json").exists())
+            recovered = run("recovered", ["--resume", event["path"], "--resume-id", event["checkpoint_id"]])
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertEqual((root / "full/generation.json").read_bytes(),
+                             (root / "recovered/generation.json").read_bytes())
 
     def test_public_example_full_and_resumed_private_outputs_match(self):
         for execution in (None, {"kind": "full_prefix"}, {"kind": "kv_cache", "max_values": 100000}):

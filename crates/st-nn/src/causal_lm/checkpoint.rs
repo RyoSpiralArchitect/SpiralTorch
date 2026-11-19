@@ -10,10 +10,17 @@ pub(super) const MAX_INTERVAL: u64 = 1024;
 #[derive(Debug)]
 pub struct CheckpointPublicationUncertain {
     checkpoint_id: String,
-    source: st_core::runtime::AtomicPublishError,
+    source: io::Error,
 }
 
 impl CheckpointPublicationUncertain {
+    pub(super) fn from_installed_file(checkpoint_id: String, source: io::Error) -> Self {
+        Self {
+            checkpoint_id,
+            source,
+        }
+    }
+
     pub fn checkpoint_id(&self) -> &str {
         &self.checkpoint_id
     }
@@ -41,12 +48,9 @@ pub(super) fn save_with_status<P: AsRef<[u8]>>(
 ) -> CausalLmResult<String> {
     match st_core::runtime::atomic_create_new_with_status(path, bytes.as_ref()) {
         Ok(()) => Ok(pin),
-        Err(source) if source.destination_installed() => {
-            Err(Box::new(CheckpointPublicationUncertain {
-                checkpoint_id: pin,
-                source,
-            }))
-        }
+        Err(source) if source.destination_installed() => Err(Box::new(
+            CheckpointPublicationUncertain::from_installed_file(pin, source.into_io_error()),
+        )),
         Err(source) => Err(source.into_io_error().into()),
     }
 }

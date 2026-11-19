@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 
 import spiraltorch as st
 
@@ -164,6 +165,9 @@ def main(argv=None):
     initial_id = generator.checkpoint_id
     destination = args.output / "generation.json"
     reports, checkpoint_id = generator.advance_to_checkpoint_new(stop, destination)
+    print(json.dumps({"event": "generation_checkpoint_published",
+                      "path": str(destination), "checkpoint_id": checkpoint_id}),
+          file=sys.stderr, flush=True)
     if "sha256:" + hashlib.sha256(read_bytes(destination, 1_048_576)).hexdigest() != checkpoint_id:
         raise ValueError("saved generation bytes and native identity disagree")
     with (args.output / "steps.jsonl").open("x", encoding="utf-8") as stream:
@@ -176,6 +180,8 @@ def main(argv=None):
               "checkpoint_id": checkpoint_id, "generated_tokens": len(generator.generated_ids),
               "finished": generator.finished, "finish_reason": generator.finish_reason,
               "scope": "frozen GPT-2 CPU generation; no corpus validation or quality claim"}
+    if args.resume:
+        result["resume_input_id"] = args.resume_id
     if all(observed):
         result["observed_training_boundary"] = {"update": args.observed_update, "observation_id": args.observation_id,
                                                 "training_documents_verified": False}
