@@ -991,8 +991,13 @@ fn guarded_checkpoint_pins_the_underflowed_outside_ceiling() {
     );
 }
 
-#[test]
-fn both_mass_guards_reject_an_underflowed_regression_on_the_same_real_candidate() {
+fn underflowing_outside_fixture(
+    rows: &[Vec<usize>],
+) -> (
+    NativeCausalLm,
+    NativeCausalLmRankOneProjection,
+    [[usize; 2]; 1],
+) {
     let make = |outside: f32| {
         let m = five_token_readout(
             [
@@ -1001,20 +1006,29 @@ fn both_mass_guards_reject_an_underflowed_regression_on_the_same_real_candidate(
             ],
             Some(([0., 1., 1., 1.], [1., 0., 0., 0.])),
         );
-        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4]).unwrap()
+        let projection =
+            NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4])
+                .unwrap();
+        (m, projection)
     };
-    let rows = vec![vec![4, 2, 1]];
-    let probe = make(2.);
-    let gap = probe.score_answer_pairs(&rows, &[[0, 1]]).unwrap()[0].gold_minus_alternative;
+    let (model, probe) = make(2.);
+    let gap = probe.score_answer_pairs(rows, &[[0, 1]]).unwrap()[0].gold_minus_alternative;
     assert_ne!(gap, 0.);
     // Improving the oriented margin increases the outside log-odds:
     // the outside logit has slope 2 along the gold coordinate, while
     // logsumexp of the two inside logits has slope at most 1.
-    let (start, pairs) = if gap > 0. {
-        (probe, [[0, 1]])
+    if gap > 0. {
+        (model, probe, [[0, 1]])
     } else {
-        (make(-2.), [[1, 0]])
-    };
+        let (model, projection) = make(-2.);
+        (model, projection, [[1, 0]])
+    }
+}
+
+#[test]
+fn both_mass_guards_reject_an_underflowed_regression_on_the_same_real_candidate() {
+    let rows = vec![vec![4, 2, 1]];
+    let (_, start, pairs) = underflowing_outside_fixture(&rows);
     let cfg = CausalLmConditionalAnswerConfig {
         length: 0.01,
         max_trials: 1,
@@ -1078,6 +1092,104 @@ fn both_mass_guards_reject_an_underflowed_regression_on_the_same_real_candidate(
         roster.checkpoint_with_retention(&guard).unwrap(),
         checkpoint
     );
+}
+
+#[test]
+fn legacy_phase_restore_only_admits_endpoints_inside_the_replayed_log_ceiling() {
+    let rows = vec![vec![4, 2, 1]];
+    let (model, start, pairs) = underflowing_outside_fixture(&rows);
+    let guard = start
+        .prepare_conditional_margin_and_mass_retention(&rows, &pairs, 0.)
+        .unwrap();
+    let schedule = vec![(vec![0], pairs.to_vec())];
+    let policy = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 1,
+        mass_inward_cosine: None,
+    };
+    let mut candidate = start.clone();
+    let report = candidate
+        .step_conditional_answers(&rows, &pairs, policy)
+        .unwrap();
+    assert!(report.committed);
+    assert_eq!(report.after.candidate_mass_nll, 0.);
+    assert!(
+        report.after.log_candidate_mass_nll.unwrap()
+            > report.before.log_candidate_mass_nll.unwrap()
+    );
+
+    let mut first = NativeCausalLmConditionalAnswerSession::new(
+        &start,
+        &guard,
+        &rows,
+        schedule.clone(),
+        policy,
+        44,
+    )
+    .unwrap();
+    assert!(!first.step().unwrap().unwrap().report.step.committed);
+    let linked = first
+        .next_phase(&rows, schedule.clone(), policy, 44, 1)
+        .unwrap();
+    for (session, schema) in [
+        (&first, "spiraltorch.native_conditional_answer_session.v3"),
+        (&linked, "spiraltorch.native_conditional_answer_session.v4"),
+    ] {
+        let (raw, _) = session.checkpoint().unwrap();
+        let end = 4 + u32::from_le_bytes(raw[..4].try_into().unwrap()) as usize;
+        let mut header: serde_json::Value = serde_json::from_slice(&raw[4..end]).unwrap();
+        let mut retained: serde_json::Value = serde_json::from_slice(&raw[end..]).unwrap();
+        header["schema"] = serde_json::json!(schema);
+        assert!(header
+            .as_object_mut()
+            .unwrap()
+            .remove("start_projection_id")
+            .is_some());
+        let mass = &mut retained["baseline"]["mass"];
+        assert_eq!(mass["maximum_mean_outside_mass_bits"], 0);
+        assert!(mass
+            .as_object_mut()
+            .unwrap()
+            .remove("maximum_log_mean_outside_mass_bits")
+            .is_some());
+
+        let frame = |mut header: serde_json::Value, retained: &serde_json::Value| {
+            let body = serde_json::to_vec(retained).unwrap();
+            header["guard_pin"] = serde_json::json!(format!("sha256:{:x}", Sha256::digest(&body)));
+            let header = serde_json::to_vec(&header).unwrap();
+            let mut raw = (header.len() as u32).to_le_bytes().to_vec();
+            raw.extend(header);
+            raw.extend(body);
+            let id = format!("sha256:{:x}", Sha256::digest(&raw));
+            (raw, id)
+        };
+        let restore = |raw: &[u8], id: &str| {
+            NativeCausalLmConditionalAnswerSession::prepare_resume(&model, raw, id)
+                .unwrap()
+                .resume(&rows, schedule.clone(), &rows, &pairs)
+        };
+        let (raw, pin) = frame(header.clone(), &retained);
+        let control = restore(&raw, &pin).unwrap();
+        assert_eq!(control.checkpoint().unwrap(), (raw, pin));
+        assert_eq!(control.projection().projection_id(), start.projection_id());
+
+        header["position"] = serde_json::json!(1);
+        header["accepted_updates"] = serde_json::json!(1);
+        retained["projection_id"] = serde_json::json!(candidate.projection_id());
+        retained["right_bits"] = serde_json::json!(candidate
+            .right()
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>());
+        let (raw, pin) = frame(header, &retained);
+        let read_only =
+            NativeCausalLmConditionalAnswerSession::serving_from_checkpoint(&model, &raw, &pin)
+                .unwrap();
+        assert_eq!(read_only.projection_id(), candidate.projection_id());
+        assert!(
+            matches!(restore(&raw, &pin), Err(e) if e.to_string().contains("violates the saved guard"))
+        );
+    }
 }
 
 #[test]
