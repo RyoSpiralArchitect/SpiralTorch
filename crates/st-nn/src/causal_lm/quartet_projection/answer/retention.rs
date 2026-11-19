@@ -23,32 +23,60 @@ struct MassFloor {
     baseline: f64,
     minimum: f64,
     maximum_outside: f64,
+    minimum_log_pair: Option<f64>,
 }
 
 #[derive(Default)]
 struct PairMassMean {
     pair: sum::Sum,
     outside: sum::Sum,
+    log_pair_sum: Option<f64>,
 }
 
 impl PairMassMean {
     fn add_loss(&mut self, loss: f64) {
         self.pair.add((-loss).exp());
         self.outside.add(-(-loss).exp_m1());
+        let log_p = -loss;
+        self.log_pair_sum = Some(self.log_pair_sum.map_or(log_p, |sum| {
+            log_p.max(sum) + (-(log_p - sum).abs()).exp().ln_1p()
+        }));
+    }
+
+    fn log_mean_pair(&self, rows: usize) -> Option<f64> {
+        self.log_pair_sum.map(|sum| sum - (rows as f64).ln())
     }
 }
 
 impl MassFloor {
     fn from_baseline(mass: PairMassMean, rows: usize, drop: f64) -> Self {
+        let minimum_log_pair = mass.log_mean_pair(rows).and_then(|log_mean| {
+            if drop == 0. {
+                return Some(log_mean);
+            }
+            let log_ratio = drop.ln() - log_mean;
+            (log_ratio < 0.).then(|| log_mean + (-log_ratio.exp_m1()).ln())
+        });
         let baseline = mass.pair.mean(rows as u64);
         Self {
             baseline,
             minimum: (baseline - drop).max(0.),
             maximum_outside: (mass.outside.mean(rows as u64) + drop).min(1.),
+            minimum_log_pair,
         }
     }
 
     fn check(&self, mass: PairMassMean, rows: usize) -> CausalLmConditionalRetentionMassCheck {
+        let log_pair = self
+            .minimum_log_pair
+            .filter(|&floor| floor < f64::MIN_POSITIVE.ln())
+            .zip(mass.log_mean_pair(rows))
+            .map(|(minimum_log_mean_pair_mass, log_mean_pair_mass)| {
+                CausalLmConditionalRetentionLogMassCheck {
+                    log_mean_pair_mass,
+                    minimum_log_mean_pair_mass,
+                }
+            });
         let mean_pair_mass = mass.pair.mean(rows as u64);
         let mean_outside_mass = mass.outside.mean(rows as u64);
         let rounded_pass = mean_pair_mass >= self.minimum;
@@ -65,6 +93,7 @@ impl MassFloor {
             mean_pair_mass,
             minimum_mean_pair_mass: self.minimum,
             outside,
+            log_pair,
         }
     }
 }
@@ -74,6 +103,13 @@ impl MassFloor {
 pub struct CausalLmConditionalRetentionOutsideCheck {
     pub mean_outside_mass: f64,
     pub maximum_mean_outside_mass: f64,
+}
+
+/// Natural logarithms of the arithmetic mean pair mass and its positive floor.
+#[derive(Clone, Debug, Serialize)]
+pub struct CausalLmConditionalRetentionLogMassCheck {
+    pub log_mean_pair_mass: f64,
+    pub minimum_log_mean_pair_mass: f64,
 }
 
 /// Finite arithmetic mean of P(gold)+P(alternative) on the whole roster.
@@ -86,10 +122,16 @@ pub struct CausalLmConditionalRetentionMassCheck {
     /// rounded pair-mass fields (notably when the floor rounds to 1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outside: Option<CausalLmConditionalRetentionOutsideCheck>,
+    /// Authoritative when the positive floor is too small for normal f64 probability arithmetic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_pair: Option<CausalLmConditionalRetentionLogMassCheck>,
 }
 
 impl CausalLmConditionalRetentionMassCheck {
     pub fn permits_commit(&self) -> bool {
+        if let Some(log_pair) = &self.log_pair {
+            return log_pair.log_mean_pair_mass >= log_pair.minimum_log_mean_pair_mass;
+        }
         match &self.outside {
             Some(outside) => outside.mean_outside_mass <= outside.maximum_mean_outside_mass,
             None => self.mean_pair_mass >= self.minimum_mean_pair_mass,
@@ -175,6 +217,12 @@ impl CausalLmConditionalMarginRetention {
             return Err(
                 "conditional margin retention belongs to a different projection state".into(),
             );
+        }
+        // Projection identity binds the weights, not the receiving model's work budget.
+        for anchor in &self.anchors {
+            projection
+                .current
+                .projection_work_dimensions(anchor.steps, projection.spec, false)?;
         }
         Ok(())
     }
@@ -354,5 +402,32 @@ mod tests {
         assert!(check.outside.is_none());
         assert!(check.mean_pair_mass < check.minimum_mean_pair_mass);
         assert!(!check.permits_commit());
+    }
+
+    #[test]
+    fn zero_drop_rejects_regression_below_the_probability_range() {
+        let before = [[0., -1., 800.], [0., -1., 802.]];
+        let after = [[0., -1., 801.], [0., -1., 802.]];
+        let floor = MassFloor::from_baseline(mass_for(&before), 2, 0.);
+        assert_eq!(floor.minimum, 0.);
+        assert!(floor.check(mass_for(&before), 2).permits_commit());
+        let check = floor.check(mass_for(&after), 2);
+        assert_eq!(check.mean_pair_mass, 0.);
+        let log_pair = check.log_pair.as_ref().unwrap();
+        assert!(log_pair.log_mean_pair_mass < log_pair.minimum_log_mean_pair_mass);
+        assert!(!check.permits_commit());
+
+        let released = MassFloor::from_baseline(mass_for(&before), 2, f64::from_bits(1));
+        assert!(released.check(mass_for(&after), 2).permits_commit());
+    }
+
+    #[test]
+    fn subnormal_positive_allowance_is_subtracted_in_log_space() {
+        let before = [[0., -1., 743.]];
+        let floor = MassFloor::from_baseline(mass_for(&before), 1, f64::from_bits(2));
+        let within = floor.check(mass_for(&[[0., -1., 743.3]]), 1);
+        let below = floor.check(mass_for(&[[0., -1., 743.6]]), 1);
+        assert!(within.log_pair.is_some() && within.permits_commit());
+        assert!(below.log_pair.is_some() && !below.permits_commit());
     }
 }

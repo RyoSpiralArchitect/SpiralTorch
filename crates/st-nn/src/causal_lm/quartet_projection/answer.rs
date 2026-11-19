@@ -16,8 +16,8 @@ pub use observation::CausalLmBindingGradientObservation;
 use observation::PairObservation;
 pub use retention::{
     CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
-    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
-    CausalLmRetainedConditionalAnswerStep,
+    CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionMassCheck,
+    CausalLmConditionalRetentionOutsideCheck, CausalLmRetainedConditionalAnswerStep,
 };
 
 /// Optional supervision on the relationship between four indexed prompts.

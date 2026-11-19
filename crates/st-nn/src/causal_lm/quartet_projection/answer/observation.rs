@@ -154,10 +154,19 @@ fn candidate_mass_terms(z: &[f32], [a, b]: [usize; 2]) -> CausalLmResult<Candida
     let (outside_den, loss, outside_share) = if outside_max == f64::NEG_INFINITY {
         (1., 0., 0.)
     } else {
-        let den = outside().map(|v| (v - outside_max).exp()).sum::<f64>();
-        let outside_vs_pair = (outside_max - pair_max) + den.ln() - pair_den.ln();
+        let mut tail = sum::Sum::default();
+        let mut skipped_max = false;
+        for v in outside() {
+            if !skipped_max && v == outside_max {
+                skipped_max = true;
+                continue;
+            }
+            tail.add((v - outside_max).exp());
+        }
+        let tail = tail.value();
+        let outside_vs_pair = (outside_max - pair_max) + tail.ln_1p() - ga.min(gb).ln_1p();
         let (loss, negative_share) = logistic(-outside_vs_pair);
-        (den, loss, -negative_share)
+        (1. + tail, loss, -negative_share)
     };
     Ok(CandidateMassTerms {
         loss,
@@ -194,5 +203,21 @@ mod tests {
         assert!(seed.loss > 0. && seed.outside_share > 0.);
         assert_eq!(seed.outside_share as f32, 0.);
         assert_eq!(seed.normalized.data(), &[-0.5, -0.5, 1.]);
+    }
+
+    #[test]
+    fn accumulated_outside_tail_changes_pair_mass_in_either_vocab_order() {
+        let loss = |tail, max_first| {
+            let mut z = vec![tail; 10_003];
+            z[0] = 0.;
+            z[1] = -1.;
+            z[if max_first { 2 } else { 10_002 }] = 0.;
+            candidate_mass_loss(&z, [0, 1]).unwrap()
+        };
+        let before = loss(-40., true);
+        let after = loss(-38., true);
+        assert_eq!(before, loss(-40., false));
+        assert_eq!(after, loss(-38., false));
+        assert!(after - before > 1e-14);
     }
 }

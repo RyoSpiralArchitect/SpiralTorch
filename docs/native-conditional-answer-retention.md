@@ -54,7 +54,11 @@ fn train(
   pair-mass fields alone would give a different verdict. When present,
   compare `outside.mean_outside_mass` against
   `outside.maximum_mean_outside_mass`; otherwise the pair fields
-  reproduce the verdict. Both measurements refer to the same rows.
+  reproduce the verdict unless `log_pair` is present. A positive floor
+  below the normal f64 probability range is compared in log space;
+  use `log_mean_pair_mass >= minimum_log_mean_pair_mass` in that
+  receipt. These are logarithms of arithmetic means, not means of
+  logarithms. All measurements refer to the same rows.
 - `mass_inward_cosine` controls a different check: it can project the
   search direction and require non-increasing mean negative log pair
   mass on the **update batch**. Set it to `None` for direct conditional
@@ -64,7 +68,8 @@ fn train(
 - Keep the guard with that projection trajectory. A hold preserves
   the projection and leaves the guard usable; a commit advances its
   owner without resetting the floor. Do not carry the guard to other
-  weights or use held-out evaluation prompts for it. There is no
+  weights or use held-out evaluation prompts for it. Reuse also
+  revalidates the roster against the receiving model's work limits. There is no
   guarantee on new prompts, full-vocabulary top-1, or throughput.
 
 Each call commits at most one step. A later error does not roll back

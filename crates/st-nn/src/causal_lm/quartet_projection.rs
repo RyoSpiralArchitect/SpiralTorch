@@ -12,8 +12,9 @@ pub use answer::{
     CausalLmBindingGradientObservation, CausalLmConditionalAnswerConfig,
     CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerStep, CausalLmConditionalAnswerTrial,
     CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
-    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
-    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmRetainedConditionalAnswerStep,
+    CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionMassCheck,
+    CausalLmConditionalRetentionOutsideCheck, CausalLmLossGradient, CausalLmPairedAnswerScore,
+    CausalLmRetainedConditionalAnswerStep,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

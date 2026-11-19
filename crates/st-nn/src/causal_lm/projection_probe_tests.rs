@@ -64,6 +64,48 @@ fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
 }
 
 #[test]
+fn retention_rechecks_anchor_limits_on_an_identical_receiving_projection() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let make_projection = |m| {
+        NativeCausalLmRankOneProjection::new(m, 1, Output, &[0., 0.6, -0.8, 0.], &[0.; 4]).unwrap()
+    };
+    let wide = make_projection(&m);
+    let anchors = vec![vec![4, 8, 2, 1]];
+    let scores = wide.score_answer_pairs(&anchors, &[[2, 7]]).unwrap();
+    let keep = if scores[0].gold_minus_alternative > 0. {
+        [[2, 7]]
+    } else {
+        [[7, 2]]
+    };
+    let mut guard = wide
+        .prepare_conditional_margin_and_mass_retention(&anchors, &keep, 0.)
+        .unwrap();
+    let mut limited = m.clone();
+    limited.limits.max_attention_pairs = limited.config.layers * limited.config.heads * 4;
+    let mut narrow = make_projection(&limited);
+    let prompts = vec![vec![4, 8]];
+    let cfg = CausalLmConditionalAnswerConfig {
+        length: 0.04,
+        max_trials: 1,
+        mass_inward_cosine: None,
+    };
+    let id = wide.projection_id();
+    assert_eq!(narrow.projection_id(), id);
+    assert!(narrow.score_answer_pairs(&anchors, &keep).is_err());
+    assert!(narrow.score_answer_pairs(&prompts, &keep).is_ok());
+    assert!(narrow
+        .step_conditional_answers_retaining(&prompts, &keep, cfg, &mut guard)
+        .unwrap_err()
+        .to_string()
+        .contains("attention pairs"));
+    assert_eq!(narrow.projection_id(), id);
+    let mut wide_again = wide.clone();
+    assert!(wide_again
+        .step_conditional_answers_retaining(&prompts, &keep, cfg, &mut guard)
+        .is_ok());
+}
+
+#[test]
 fn conditional_mass_guard_changes_a_conflicting_real_decoder_step() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let a = NativeCausalLmRankOneProjection::new(
