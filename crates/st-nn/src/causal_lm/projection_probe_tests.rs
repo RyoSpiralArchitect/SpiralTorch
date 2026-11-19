@@ -767,6 +767,95 @@ fn guarded_checkpoint_pins_the_underflowed_outside_ceiling() {
 }
 
 #[test]
+fn both_mass_guards_reject_an_underflowed_regression_on_the_same_real_candidate() {
+    let make = |outside: f32| {
+        let m = five_token_readout(
+            [
+                0., 1., 0., 0., 0., -1., 0., 0., -800., outside, 0., 0., -800., outside, 0., 0.,
+                -800., outside, 0., 0.,
+            ],
+            Some(([0., 1., 1., 1.], [1., 0., 0., 0.])),
+        );
+        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4]).unwrap()
+    };
+    let rows = vec![vec![4, 2, 1]];
+    let probe = make(2.);
+    let gap = probe.score_answer_pairs(&rows, &[[0, 1]]).unwrap()[0].gold_minus_alternative;
+    assert_ne!(gap, 0.);
+    // Improving the oriented margin increases the outside log-odds:
+    // the outside logit has slope 2 along the gold coordinate, while
+    // logsumexp of the two inside logits has slope at most 1.
+    let (start, pairs) = if gap > 0. {
+        (probe, [[0, 1]])
+    } else {
+        (make(-2.), [[1, 0]])
+    };
+    let cfg = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 1,
+        mass_inward_cosine: None,
+    };
+    let id = start.projection_id();
+    let mut direct = start.clone();
+    let accepted = direct.step_conditional_answers(&rows, &pairs, cfg).unwrap();
+    assert!(accepted.committed);
+    assert!(accepted.after.conditional_ce < accepted.before.conditional_ce);
+    assert_eq!(
+        (
+            accepted.before.candidate_mass_nll,
+            accepted.after.candidate_mass_nll
+        ),
+        (0., 0.)
+    );
+    assert!(
+        accepted.after.log_candidate_mass_nll.unwrap()
+            > accepted.before.log_candidate_mass_nll.unwrap()
+    );
+
+    let mut batch = start.clone();
+    let held = batch
+        .step_conditional_answers(
+            &rows,
+            &pairs,
+            CausalLmConditionalAnswerConfig {
+                mass_inward_cosine: Some(0.),
+                ..cfg
+            },
+        )
+        .unwrap();
+    assert!(!held.committed);
+    assert_eq!(held.mass_gradient_l2, Some(0.));
+    assert_eq!(
+        held.trials[0].projection_id,
+        accepted.trials[0].projection_id
+    );
+    assert_eq!(held.trials[0].point, accepted.after);
+    assert_eq!(batch.projection_id(), id);
+
+    let mut roster = start;
+    let mut guard = roster
+        .prepare_conditional_margin_and_mass_retention(&rows, &pairs, 0.)
+        .unwrap();
+    let checkpoint = roster.checkpoint_with_retention(&guard).unwrap();
+    let held = roster
+        .step_conditional_answers_retaining(&rows, &pairs, cfg, &mut guard)
+        .unwrap();
+    assert!(!held.step.committed);
+    assert_eq!(
+        held.step.trials[0].projection_id,
+        accepted.trials[0].projection_id
+    );
+    let check = held.retention[0].as_ref().unwrap();
+    assert_eq!(check.nonpositive, 0);
+    let outside = check.mass.as_ref().unwrap().log_outside.as_ref().unwrap();
+    assert!(outside.log_mean_outside_mass.unwrap() > outside.maximum_log_mean_outside_mass);
+    assert_eq!(
+        roster.checkpoint_with_retention(&guard).unwrap(),
+        checkpoint
+    );
+}
+
+#[test]
 fn conditional_mass_guard_changes_a_conflicting_real_decoder_step() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let a = NativeCausalLmRankOneProjection::new(
