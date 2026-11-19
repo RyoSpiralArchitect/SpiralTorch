@@ -880,8 +880,12 @@ assert session.checkpoint_with_id() == restored.checkpoint_with_id()
         self.assertEqual((r["left_target_tokens"], r["right_target_tokens"]), (2, 1))
         self.assertEqual(r["geometry_artifact_id"], m.geometry_artifact_id)
         x, y = a.parameter_gradients(), b.parameter_gradients()
-        pairs = [(i, j) for path, group in x.items() for name, vals in group.items()
-                 for i, j in zip(vals, y[path][name], strict=True)]
+        pairs = []
+        for path, group in x.items():
+            for name, vals in group.items():
+                right = y[path][name]
+                self.assertEqual(len(vals), len(right), (path, name))
+                pairs.extend(zip(vals, right))
         self.assertEqual(r["total"]["elements"], len(pairs))
         self.assertAlmostEqual(r["total"]["dot"], math.fsum(i*j for i,j in pairs), places=12)
         self.assertAlmostEqual(r["total"]["right_loss_slope"], -math.fsum(j*(i+j)/2 for i,j in pairs), places=12)
