@@ -2,6 +2,306 @@ use super::*;
 use CausalLmProjectionBasis::{Dense, Diagonal};
 use CausalLmProjectionSite::{Key, Output, Query, Value};
 
+fn five_token_readout(head: [f32; 20], norm: Option<([f32; 4], [f32; 4])>) -> NativeCausalLm {
+    let mut c = config();
+    c["vocab_size"] = json!(5);
+    c["tie_word_embeddings"] = json!(false);
+    let mut p = parameters();
+    let (shape, values) = p.get_mut("wte.weight").unwrap();
+    shape[0] = 5;
+    values.truncate(20);
+    if let Some((gain, bias)) = norm {
+        p.get_mut("ln_f.weight").unwrap().1 = gain.to_vec();
+        p.get_mut("ln_f.bias").unwrap().1 = bias.to_vec();
+    }
+    p.insert("lm_head.weight".into(), (vec![5, 4], head.to_vec()));
+    NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&c).unwrap(),
+        &archive(&p),
+        Default::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn binding_observation_ignores_common_vocabulary_weight() {
+    let model = five_token_readout(
+        std::array::from_fn(|i| if i % 4 == 0 { 67_108_864. } else { 0. }),
+        None,
+    );
+    let prompts = vec![vec![4, 2, 1], vec![2, 1], vec![3, 1, 2], vec![1, 2]];
+    let binding = CausalLmAnswerBinding {
+        ids: [0, 1],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    for precision in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F32WideBackward,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let m = model.with_readout_accumulator(precision);
+        let p = NativeCausalLmRankOneProjection::new(&m, 1, Output, &[0., 1., 0., 0.], &[0.; 4])
+            .unwrap();
+        let out = p
+            .observe_binding_gradients(&prompts, &[0, 1, 1, 0], binding)
+            .unwrap();
+        assert!((out.candidate_mass.loss - (2.5_f64).ln()).abs() < 1e-14);
+        assert_eq!(out.candidate_mass.gradient, [0.; 4], "{precision:?}");
+        assert_eq!(out.conditional.gradient, [0.; 4], "{precision:?}");
+    }
+}
+
+#[test]
+fn binding_observation_retains_saturated_mass_after_decoder_pullback() {
+    let m = five_token_readout(
+        [
+            0., 0., 0., 0., 0., 0., 0., 0., -110., 1., 0., 0., -110., 1., 0., 0., -110., 1., 0., 0.,
+        ],
+        Some(([0., 1., 1., 1.], [1., 0., 0., 0.])),
+    )
+    .with_readout_accumulator(CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![vec![4, 2, 1], vec![2, 1], vec![3, 1, 2], vec![1, 2]];
+    let binding = CausalLmAnswerBinding {
+        ids: [0, 1],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    let spec = CausalLmProjectionSpec {
+        layer: 1,
+        site: Output,
+        basis: Diagonal,
+    };
+    let left = [0., 1., 0., 0.];
+    let p =
+        NativeCausalLmRankOneProjection::new(&m, spec.layer, spec.site, &left, &[0.; 4]).unwrap();
+    let o = p
+        .observe_binding_gradients(&prompts, &[0, 1, 1, 0], binding)
+        .unwrap();
+    let (mut loss, mut right) = (sum::Sum::default(), [0.; 4]);
+    for prompt in &prompts {
+        let z = p.last_logits(prompt).unwrap();
+        assert_eq!(z[..2], [0.; 2]);
+        assert!(z[2..].iter().all(|&x| x == z[2]));
+        let ratio = 1.5 * f64::from(z[2]).exp();
+        let share = ratio / (1. + ratio);
+        assert!(share > 0. && share as f32 == 0.);
+        loss.add(ratio.ln_1p());
+        let (_, gradient) = m.fixed_left_contrast(prompt, 2, 0, spec, &left).unwrap();
+        for (reference, normalized) in right.iter_mut().zip(gradient) {
+            *reference += share * normalized / prompts.len() as f64;
+        }
+    }
+    let loss = loss.value() / prompts.len() as f64;
+    assert!((o.candidate_mass.loss / loss - 1.).abs() < 1e-12);
+    assert!(right.iter().any(|x| x.abs() > 1e-51));
+    for (actual, reference) in o.candidate_mass.gradient.iter().zip(right) {
+        assert!((actual - reference).abs() <= reference.abs() * 1e-6);
+    }
+}
+
+#[test]
+fn binding_observation_splits_ce_without_changing_the_training_adjoint() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let rows = vec![
+        vec![4, 8, 2, 1],
+        vec![8, 4, 1],
+        vec![7, 1, 2, 3],
+        vec![1, 2, 3],
+    ];
+    let gold = [2, 7, 7, 2];
+    let binding = CausalLmAnswerBinding {
+        ids: [2, 7],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    for site in [Output, Query, Key, Value] {
+        let a = NativeCausalLmRankOneProjection::new(
+            &m,
+            1,
+            site,
+            &[0., 0.6, -0.8, 0.],
+            &[0.01, -0.02, 0.0, 0.03],
+        )
+        .unwrap();
+        let prior = a.projection_id();
+        let ordinary = a.answer_gradients(&rows, &gold, Some(binding)).unwrap();
+        let obs = a.observe_binding_gradients(&rows, &gold, binding).unwrap();
+        assert_eq!(obs.projection_id, prior);
+        assert_eq!(a.projection_id(), prior);
+        assert_eq!((obs.prompt_forwards, obs.projection_pullbacks), (4, 12));
+        assert_eq!(
+            serde_json::to_vec(&obs.training).unwrap(),
+            serde_json::to_vec(&ordinary).unwrap()
+        );
+        assert!(
+            (obs.candidate_mass.loss + obs.conditional.loss - ordinary.answer.loss).abs() < 1e-6
+        );
+        for ((&mass, &pair), &ce) in obs
+            .candidate_mass
+            .gradient
+            .iter()
+            .zip(&obs.conditional.gradient)
+            .zip(&ordinary.answer.gradient)
+        {
+            assert!((mass + pair - ce).abs() < 1e-6);
+        }
+        assert!(a
+            .observe_binding_gradients(&rows, &[2, 7, 3, 2], binding)
+            .is_err());
+        assert_eq!(a.projection_id(), prior);
+    }
+}
+
+#[test]
+fn binding_observation_components_match_separate_finite_differences() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![
+        vec![4, 8, 2, 1],
+        vec![8, 4, 1],
+        vec![7, 1, 2, 3],
+        vec![1, 2, 3],
+    ];
+    let binding = CausalLmAnswerBinding {
+        ids: [2, 7],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    let start = [0.01, -0.02, 0., 0.03];
+    let eps = 0.01;
+    for site in [Query, Key, Value, Output] {
+        let projection = |right: &[f64]| {
+            NativeCausalLmRankOneProjection::new(&m, 1, site, &[0., 0.6, -0.8, 0.], right).unwrap()
+        };
+        let base = projection(&start);
+        for gold in [[2, 7, 7, 2], [7, 2, 2, 7]] {
+            let observed = base
+                .observe_binding_gradients(&prompts, &gold, binding)
+                .unwrap();
+            let reference = |right: &[f64]| {
+                let p = projection(right);
+                let mut losses = [0., 0.];
+                for (ids, y) in prompts.iter().zip(gold) {
+                    let z = p.last_logits(ids).unwrap();
+                    let pair = binding.ids.map(|i| f64::from(z[i]).exp());
+                    let full = z.iter().map(|&v| f64::from(v).exp()).sum::<f64>();
+                    losses[0] += (full / (pair[0] + pair[1])).ln();
+                    losses[1] += (pair[0] + pair[1]).ln() - f64::from(z[y]);
+                }
+                losses.map(|loss| loss / prompts.len() as f64)
+            };
+            let components = [&observed.candidate_mass, &observed.conditional];
+            for (component, loss) in components.into_iter().zip(reference(&start)) {
+                assert!((component.loss - loss).abs() < 1e-12);
+            }
+            for i in 0..start.len() {
+                let mut plus = start;
+                let mut minus = start;
+                plus[i] += eps;
+                minus[i] -= eps;
+                let above = reference(&plus);
+                let below = reference(&minus);
+                for (j, component) in components.into_iter().enumerate() {
+                    let finite = (above[j] - below[j]) / (2. * eps);
+                    let actual = component.gradient[i];
+                    assert!(
+                        (finite - actual).abs() < 1e-5 + finite.abs() * 2e-3,
+                        "{site:?} component {j} coordinate {i}: {finite} vs {actual}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn paired_answer_scores_match_serving_logits_at_each_placement() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let prompts = vec![vec![4, 8, 2, 1], vec![8, 4, 1]];
+    let pairs = [[2, 7], [7, 2]];
+    for site in [Query, Key, Value, Output] {
+        let a = NativeCausalLmRankOneProjection::new(
+            &m,
+            0,
+            site,
+            &[0., 0.6, -0.8, 0.],
+            &[0.01, -0.02, 0.0, 0.03],
+        )
+        .unwrap();
+        let owner = a.projection_id();
+        let scores = a.score_answer_pairs(&prompts, &pairs).unwrap();
+        for ((p, [y, w]), score) in prompts.iter().zip(pairs).zip(scores) {
+            let z = a.last_logits(p).unwrap();
+            let log_z = z.iter().map(|&v| f64::from(v).exp()).sum::<f64>().ln();
+            assert!((score.gold_nll - (log_z - f64::from(z[y]))).abs() < 1e-12);
+            assert!((score.alternative_nll - (log_z - f64::from(z[w]))).abs() < 1e-12);
+            assert_eq!(
+                score.gold_minus_alternative,
+                f64::from(z[y]) - f64::from(z[w])
+            );
+            assert!(z.iter().all(|&v| v <= z[score.top_token]));
+        }
+        assert!(a.score_answer_pairs(&prompts, &[[2, 7]]).is_err());
+        assert!(a.score_answer_pairs(&prompts, &[[2, 7], [7, 7]]).is_err());
+        assert!(a
+            .score_answer_pairs(&prompts, &[[2, 7], [7, usize::MAX]])
+            .is_err());
+        assert_eq!(a.projection_id(), owner);
+    }
+}
+
+#[test]
+fn placement_gradient_matches_full_loss_with_a_nonzero_frozen_output_lora() {
+    let start = load()
+        .with_readout_accumulator(CausalLmReadoutAccumulator::F32WideBackward)
+        .with_lora(0, 2, 2.)
+        .unwrap();
+    let gradient = start.lora_loss_gradients(&[1, 2, 3, 4], [1, 4]).unwrap();
+    let frozen = start.step_lora_sgd(&gradient, 0.4).unwrap();
+    assert_ne!(start.lora_artifact_id(), frozen.lora_artifact_id());
+    let prompts = vec![
+        vec![4, 8, 2, 1],
+        vec![8, 4, 1],
+        vec![7, 1, 2, 3],
+        vec![1, 2, 3],
+    ];
+    let pairs = [[2, 7], [7, 2], [7, 2], [2, 7]];
+    let gold = pairs.map(|[k, _]| k);
+    let left = [0., 0.6, -0.8, 0.];
+    let binding = CausalLmAnswerBinding {
+        ids: [2, 7],
+        quartets: &[[0, 1, 2, 3]],
+        mix: 0.5,
+    };
+    for site in [Query, Key, Value, Output] {
+        let projection = |right: [f64; 4]| {
+            NativeCausalLmRankOneProjection::new(&frozen, 0, site, &left, &right).unwrap()
+        };
+        let objective = |right| {
+            let scores = projection(right)
+                .score_answer_pairs(&prompts, &pairs)
+                .unwrap();
+            let ce = scores.iter().map(|s| s.gold_nll).sum::<f64>() * 0.25;
+            let interaction = scores.iter().map(|s| s.gold_minus_alternative).sum::<f64>() * 0.5;
+            0.5 * (ce + (-interaction).exp().ln_1p())
+        };
+        let origin = projection([0.; 4]);
+        let grad = origin
+            .answer_gradients(&prompts, &gold, Some(binding))
+            .unwrap()
+            .combined;
+        assert!(grad.norm > 1e-6);
+        let eps = 0.002;
+        let delta = std::array::from_fn(|i| eps * grad.gradient[i] / grad.norm);
+        let finite_diff = (objective(delta) - objective(delta.map(|x| -x))) / (2. * eps);
+        assert!(
+            (finite_diff - grad.norm).abs() < 3e-4,
+            "{site:?}: finite difference {finite_diff} vs gradient norm {}",
+            grad.norm,
+        );
+    }
+}
+
 #[test]
 fn answer_guard_falls_back_or_holds_without_publishing_rejected_weights() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);

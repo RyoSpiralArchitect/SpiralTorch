@@ -1403,3 +1403,22 @@ not just a scalar coefficient. Its [answer guard](../../benchmarks/paired-prompt
 can require a measured decrease in gold-token loss and protect a second
 training batch before committing a binding correction. This is a Rust API
 and local example; it is not a method on the Python scalar learner above.
+
+On that Rust projection, `score_answer_pairs` scores an ordered
+`[gold, alternative]` pair per prompt. Both NLLs normalize over the
+full vocabulary; the signed gap is taken directly from the two logits.
+The result includes the top token but does not export a vocabulary row.
+
+`observe_binding_gradients` separates the gold-token CE into
+`-ln(P(gold) + P(alternative))` and the conditional CE within the pair.
+It requires every gold label to belong to the nominated pair and keeps
+the existing quartet training objective unchanged. The diagnostic uses
+one forward and three projection pullbacks per prompt, returns the
+projection identity, and does not update the weights. The mass
+diagnostic averages outside-minus-inside head weight differences in f64
+without rounding the probability coefficients before contraction. It
+applies the (possibly tiny) outside probability after the decoder
+pullback. This is independent of the model's training readout
+precision policy; it does not alter the ordinary CE gradient. These measures
+distinguish putting more probability on the pair from selecting the
+right member; neither is evidence of improved held-out generation.
