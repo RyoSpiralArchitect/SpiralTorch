@@ -84,8 +84,10 @@ impl MassFloor {
             (log_ratio < 0.).then(|| log_mean + (-log_ratio.exp_m1()).ln())
         });
         let log_drop = (drop > 0.).then(|| drop.ln());
-        let maximum_log_outside =
-            sum::add_logs(mass.log_mean_outside(rows), log_drop).map(|log| log.min(0.));
+        let maximum_log_outside = mass
+            .log_mean_outside(rows)
+            .and_then(|log| sum::add_logs(Some(log), log_drop))
+            .map(|log| log.min(0.));
         let baseline = mass.pair.mean(rows as u64);
         Self {
             baseline,
@@ -495,6 +497,20 @@ mod tests {
 
         let released = MassFloor::from_baseline(mass_for(&before), 2, f64::from_bits(1));
         assert!(released.check(mass_for(&after), 2).permits_commit());
+    }
+
+    #[test]
+    fn exact_zero_outside_mass_needs_no_log_ceiling() {
+        let empty = || {
+            let mut mean = PairMassMean::default();
+            mean.add(candidate_mass_measure(&[0., -1.], [0, 1]).unwrap());
+            mean
+        };
+        let floor = MassFloor::from_baseline(empty(), 1, f64::from_bits(1));
+        assert_eq!(floor.maximum_outside, f64::from_bits(1));
+        assert!(floor.log_outside_limit().is_none());
+        let same = floor.check(empty(), 1);
+        assert!(same.log_outside.is_none() && same.permits_commit());
     }
 
     #[test]

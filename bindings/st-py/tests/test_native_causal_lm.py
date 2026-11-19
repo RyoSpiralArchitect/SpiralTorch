@@ -285,6 +285,23 @@ class NativeCausalLmTests(unittest.TestCase):
         self.assertEqual(resume_guard.maximum_log_mean_outside_mass, outside_guard.maximum_log_mean_outside_mass)
         self.assertEqual(resumed.checkpoint_with_retention(resume_guard), (body, outside_pin))
 
+    def test_rank_one_empty_outside_probability_keeps_legacy_checkpoint_encoding(self):
+        config, weights = fixture(vocabulary=2)
+        model = st.NativeCausalLm.from_gpt2(config, weights)
+        projection = model.rank_one_projection("output", layer=1, left_f64le=struct.pack("<4d", 1., 0., 0., 0.))
+        rows = [[0, 1]]
+        pair = [0, 1]
+        score, = projection.score_pairs(rows, [pair])
+        self.assertNotEqual(score["gold_minus_alternative"], 0.)
+        if score["gold_minus_alternative"] < 0.:
+            pair.reverse()
+        guard = projection.prepare_retention(rows, [pair], max_mean_mass_drop=float.fromhex("0x0.0000000000001p-1022"))
+        payload, pin = projection.checkpoint_with_retention(guard)
+        self.assertIsNone(guard.maximum_log_mean_outside_mass)
+        self.assertNotIn("maximum_log_mean_outside_mass_bits", json.loads(payload)["baseline"]["mass"])
+        restored, guard = model.restore_rank_one_with_retention(payload, pin, rows, [pair])
+        self.assertEqual(restored.checkpoint_with_retention(guard), (payload, pin))
+
     def test_scalar_output_real_step_and_bit_exact_restore(self):
         from hashlib import sha256
         m = self.model.with_geometry(artifact(self.model))
