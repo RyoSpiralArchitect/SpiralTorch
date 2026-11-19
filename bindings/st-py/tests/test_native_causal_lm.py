@@ -397,6 +397,149 @@ assert session.checkpoint_with_id() == restored.checkpoint_with_id()
                                    capture_output=True, text=True, timeout=60)
             self.assertEqual(child.returncode, 0, child.stderr)
 
+    def test_conditional_phase_keeps_guard_and_resumes_new_schedule(self):
+        state, guard, rows, pairs, schedule = conditional_session_inputs(self.model)
+        session = st.NativeCausalLmConditionalAnswerSession
+        parent = session(state, guard, rows, schedule, length=.01)
+        self.assertIsNone(parent.predecessor_checkpoint_id)
+
+        class Unreadable:
+            def __len__(self):
+                raise AssertionError("phase input read before admission")
+
+        parent.step()
+        before = parent.checkpoint_with_id()
+        self.assertFalse(parent.exhausted)
+        with self.assertRaisesRegex(ValueError, "must be exhausted"):
+            parent.next_phase(Unreadable(), Unreadable(), length=.02)
+        self.assertEqual(parent.checkpoint_with_id(), before)
+        parent.step()
+        self.assertTrue(parent.exhausted)
+        parent_raw, parent_id = parent.checkpoint_with_id()
+        self.assertGreater(parent.accepted_updates, 0)
+
+        pool = [[4, 8, 2], [7, 1]]
+        plan = [([1, 0], [[7, 2], [2, 7]]), ([0], [[2, 7]])]
+        with self.assertRaisesRegex(ValueError, "repeat count"):
+            parent.next_phase(Unreadable(), plan, length=.02, epochs=session.MAX_TOTAL_BATCHES)
+        with self.assertRaisesRegex(ValueError, "outside pool"):
+            parent.next_phase(pool, [([2], [[2, 7]])], length=.02)
+        self.assertEqual(parent.checkpoint_with_id(), (parent_raw, parent_id))
+
+        child = parent.next_phase(pool, plan, length=.02, epochs=2)
+        self.assertEqual(child.predecessor_checkpoint_id, parent_id)
+        self.assertEqual((child.position, child.accepted_updates, child.total_batches), (0, 0, 4))
+        self.assertFalse(child.exhausted)
+        self.assertEqual(child.projection_snapshot().projection_id, parent.projection_snapshot().projection_id)
+
+        def unframe(raw):
+            end = 4 + struct.unpack_from("<I", raw)[0]
+            return json.loads(raw[4:end]), raw[end:]
+
+        child_raw, _ = child.checkpoint_with_id()
+        meta, retained = unframe(child_raw)
+        self.assertEqual(retained, unframe(parent_raw)[1])
+        self.assertEqual(meta["predecessor_checkpoint_id"], parent_id)
+        self.assertEqual(meta["schema"], "spiraltorch.native_conditional_answer_session.v4")
+        self.assertEqual(unframe(parent_raw)[0]["schema"], "spiraltorch.native_conditional_answer_session.v3")
+        for key, value in [
+            ("predecessor_checkpoint_id", None),
+            ("predecessor_checkpoint_id", "sha256:" + "Z" * 64),
+            ("schema", "spiraltorch.native_conditional_answer_session.v3"),
+        ]:
+            with self.subTest(key=key, value=value):
+                bad = json.dumps({**meta, key: value}, separators=(",", ":")).encode()
+                raw = struct.pack("<I", len(bad)) + bad + retained
+                pin = "sha256:" + hashlib.sha256(raw).hexdigest()
+                with self.assertRaises(ValueError):
+                    session.from_bytes(self.model, raw, pin, Unreadable(), None, None, None)
+        changed = {**meta, "predecessor_checkpoint_id": "sha256:" + "0" * 64}
+        bad = json.dumps(changed, separators=(",", ":")).encode()
+        raw = struct.pack("<I", len(bad)) + bad + retained
+        pin = "sha256:" + hashlib.sha256(raw).hexdigest()
+        with self.assertRaisesRegex(ValueError, "pool or schedule changed"):
+            session.from_bytes(self.model, raw, pin, pool, plan, rows, pairs)
+
+        for _ in range(3):
+            child.step()
+        raw, pin = child.checkpoint_with_id()
+        resumed = session.from_bytes(self.model, raw, pin, pool, plan, rows, pairs)
+        self.assertEqual(resumed.predecessor_checkpoint_id, parent_id)
+        self.assertEqual(resumed.checkpoint_with_id(), (raw, pin))
+        self.assertEqual(resumed.step(), child.step())
+        self.assertEqual(resumed.checkpoint_with_id(), child.checkpoint_with_id())
+        self.assertTrue(resumed.exhausted)
+        self.assertIsNone(resumed.step())
+        self.assertEqual(parent.checkpoint_with_id(), (parent_raw, parent_id))
+
+        grandchild = resumed.next_phase(pool, plan, length=.02)
+        same_plan_after_parent = parent.next_phase(pool, plan, length=.02)
+        self.assertNotEqual(grandchild.plan_id, same_plan_after_parent.plan_id)
+        raw, pin = grandchild.checkpoint_with_id()
+        self.assertEqual(unframe(raw)[0]["epochs"], 1)
+        self.assertEqual(grandchild.predecessor_checkpoint_id, child.checkpoint_with_id()[1])
+        self.assertEqual(session.from_bytes(self.model, raw, pin, pool, plan, rows, pairs)
+                         .checkpoint_with_id(), (raw, pin))
+
+    def test_conditional_checkpoint_serves_without_training_workspace(self):
+        model = self.model.with_readout_accumulator("f64").with_lora(0, 2, 4.)
+        geometry = artifact(model, path="transformer.h.0.attn", trainable=True)
+        model = model.with_geometry(geometry)
+        state, guard, rows, pairs, schedule = conditional_session_inputs(model)
+        cls = st.NativeCausalLmConditionalAnswerSession
+        plain = cls(state, guard, rows, schedule, length=.01)
+        repeated = cls(state, guard, rows, schedule, length=.01, epochs=2)
+        self.assertTrue(plain.step()["report"]["step"]["committed"])
+        repeated.step()
+        plain.step()
+        phase = plain.next_phase(rows[::-1], [([0], [pairs[-1]])], length=.02)
+
+        # The serving owner cannot allocate a full training tape.
+        restricted = st.NativeCausalLm.from_gpt2(
+            self.config, self.weights, max_training_checkpoint_elements=1,
+        ).with_readout_accumulator("f64").with_lora_json(model.lora_to_json()).with_geometry(geometry)
+        self.assertIn("NativeCausalLmConditionalServingSnapshot", st.__all__)
+        for session in (plain, repeated, phase):
+            with self.subTest(plan=session.plan_id):
+                payload, pin = session.checkpoint_with_id()
+                live_projection = session.projection_snapshot()
+                source = cls.serving_from_checkpoint(restricted, payload, pin)
+                self.assertIsInstance(source, st.NativeCausalLmConditionalServingSnapshot)
+                self.assertFalse(hasattr(source, "step"))
+                self.assertEqual((source.checkpoint_id, source.projection_id), (pin, live_projection.projection_id))
+                self.assertEqual((source.position, source.total_batches), (session.position, session.total_batches))
+                for prompt, token in [([4, 1, 5], 7), ([1, 2], 6)]:
+                    expected = live_projection.prefill(prompt)
+                    actual = source.prefill(prompt)
+                    self.assertEqual(actual.serving_id, expected.serving_id)
+                    self.assertEqual(actual.logits_f32le(), expected.logits_f32le())
+                    self.assertEqual(actual.branch(token).logits_f32le(), expected.branch(token).logits_f32le())
+                self.assertEqual(session.checkpoint_with_id(), (payload, pin))
+
+        payload, pin = plain.checkpoint_with_id()
+        with self.assertRaisesRegex(ValueError, "digest mismatch"):
+            cls.serving_from_checkpoint(model, payload + b" ", pin)
+        broken = payload[:-1] + b" "
+        with self.assertRaisesRegex(ValueError, "retention checkpoint.*digest mismatch"):
+            cls.serving_from_checkpoint(model, broken, "sha256:" + hashlib.sha256(broken).hexdigest())
+        for other in (self.model, model.with_readout_accumulator("f32")):
+            with self.assertRaisesRegex(ValueError, "different projection recipe"):
+                cls.serving_from_checkpoint(other, payload, pin)
+        with self.assertRaises(TypeError):
+            cls.serving_from_checkpoint(model, bytearray(payload), pin)
+
+        class UnreadablePrompt:
+            def __len__(self):
+                return 2
+
+            def __getitem__(self, _):
+                raise AssertionError("token read before checking cache budget")
+
+        with self.assertRaisesRegex(ValueError, "KV and geometry cache"):
+            cls.serving_from_checkpoint(restricted, payload, pin).prefill(
+                UnreadablePrompt(), max_cache_values=1,
+            )
+
     def test_rank_one_forward_does_not_need_training_checkpoint_budget(self):
         restricted = st.NativeCausalLm.from_gpt2(
             self.config, self.weights, max_training_checkpoint_elements=1,

@@ -9694,6 +9694,7 @@ for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAd
               "NativeCausalLmOutputContrastBank", "NativeCausalLmOutputMarginDirection",
               "NativeCausalLmRankOneProjection", "NativeCausalLmConditionalPrefixBank", "NativeCausalLmConditionalRetention",
               "NativeCausalLmConditionalAnswerSession",
+              "NativeCausalLmConditionalServingSnapshot",
               "NativeCausalLmTrainingPrefixCache", "NativeCausalLmTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
               "NativeCausalLmTrainingStep", "NativeCausalLmObservedTrainingStep", "NativeCausalLmGenerator",
               "NativeCausalLmGenerationStep", "NativeCausalLmContext"):

@@ -1,11 +1,12 @@
 //! Fixed ordered batch schedule over an immutable conditional prefix bank.
 use super::super::conditional::{conditional_bank_input_values, MAX_PREPARED_PREFIX_VALUES};
-use super::checkpoint::fingerprint;
+use super::checkpoint::{canonical_digest, fingerprint};
 use super::*;
 use crate::causal_lm::checkpoint as files;
 use std::path::Path;
 
 const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
+const PHASE_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v4";
 const HEADER_LIMIT: usize = 4096;
 
 /// A complete checkpoint was installed but publication did not finish.
@@ -74,6 +75,7 @@ pub struct NativeCausalLmConditionalAnswerSession {
     policy: CausalLmConditionalAnswerConfig,
     max_prefix_values: usize,
     plan_id: String,
+    predecessor_checkpoint_id: Option<String>,
     position: u64,
     accepted_updates: u64,
 }
@@ -93,6 +95,12 @@ struct Record {
     max_trials: usize,
     mass_inward_cosine_bits: Option<u64>,
     max_prefix_values: usize,
+    #[serde(
+        default,
+        deserialize_with = "declared_predecessor",
+        skip_serializing_if = "Option::is_none"
+    )]
+    predecessor_checkpoint_id: Option<String>,
 }
 
 /// Byte-admitted restore handle, with no training or prompt evaluation yet performed.
@@ -101,6 +109,66 @@ pub struct CausalLmConditionalAnswerSessionRestore {
     policy: CausalLmConditionalAnswerConfig,
     retained: CausalLmConditionalRetentionRestore,
     batches_per_epoch: usize,
+}
+
+fn declared_predecessor<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(input).map(Some)
+}
+
+fn phase_plan_id(schedule: String, predecessor: Option<&str>) -> String {
+    let Some(predecessor) = predecessor else {
+        return schedule;
+    };
+    let mut hash = Sha256::new();
+    hash.update(b"spiraltorch.conditional_answer_phase.v2\0");
+    hash.update(predecessor.as_bytes());
+    hash.update(schedule.as_bytes());
+    format!("sha256:{:x}", hash.finalize())
+}
+
+/// Read-only weights from a pinned session, without its training roster or guard.
+pub struct NativeCausalLmConditionalServingSnapshot {
+    model: NativeCausalLm,
+    projection_id: String,
+    checkpoint_id: String,
+    position: u64,
+    total_batches: u64,
+}
+
+impl NativeCausalLmConditionalServingSnapshot {
+    pub fn projection_id(&self) -> &str {
+        &self.projection_id
+    }
+    pub fn checkpoint_id(&self) -> &str {
+        &self.checkpoint_id
+    }
+    pub fn position(&self) -> u64 {
+        self.position
+    }
+    pub fn total_batches(&self) -> u64 {
+        self.total_batches
+    }
+    pub fn prefill_input_count(
+        &self,
+        steps: usize,
+        max_cache_values: usize,
+    ) -> CausalLmResult<usize> {
+        self.model.context_prefill_count(steps, max_cache_values)
+    }
+    pub fn prefill(
+        &self,
+        prompt: Vec<usize>,
+        max_cache_values: usize,
+    ) -> CausalLmResult<NativeCausalLmProjectionPrefix> {
+        NativeCausalLmProjectionPrefix::from_snapshot(
+            &self.model,
+            self.projection_id.clone(),
+            prompt,
+            max_cache_values,
+        )
+    }
 }
 
 fn plan_id(
@@ -259,6 +327,7 @@ impl NativeCausalLmConditionalAnswerSession {
             guard: guard.clone(),
             pool: Arc::new(pool),
             plan_id: plan_id(prompts, &batches, epochs),
+            predecessor_checkpoint_id: None,
             batches: batches.into(),
             epochs,
             policy,
@@ -268,11 +337,43 @@ impl NativeCausalLmConditionalAnswerSession {
         })
     }
 
+    /// Start a fixed schedule after exhaustion without rebasing the original guard.
+    /// Only this new phase's counters are reset.
+    pub fn next_phase(
+        &self,
+        prompts: &[Vec<usize>],
+        batches: Vec<CausalLmConditionalAnswerBatch>,
+        policy: CausalLmConditionalAnswerConfig,
+        max_prefix_values: usize,
+        epochs: u32,
+    ) -> CausalLmResult<Self> {
+        if !self.is_exhausted() {
+            return Err("conditional session must be exhausted before starting a new phase".into());
+        }
+        let (_, predecessor) = self.checkpoint()?;
+        let mut next = Self::new_repeated(
+            &self.projection,
+            &self.guard,
+            prompts,
+            batches,
+            policy,
+            max_prefix_values,
+            epochs,
+        )?;
+        next.plan_id = phase_plan_id(next.plan_id, Some(&predecessor));
+        next.predecessor_checkpoint_id = Some(predecessor);
+        Ok(next)
+    }
+
     pub fn projection(&self) -> &NativeCausalLmRankOneProjection {
         &self.projection
     }
     pub fn plan_id(&self) -> &str {
         &self.plan_id
+    }
+    /// Digest of the immediate predecessor, not a proof of its history.
+    pub fn predecessor_checkpoint_id(&self) -> Option<&str> {
+        self.predecessor_checkpoint_id.as_deref()
     }
     pub fn position(&self) -> u64 {
         self.position
@@ -290,8 +391,12 @@ impl NativeCausalLmConditionalAnswerSession {
         self.accepted_updates
     }
 
+    pub fn is_exhausted(&self) -> bool {
+        self.position == self.total_batches()
+    }
+
     pub fn step(&mut self) -> CausalLmResult<Option<CausalLmConditionalAnswerSessionStep>> {
-        if self.position >= self.total_batches() {
+        if self.is_exhausted() {
             return Ok(None);
         }
         let index = (self.position % self.batches_per_epoch() as u64) as usize;
@@ -316,7 +421,12 @@ impl NativeCausalLmConditionalAnswerSession {
     pub fn checkpoint(&self) -> CausalLmResult<(Vec<u8>, String)> {
         let (retained, guard_pin) = self.projection.checkpoint_with_retention(&self.guard)?;
         let header = serde_json::to_vec(&Record {
-            schema: SCHEMA.into(),
+            schema: if self.predecessor_checkpoint_id.is_some() {
+                PHASE_SCHEMA
+            } else {
+                SCHEMA
+            }
+            .into(),
             plan_id: self.plan_id.clone(),
             guard_pin,
             pool_rows: self.pool.len(),
@@ -328,6 +438,7 @@ impl NativeCausalLmConditionalAnswerSession {
             max_trials: self.policy.max_trials,
             mass_inward_cosine_bits: self.policy.mass_inward_cosine.map(f64::to_bits),
             max_prefix_values: self.max_prefix_values,
+            predecessor_checkpoint_id: self.predecessor_checkpoint_id.clone(),
         })?;
         if header.len() > HEADER_LIMIT {
             return Err("conditional session header exceeds limit".into());
@@ -362,13 +473,31 @@ impl NativeCausalLmConditionalAnswerSession {
         )
     }
 
+    /// Reconstruct pinned weights without training data or guard replay.
+    /// This verifies bytes and source identity, not the history of the weights.
+    pub fn serving_from_checkpoint(
+        source: &NativeCausalLm,
+        bytes: &[u8],
+        expected_id: &str,
+    ) -> CausalLmResult<NativeCausalLmConditionalServingSnapshot> {
+        let admitted = Self::prepare_resume(source, bytes, expected_id)?;
+        let projection = admitted.retained.serving_endpoint()?;
+        Ok(NativeCausalLmConditionalServingSnapshot {
+            projection_id: projection.projection_id(),
+            model: projection.current,
+            checkpoint_id: expected_id.to_owned(),
+            position: admitted.record.position,
+            total_batches: admitted.record.total_batches,
+        })
+    }
+
     pub fn prepare_resume(
         source: &NativeCausalLm,
         bytes: &[u8],
         expected_id: &str,
     ) -> CausalLmResult<CausalLmConditionalAnswerSessionRestore> {
         if !(4..=Self::MAX_CHECKPOINT_BYTES).contains(&bytes.len())
-            || expected_id.len() != 71
+            || !canonical_digest(expected_id)
             || fingerprint(bytes) != expected_id
         {
             return Err("conditional session checkpoint length or digest mismatch".into());
@@ -379,7 +508,15 @@ impl NativeCausalLmConditionalAnswerSession {
         }
         let (header, retained) = bytes[4..].split_at(size);
         let record: Record = serde_json::from_slice(header)?;
-        if record.schema != SCHEMA || record.epochs == 0 {
+        match (
+            record.schema.as_str(),
+            record.predecessor_checkpoint_id.as_deref(),
+        ) {
+            (SCHEMA, None) => {}
+            (PHASE_SCHEMA, Some(parent)) if canonical_digest(parent) => {}
+            _ => return Err("invalid conditional session checkpoint schema or predecessor".into()),
+        }
+        if record.epochs == 0 {
             return Err("invalid conditional session checkpoint repeat policy".into());
         }
         let epochs = record.epochs;
@@ -389,7 +526,7 @@ impl NativeCausalLmConditionalAnswerSession {
             || !(1..=MAX_PREPARED_PREFIX_VALUES).contains(&record.max_prefix_values)
             || record.position > record.total_batches
             || record.accepted_updates > record.position
-            || !crate::geometry_artifact::is_sha256_id(&record.plan_id)
+            || !canonical_digest(&record.plan_id)
         {
             return Err("invalid conditional session checkpoint policy or cursor".into());
         }
@@ -492,7 +629,10 @@ impl CausalLmConditionalAnswerSessionRestore {
             return Err("conditional session schedule shape changed".into());
         }
         self.pool_input_values(&prompts.iter().map(Vec::len).collect::<Vec<_>>(), &batches)?;
-        let id = plan_id(prompts, &batches, self.record.epochs);
+        let id = phase_plan_id(
+            plan_id(prompts, &batches, self.record.epochs),
+            self.record.predecessor_checkpoint_id.as_deref(),
+        );
         if id != self.record.plan_id {
             return Err("conditional session training pool or schedule changed".into());
         }
@@ -507,6 +647,7 @@ impl CausalLmConditionalAnswerSessionRestore {
             epochs: self.record.epochs,
             policy: self.policy,
             plan_id: id,
+            predecessor_checkpoint_id: self.record.predecessor_checkpoint_id,
             max_prefix_values: self.record.max_prefix_values,
             position: self.record.position,
             accepted_updates: self.record.accepted_updates,

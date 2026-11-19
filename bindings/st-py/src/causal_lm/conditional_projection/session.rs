@@ -1,6 +1,9 @@
 //! Transport for Rust-owned conditional schedules and checkpoint publication.
 use super::*;
-use st_nn::causal_lm::{CausalLmConditionalAnswerBatch, NativeCausalLmConditionalAnswerSession};
+use st_nn::causal_lm::{
+    CausalLmConditionalAnswerBatch, NativeCausalLmConditionalAnswerSession,
+    NativeCausalLmConditionalServingSnapshot,
+};
 use std::path::PathBuf;
 
 #[pyclass(
@@ -8,6 +11,54 @@ use std::path::PathBuf;
     module = "spiraltorch"
 )]
 pub(super) struct PyConditionalSession(NativeCausalLmConditionalAnswerSession);
+
+#[pyclass(
+    name = "NativeCausalLmConditionalServingSnapshot",
+    module = "spiraltorch",
+    frozen
+)]
+struct PyConditionalServing(NativeCausalLmConditionalServingSnapshot);
+
+#[pymethods]
+impl PyConditionalServing {
+    #[getter]
+    fn projection_id(&self) -> &str {
+        self.0.projection_id()
+    }
+    #[getter]
+    fn checkpoint_id(&self) -> &str {
+        self.0.checkpoint_id()
+    }
+    #[getter]
+    fn position(&self) -> u64 {
+        self.0.position()
+    }
+    #[getter]
+    fn total_batches(&self) -> u64 {
+        self.0.total_batches()
+    }
+
+    #[pyo3(signature=(prompt, *, max_cache_values=None))]
+    fn prefill(
+        &self,
+        py: Python<'_>,
+        prompt: &Bound<'_, PyAny>,
+        max_cache_values: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<qkv::PyProjectionPrefix> {
+        let cap = limit(
+            max_cache_values,
+            NativeCausalLmContext::DEFAULT_MAX_CACHE_VALUES,
+        )?;
+        let n = self
+            .0
+            .prefill_input_count(prompt.len()?, cap)
+            .map_err(error)?;
+        let ids = tokens(prompt, n)?;
+        py.detach(|| self.0.prefill(ids, cap))
+            .map(|inner| qkv::PyProjectionPrefix { inner })
+            .map_err(error)
+    }
+}
 
 fn batches(
     input: &Bound<'_, PyAny>,
@@ -27,6 +78,31 @@ fn batches(
             Ok((tokens(&indices, n)?, labels))
         })
         .collect()
+}
+
+type ScheduleInputs = (Vec<Vec<usize>>, Vec<CausalLmConditionalAnswerBatch>);
+
+fn read_schedule(
+    projection: &NativeCausalLmRankOneProjection,
+    pool: &Bound<'_, PyAny>,
+    schedule: &Bound<'_, PyAny>,
+    policy: CausalLmConditionalAnswerConfig,
+    cap: usize,
+    epochs: u32,
+) -> PyResult<ScheduleInputs> {
+    let n = roster_size(
+        schedule,
+        NativeCausalLmConditionalAnswerSession::MAX_BATCHES,
+    )?;
+    NativeCausalLmConditionalAnswerSession::scheduled_positions(n, epochs).map_err(error)?;
+    let schedule = batches(schedule, n)?;
+    let count = roster_size(pool, MAX_CONDITIONAL_BANK_ROWS)?;
+    let rows = read_prompts(pool, count, |steps| {
+        NativeCausalLmConditionalAnswerSession::admit_schedule_inputs(
+            projection, steps, &schedule, policy, cap, epochs,
+        )
+    })?;
+    Ok((rows, schedule))
 }
 
 #[pymethods]
@@ -59,21 +135,8 @@ impl PyConditionalSession {
     ) -> PyResult<Self> {
         let policy = config(length, max_trials, mass_inward_cosine)?;
         let cap = limit(max_prefix_values, 1 << 20)?;
-        let n = roster_size(schedule, Self::MAX_BATCHES)?;
         let epochs = u32::try_from(limit(epochs, 1)?).map_err(error)?;
-        NativeCausalLmConditionalAnswerSession::scheduled_positions(n, epochs).map_err(error)?;
-        let schedule = batches(schedule, n)?;
-        let count = roster_size(pool, MAX_CONDITIONAL_BANK_ROWS)?;
-        let rows = read_prompts(pool, count, |steps| {
-            NativeCausalLmConditionalAnswerSession::admit_schedule_inputs(
-                &projection.0,
-                steps,
-                &schedule,
-                policy,
-                cap,
-                epochs,
-            )
-        })?;
+        let (rows, schedule) = read_schedule(&projection.0, pool, schedule, policy, cap, epochs)?;
         py.detach(|| {
             NativeCausalLmConditionalAnswerSession::new_repeated(
                 &projection.0,
@@ -87,6 +150,34 @@ impl PyConditionalSession {
         })
         .map(Self)
         .map_err(error)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(pool, schedule, *, length, max_trials=None, mass_inward_cosine=None, max_prefix_values=None, epochs=None))]
+    fn next_phase(
+        &self,
+        py: Python<'_>,
+        pool: &Bound<'_, PyAny>,
+        schedule: &Bound<'_, PyAny>,
+        length: &Bound<'_, PyAny>,
+        max_trials: Option<&Bound<'_, PyAny>>,
+        mass_inward_cosine: Option<&Bound<'_, PyAny>>,
+        max_prefix_values: Option<&Bound<'_, PyAny>>,
+        epochs: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        if !self.0.is_exhausted() {
+            return Err(error(
+                "conditional session must be exhausted before starting a new phase",
+            ));
+        }
+        let policy = config(length, max_trials, mass_inward_cosine)?;
+        let cap = limit(max_prefix_values, 1 << 20)?;
+        let epochs = u32::try_from(limit(epochs, 1)?).map_err(error)?;
+        let (rows, schedule) =
+            read_schedule(self.0.projection(), pool, schedule, policy, cap, epochs)?;
+        py.detach(|| self.0.next_phase(&rows, schedule, policy, cap, epochs))
+            .map(Self)
+            .map_err(error)
     }
 
     #[staticmethod]
@@ -130,6 +221,26 @@ impl PyConditionalSession {
             .map_err(error)
     }
 
+    #[staticmethod]
+    fn serving_from_checkpoint(
+        py: Python<'_>,
+        model: &PyNativeCausalLm,
+        payload: &Bound<'_, PyBytes>,
+        expected_id: &Bound<'_, PyAny>,
+    ) -> PyResult<PyConditionalServing> {
+        let pin = session_input::pin(expected_id)?;
+        let bytes = payload.as_bytes();
+        py.detach(|| {
+            NativeCausalLmConditionalAnswerSession::serving_from_checkpoint(
+                &model.inner,
+                bytes,
+                &pin,
+            )
+        })
+        .map(PyConditionalServing)
+        .map_err(error)
+    }
+
     #[getter]
     fn position(&self) -> u64 {
         self.0.position()
@@ -153,6 +264,14 @@ impl PyConditionalSession {
     #[getter]
     fn plan_id(&self) -> &str {
         self.0.plan_id()
+    }
+    #[getter]
+    fn predecessor_checkpoint_id(&self) -> Option<&str> {
+        self.0.predecessor_checkpoint_id()
+    }
+    #[getter]
+    fn exhausted(&self) -> bool {
+        self.0.is_exhausted()
     }
     fn projection_snapshot(&self) -> PyRankOne {
         PyRankOne(self.0.projection().clone())
@@ -188,5 +307,6 @@ impl PyConditionalSession {
 }
 
 pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<PyConditionalServing>()?;
     module.add_class::<PyConditionalSession>()
 }

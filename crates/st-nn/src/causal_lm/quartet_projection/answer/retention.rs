@@ -7,7 +7,7 @@ pub use checkpoint::CausalLmConditionalRetentionRestore;
 pub use session::{
     CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
     CausalLmConditionalAnswerSessionStep, ConditionalCheckpointPublicationUncertain,
-    NativeCausalLmConditionalAnswerSession,
+    NativeCausalLmConditionalAnswerSession, NativeCausalLmConditionalServingSnapshot,
 };
 
 struct Anchor {

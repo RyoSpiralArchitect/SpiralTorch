@@ -120,6 +120,17 @@ Do not overwrite the path or trust its durability. If the file remains
 readable, verify it against that pin and explicitly resume from it only if
 choosing that checkpoint over the prior live state.
 
+An exhausted session can start a new pool and schedule with `next_phase`.
+The child keeps the exact weights and original guard and starts its own
+counters at zero. Its v4 checkpoint pins the immediate predecessor's
+digest; standalone sessions keep the v3 format. The digest links the
+checkpoints but does not prove the predecessor's training history.
+
+`serving_from_checkpoint` reconstructs the pinned projection without the
+prompt pool, original guard roster, or training workspace. It checks the
+outer and inner pins and model recipe; it does not replay the guard.
+Use `prepare_resume` with the original inputs to resume training.
+
 The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
 calls this same implementation without Torch. There is no WASM training
 binding for this projection.

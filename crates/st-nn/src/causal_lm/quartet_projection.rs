@@ -19,7 +19,7 @@ pub use answer::{
     CausalLmConditionalRetentionRestore, CausalLmLossGradient, CausalLmPairedAnswerScore,
     CausalLmPreparedConditionalAnswerBatch, CausalLmRetainedConditionalAnswerStep,
     ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
-    MAX_CONDITIONAL_BANK_ROWS,
+    NativeCausalLmConditionalServingSnapshot, MAX_CONDITIONAL_BANK_ROWS,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

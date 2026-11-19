@@ -77,7 +77,7 @@ pub(super) fn fingerprint(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-fn canonical_digest(id: &str) -> bool {
+pub(super) fn canonical_digest(id: &str) -> bool {
     id.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex
@@ -213,6 +213,16 @@ impl NativeCausalLmRankOneProjection {
 }
 
 impl CausalLmConditionalRetentionRestore {
+    pub(super) fn serving_endpoint(self) -> CausalLmResult<NativeCausalLmRankOneProjection> {
+        NativeCausalLmRankOneProjection::new(
+            &self.source,
+            self.spec.layer,
+            self.spec.site,
+            &self.left,
+            &self.right,
+        )
+    }
+
     pub fn roster_len(&self) -> usize {
         self.plan.baseline.margin_bits.len()
     }
