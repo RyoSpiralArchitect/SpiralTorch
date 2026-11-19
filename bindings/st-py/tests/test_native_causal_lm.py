@@ -936,7 +936,7 @@ assert session.predecessor_checkpoint_id == predecessor
             def __len__(self): raise AssertionError("inputs read before validating search bounds")
         for bad in ({"max_trials":0},{"max_trials":17},{"min_decrease":float("nan")},{"max_abs":0.0}):
             with self.assertRaises(ValueError):
-                s.step_pairs_backtracking(NoRead(),NoRead(),2,7,**(options|bad))
+                s.step_pairs_backtracking(NoRead(), NoRead(), 2, 7, **{**options, **bad})
 
     def test_scalar_search_recovers_an_overshoot_without_committing_rejected_candidates(self):
         from hashlib import sha256
