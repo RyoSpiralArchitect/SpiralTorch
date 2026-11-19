@@ -127,10 +127,25 @@ fn retained_checkpoint_replays_the_same_next_update() {
             NativeCausalLmRankOneProjection::admit_retained_checkpoint(&changed, &bytes, &pin)
                 .is_err()
         );
+        let mut wrong_pin = pin.clone();
+        wrong_pin.replace_range(7..8, if pin.as_bytes()[7] == b'0' { "1" } else { "0" });
         assert!(
-            NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, "wrong")
+            NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &bytes, &wrong_pin)
                 .is_err()
         );
+        for (key, val) in [
+            ("schema", "spiraltorch.native_conditional_retention.v2"),
+            ("roster_id", "sha256:not-a-roster-digest"),
+        ] {
+            let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            record[key] = serde_json::json!(val);
+            let invalid = serde_json::to_vec(&record).unwrap();
+            let id = format!("sha256:{:x}", Sha256::digest(&invalid));
+            assert!(
+                NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &invalid, &id)
+                    .is_err()
+            );
+        }
         let mut reversed = pairs.clone();
         reversed[0].reverse();
         assert!(admit().unwrap().restore(&prompts, &reversed).is_err());
@@ -170,11 +185,12 @@ fn retained_checkpoint_pins_a_floor_below_the_probability_range() {
     let mut config = config();
     config["tie_word_embeddings"] = serde_json::json!(false);
     let mut weights = parameters();
-    weights.get_mut("ln_f.weight").unwrap().1.fill(0.);
+    weights.get_mut("ln_f.weight").unwrap().1 = vec![0., 1., 0., 0.];
     weights.get_mut("ln_f.bias").unwrap().1 = vec![1., 0., 0., 0.];
     let mut head = vec![0.; 11 * 4];
     head[4] = -1.;
     head[8] = 800.;
+    head[9] = 1.;
     weights.insert("lm_head.weight".into(), (vec![11, 4], head));
     let m = NativeCausalLm::from_gpt2_json(
         &serde_json::to_vec(&config).unwrap(),
@@ -182,14 +198,16 @@ fn retained_checkpoint_pins_a_floor_below_the_probability_range() {
         Default::default(),
     )
     .unwrap();
-    let state =
-        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[1., 0., 0., 0.], &[0.; 4]).unwrap();
+    let projection = |right: &[f64]| {
+        NativeCausalLmRankOneProjection::new(&m, 1, Output, &[1., 0., 0., 0.], right).unwrap()
+    };
+    let start = [0., -0., 0., 0.];
+    let state = projection(&start);
     let prompts = vec![vec![1, 2, 3]];
     let pairs = [[0, 1]];
-    assert_eq!(
-        &state.last_logits(&prompts[0]).unwrap()[..3],
-        &[0., -1., 800.]
-    );
+    let z = state.last_logits(&prompts[0]).unwrap();
+    assert_eq!(&z[..2], &[0., -1.]);
+    assert!(z[2] > 790.);
     let guard = state
         .prepare_conditional_margin_and_mass_retention(&prompts, &pairs, 0.)
         .unwrap();
@@ -199,22 +217,59 @@ fn retained_checkpoint_pins_a_floor_below_the_probability_range() {
             .unwrap()
             .restore(&prompts, &pairs)
             .unwrap();
+    assert_eq!(restored.right()[1].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(restored.projection_id(), state.projection_id());
+    assert_ne!(
+        restored.projection_id(),
+        projection(&[0.; 4]).projection_id()
+    );
     assert_eq!(
         restored.checkpoint_with_retention(&restored_guard).unwrap(),
         (bytes.clone(), pin)
     );
-    let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    let mass = &mut record["baseline"]["mass"];
+    let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let mass = &record["baseline"]["mass"];
     assert_eq!(mass["minimum_mean_pair_mass_bits"], 0);
     let log_floor = f64::from_bits(mass["minimum_log_mean_pair_mass_bits"].as_u64().unwrap());
     assert!(log_floor < -790.);
-    mass["minimum_log_mean_pair_mass_bits"] = serde_json::json!((log_floor - 1.).to_bits());
-    let altered = serde_json::to_vec(&record).unwrap();
+    let mut weaker = record.clone();
+    weaker["baseline"]["mass"]["minimum_log_mean_pair_mass_bits"] =
+        serde_json::json!(log_floor.to_bits() + 1);
+    let altered = serde_json::to_vec(&weaker).unwrap();
     let id = format!("sha256:{:x}", Sha256::digest(&altered));
     let plan =
         NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &altered, &id).unwrap();
     assert!(matches!(plan.restore(&prompts, &pairs), Err(e)
         if e.to_string().contains("baseline does not reproduce")));
+
+    let regressed = [-0.5, 0.5]
+        .into_iter()
+        .map(|delta| {
+            let mut right = start;
+            right[1] = delta;
+            projection(&right)
+        })
+        .find(|p| p.last_logits(&prompts[0]).unwrap()[2] > z[2] + 0.001)
+        .expect("fixture must reduce the log pair mass without changing the sign");
+    let scores = regressed.score_answer_pairs(&prompts, &pairs).unwrap();
+    assert_eq!(scores[0].gold_minus_alternative, 1.);
+    assert_eq!(
+        (-scores[0].gold_nll).exp() + (-scores[0].alternative_nll).exp(),
+        0.
+    );
+    let mut endpoint = record;
+    endpoint["projection_id"] = serde_json::json!(regressed.projection_id());
+    endpoint["right_bits"] = serde_json::json!(regressed
+        .right()
+        .iter()
+        .map(|v| v.to_bits())
+        .collect::<Vec<_>>());
+    let altered = serde_json::to_vec(&endpoint).unwrap();
+    let id = format!("sha256:{:x}", Sha256::digest(&altered));
+    let plan =
+        NativeCausalLmRankOneProjection::admit_retained_checkpoint(&m, &altered, &id).unwrap();
+    assert!(matches!(plan.restore(&prompts, &pairs), Err(e)
+        if e.to_string().contains("violates the saved guard")));
 }
 
 #[test]

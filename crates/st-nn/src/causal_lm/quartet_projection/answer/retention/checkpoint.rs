@@ -77,6 +77,15 @@ pub(super) fn fingerprint(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+fn canonical_digest(id: &str) -> bool {
+    id.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+
 pub(super) fn roster_id(prompts: &[Vec<usize>], pairs: &[[usize; 2]]) -> String {
     let mut h = Sha256::new();
     h.update(b"spiraltorch.conditional_retention_roster.v1\0");
@@ -146,7 +155,7 @@ impl NativeCausalLmRankOneProjection {
         expected_id: &str,
     ) -> CausalLmResult<CausalLmConditionalRetentionRestore> {
         if payload.len() > Self::MAX_RETENTION_CHECKPOINT_BYTES
-            || expected_id.len() != "sha256:".len() + 64
+            || !canonical_digest(expected_id)
             || fingerprint(payload) != expected_id
         {
             return Err("conditional retention checkpoint length or digest mismatch".into());
@@ -161,6 +170,9 @@ impl NativeCausalLmRankOneProjection {
             || !(1..=MAX_OUTPUT_CONTRAST_ROWS).contains(&plan.baseline.margin_bits.len())
         {
             return Err("invalid conditional retention checkpoint schema or dimensions".into());
+        }
+        if !canonical_digest(&plan.roster_id) {
+            return Err("invalid conditional retention checkpoint roster digest".into());
         }
         let site: CausalLmProjectionSite = plan.site.parse()?;
         let allowed_drop = plan.max_mean_mass_drop_bits.map(f64::from_bits);
