@@ -115,7 +115,11 @@ impl CandidateMassTerms {
         }
     }
 
-    fn readout_upstream(&self, model: &NativeCausalLm, logits: &[f32]) -> CausalLmResult<Tensor> {
+    fn readout_upstream(
+        &self,
+        model: &NativeCausalLm,
+        logits: &[f32],
+    ) -> CausalLmResult<(Tensor, f64)> {
         // The native GPT-2 loader packs each vocabulary row as one contiguous column.
         let head = &model.head;
         let width = head.inner();
@@ -124,7 +128,7 @@ impl CandidateMassTerms {
             return Err("invalid binding observation readout".into());
         }
         if self.outside_den == 0. {
-            return Ok(Tensor::zeros(1, width)?);
+            return Ok((Tensor::zeros(1, width)?, 1.));
         }
         let [first, second] = self
             .pair
@@ -154,11 +158,20 @@ impl CandidateMassTerms {
             }
         }
         let den = self.outside_den * (1. + self.second);
-        let upstream: Vec<_> = sums.iter().map(|s| (s.value() / den) as f32).collect();
+        let mut upstream: Vec<_> = sums.iter().map(|s| (s.value() / den) as f32).collect();
+        let readout_scale = if upstream.iter().any(|x| x.is_infinite()) {
+            // Differences of finite f32 weights can span twice the f32 range.
+            for (value, sum) in upstream.iter_mut().zip(&sums) {
+                *value = (0.5 * (sum.value() / den)) as f32;
+            }
+            2.
+        } else {
+            1.
+        };
         if upstream.iter().any(|x| !x.is_finite()) {
             return Err("nonfinite binding observation readout adjoint".into());
         }
-        Ok(Tensor::from_vec(1, width, upstream)?)
+        Ok((Tensor::from_vec(1, width, upstream)?, readout_scale))
     }
 }
 
@@ -179,13 +192,13 @@ impl NativeCausalLmRankOneProjection {
     ) -> CausalLmResult<(CandidateMassMeasure, Vec<f64>)> {
         let logits = row.logits.data();
         let terms = candidate_mass_terms(logits, pair)?;
-        let upstream = terms.readout_upstream(&self.current, logits)?;
+        let (upstream, readout_scale) = terms.readout_upstream(&self.current, logits)?;
         let mut gradient = self
             .current
             .fixed_left_upstream(row, upstream, self.spec, &self.left)?;
-        // Preserve outside probabilities that would round to zero in the decoder.
+        // Apply the outside probability and restore the readout scale in f64.
         for g in &mut gradient {
-            *g *= terms.outside_share;
+            *g *= terms.outside_share * readout_scale;
         }
         Ok((terms.measure(), gradient))
     }
@@ -263,9 +276,32 @@ mod tests {
             m.head = PackedB::from_tensor_transpose(&head, st_tensor::Tile::col_major()).unwrap();
             for ids in [[0, 1], [1, 0]] {
                 let terms = candidate_mass_terms(&logits, ids).unwrap();
-                let upstream = terms.readout_upstream(&m, &logits).unwrap();
+                let (upstream, scale) = terms.readout_upstream(&m, &logits).unwrap();
                 assert_eq!(upstream.data(), &[expected], "{logits:?}, {ids:?}");
+                assert_eq!(scale, 1.);
             }
+        }
+    }
+
+    #[test]
+    fn finite_scaled_adjoint_does_not_reject_opposite_extreme_weights() {
+        let mut model = crate::causal_lm::tests::load();
+        let head = Tensor::from_vec(3, 1, vec![f32::MAX, f32::MAX, -f32::MAX]).unwrap();
+        model.head = PackedB::from_tensor_transpose(&head, st_tensor::Tile::col_major()).unwrap();
+        for tail in [-2., -104.] {
+            let logits = [0., 0., tail];
+            let terms = candidate_mass_terms(&logits, [0, 1]).unwrap();
+            let scaled_expected = -2. * f64::from(f32::MAX) * terms.outside_share;
+            assert!(scaled_expected.is_finite() && (scaled_expected as f32).is_normal());
+            if tail == -104. {
+                assert_eq!(terms.outside_share as f32, 0.);
+            }
+            let (upstream, scale) = terms.readout_upstream(&model, &logits).unwrap();
+            assert_eq!((upstream.data(), scale), (&[-f32::MAX][..], 2.));
+            assert_eq!(
+                f64::from(upstream.data()[0]) * (terms.outside_share * scale),
+                scaled_expected
+            );
         }
     }
 
