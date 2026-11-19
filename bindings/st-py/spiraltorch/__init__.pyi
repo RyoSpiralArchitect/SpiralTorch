@@ -744,7 +744,29 @@ class NativeCausalLmConditionalRetention:
     @property
     def minimum_log_mean_pair_mass(self) -> float | None: ...
 
+class NativeCausalLmConditionalAnswerComparison:
+    def __len__(self) -> int: ...
+    @property
+    def document_count(self) -> int: ...
+    @property
+    def scored_documents(self) -> int: ...
+    @property
+    def shared_prefix_layers(self) -> int: ...
+    @property
+    def evaluations(self) -> list[NativeCausalLmEvaluation]: ...
+    def answer(self, index: int) -> dict[str, Any]: ...
+    def contrast(self, reference: int, candidate: int) -> dict[str, Any]: ...
+    def to_json(self) -> str: ...
+
+
 class NativeCausalLmConditionalServingSnapshot:
+    MAX_COMPARISON_SNAPSHOTS: int
+    @staticmethod
+    def evaluate_variants_by_answer(source: NativeCausalLm,
+                                    snapshots: Sequence[NativeCausalLmConditionalServingSnapshot],
+                                    token_documents: Sequence[Sequence[int]], context_length: int, *,
+                                    microbatch_windows: int | None = None,
+                                    labels: Sequence[Sequence[int]] | None = None) -> NativeCausalLmConditionalAnswerComparison: ...
     @property
     def projection_id(self) -> str: ...
     @property
@@ -14087,6 +14109,7 @@ __all__ = [
     "NativeCausalLmConditionalRetention",
     "NativeCausalLmConditionalAnswerSession",
     "NativeCausalLmConditionalServingSnapshot",
+    "NativeCausalLmConditionalAnswerComparison",
     "NativeCausalLmOutputMarginDirection",
     "NativeCausalLmLoraGradients",
     "NativeCausalLmAccumulator",

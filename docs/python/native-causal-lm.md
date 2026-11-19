@@ -1533,3 +1533,29 @@ The example emits the native generation pin on stderr immediately after
 publication, so it stays available if writing reports fails. On resume,
 `result.json` distinguishes the exact admitted `resume_input_id` from
 the canonical starting-state `initial_id`.
+
+### Compare full supervised answers from saved projections
+
+```python
+from spiraltorch import NativeCausalLmConditionalServingSnapshot
+
+score = NativeCausalLmConditionalServingSnapshot.evaluate_variants_by_answer(
+    model, [before, after], documents, context_length=128, labels=answer_labels,
+)
+first_answer = score.answer(0)
+after_minus_before = score.contrast(1, 2)
+```
+
+Variant 0 is the frozen source model; the remaining variants follow the
+supplied snapshot order. All must agree on the base weights, LoRA,
+geometry and readout policy. Unshifted labels mark supervised targets;
+`-100` masks a token. The evaluator groups contiguous scored targets
+into answers and reports both token-weighted and answer-weighted NLL
+differences. A negative candidate-minus-reference delta means lower NLL.
+
+Decoder work is shared only before the earliest changed projection.
+The `native_answer_comparison.py` example accepts pinned
+`--conditional-variant NAME CHECKPOINT PIN` entries and a separately
+pinned labeled corpus. It does not need the training roster or verify
+split independence. These are teacher-forced scores, not free-generation
+quality or a speed measurement.

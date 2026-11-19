@@ -17,11 +17,12 @@ pub use guard::{
 pub use observation::CausalLmBindingGradientObservation;
 use observation::PairObservation;
 pub use retention::{
-    CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
-    CausalLmConditionalAnswerSessionStep, CausalLmConditionalMarginRetention,
-    CausalLmConditionalRetentionCheck, CausalLmConditionalRetentionLogMassCheck,
-    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
-    CausalLmConditionalRetentionRestore, CausalLmRetainedConditionalAnswerStep,
+    CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerComparison,
+    CausalLmConditionalAnswerSessionRestore, CausalLmConditionalAnswerSessionStep,
+    CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
+    CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionMassCheck,
+    CausalLmConditionalRetentionOutsideCheck, CausalLmConditionalRetentionRestore,
+    CausalLmConditionalScoredSnapshot, CausalLmRetainedConditionalAnswerStep,
     ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
     NativeCausalLmConditionalServingSnapshot,
 };

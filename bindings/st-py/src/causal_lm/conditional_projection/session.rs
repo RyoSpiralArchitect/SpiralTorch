@@ -23,6 +23,45 @@ struct PyConditionalServing(NativeCausalLmConditionalServingSnapshot);
 
 #[pymethods]
 impl PyConditionalServing {
+    #[classattr]
+    const MAX_COMPARISON_SNAPSHOTS: usize =
+        NativeCausalLmConditionalServingSnapshot::MAX_COMPARISON_SNAPSHOTS;
+
+    #[staticmethod]
+    #[pyo3(signature=(source, snapshots, token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_variants_by_answer(
+        py: Python<'_>,
+        source: &PyNativeCausalLm,
+        snapshots: &Bound<'_, PyAny>,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<evaluation::PyConditionalAnswerComparison> {
+        let count = snapshots.len()?;
+        if !(1..=Self::MAX_COMPARISON_SNAPSHOTS).contains(&count) {
+            return Err(error("conditional comparison requires 1 to 15 snapshots"));
+        }
+        let owners = (0..count)
+            .map(|i| {
+                snapshots
+                    .get_item(i)?
+                    .cast_into::<Self>()
+                    .map_err(Into::into)
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let snapshots = owners.iter().map(|obj| &obj.get().0).collect::<Vec<_>>();
+        evaluation::compare_conditional_answers(
+            source,
+            &snapshots,
+            py,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
     #[getter]
     fn projection_id(&self) -> &str {
         self.0.projection_id()

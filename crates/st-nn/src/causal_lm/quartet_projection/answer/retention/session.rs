@@ -5,6 +5,9 @@ use super::*;
 use crate::causal_lm::checkpoint as files;
 use std::path::Path;
 
+mod evaluation;
+pub use evaluation::{CausalLmConditionalAnswerComparison, CausalLmConditionalScoredSnapshot};
+
 const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
 const PHASE_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v4";
 const HEADER_LIMIT: usize = 4096;
@@ -99,6 +102,8 @@ pub struct NativeCausalLmConditionalServingSnapshot {
     model: NativeCausalLm,
     projection_id: String,
     checkpoint_id: String,
+    layer: usize,
+    site: CausalLmProjectionSite,
     position: u64,
     total_batches: u64,
 }
@@ -493,6 +498,8 @@ impl NativeCausalLmConditionalAnswerSession {
         let projection = admitted.retained.serving_endpoint()?;
         Ok(NativeCausalLmConditionalServingSnapshot {
             projection_id: projection.projection_id(),
+            layer: projection.spec.layer,
+            site: projection.spec.site,
             model: projection.current,
             checkpoint_id: expected_id.to_owned(),
             position: admitted.record.position,
