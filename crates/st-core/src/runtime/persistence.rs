@@ -115,22 +115,38 @@ fn publish_detailed(
             Err(source) => return Err(source.into()),
         };
         let mut destination_installed = false;
+        let mut owns_temporary_name = true;
         let result = (|| {
             write(&mut file)?;
             file.flush()?;
             file.sync_all()?;
+            #[cfg(not(unix))]
             close_before_replace(file);
             install(&temporary, path, create_only)?;
             destination_installed = true;
-            #[cfg(not(windows))]
-            if create_only {
+            #[cfg(unix)]
+            if !create_only {
+                // A rename onto a hard link to the same inode is a no-op.
+                // Keep the original descriptor alive while checking the name.
+                owns_temporary_name = false;
+                owns_temporary_name = staging_name_refers_to_file(&temporary, &file)?;
+            }
+            #[cfg(not(unix))]
+            {
+                owns_temporary_name = cfg!(not(windows)) && create_only;
+            }
+            if owns_temporary_name {
                 fs::remove_file(&temporary)?;
             }
+            // Rename or unlink released the name; another publisher may reuse it.
+            owns_temporary_name = false;
             finish(parent)?;
             Ok::<(), io::Error>(())
         })();
         if let Err(source) = result {
-            let _ = fs::remove_file(&temporary);
+            if owns_temporary_name {
+                let _ = fs::remove_file(&temporary);
+            }
             return Err(AtomicPublishError {
                 source,
                 destination_installed,
@@ -158,6 +174,20 @@ fn sync_parent(parent: &Path) -> io::Result<()> {
     }
 }
 
+#[cfg(unix)]
+fn staging_name_refers_to_file(path: &Path, file: &File) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    match fs::symlink_metadata(path) {
+        Ok(named) => {
+            let staged = file.metadata()?;
+            Ok((named.dev(), named.ino()) == (staged.dev(), staged.ino()))
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(source),
+    }
+}
+
+#[cfg(not(unix))]
 fn close_before_replace(file: fs::File) {
     #[cfg(not(target_arch = "wasm32"))]
     drop(file);
@@ -254,6 +284,74 @@ mod tests {
         let collision = atomic_create_new_with_status(&dest, b"other").unwrap_err();
         assert!(!collision.destination_installed());
         assert_eq!(fs::read(&dest).unwrap(), b"complete");
+    }
+
+    #[test]
+    fn post_install_sync_failure_keeps_the_next_writers_temporary_file() {
+        for create_only in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("checkpoint");
+            if !create_only {
+                fs::write(&dest, b"previous").unwrap();
+            }
+            let temporary = dir
+                .path()
+                .join(format!(".checkpoint.{}.0.tmp", std::process::id()));
+            let error = publish_detailed(
+                &dest,
+                create_only,
+                |f| f.write_all(b"installed"),
+                |_| {
+                    // The first publisher has released this name before syncing.
+                    OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(&temporary)
+                        .unwrap()
+                        .write_all(b"next writer")
+                        .unwrap();
+                    Err(io::Error::other("injected directory sync failure"))
+                },
+            )
+            .unwrap_err();
+            assert!(error.destination_installed());
+            assert_eq!(fs::read(&dest).unwrap(), b"installed");
+            assert_eq!(fs::read(&temporary).unwrap(), b"next writer");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_cleans_up_a_staging_name_left_by_same_inode_rename() {
+        for fail_sync in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("checkpoint");
+            let temporary = dir
+                .path()
+                .join(format!(".checkpoint.{}.0.tmp", std::process::id()));
+            let result = publish_detailed(
+                &dest,
+                false,
+                |f| {
+                    f.write_all(b"installed")?;
+                    fs::hard_link(&temporary, &dest)
+                },
+                |_| {
+                    if fail_sync {
+                        Err(io::Error::other("injected directory sync failure"))
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            if fail_sync {
+                assert!(result.unwrap_err().destination_installed());
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(fs::read(&dest).unwrap(), b"installed");
+            assert!(!temporary.exists());
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
