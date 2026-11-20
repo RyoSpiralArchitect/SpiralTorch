@@ -553,6 +553,55 @@ assert session.predecessor_checkpoint_id == predecessor
                 changed = json.dumps(inner, separators=(",", ":")).encode()
                 check_rejected(header, changed)
 
+    def test_legacy_session_replays_historical_pair_floor(self):
+        import base64
+
+        cls = st.NativeCausalLmConditionalAnswerSession
+        controls = json.loads((Path(__file__).parent / "fixtures" /
+                               "conditional_session_legacy_pair_floor.json").read_text())
+        rows, pairs = [[0]], [[0, 1]]
+        schedule = [([0], pairs)]
+
+        def split(raw):
+            end = 4 + struct.unpack_from("<I", raw)[0]
+            return json.loads(raw[4:end]), json.loads(raw[end:])
+
+        for case in controls["cases"]:
+            with self.subTest(schema=case["schema"]):
+                config, weights = fixture(vocabulary=3, constant_logits=[0., -1., case["outside"]])
+                model = st.NativeCausalLm.from_gpt2(config, weights)
+                raw, pin = base64.b64decode(case["payload"], validate=True), case["pin"]
+                header, retained = split(raw)
+                self.assertTrue(header["schema"].endswith("." + case["schema"]))
+                mass = retained["baseline"]["mass"]
+                self.assertIsNone(mass["minimum_log_mean_pair_mass_bits"])
+                self.assertGreater(mass["minimum_mean_pair_mass_bits"], 0)
+                session = cls.from_bytes(model, raw, pin, rows, schedule, rows, pairs)
+                self.assertEqual(session.checkpoint_with_id(), (raw, pin))
+                self.assertEqual(session.position, 0)
+                self.assertIsNotNone(session.step())
+                current, current_pin = session.checkpoint_with_id()
+                current_header, current_retained = split(current)
+                self.assertEqual(current_header["schema"], header["schema"])
+                current_floor = current_retained["baseline"]["mass"]["minimum_log_mean_pair_mass_bits"]
+                self.assertIsNotNone(current_floor)
+                restored = cls.from_bytes(model, current, current_pin, rows, schedule, rows, pairs)
+                self.assertEqual(restored.checkpoint_with_id(), (current, current_pin))
+
+                def reject(record):
+                    body = json.dumps(retained, separators=(",", ":")).encode()
+                    record = dict(record, guard_pin="sha256:" + hashlib.sha256(body).hexdigest())
+                    encoded = json.dumps(record, separators=(",", ":")).encode()
+                    payload = struct.pack("<I", len(encoded)) + encoded + body
+                    changed_pin = "sha256:" + hashlib.sha256(payload).hexdigest()
+                    with self.assertRaisesRegex(ValueError, "baseline does not reproduce"):
+                        cls.from_bytes(model, payload, changed_pin, rows, schedule, rows, pairs)
+
+                reject(dict(header, schema="spiraltorch.native_conditional_answer_session.start_bound.v1",
+                            start_projection_id=retained["projection_id"]))
+                mass["minimum_log_mean_pair_mass_bits"] = current_floor + 1
+                reject(header)
+
     def test_conditional_phase_keeps_guard_and_resumes_new_schedule(self):
         state, guard, rows, pairs, schedule = conditional_session_inputs(self.model)
         session = st.NativeCausalLmConditionalAnswerSession

@@ -22,8 +22,15 @@ struct MassBaseline {
 }
 
 impl Baseline {
-    fn matches_legacy_replay(&self, mut replay: Self) -> bool {
-        if let (Some(saved), Some(recomputed)) = (&self.mass, &mut replay.mass) {
+    fn matches_legacy_replay(&self, mut replay: Self, floor: Option<&MassFloor>) -> bool {
+        if let (Some(saved), Some(recomputed), Some(floor)) = (&self.mass, &mut replay.mass, floor)
+        {
+            // Old writers subtracted the rounded logs, which can erase a positive
+            // residual. Match that exact encoding, not an arbitrary weaker floor.
+            let legacy_pair_bits = floor.legacy_log_pair_limit().map(f64::to_bits);
+            if saved.minimum_log_mean_pair_mass_bits == legacy_pair_bits {
+                recomputed.minimum_log_mean_pair_mass_bits = legacy_pair_bits;
+            }
             if saved.maximum_log_mean_outside_mass_bits.is_none() {
                 // Legacy writers omitted this field. Compare all saved fields;
                 // the live guard still enforces the recomputed log ceiling.
@@ -319,7 +326,9 @@ impl CausalLmConditionalRetentionRestore {
         let mut guard = state.prepare_conditional_retention(prompts, pairs, self.allowed_drop)?;
         let replayed = guard.checkpoint_baseline();
         let baseline_matches = if legacy {
-            self.plan.baseline.matches_legacy_replay(replayed)
+            self.plan
+                .baseline
+                .matches_legacy_replay(replayed, guard.mass.as_ref())
         } else {
             self.plan.baseline == replayed
         };
