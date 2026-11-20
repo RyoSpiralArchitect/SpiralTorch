@@ -32,6 +32,13 @@ impl AtomicNewDestination {
                 "checkpoint destination must name a file",
             ));
         }
+        #[cfg(windows)]
+        if path.file_name().unwrap().as_encoded_bytes().contains(&b':') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "checkpoint destination must name a file, not a drive or stream",
+            ));
+        }
         let parent = path.parent().expect("absolute path with filename");
         #[cfg(unix)]
         let directory = {
@@ -204,10 +211,11 @@ impl AtomicNewDestination {
 fn open_directory(path: &Path, share_delete: bool) -> io::Result<fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
     };
     let file = fs::OpenOptions::new()
-        .read(true)
+        .access_mode(FILE_READ_ATTRIBUTES)
         .share_mode(
             FILE_SHARE_READ | FILE_SHARE_WRITE | if share_delete { FILE_SHARE_DELETE } else { 0 },
         )
@@ -217,6 +225,20 @@ fn open_directory(path: &Path, share_delete: bool) -> io::Result<fs::File> {
         return Err(io::ErrorKind::NotADirectory.into());
     }
     Ok(file)
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn windows_checkpoint_admits_files_but_not_stream_names() {
+    let root = tempfile::tempdir().unwrap();
+    let destination = AtomicNewDestination::admit(&root.path().join("next.json")).unwrap();
+    destination.publish(b"checkpoint").unwrap();
+    assert_eq!(
+        fs::read(root.path().join("next.json")).unwrap(),
+        b"checkpoint"
+    );
+    let stream = AtomicNewDestination::admit(&root.path().join("next.json:metadata"));
+    assert!(matches!(stream, Err(error) if error.kind() == io::ErrorKind::InvalidInput));
 }
 
 #[cfg(windows)]
