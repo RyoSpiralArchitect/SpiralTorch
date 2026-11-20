@@ -101,6 +101,48 @@ pub(super) fn load() -> NativeCausalLm {
     .unwrap()
 }
 
+pub(super) fn load_constant_hidden_with_extreme_readout() -> NativeCausalLm {
+    let mut config = config();
+    config["vocab_size"] = json!(3);
+    config["tie_word_embeddings"] = json!(false);
+    let mut weights = parameters();
+    for (_, values) in weights.values_mut() {
+        values.fill(0.);
+    }
+    let (shape, values) = weights.get_mut("wte.weight").unwrap();
+    shape[0] = 3;
+    values.truncate(12);
+    weights.get_mut("ln_f.weight").unwrap().1.fill(1.);
+    weights.get_mut("ln_f.bias").unwrap().1[1] = 1.;
+    weights.get_mut("h.1.attn.c_attn.bias").unwrap().1[8] = 1.;
+    weights.insert(
+        "lm_head.weight".into(),
+        (
+            vec![3, 4],
+            vec![
+                f32::MAX,
+                0.,
+                0.,
+                0.,
+                f32::MAX,
+                -1.,
+                0.,
+                0.,
+                -f32::MAX,
+                -104.,
+                0.,
+                0.,
+            ],
+        ),
+    );
+    NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&config).unwrap(),
+        &archive(&weights),
+        Default::default(),
+    )
+    .unwrap()
+}
+
 fn close(a: &[f32], b: &[f32]) {
     assert_eq!(a.len(), b.len());
     for (a, b) in a.iter().zip(b) {

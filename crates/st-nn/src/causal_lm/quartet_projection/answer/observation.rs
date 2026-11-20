@@ -158,16 +158,22 @@ impl CandidateMassTerms {
             }
         }
         let den = self.outside_den * (1. + self.second);
-        let mut upstream: Vec<_> = sums.iter().map(|s| (s.value() / den) as f32).collect();
-        let readout_scale = if upstream.iter().any(|x| x.is_infinite()) {
-            // Differences of finite f32 weights can span twice the f32 range.
-            for (value, sum) in upstream.iter_mut().zip(&sums) {
-                *value = (0.5 * (sum.value() / den)) as f32;
-            }
-            2.
+        let peak = sums.iter().map(|s| s.value().abs()).fold(0., f64::max) / den;
+        if !peak.is_finite() {
+            return Err("nonfinite binding observation readout adjoint".into());
+        }
+        let readout_scale = if peak > f64::from(f32::MAX).sqrt() {
+            // A finite f32 seed can still overflow inside the decoder. Shift
+            // the peak to [2^32, 2^33) to leave headroom for the LayerNorm VJP.
+            let exponent = (peak.to_bits() >> 52) as i32 - 1023;
+            2f64.powi(exponent - 32)
         } else {
             1.
         };
+        let upstream: Vec<_> = sums
+            .iter()
+            .map(|s| ((s.value() / den) / readout_scale) as f32)
+            .collect();
         if upstream.iter().any(|x| !x.is_finite()) {
             return Err("nonfinite binding observation readout adjoint".into());
         }
@@ -297,10 +303,41 @@ mod tests {
                 assert_eq!(terms.outside_share as f32, 0.);
             }
             let (upstream, scale) = terms.readout_upstream(&model, &logits).unwrap();
-            assert_eq!((upstream.data(), scale), (&[-f32::MAX][..], 2.));
+            assert!(scale > 1. && upstream.data()[0].is_finite());
             assert_eq!(
                 f64::from(upstream.data()[0]) * (terms.outside_share * scale),
                 scaled_expected
+            );
+        }
+    }
+
+    #[test]
+    fn extreme_readout_with_small_outside_mass_reaches_decoder_projection() {
+        let model = crate::causal_lm::tests::load_constant_hidden_with_extreme_readout();
+        let projection = NativeCausalLmRankOneProjection::new(
+            &model,
+            1,
+            CausalLmProjectionSite::Output,
+            &[1., 0., 0., 0.],
+            &[0.; 4],
+        )
+        .unwrap();
+        let row = model.projection_last_row(&[0], projection.spec).unwrap();
+        assert_eq!(row.logits.data(), &[0., -1., -104.]);
+        let share = candidate_mass_terms(row.logits.data(), [0, 1])
+            .unwrap()
+            .outside_share;
+        assert!(share > 0. && (share as f32) == 0.);
+        let factor =
+            -2. * f64::from(f32::MAX) * share / f64::from(model.config.norm_epsilon).sqrt();
+        let (_, values) = projection
+            .candidate_mass_measured_gradient(row, [0, 1])
+            .unwrap();
+        for (actual, centre) in values.iter().zip([0.75, -0.25, -0.25, -0.25]) {
+            let expected = factor * centre;
+            assert!(
+                (actual / expected - 1.).abs() < 2e-6,
+                "{actual} != {expected}"
             );
         }
     }
