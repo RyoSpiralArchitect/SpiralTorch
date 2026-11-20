@@ -1,13 +1,27 @@
 use super::*;
 
+mod conditional;
 mod guard;
 mod observation;
+mod retention;
+pub use conditional::{
+    CausalLmConditionalAnswerConfig, CausalLmConditionalAnswerPoint,
+    CausalLmConditionalAnswerPrefixBank, CausalLmConditionalAnswerStep,
+    CausalLmConditionalAnswerTrial, CausalLmPreparedConditionalAnswerBatch,
+    MAX_CONDITIONAL_BANK_ROWS,
+};
 pub use guard::{
     CausalLmAnswerCorrection, CausalLmAnswerGuard, CausalLmAnswerGuardStatus,
     CausalLmAnswerGuardStep, CausalLmAnswerPoint, CausalLmAnswerProtection, CausalLmAnswerTrial,
 };
 pub use observation::CausalLmBindingGradientObservation;
-use observation::{candidate_mass_seed, PairObservation};
+use observation::PairObservation;
+pub use retention::{
+    CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
+    CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionLogOutsideCheck,
+    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
+    CausalLmConditionalRetentionRestore, CausalLmRetainedConditionalAnswerStep,
+};
 
 /// Optional supervision on the relationship between four indexed prompts.
 /// Gold CE labels are independent of the quartet orientation and contrast IDs.
@@ -111,13 +125,10 @@ impl NativeCausalLmRankOneProjection {
         prompts: &[Vec<usize>],
         candidates: &[[usize; 2]],
     ) -> CausalLmResult<Vec<CausalLmPairedAnswerScore>> {
-        let m = &self.current;
-        if prompts.len() != candidates.len() || candidates.len() > MAX_OUTPUT_CONTRAST_ROWS {
+        if prompts.len() != candidates.len() {
             return Err("invalid paired answer roster".into());
         }
-        for &[gold, alt] in candidates {
-            m.check_contrast_candidates(gold, alt)?;
-        }
+        self.admit_conditional_answer_pairs(candidates)?;
         let gold: Vec<_> = candidates.iter().map(|p| p[0]).collect();
         self.admit_answers(prompts, &gold, None, false)?;
         prompts
@@ -212,15 +223,9 @@ impl NativeCausalLmRankOneProjection {
                 let gap = f64::from(z[b.ids[0]]) - f64::from(z[b.ids[1]]);
                 let g = m.fixed_left_seed(row.clone(), d, self.spec, &self.left)?;
                 if let Some(observer) = &mut split {
-                    let mass_seed = candidate_mass_seed(z, b.ids)?;
-                    let upstream = mass_seed.readout_upstream(m)?;
-                    let mut mass =
-                        m.fixed_left_upstream(row.clone(), upstream, self.spec, &self.left)?;
-                    for g in &mut mass {
-                        *g *= mass_seed.outside_share;
-                    }
+                    let (mass_loss, mass) = self.candidate_mass_gradient(row.clone(), b.ids)?;
                     observer.add(
-                        mass_seed.loss,
+                        mass_loss,
                         mass,
                         gap,
                         if y == b.ids[0] { 1. } else { -1. },

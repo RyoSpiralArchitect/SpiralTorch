@@ -19,7 +19,7 @@ pub(super) struct PyQkv {
     frozen
 )]
 pub(super) struct PyProjectionPrefix {
-    inner: NativeCausalLmProjectionPrefix,
+    pub(super) inner: NativeCausalLmProjectionPrefix,
 }
 
 #[pymethods]

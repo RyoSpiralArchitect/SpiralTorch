@@ -291,6 +291,26 @@ impl NativeCausalLm {
         Ok(g)
     }
 
+    pub(super) fn fixed_left_wide_upstream(
+        &self,
+        row: projection_probe::ProjectionLastRow,
+        upstream: &[f64],
+        spec: CausalLmProjectionSpec,
+        left: &[f64],
+    ) -> CausalLmResult<(Vec<f64>, f64)> {
+        let mut capture = FixedLeft {
+            site: spec.site,
+            left,
+            right: None,
+        };
+        let scale = self.pull_projection_wide_upstream(row, spec, upstream, &mut capture)?;
+        let gradient = capture.right.ok_or("unreached seeded projection")?;
+        if gradient.iter().any(|x| !x.is_finite()) {
+            return Err("nonfinite seeded projection adjoint".into());
+        }
+        Ok((gradient, scale))
+    }
+
     pub fn output_contrast_bank(
         &self,
         layer: usize,

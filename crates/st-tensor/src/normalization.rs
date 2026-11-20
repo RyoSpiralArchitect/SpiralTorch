@@ -95,6 +95,70 @@ impl Tensor {
         Ok(input.unwrap())
     }
 
+    /// CPU input-only LayerNorm VJP with a row-major f64 seed and result.
+    /// Defers narrowing until the caller can account for the true cotangent range.
+    pub fn layer_norm_input_backward_wide(
+        &self,
+        gamma: &Tensor,
+        upstream: &[f64],
+        epsilon: f32,
+    ) -> PureResult<Vec<f64>> {
+        let (rows, cols) = self.shape();
+        if cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if gamma.shape() != (1, cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: gamma.shape(),
+                right: (1, cols),
+            });
+        }
+        if upstream.len() != self.len() {
+            return Err(TensorError::DataLength {
+                expected: self.len(),
+                got: upstream.len(),
+            });
+        }
+        finite("layernorm_epsilon", epsilon)?;
+        if epsilon < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "layernorm_epsilon",
+            });
+        }
+        let input = self.to_layout(Layout::RowMajor)?;
+        let gamma = gamma.to_layout(Layout::RowMajor)?;
+        validate_layer_norm_values(input.data(), None, cols, epsilon)?;
+        if upstream.iter().any(|x| !x.is_finite()) || gamma.data().iter().any(|x| !x.is_finite()) {
+            return Err(TensorError::InvalidValue {
+                label: "layernorm_backward_wide_operand",
+            });
+        }
+        let mut result = Vec::with_capacity(self.len());
+        for (row, seed) in input
+            .data()
+            .chunks_exact(cols)
+            .zip(upstream.chunks_exact(cols))
+        {
+            let stats = LayerNormRowStats::new(row, None, epsilon);
+            layer_norm_input_vjp_row(
+                row,
+                gamma.data(),
+                &stats,
+                |c| seed[c],
+                |value| {
+                    if !value.is_finite() {
+                        return Err(TensorError::InvalidValue {
+                            label: "layernorm_backward_wide_input_grad",
+                        });
+                    }
+                    result.push(value);
+                    Ok(())
+                },
+            )?;
+        }
+        Ok(result)
+    }
+
     /// First-order affine LayerNorm VJP: `(input, gamma, beta)` gradients.
     /// Affine gradients sum rows; any loss reduction belongs to the upstream seed.
     /// CPU intermediates remain f64 until each requested final gradient is stored.
@@ -401,6 +465,33 @@ fn default_layer_norm_resident_device() -> PureResult<st_backend_wgpu::resident_
     Ok(DEVICE.get().unwrap_or(&created).clone())
 }
 
+fn layer_norm_input_vjp_row(
+    row: &[f32],
+    gamma: &[f32],
+    stats: &LayerNormRowStats,
+    seed: impl Fn(usize) -> f64,
+    mut store: impl FnMut(f64) -> PureResult<()>,
+) -> PureResult<()> {
+    // Center before the reduction so constant weighted cotangents cancel.
+    let origin = seed(0) * f64::from(gamma[0]);
+    let weighted = |c: usize| seed(c) * f64::from(gamma[c]) - origin;
+    let mut mean = 0.0;
+    let mut projection = 0.0;
+    for (col, &value) in row.iter().enumerate() {
+        let g = weighted(col);
+        mean += g;
+        projection += g * stats.normalize_f64(value);
+    }
+    mean /= row.len() as f64;
+    projection /= row.len() as f64;
+    for (col, &value) in row.iter().enumerate() {
+        store(
+            (weighted(col) - mean - stats.normalize_f64(value) * projection) / stats.denominator,
+        )?;
+    }
+    Ok(())
+}
+
 fn layer_norm_vjp_cpu(
     input: &Tensor,
     gamma: &Tensor,
@@ -420,26 +511,16 @@ fn layer_norm_vjp_cpu(
     {
         let stats = LayerNormRowStats::new(row, None, epsilon);
         if let Some(dx) = &mut dx {
-            // Center the weighted seed before reduction: constant cotangents
-            // then cancel exactly, even when their f32 product would overflow.
-            let origin = f64::from(seed[0]) * f64::from(gamma.data()[0]);
-            let mut mean = 0.0;
-            let mut projection = 0.0;
-            for col in 0..cols {
-                let g = f64::from(seed[col]) * f64::from(gamma.data()[col]) - origin;
-                mean += g;
-                projection += g * stats.normalize_f64(row[col]);
-            }
-            mean /= cols as f64;
-            projection /= cols as f64;
-            for col in 0..cols {
-                let g = f64::from(seed[col]) * f64::from(gamma.data()[col]) - origin;
-                dx.push(finite(
-                    "layernorm_backward_input_grad",
-                    ((g - mean - stats.normalize_f64(row[col]) * projection) / stats.denominator)
-                        as f32,
-                )?);
-            }
+            layer_norm_input_vjp_row(
+                row,
+                gamma.data(),
+                &stats,
+                |c| f64::from(seed[c]),
+                |value| {
+                    dx.push(finite("layernorm_backward_input_grad", value as f32)?);
+                    Ok(())
+                },
+            )?;
         }
         for col in 0..cols {
             if let Some(dg) = &mut dg {
@@ -535,6 +616,29 @@ mod input_only_tests {
     use super::*;
 
     #[test]
+    fn wide_input_vjp_preserves_extreme_adjoint_and_validates_layout_contract() {
+        let input = Tensor::zeros(1, 4).unwrap();
+        let gamma = Tensor::from_vec(1, 4, vec![1.; 4]).unwrap();
+        let large = 2. * f64::from(f32::MAX);
+        let eps = 1e-5_f32;
+        let wide = input
+            .layer_norm_input_backward_wide(&gamma, &[large, 0., 0., 0.], eps)
+            .unwrap();
+        assert_eq!(wide[0], (0.75 * large) / f64::from(eps).sqrt());
+        assert!(wide[0] > f64::from(f32::MAX));
+        for &value in &wide[1..] {
+            assert_eq!(value, (-0.25 * large) / f64::from(eps).sqrt());
+        }
+        assert!(matches!(
+            input.layer_norm_input_backward_wide(&gamma, &[0.; 3], eps),
+            Err(TensorError::DataLength { .. })
+        ));
+        assert!(input
+            .layer_norm_input_backward_wide(&gamma, &[f64::NAN; 4], eps)
+            .is_err());
+    }
+
+    #[test]
     fn input_only_matches_full_layer_norm_vjp_without_affine_reductions() {
         let input = Tensor::from_vec(2, 3, vec![0.2, -0.7, 0.8, 1.2, 0.3, -0.1]).unwrap();
         let gamma = Tensor::from_vec(1, 3, vec![0.5, -0.8, 1.3]).unwrap();
@@ -547,6 +651,14 @@ mod input_only_tests {
                 .layer_norm_input_backward(&gamma, &upstream, 1e-5)
                 .unwrap(),
             full
+        );
+        let seed: Vec<_> = upstream.data().iter().map(|&v| f64::from(v)).collect();
+        let wide = input
+            .layer_norm_input_backward_wide(&gamma, &seed, 1e-5)
+            .unwrap();
+        assert_eq!(
+            wide.into_iter().map(|v| v as f32).collect::<Vec<_>>(),
+            full.data()
         );
         let invalid = Tensor::from_vec(2, 3, vec![f32::NAN; 6]).unwrap();
         assert!(input

@@ -1422,3 +1422,39 @@ pullback. This is independent of the model's training readout
 precision policy; it does not alter the ordinary CE gradient. These measures
 distinguish putting more probability on the pair from selecting the
 right member; neither is evidence of improved held-out generation.
+
+The same Rust projection supports [conditional answer retention](../native-conditional-answer-retention.md):
+optimize choice within a pair while protecting explicit training margins
+and the total candidate probability before each commit.
+
+## Guarded rank-one training and restart
+
+Use `rank_one_projection` on the frozen decoder. Supply one unit left
+factor as little-endian f64 bytes, with one coordinate per model feature.
+Each row's ordered pair is `[gold, alternative]`.
+
+```python
+projection = model.rank_one_projection("value", layer=0, left_f64le=axis_f64le)
+guard = projection.prepare_retention(guard_rows, guard_pairs, max_mean_mass_drop=0.01)
+report = projection.step(train_rows, train_pairs, length=0.04, retention=guard)
+payload, pin = projection.checkpoint_with_retention(guard)
+
+# Use the original frozen model and guard rows in their original order.
+projection, guard = model.restore_rank_one_with_retention(payload, pin, guard_rows, guard_pairs)
+```
+
+The update is applied only when `report["step"]["committed"]` is true.
+An optional `mass_inward_cosine` requires non-increasing mean negative log
+pair mass on the update batch. That is not a floor on mean pair probability.
+The separate fixed guard enforces its arithmetic-mean probability floor
+on the protection set when configured.
+`guard.minimum_log_mean_pair_mass` is the authoritative floor when the
+positive ordinary probability is too small to compare reliably.
+`guard.maximum_log_mean_outside_mass` is its complementary ceiling when the
+positive probability outside the pair is subnormal.
+
+For repeated prompts, call `prepare_prefix_bank(rows)` with distinct rows
+and then `step_indexed(bank, indices, pairs, ...)`. Repeated indices still
+count as separate rows. The bank caches computation strictly before the
+updated projection and must be rebuilt after restore. `score_pairs` and
+`prefill` read the current projection without updating it.
