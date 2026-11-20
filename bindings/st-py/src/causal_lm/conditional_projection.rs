@@ -1,4 +1,6 @@
 //! Bounded transport; the Rust projection owns all update and retention decisions.
+mod session;
+
 use super::*;
 use st_nn::causal_lm::{
     CausalLmConditionalAnswerConfig, CausalLmConditionalAnswerPrefixBank,
@@ -420,5 +422,6 @@ impl PyConditionalRetention {
 pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRankOne>()?;
     m.add_class::<PyConditionalBank>()?;
-    m.add_class::<PyConditionalRetention>()
+    m.add_class::<PyConditionalRetention>()?;
+    session::register(m)
 }

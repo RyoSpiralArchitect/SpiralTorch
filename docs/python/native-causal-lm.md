@@ -1458,3 +1458,40 @@ and then `step_indexed(bank, indices, pairs, ...)`. Repeated indices still
 count as separate rows. The bank caches computation strictly before the
 updated projection and must be rebuilt after restore. `score_pairs` and
 `prefill` read the current projection without updating it.
+
+### Repeat a fixed schedule
+
+```python
+from pathlib import Path
+from spiraltorch import NativeCausalLmConditionalAnswerSession
+
+# Each schedule entry is (indices_in_pool, ordered_answer_pairs).
+session = NativeCausalLmConditionalAnswerSession(
+    projection, guard, pool, schedule, length=0.04, epochs=3,
+)
+path = Path("conditional-slot-0001.bin")  # Must not exist.
+reports, pin = session.advance_to_checkpoint_new(1, path)
+session = NativeCausalLmConditionalAnswerSession.from_bytes(
+    model, path.read_bytes(), pin, pool, schedule, guard_rows, guard_pairs,
+)
+```
+
+The session owns a snapshot of the projection and guard, and pins the
+ordered schedule and repeat count. A refused proposal consumes one
+position without incrementing `accepted_updates`. Training errors do
+not consume it. File checkpoints are no-clobber, and an interval becomes
+live only after its file is published successfully. Keep the pin and
+original inputs separately: the checkpoint carries no token rows.
+If publication reports an installed file but incomplete durability,
+the exception includes its staged pin and the live position is unchanged.
+Do not overwrite the path; verify the file and explicitly reopen it if
+you choose to recover from it. Python builds the return tuple before
+publication, so failure to create the reports does not advance the
+session or create the checkpoint.
+
+New session checkpoints also record the starting projection separately
+from the guard baseline. A checkpoint with zero accepted updates must
+still have that starting projection. Older v3 checkpoints restore and
+re-save without this check; they did not record the starting projection.
+This consistency check does not replace a trusted pin or a replay of
+the training trajectory.

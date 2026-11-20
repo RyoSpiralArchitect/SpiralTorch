@@ -5,7 +5,13 @@ use super::{
 };
 
 mod checkpoint;
+mod session;
 pub use checkpoint::CausalLmConditionalRetentionRestore;
+pub use session::{
+    CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
+    CausalLmConditionalAnswerSessionStep, CausalLmPreparedConditionalAnswerInterval,
+    ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
+};
 
 struct Anchor {
     prefix: Tensor,
@@ -16,20 +22,22 @@ struct Anchor {
 
 /// Prepared protection roster for one projection trajectory. Initially
 /// correct rows are sign-protected; optional mass protection uses all rows.
+#[derive(Clone)]
 pub struct CausalLmConditionalMarginRetention {
-    anchors: Vec<Anchor>,
+    anchors: Arc<[Anchor]>,
     layer: usize,
     owner: String,
     baseline: Vec<f64>,
+    roster_steps: Arc<[usize]>,
     protected_count: usize,
     mass: Option<MassFloor>,
     initial_projection_id: String,
     initial_right: Vec<f64>,
     roster_id: String,
-    roster_steps: Vec<usize>,
     allowed_drop: Option<f64>,
 }
 
+#[derive(Clone)]
 struct MassFloor {
     baseline: f64,
     minimum: f64,
@@ -292,19 +300,37 @@ impl CausalLmConditionalMarginRetention {
         self.mass.as_ref().and_then(MassFloor::log_outside_limit)
     }
 
-    /// Check trajectory ownership and current work limits without reading training inputs.
-    pub fn verify_owner(&self, projection: &NativeCausalLmRankOneProjection) -> CausalLmResult<()> {
+    fn verify_projection_state(
+        &self,
+        projection: &NativeCausalLmRankOneProjection,
+    ) -> CausalLmResult<()> {
         if self.owner != projection.projection_id() {
             return Err(
                 "conditional margin retention belongs to a different projection state".into(),
             );
         }
+        Ok(())
+    }
+
+    /// Check trajectory ownership and the work limits for the active anchors.
+    pub fn verify_owner(&self, projection: &NativeCausalLmRankOneProjection) -> CausalLmResult<()> {
+        self.verify_projection_state(projection)?;
         // Projection identity binds the weights, not the receiving model's work budget.
-        for anchor in &self.anchors {
+        for anchor in self.anchors.iter() {
             projection
                 .current
                 .projection_work_dimensions(anchor.steps, projection.spec, false)?;
         }
+        Ok(())
+    }
+
+    /// Verify a matching projection and the full roster required to restore it.
+    pub fn verify_checkpoint_owner(
+        &self,
+        projection: &NativeCausalLmRankOneProjection,
+    ) -> CausalLmResult<()> {
+        self.verify_projection_state(projection)?;
+        projection.conditional_retention_input_count(&self.roster_steps, self.allowed_drop)?;
         Ok(())
     }
 
@@ -315,7 +341,7 @@ impl CausalLmConditionalMarginRetention {
         let mut minimum = f64::INFINITY;
         let mut nonpositive = 0;
         let mut mean_mass = PairMassMean::default();
-        for a in &self.anchors {
+        for a in self.anchors.iter() {
             let (v, loss) = evaluate(
                 &candidate.current,
                 &a.prefix,
@@ -448,15 +474,15 @@ impl NativeCausalLmRankOneProjection {
         }
         let owner = self.projection_id();
         Ok(CausalLmConditionalMarginRetention {
-            anchors,
+            anchors: anchors.into(),
             baseline,
+            roster_steps: prompts.iter().map(Vec::len).collect::<Vec<_>>().into(),
             layer,
             initial_projection_id: owner.clone(),
             owner,
             protected_count,
             initial_right: self.right().to_vec(),
             roster_id: checkpoint::roster_id(prompts, pairs),
-            roster_steps: prompts.iter().map(Vec::len).collect(),
             allowed_drop,
             mass: allowed_drop.map(|drop| MassFloor::from_baseline(mean_mass, prompts.len(), drop)),
         })

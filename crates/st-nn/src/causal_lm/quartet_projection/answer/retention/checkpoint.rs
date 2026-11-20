@@ -68,9 +68,9 @@ struct Record {
 /// Byte-admitted restore plan. It has performed no decoder work and
 /// still requires the caller's original, ordered training roster.
 pub struct CausalLmConditionalRetentionRestore {
-    source: NativeCausalLm,
+    pub(super) source: NativeCausalLm,
     plan: Record,
-    spec: CausalLmProjectionSpec,
+    pub(super) spec: CausalLmProjectionSpec,
     left: Vec<f64>,
     initial_right: Vec<f64>,
     right: Vec<f64>,
@@ -131,8 +131,7 @@ impl NativeCausalLmRankOneProjection {
         &self,
         guard: &CausalLmConditionalMarginRetention,
     ) -> CausalLmResult<(Vec<u8>, String)> {
-        guard.verify_owner(self)?;
-        self.conditional_retention_input_count(&guard.roster_steps, guard.allowed_drop)?;
+        guard.verify_checkpoint_owner(self)?;
         let payload = serde_json::to_vec(&Record {
             schema: SCHEMA.into(),
             layer: self.spec.layer,
@@ -219,6 +218,10 @@ impl NativeCausalLmRankOneProjection {
 }
 
 impl CausalLmConditionalRetentionRestore {
+    pub(super) fn projection_id(&self) -> &str {
+        &self.plan.projection_id
+    }
+
     pub fn roster_len(&self) -> usize {
         self.plan.baseline.margin_bits.len()
     }
