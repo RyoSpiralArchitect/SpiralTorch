@@ -109,10 +109,10 @@ def main(argv=None):
                 recipe = admit_paired_generation(base, prompts, *paired)
             except ValueError as exc:
                 parser.error(f"invalid paired greedy request: {exc}")
-            if not hasattr(base, "validate_answer_comparison_request"):
+            if not hasattr(base, "admit_answer_comparison_request"):
                 parser.error("paired scoring admission needs a matching SpiralTorch build")
             try:
-                base.validate_answer_comparison_request(*common, variants=len(names), **options)
+                base.admit_answer_comparison_request(*common, variants=len(names), **options)
             except ValueError as exc:
                 parser.error(f"invalid paired scoring request: {exc}")
             owners = [
@@ -198,21 +198,34 @@ def paired_generation(base, owners, names, ref, scored, prompts, documents, reci
     score_record = json.loads(scored.to_json())
     score_roster = score_record["snapshots"]
     expected_roster = [(i, owner.checkpoint_id, owner.projection_id) for i, owner in enumerate(owners, 1)]
-    score_source = score_record["comparison"]["comparison"]["evaluations"][0]
+    evaluations = score_record["comparison"]["comparison"]["evaluations"]
+    score_source = evaluations[0]
     identity = ("base_model_identity", "geometry_artifact_id", "lora_artifact_id", "readout_accumulator")
     if ([(entry["variant"], entry["checkpoint_id"], entry["projection_id"]) for entry in score_roster]
             != expected_roster or any(score_source.get(key) != getattr(base, key) for key in identity)):
         raise ValueError("paired greedy requires the scored source or snapshot roster to match generation")
     if len(names) != len(owners) + 1 or len(set(names)) != len(names) or not 0 <= ref < len(names):
         raise ValueError("paired greedy requires one distinct name per variant and a selected reference")
+    if len(scored) != len(prompts) or len(prompts) != len(documents):
+        raise ValueError("paired greedy expected one scored answer per document")
     limit, (stop,) = recipe["max_new_tokens"], recipe["eos_token_ids"]
+    scoring_config = score_source["config"]
+    context = scoring_config["context_length"]
+    labels = [[-100] * len(prompt) + doc[len(prompt):] for prompt, doc in zip(prompts, documents)]
+    if paired_prompts(documents, labels, len(names), context, limit, stop) != prompts:
+        raise ValueError("paired greedy prompts must be the exact document prefixes")
+    data_id = base.admit_answer_comparison_request(
+        documents, context, variants=len(names), labels=labels,
+        microbatch_windows=scoring_config["microbatch_windows"],
+    )
+    if any(result["data_id"] != data_id for result in evaluations):
+        raise ValueError("paired greedy requires the exact scored corpus identity")
     config = json.dumps(recipe)
     factories = [lambda prompt, policy: st.NativeCausalLmGenerator(base, prompt, policy)]
     factories.extend(owner.generator for owner in owners)
     rows = []
     joint = {name: {} for i, name in enumerate(names) if i != ref}
-    if len(scored) != len(prompts) or len(prompts) != len(documents):
-        raise ValueError("paired greedy expected one scored answer per document")
+    transitions = {name: {} for name in joint}
     for j, (prompt, doc) in enumerate(zip(prompts, documents)):
         target = doc[len(prompt):]
         answer = scored.answer(j)
@@ -238,9 +251,15 @@ def paired_generation(base, owners, names, ref, scored, prompts, documents, reci
             outcome = {-1: "lost", 0: "unchanged", 1: "gained"}[change]
             key = f"nll_{delta}_exact_{outcome}"
             counts[key] = counts.get(key, 0) + 1
+            if change == 0:
+                outcome = "both_correct" if reference["exact"] else "both_wrong"
+            transition = f"nll_{delta}_exact_{outcome}"
+            table = transitions[name]
+            table[transition] = table.get(transition, 0) + 1
         rows.append(dict(document=j, variants=results))
-    return dict(schema="spiraltorch.native_paired_greedy.v1", recipe=recipe, cases=rows,
-                joint_counts=joint, exact_metric="answer_token_ids_including_stop")
+    return dict(schema="spiraltorch.native_paired_greedy.v1", recipe=recipe, cases=rows, data_id=data_id,
+                joint_counts=joint, exact_transitions_by_nll=transitions,
+                exact_metric="answer_token_ids_including_stop")
 
 
 if __name__ == "__main__":

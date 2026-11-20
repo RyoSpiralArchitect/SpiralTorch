@@ -1143,7 +1143,7 @@ impl PyNativeCausalLm {
     }
 
     #[pyo3(signature=(token_documents, context_length, *, variants, microbatch_windows=None, labels=None))]
-    fn validate_answer_comparison_request(
+    fn admit_answer_comparison_request(
         &self,
         py: Python<'_>,
         token_documents: &Bound<'_, PyAny>,
@@ -1151,8 +1151,8 @@ impl PyNativeCausalLm {
         variants: &Bound<'_, PyAny>,
         microbatch_windows: Option<&Bound<'_, PyAny>>,
         labels: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<()> {
-        evaluation::validate_answer_comparison_request(
+    ) -> PyResult<String> {
+        evaluation::admit_answer_comparison_request(
             self,
             py,
             token_documents,

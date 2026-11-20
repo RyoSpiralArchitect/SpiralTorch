@@ -380,6 +380,35 @@ class AnswerComparisonTests(unittest.TestCase):
                     cli["paired_generation"](base, [owner], ["source", "candidate"], 0,
                                              scored, prompts, documents, recipe)
 
+    def test_paired_greedy_binds_exact_input_and_separates_unchanged_outcomes(self):
+        cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
+        source = st.NativeCausalLm.from_gpt2(*FIXTURE())
+        projection, guard, rows, pairs, schedule = FIXTURES["conditional_session_inputs"](source)
+        kind = st.NativeCausalLmConditionalAnswerSession
+        session = kind(projection, guard, rows, schedule, length=.01)
+        owner = kind.serving_from_checkpoint(source, *session.checkpoint_with_id())
+        documents = [[1, 6, 7, 8], [1, 6, 9, 8]]
+        labels = [[-100, -100, 7, 8], [-100, -100, 9, 8]]
+        prompts = cli["paired_prompts"](documents, labels, 2, 4, 2, 8)
+        recipe = cli["admit_paired_generation"](source, prompts, 2, 8)
+        scored = type(owner).evaluate_variants_by_answer(source, [owner], documents, 4, labels=labels)
+        names = ["source", "candidate"]
+
+        for actual_prompts, actual_docs, reason in (
+            (prompts, [[1, 6, 9, 8], [1, 6, 7, 8]], "scored corpus identity"),
+            ([[1, 5], prompts[1]], documents, "exact document prefixes"),
+        ):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, reason):
+                cli["paired_generation"](source, [owner], names, 0, scored,
+                                         actual_prompts, actual_docs, recipe)
+
+        result = cli["paired_generation"](source, [owner], names, 0, scored, prompts, documents, recipe)
+        self.assertEqual(result["data_id"], scored.evaluations[0].data_id)
+        self.assertEqual(result["joint_counts"], {"candidate": {"nll_equal_exact_unchanged": 2}})
+        self.assertEqual(result["exact_transitions_by_nll"], {"candidate": {
+            "nll_equal_exact_both_correct": 1, "nll_equal_exact_both_wrong": 1,
+        }})
+
     def test_paired_greedy_counts_exact_gain_and_loss_independently_of_nll(self):
         cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
         source = st.NativeCausalLm.from_gpt2(*FIXTURE())
@@ -408,10 +437,12 @@ class AnswerComparisonTests(unittest.TestCase):
         self.assertFalse(case["candidate"]["exact"])
         self.assertLess(case["candidate"]["nll"], case["source"]["nll"])
         self.assertEqual(loss["joint_counts"], {"candidate": {"nll_lower_exact_lost": 1}})
+        self.assertEqual(loss["exact_transitions_by_nll"], loss["joint_counts"])
 
         gain = cli["paired_generation"](source, [snapshot], names, 1, scored, prompts, documents, recipe)
         self.assertEqual(gain["cases"], loss["cases"])
         self.assertEqual(gain["joint_counts"], {"source": {"nll_higher_exact_gained": 1}})
+        self.assertEqual(gain["exact_transitions_by_nll"], gain["joint_counts"])
 
     def test_weightings_have_opposite_signs_even_when_top1_is_unchanged(self):
         _, _, bare, candidate = counterexample()

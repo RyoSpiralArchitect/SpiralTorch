@@ -354,7 +354,7 @@ fn policy(
     Ok(config)
 }
 
-pub(super) fn validate_answer_comparison_request(
+pub(super) fn admit_answer_comparison_request(
     model: &PyNativeCausalLm,
     py: Python<'_>,
     token_documents: &Bound<'_, PyAny>,
@@ -362,7 +362,7 @@ pub(super) fn validate_answer_comparison_request(
     variants: &Bound<'_, PyAny>,
     microbatch_windows: Option<&Bound<'_, PyAny>>,
     labels: Option<&Bound<'_, PyAny>>,
-) -> PyResult<()> {
+) -> PyResult<String> {
     let config = policy(context_length, microbatch_windows)?;
     let variants = dimension(variants)?;
     if !(2..=MAX_EVALUATION_VARIANTS).contains(&variants) {
@@ -379,7 +379,7 @@ pub(super) fn validate_answer_comparison_request(
     py.detach(|| {
         model
             .inner
-            .validate_answer_comparison_request(variants, &docs, labels.as_deref(), config)
+            .admit_answer_comparison_request(variants, &docs, labels.as_deref(), config)
     })
     .map_err(error)
 }

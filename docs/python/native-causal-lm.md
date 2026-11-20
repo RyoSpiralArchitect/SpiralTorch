@@ -1600,11 +1600,15 @@ route truncates the prompt. All variants get the same greedy full-prefix recipe.
 Before opening the conditional snapshots, Rust checks both the scoring
 request and each prompt length's generation budget against the frozen source.
 Actual scoring still validates the identities and budgets of the loaded variants.
-The decoder never gets the answer IDs or the answer's length.
+The case roster must match Rust's exact scored corpus ID, including its
+prefixes and labeled targets. The decoder never gets the answer IDs or the
+answer's length.
 
 The private output includes generated token IDs, termination, first-token and
 exact answer-plus-stop matches, and per-answer teacher-forced NLL. The joint
 counts distinguish lower NLL without an exact-match gain from gains and losses.
+`exact_transitions_by_nll` also separates unchanged correct answers from
+unchanged failures, without changing the original `joint_counts`.
 Exact match is on IDs, not decoded text or semantic equivalence. Only this mode
 has the smaller 2 MiB input, 128-case, 8,192-step and 131,072-prefix-token
 limits; it does not check that the inputs are fresh.

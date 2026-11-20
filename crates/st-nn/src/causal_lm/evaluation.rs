@@ -23,6 +23,29 @@ struct EvaluationAdmission {
     target_tokens: u64,
 }
 
+fn evaluation_data_id(
+    plan_id: &str,
+    documents: &[Vec<usize>],
+    labels: Option<&[Vec<i64>]>,
+) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"spiraltorch.native_causal_evaluation_data.v1\0");
+    hash.update(plan_id.as_bytes());
+    hash.update([u8::from(labels.is_some())]);
+    for (index, document) in documents.iter().enumerate() {
+        hash.update((document.len() as u64).to_le_bytes());
+        for &id in document {
+            hash.update((id as u64).to_le_bytes());
+        }
+        if let Some(labels) = labels {
+            for &label in &labels[index] {
+                hash.update(label.to_le_bytes());
+            }
+        }
+    }
+    format!("sha256:{:x}", hash.finalize())
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CausalLmEvaluationConfig {
@@ -229,28 +252,32 @@ impl NativeCausalLm {
             .ok_or_else(|| "missing evaluation result".into())
     }
 
-    /// Check a scored-answer request against its frozen source before loading
-    /// its snapshots. The actual comparison still checks each snapshot.
-    pub fn validate_answer_comparison_request(
+    /// Admit a scored-answer request against its frozen source and return the
+    /// exact labeled corpus ID. The actual comparison still checks each snapshot.
+    pub fn admit_answer_comparison_request(
         &self,
         variants: usize,
         documents: &[Vec<usize>],
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
-    ) -> CausalLmResult<()> {
+    ) -> CausalLmResult<String> {
         if !(2..=MAX_EVALUATION_VARIANTS).contains(&variants) {
             return Err("native comparison requires 2 to 16 variants".into());
         }
         let models = vec![self; variants];
         Self::comparison_prefix_layers(&models)?;
-        self.admit_evaluation(
+        let admitted = self.admit_evaluation(
             &models,
             documents,
             labels,
             config,
             Some(&mut answers::AnswerCollector::default()),
         )?;
-        Ok(())
+        Ok(evaluation_data_id(
+            &admitted.plan.plan_id()?,
+            documents,
+            labels,
+        ))
     }
 
     fn admit_evaluation(
@@ -334,21 +361,7 @@ impl NativeCausalLm {
         } = self.admit_evaluation(models, documents, labels, config, answers.as_deref_mut())?;
         let windows = plan.windows();
         let plan_id = plan.plan_id()?;
-        let mut hash = Sha256::new();
-        hash.update(b"spiraltorch.native_causal_evaluation_data.v1\0");
-        hash.update(plan_id.as_bytes());
-        hash.update([u8::from(labels.is_some())]);
-        for (index, document) in documents.iter().enumerate() {
-            hash.update((document.len() as u64).to_le_bytes());
-            for &id in document {
-                hash.update((id as u64).to_le_bytes());
-            }
-            if let Some(labels) = labels {
-                for &label in &labels[index] {
-                    hash.update(label.to_le_bytes());
-                }
-            }
-        }
+        let data_id = evaluation_data_id(&plan_id, documents, labels);
         let mut totals = vec![0.; models.len()];
         let mut microbatches = 0;
         for group in groups(windows, config.microbatch_windows) {
@@ -404,7 +417,6 @@ impl NativeCausalLm {
             }
             microbatches += 1;
         }
-        let data_id = format!("sha256:{:x}", hash.finalize());
         let skipped_windows = selected.iter().filter(|&&n| n == 0).count();
         let ignored_targets =
             windows.iter().map(|w| u64::from(w.length - 1)).sum::<u64>() - target_tokens;
