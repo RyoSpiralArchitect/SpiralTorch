@@ -17,6 +17,12 @@ pub use labeled_corpus::CausalLmLabeledAnswerCorpus;
 pub const MAX_EVALUATION_TOKENS: usize = 16_777_216;
 pub const MAX_EVALUATION_VARIANTS: usize = 16;
 
+struct EvaluationAdmission {
+    plan: CausalDocumentWindows,
+    selected: Vec<usize>,
+    target_tokens: u64,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CausalLmEvaluationConfig {
@@ -223,15 +229,38 @@ impl NativeCausalLm {
             .ok_or_else(|| "missing evaluation result".into())
     }
 
-    fn evaluate_corpus(
+    /// Check a scored-answer request against its frozen source before loading
+    /// its snapshots. The actual comparison still checks each snapshot.
+    pub fn validate_answer_comparison_request(
         &self,
-        models: &[&Self],
-        shared: usize,
+        variants: usize,
         documents: &[Vec<usize>],
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
-        mut answers: Option<&mut answers::AnswerCollector>,
-    ) -> CausalLmResult<Vec<CausalLmEvaluation>> {
+    ) -> CausalLmResult<()> {
+        if !(2..=MAX_EVALUATION_VARIANTS).contains(&variants) {
+            return Err("native comparison requires 2 to 16 variants".into());
+        }
+        let models = vec![self; variants];
+        Self::comparison_prefix_layers(&models)?;
+        self.admit_evaluation(
+            &models,
+            documents,
+            labels,
+            config,
+            Some(&mut answers::AnswerCollector::default()),
+        )?;
+        Ok(())
+    }
+
+    fn admit_evaluation(
+        &self,
+        models: &[&Self],
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+        answers: Option<&mut answers::AnswerCollector>,
+    ) -> CausalLmResult<EvaluationAdmission> {
         if documents.len() > MAX_DOCUMENTS {
             return Err("document count exceeds budget".into());
         }
@@ -271,7 +300,7 @@ impl NativeCausalLm {
         if target_tokens == 0 {
             return Err("evaluation has no selected targets".into());
         }
-        if let Some(detail) = answers.as_deref_mut() {
+        if let Some(detail) = answers {
             detail.prepare(&lengths, labels, models.len())?;
         }
         // A fixed owner's readout size is monotonic in selected rows, including masked tails.
@@ -282,6 +311,28 @@ impl NativeCausalLm {
         for model in models {
             model.logit_count(maximum_active)?;
         }
+        Ok(EvaluationAdmission {
+            plan,
+            selected,
+            target_tokens,
+        })
+    }
+
+    fn evaluate_corpus(
+        &self,
+        models: &[&Self],
+        shared: usize,
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+        mut answers: Option<&mut answers::AnswerCollector>,
+    ) -> CausalLmResult<Vec<CausalLmEvaluation>> {
+        let EvaluationAdmission {
+            plan,
+            selected,
+            target_tokens,
+        } = self.admit_evaluation(models, documents, labels, config, answers.as_deref_mut())?;
+        let windows = plan.windows();
         let plan_id = plan.plan_id()?;
         let mut hash = Sha256::new();
         hash.update(b"spiraltorch.native_causal_evaluation_data.v1\0");

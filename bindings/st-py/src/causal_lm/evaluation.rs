@@ -354,6 +354,36 @@ fn policy(
     Ok(config)
 }
 
+pub(super) fn validate_answer_comparison_request(
+    model: &PyNativeCausalLm,
+    py: Python<'_>,
+    token_documents: &Bound<'_, PyAny>,
+    context_length: &Bound<'_, PyAny>,
+    variants: &Bound<'_, PyAny>,
+    microbatch_windows: Option<&Bound<'_, PyAny>>,
+    labels: Option<&Bound<'_, PyAny>>,
+) -> PyResult<()> {
+    let config = policy(context_length, microbatch_windows)?;
+    let variants = dimension(variants)?;
+    if !(2..=MAX_EVALUATION_VARIANTS).contains(&variants) {
+        return Err(error("native comparison requires 2 to 16 variants"));
+    }
+    let limit = NativeCausalLm::evaluation_token_limit(variants).map_err(error)?;
+    let models = vec![&model.inner; variants];
+    let (docs, labels) = documents(token_documents, labels, limit, |lengths, has_labels| {
+        py.detach(|| {
+            NativeCausalLm::answer_comparison_plan(&models, lengths, config, has_labels).map(|_| ())
+        })
+        .map_err(error)
+    })?;
+    py.detach(|| {
+        model
+            .inner
+            .validate_answer_comparison_request(variants, &docs, labels.as_deref(), config)
+    })
+    .map_err(error)
+}
+
 pub(super) fn evaluate(
     model: &PyNativeCausalLm,
     py: Python<'_>,

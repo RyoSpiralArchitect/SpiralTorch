@@ -137,8 +137,9 @@ New sessions and direct retention restore still require an exact baseline.
 `prepare_resume` checks the outer and inner pins before model evaluation.
 Resume requires the exact original pool, ordered batches, and guard roster.
 `advance_to_checkpoint_new` stages at most 1,024 positions and only advances
-the live session after successful no-clobber publication. If a complete file
-was installed but cleanup or parent-directory sync failed, the live session
+the live session after successful no-clobber publication. On Unix the staged
+destination stays bound to the caller's admitted directory, not a later
+replacement. If a complete file was installed but publication did not finish, the live session
 remains at the previous position. The
 `ConditionalCheckpointPublicationUncertain` error carries the staged pin.
 Do not overwrite the path or trust its durability. If the file remains

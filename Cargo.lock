@@ -3246,6 +3246,7 @@ dependencies = [
  "rand",
  "rustc-hash",
  "rustfft",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

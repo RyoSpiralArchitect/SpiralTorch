@@ -20,6 +20,32 @@ fn pin(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+#[cfg(unix)]
+#[test]
+fn prepared_generation_rejects_a_replaced_destination_directory() {
+    use std::fs;
+
+    let mut live = NativeCausalLmGenerator::new(load(), vec![1, 2], policy()).unwrap();
+    live.step().unwrap();
+    let before = live.checkpoint_with_id().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let current = dir.path().join("current");
+    let rotated = dir.path().join("rotated");
+    fs::create_dir(&current).unwrap();
+    let staged = live
+        .prepare_checkpoint_interval(3, current.join("next.json"))
+        .unwrap();
+    fs::rename(&current, &rotated).unwrap();
+    fs::create_dir(&current).unwrap();
+    match staged.publish() {
+        Err(error) => assert!(error.to_string().contains("destination directory changed")),
+        Ok(_) => panic!("published into a replaced destination directory"),
+    }
+    assert_eq!(fs::read_dir(&current).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&rotated).unwrap().count(), 0);
+    assert_eq!(live.checkpoint_with_id().unwrap(), before);
+}
+
 #[test]
 fn generation_publication_failures_keep_the_live_seeded_cursor() {
     let model = load();
@@ -52,9 +78,9 @@ fn generation_publication_failures_keep_the_live_seeded_cursor() {
 
     let race = dir.path().join("race.json");
     let error = live
-        .advance_to_checkpoint_with(3, &race, |path, snapshot| {
-            std::fs::write(path, b"winner")?;
-            checkpoint::save_with_status(path, snapshot)
+        .advance_to_checkpoint_with(3, &race, |destination, snapshot| {
+            std::fs::write(destination.path(), b"winner")?;
+            checkpoint::save_with_status(destination, snapshot)
         })
         .unwrap_err();
     assert_eq!(
@@ -66,8 +92,8 @@ fn generation_publication_failures_keep_the_live_seeded_cursor() {
 
     let installed = dir.path().join("installed.json");
     let error = live
-        .advance_to_checkpoint_with(3, &installed, |path, snapshot| {
-            let pin = checkpoint::save_with_status(path, snapshot)?;
+        .advance_to_checkpoint_with(3, &installed, |destination, snapshot| {
+            let pin = checkpoint::save_with_status(destination, snapshot)?;
             Err(Box::new(
                 CheckpointPublicationUncertain::from_installed_file(
                     pin,

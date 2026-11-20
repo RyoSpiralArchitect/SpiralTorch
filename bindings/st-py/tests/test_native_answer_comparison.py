@@ -332,6 +332,34 @@ class AnswerComparisonTests(unittest.TestCase):
             self.assertIn("attention pairs", err.getvalue())
             self.assertFalse(output.exists())
 
+    def test_paired_cli_admits_scoring_before_opening_the_snapshot(self):
+        run = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))["main"]
+        config, weights = FIXTURE(raw_weights=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config.json").write_text(config, encoding="utf-8")
+            (root / "model.safetensors").write_bytes(weights)
+            out, corpus, checkpoint = (root / name for name in ("out", "eval.json", "absent.ck"))
+            for context, ids, reason in (
+                (10, [1, 3, 4], "evaluation context exceeds model position capacity"),
+                (8, [1, 99, 4], "invalid evaluation document token ID"),
+            ):
+                with self.subTest(context=context, ids=ids):
+                    raw = json.dumps(dict(token_documents=[ids], labels=[[-100, *ids[1:]]])).encode()
+                    corpus.write_bytes(raw)
+                    args = [
+                        "--model-dir", str(root), "--documents", str(corpus),
+                        "--documents-sha256", hashlib.sha256(raw).hexdigest(),
+                        "--conditional-variant", "after", str(checkpoint), "sha256:" + "0" * 64,
+                        "--context", str(context), "--reference", "source", "--output", str(out),
+                        "--paired-greedy", "2", "4",
+                    ]
+                    with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+                        run(args)
+                    self.assertIn("invalid paired scoring request", err.getvalue())
+                    self.assertIn(reason, err.getvalue())
+                    self.assertFalse(out.exists())
+
     def test_paired_greedy_rejects_a_different_scored_snapshot_or_source(self):
         cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
         source = st.NativeCausalLm.from_gpt2(*FIXTURE())

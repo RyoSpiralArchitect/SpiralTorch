@@ -1534,8 +1534,10 @@ Use the same projection when restoring, not the unprojected base.
 `advance_to_checkpoint_new` takes an absolute new-token position within
 the configured limit, may stop early at EOS, and never overwrites a file.
 It commits the staged cursor only after successful publication. A
-post-install cleanup or sync failure leaves the prior live cursor and
+post-install cleanup, sync, or destination-check failure leaves the prior live cursor and
 reports the staged pin; verify any file that remains before recovery.
+Use a stable caller-owned directory. On Unix, staging and publication use
+the admitted directory handle and do not write into a replacement directory.
 Python builds the returned reports, pin and tuple before publication.
 If this preparation fails, it does not create a file or advance generation.
 A save-only checkpoint also prepares its Python pin before publication.
@@ -1544,6 +1546,7 @@ The `native_geometry_generation.py` example accepts
 `--conditional-checkpoint` and `--conditional-checkpoint-id` for this path.
 Keep that serving pin separate from the generation pin passed to
 `--resume-id`. Supply the frozen model recipe, not the training roster.
+An explicit LoRA JSON must agree with any LoRA restored from a pinned training source.
 The example emits the native generation pin on stderr immediately after
 publication, so it stays available if writing reports fails. On resume,
 `result.json` distinguishes the exact admitted `resume_input_id` from
@@ -1594,8 +1597,9 @@ Each document must have a nonempty masked prompt followed by an unmasked answer
 whose labels match the input IDs exactly, including one final stop ID. The
 whole prompt and generation budget must fit a single scoring window so neither
 route truncates the prompt. All variants get the same greedy full-prefix recipe.
-Before scoring or generating, Rust checks the maximum generated prefix against
-the frozen source's native generation budget for every prompt length.
+Before opening the conditional snapshots, Rust checks both the scoring
+request and each prompt length's generation budget against the frozen source.
+Actual scoring still validates the identities and budgets of the loaded variants.
 The decoder never gets the answer IDs or the answer's length.
 
 The private output includes generated token IDs, termination, first-token and

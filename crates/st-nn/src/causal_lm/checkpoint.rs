@@ -1,9 +1,7 @@
 //! Shared no-clobber commit boundary; trainers still own their math and payloads.
 use super::CausalLmResult;
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use st_core::runtime::AtomicNewDestination;
+use std::{fs, io, path::Path};
 
 pub(super) const MAX_INTERVAL: u64 = 1024;
 
@@ -46,10 +44,10 @@ impl std::error::Error for CheckpointPublicationUncertain {
 }
 
 pub(super) fn save_with_status<P: AsRef<[u8]>>(
-    path: &Path,
+    destination: &AtomicNewDestination,
     (bytes, pin): (P, String),
 ) -> CausalLmResult<String> {
-    match st_core::runtime::atomic_create_new_with_status(path, bytes.as_ref()) {
+    match destination.publish(bytes.as_ref()) {
         Ok(()) => Ok(pin),
         Err(source) if source.destination_installed() => Err(Box::new(
             CheckpointPublicationUncertain::from_installed_file(pin, source.into_io_error()),
@@ -61,7 +59,7 @@ pub(super) fn save_with_status<P: AsRef<[u8]>>(
 /// A frozen checkpoint and destination. Dropping it does not publish a file.
 pub struct CausalLmPreparedCheckpointFile<P> {
     snapshot: (P, String),
-    path: PathBuf,
+    destination: AtomicNewDestination,
 }
 
 impl<P: AsRef<[u8]>> CausalLmPreparedCheckpointFile<P> {
@@ -69,9 +67,9 @@ impl<P: AsRef<[u8]>> CausalLmPreparedCheckpointFile<P> {
         path: &Path,
         snapshot: impl FnOnce() -> CausalLmResult<(P, String)>,
     ) -> CausalLmResult<Self> {
-        let path = admit_absolute(path)?;
+        let destination = AtomicNewDestination::admit(path)?;
         Ok(Self {
-            path,
+            destination,
             snapshot: snapshot()?,
         })
     }
@@ -87,9 +85,9 @@ impl<P: AsRef<[u8]>> CausalLmPreparedCheckpointFile<P> {
 
     fn publish_with(
         self,
-        publish: impl FnOnce(&Path, (P, String)) -> CausalLmResult<String>,
+        publish: impl FnOnce(&AtomicNewDestination, (P, String)) -> CausalLmResult<String>,
     ) -> CausalLmResult<String> {
-        publish(&self.path, self.snapshot)
+        publish(&self.destination, self.snapshot)
     }
 }
 
@@ -106,13 +104,16 @@ impl<'a, S, R, P: AsRef<[u8]>> PreparedCheckpoint<'a, S, R, P> {
         path: &Path,
         prepare: impl FnOnce(&S) -> CausalLmResult<(Option<S>, Vec<R>, (P, String))>,
     ) -> CausalLmResult<Self> {
-        let path = admit_absolute(path)?;
+        let destination = AtomicNewDestination::admit(path)?;
         let (next, reports, snapshot) = prepare(live)?;
         Ok(Self {
             live,
             next,
             reports,
-            file: CausalLmPreparedCheckpointFile { snapshot, path },
+            file: CausalLmPreparedCheckpointFile {
+                snapshot,
+                destination,
+            },
         })
     }
 
@@ -130,7 +131,7 @@ impl<'a, S, R, P: AsRef<[u8]>> PreparedCheckpoint<'a, S, R, P> {
 
     pub(super) fn publish_with(
         self,
-        publish: impl FnOnce(&Path, (P, String)) -> CausalLmResult<String>,
+        publish: impl FnOnce(&AtomicNewDestination, (P, String)) -> CausalLmResult<String>,
     ) -> CausalLmResult<(Vec<R>, String)> {
         let pin = self.file.publish_with(publish)?;
         if let Some(next) = self.next {
@@ -164,12 +165,6 @@ pub(super) fn admit_new(path: &Path) -> io::Result<()> {
         return Err(io::ErrorKind::NotADirectory.into());
     }
     Ok(())
-}
-
-fn admit_absolute(path: &Path) -> io::Result<PathBuf> {
-    let path = std::path::absolute(path)?;
-    admit_new(&path)?;
-    Ok(path)
 }
 
 pub(super) fn save<P: AsRef<[u8]>>(

@@ -401,7 +401,10 @@ impl NativeCausalLmGenerator {
         &mut self,
         stop: usize,
         path: &Path,
-        publish: impl FnOnce(&Path, (String, String)) -> CausalLmResult<String>,
+        publish: impl FnOnce(
+            &st_core::runtime::AtomicNewDestination,
+            (String, String),
+        ) -> CausalLmResult<String>,
     ) -> CausalLmResult<(Vec<CausalLmGenerationStep>, String)> {
         self.prepare_checkpoint_interval(stop, path)?
             .0

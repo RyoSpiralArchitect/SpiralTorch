@@ -109,6 +109,12 @@ def main(argv=None):
                 recipe = admit_paired_generation(base, prompts, *paired)
             except ValueError as exc:
                 parser.error(f"invalid paired greedy request: {exc}")
+            if not hasattr(base, "validate_answer_comparison_request"):
+                parser.error("paired scoring admission needs a matching SpiralTorch build")
+            try:
+                base.validate_answer_comparison_request(*common, variants=len(names), **options)
+            except ValueError as exc:
+                parser.error(f"invalid paired scoring request: {exc}")
             owners = [
                 decode(base, *read_pinned_projection(path, pin, session.MAX_CHECKPOINT_BYTES))
                 for _, path, pin in variants
