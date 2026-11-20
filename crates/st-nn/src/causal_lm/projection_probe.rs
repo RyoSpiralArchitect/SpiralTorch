@@ -3,6 +3,7 @@ use super::*;
 
 const MAX_COORDINATES: usize = 1 << 20;
 const MAX_REDUCTION_TERMS: usize = 1 << 26;
+const PROJECTION_ADJOINT_HEADROOM: f64 = (1u128 << 64) as f64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CausalLmProjectionSite {
@@ -103,6 +104,114 @@ pub(super) struct ProjectionLastRow {
     checkpoints: Vec<Tensor>,
     selected: Tensor,
     pub(super) logits: Tensor,
+}
+
+fn binary_exponent(value: f64) -> i32 {
+    let bits = value.to_bits();
+    let biased = (bits >> 52) as i32;
+    if biased == 0 {
+        (63 - bits.leading_zeros()) as i32 - 1074
+    } else {
+        biased - 1023
+    }
+}
+
+fn binary_scale(shift: i32) -> f64 {
+    debug_assert!((-1022..=1023).contains(&shift));
+    f64::from_bits(((shift + 1023) as u64) << 52)
+}
+
+fn projection_adjoint_scale(wide: &[f64]) -> CausalLmResult<f64> {
+    let (mut peak, mut smallest) = (0.0_f64, f64::INFINITY);
+    for magnitude in wide.iter().map(|x| x.abs()) {
+        if !magnitude.is_finite() {
+            return Err("nonfinite projection adjoint".into());
+        }
+        peak = peak.max(magnitude);
+        if magnitude > 0. {
+            smallest = smallest.min(magnitude);
+        }
+    }
+    if peak == 0. || (peak < PROJECTION_ADJOINT_HEADROOM && smallest as f32 != 0.) {
+        return Ok(1.);
+    }
+    let peak_exp = binary_exponent(peak);
+    let small_exp = binary_exponent(smallest);
+    // The largest component bounds overflow; the smallest nonzero component
+    // bounds underflow. Check the endpoint casts to handle rounding ties.
+    let mut lower = (peak_exp - 127).max(-1022);
+    if !((peak / binary_scale(lower)) as f32).is_finite() {
+        lower += 1;
+    }
+    let mut upper = (small_exp + 150).min(1023);
+    if (smallest / binary_scale(upper)) as f32 == 0. {
+        upper -= 1;
+    }
+    if lower > upper {
+        return Err("no common scale preserves the f32 decoder adjoint range".into());
+    }
+    // Give the decoder exponent headroom, preferring a normal smallest
+    // component when the range permits it.
+    let normal_upper = small_exp + 126;
+    if normal_upper >= lower {
+        upper = upper.min(normal_upper);
+    }
+    let preferred = if peak >= PROJECTION_ADJOINT_HEADROOM {
+        peak_exp - 32
+    } else {
+        0
+    };
+    Ok(binary_scale(preferred.clamp(lower, upper)))
+}
+
+fn pack_projection_adjoint(shape: (usize, usize), wide: &[f64]) -> CausalLmResult<(Tensor, f64)> {
+    let scale = projection_adjoint_scale(wide)?;
+    let narrowed = wide
+        .iter()
+        .copied()
+        .map(|value| {
+            let narrow = (value / scale) as f32;
+            if !narrow.is_finite() || (value != 0. && narrow == 0.) {
+                return Err("wide layernorm adjoint exceeds the f32 decoder range");
+            }
+            Ok(narrow)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((Tensor::from_vec(shape.0, shape.1, narrowed)?, scale))
+}
+
+#[cfg(test)]
+mod projection_adjoint_range_tests {
+    use super::*;
+
+    #[test]
+    fn a_common_scale_can_keep_a_wide_layernorm_cotangent_and_its_small_components() {
+        let large = 2f64.powi(178);
+        let small = 2f64.powi(-15);
+        let values = [large, -large, small, -small];
+        let (packed, scale) = pack_projection_adjoint((1, 4), &values).unwrap();
+        for (&component, value) in packed.data().iter().zip(values) {
+            assert!(component.is_normal());
+            assert_eq!(f64::from(component) * scale, value);
+        }
+    }
+
+    #[test]
+    fn scales_preserve_subnormal_endpoints_or_refuse_an_impossible_range() {
+        for values in [
+            [2f64.powi(177), 2f64.powi(-96)],
+            [f64::from_bits(2), f64::from_bits(1)],
+        ] {
+            let (packed, scale) = pack_projection_adjoint((1, 2), &values).unwrap();
+            for (&component, value) in packed.data().iter().zip(values) {
+                assert_ne!(component, 0.);
+                assert_eq!(f64::from(component) * scale, value);
+            }
+        }
+        let error =
+            pack_projection_adjoint((1, 2), &[2f64.powi(200), 2f64.powi(-100)]).unwrap_err();
+        assert!(error.to_string().contains("no common scale"));
+    }
 }
 
 struct Capture {
@@ -429,33 +538,16 @@ impl NativeCausalLm {
         } else {
             None
         };
-        let (d_selected, scale) = if let Some(normal) = normal {
+        let (d_selected, scale) = if let Some(normal) = normal.filter(|tensor| {
+            tensor
+                .data()
+                .iter()
+                .all(|value| f64::from(value.abs()) < PROJECTION_ADJOINT_HEADROOM)
+        }) {
             (normal, 1.)
         } else {
             let wide = selected.layer_norm_input_backward_wide(gain, upstream, epsilon)?;
-            let peak = wide.iter().map(|x| x.abs()).fold(0., f64::max);
-            let scale = if peak > f64::from(f32::MAX).sqrt() {
-                // The dense suffix still uses f32. Scale after the gains and
-                // the normalization pullback, not at the vocabulary readout.
-                let exponent = (peak.to_bits() >> 52) as i32 - 1023;
-                2f64.powi(exponent - 32)
-            } else {
-                1.
-            };
-            let narrowed = wide
-                .into_iter()
-                .map(|value| {
-                    let narrow = (value / scale) as f32;
-                    if !narrow.is_finite() || (value != 0. && narrow == 0.) {
-                        return Err("wide layernorm adjoint exceeds the f32 decoder range");
-                    }
-                    Ok(narrow)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            (
-                Tensor::from_vec(selected.shape().0, selected.shape().1, narrowed)?,
-                scale,
-            )
+            pack_projection_adjoint(selected.shape(), &wide)?
         };
         drop(selected);
         self.decoder_parameter_pullback_from_selected(

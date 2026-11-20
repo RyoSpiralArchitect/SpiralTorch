@@ -185,7 +185,11 @@ impl NativeCausalLmRankOneProjection {
             .fixed_left_wide_upstream(row, &upstream, self.spec, &self.left)?;
         // Apply the outside probability and restore the readout scale in f64.
         for g in &mut gradient {
-            *g *= terms.outside_share * readout_scale;
+            *g = if readout_scale < 1. {
+                (*g * readout_scale) * terms.outside_share
+            } else {
+                *g * (terms.outside_share * readout_scale)
+            };
         }
         Ok((terms.measure(), gradient))
     }
@@ -352,6 +356,48 @@ mod tests {
             "{} != {expected}",
             values[1]
         );
+    }
+
+    #[test]
+    fn finite_final_norm_adjoint_leaves_headroom_for_the_value_projection() {
+        let mut model = crate::causal_lm::tests::load_constant_hidden_with_extreme_readout();
+        let block = &mut model.blocks[1];
+        block.qkv.bias = Tensor::zeros(1, 12).unwrap();
+        block.first_norm.beta = Tensor::from_vec(1, 4, vec![1., 0., 0., 0.]).unwrap();
+        let mut output = vec![0.; 16];
+        output[0] = 2f32.powi(40);
+        let output = Tensor::from_vec(4, 4, output).unwrap();
+        block.output.weight =
+            PackedB::from_tensor_transpose(&output, st_tensor::Tile::col_major()).unwrap();
+        block.output.backward_weight = Default::default();
+        let mut head = vec![0.; 12];
+        head[5] = -1.;
+        head[8] = 2f32.powi(90);
+        head[9] = -104.;
+        let head = Tensor::from_vec(3, 4, head).unwrap();
+        model.head = PackedB::from_tensor_transpose(&head, st_tensor::Tile::col_major()).unwrap();
+        let projection = NativeCausalLmRankOneProjection::new(
+            &model,
+            1,
+            CausalLmProjectionSite::Value,
+            &[1., 0., 0., 0.],
+            &[0.; 4],
+        )
+        .unwrap();
+        let row = model.projection_last_row(&[0], projection.spec).unwrap();
+        assert_eq!(row.logits.data(), &[0., -1., -104.]);
+        let outside = (-104_f64).exp();
+        let share = outside / (1. + (-1_f64).exp() + outside);
+        let expected = 0.75 * 2f64.powi(130) * share / f64::from(model.config.norm_epsilon).sqrt();
+        let (_, values) = projection
+            .candidate_mass_measured_gradient(row, [0, 1])
+            .unwrap();
+        assert!(
+            (values[0] / expected - 1.).abs() < 2e-6,
+            "{} != {expected}",
+            values[0]
+        );
+        assert_eq!(&values[1..], &[0.; 3]);
     }
 
     #[test]
