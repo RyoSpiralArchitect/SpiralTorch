@@ -102,6 +102,214 @@ fn binding_observation_retains_saturated_mass_after_decoder_pullback() {
 }
 
 #[test]
+fn conditional_session_admits_even_the_unanchored_guard_rows() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let make = |m| {
+        NativeCausalLmRankOneProjection::new(m, 1, Output, &[0., 0.6, -0.8, 0.], &[0.; 4]).unwrap()
+    };
+    let wide = make(&m);
+    let rows = vec![vec![4, 8], vec![4, 8, 2, 1]];
+    let scored = wide.score_answer_pairs(&rows, &[[2, 7]; 2]).unwrap();
+    let pairs: Vec<_> = scored
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if (s.gold_minus_alternative > 0.) == (i == 0) {
+                [2, 7]
+            } else {
+                [7, 2]
+            }
+        })
+        .collect();
+    let guard = wide
+        .prepare_conditional_margin_retention(&rows, &pairs)
+        .unwrap();
+    assert_eq!(guard.protected_count(), 1);
+    assert!(guard.baseline_margins()[1] < 0.);
+    let mut limited = m.clone();
+    limited.limits.max_attention_pairs = limited.config.layers * limited.config.heads * 4;
+    let narrow = make(&limited);
+    assert_eq!(wide.projection_id(), narrow.projection_id());
+    assert!(narrow.score_answer_pairs(&rows[..1], &pairs[..1]).is_ok());
+    let policy = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 1,
+        mass_inward_cosine: None,
+    };
+    let result = NativeCausalLmConditionalAnswerSession::new(
+        &narrow,
+        &guard,
+        &rows[..1],
+        vec![(vec![0], pairs[..1].to_vec())],
+        policy,
+        8,
+    );
+    assert!(matches!(result, Err(e) if e.to_string().contains("attention pairs")));
+}
+
+#[test]
+fn conditional_session_pins_schedule_and_publishes_before_advancing() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let mut p = NativeCausalLmRankOneProjection::new(
+        &m,
+        1,
+        Output,
+        &[0., 0.6, -0.8, 0.],
+        &[0.01, -0.02, -0., 0.03],
+    )
+    .unwrap();
+    let original_id = p.projection_id();
+    let rows = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
+    let labels = p
+        .score_answer_pairs(&rows, &[[2, 7]; 3])
+        .unwrap()
+        .into_iter()
+        .map(|s| {
+            if s.gold_minus_alternative > 0. {
+                [2, 7]
+            } else {
+                [7, 2]
+            }
+        })
+        .collect::<Vec<_>>();
+    let schedule = vec![
+        (vec![0, 1, 2], labels.clone()),
+        (
+            vec![2, 0, 1, 1],
+            vec![
+                labels[2],
+                labels[0],
+                labels[1],
+                [labels[1][1], labels[1][0]],
+            ],
+        ),
+    ];
+    let mut guard = p
+        .prepare_conditional_margin_and_mass_retention(&rows, &labels, 0.02)
+        .unwrap();
+    let policy = CausalLmConditionalAnswerConfig {
+        length: 0.01,
+        max_trials: 2,
+        mass_inward_cosine: None,
+    };
+    let mut session = NativeCausalLmConditionalAnswerSession::new(
+        &p,
+        &guard,
+        &rows,
+        schedule.clone(),
+        policy,
+        44,
+    )
+    .unwrap();
+    let mut invalid = schedule.clone();
+    invalid[1].0[0] = rows.len();
+    assert!(
+        NativeCausalLmConditionalAnswerSession::new(&p, &guard, &rows, invalid, policy, 44,)
+            .is_err()
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("slot1.ck");
+    let before = session.checkpoint().unwrap();
+    assert_eq!(session.save_checkpoint_new(&path).unwrap(), before.1);
+    assert!(session.advance_to_checkpoint_new(1, &path).is_err());
+    assert_eq!(session.checkpoint().unwrap(), before);
+    assert_eq!(std::fs::read(path).unwrap(), before.0);
+
+    let abandoned = temp.path().join("abandoned.ck");
+    let staged = session.prepare_checkpoint_interval(1, &abandoned).unwrap();
+    assert!(staged.reports()[0].report.step.committed);
+    assert!(!abandoned.exists());
+    drop(staged);
+    assert_eq!(session.checkpoint().unwrap(), before);
+    assert!(!abandoned.exists());
+
+    let collision = temp.path().join("collision.ck");
+    let staged = session.prepare_checkpoint_interval(1, &collision).unwrap();
+    std::fs::write(&collision, b"prior bytes").unwrap();
+    assert!(staged.publish().is_err());
+    assert_eq!(session.checkpoint().unwrap(), before);
+    assert_eq!(std::fs::read(collision).unwrap(), b"prior bytes");
+
+    let path = temp.path().join("slot2.ck");
+    let (reports, digest) = session.advance_to_checkpoint_new(1, &path).unwrap();
+    let payload = std::fs::read(path).unwrap();
+    assert_eq!(
+        session.checkpoint().unwrap(),
+        (payload.clone(), digest.clone())
+    );
+    assert_eq!((session.position(), session.accepted_updates()), (1, 1));
+    assert_eq!(
+        reports[0].projection_id,
+        session.projection().projection_id()
+    );
+    let prep =
+        || NativeCausalLmConditionalAnswerSession::prepare_resume(&m, &payload, &digest).unwrap();
+    let mut swapped = schedule.clone();
+    swapped.swap(0, 1);
+    assert!(prep().resume(&rows, swapped, &rows, &labels).is_err());
+    let mut changed_pairs = schedule.clone();
+    changed_pairs[1].1[3].reverse();
+    assert!(prep().resume(&rows, changed_pairs, &rows, &labels).is_err());
+    let mut restored = prep()
+        .resume(&rows, schedule.clone(), &rows, &labels)
+        .unwrap();
+    assert_eq!(
+        restored.checkpoint().unwrap(),
+        session.checkpoint().unwrap()
+    );
+
+    let bank = p.prepare_conditional_answer_prefix_bank(&rows, 44).unwrap();
+    for (i, (indices, pairs)) in schedule.iter().enumerate() {
+        let manual = p
+            .step_indexed_conditional_answers_retaining(&bank, indices, pairs, policy, &mut guard)
+            .unwrap();
+        let slot = if i == 0 {
+            reports[0].clone()
+        } else {
+            let next = session.step().unwrap().unwrap();
+            assert_eq!(
+                serde_json::to_vec(&next).unwrap(),
+                serde_json::to_vec(&restored.step().unwrap().unwrap()).unwrap()
+            );
+            next
+        };
+        assert_eq!(
+            serde_json::to_vec(&manual).unwrap(),
+            serde_json::to_vec(&slot.report).unwrap()
+        );
+        assert_eq!(slot.projection_id, p.projection_id());
+    }
+    assert_eq!(
+        restored.checkpoint().unwrap(),
+        session.checkpoint().unwrap()
+    );
+    assert_eq!(
+        p.last_logits(&rows[0]).unwrap(),
+        restored.projection().last_logits(&rows[0]).unwrap()
+    );
+    assert!(restored.step().unwrap().is_none());
+
+    // A new session can start from a projection different from the guard baseline.
+    assert_ne!(p.projection_id(), original_id);
+    let restarted = NativeCausalLmConditionalAnswerSession::new(
+        &p,
+        &guard,
+        &rows,
+        schedule.clone(),
+        policy,
+        44,
+    )
+    .unwrap();
+    let (raw, pin) = restarted.checkpoint().unwrap();
+    let recovered = NativeCausalLmConditionalAnswerSession::prepare_resume(&m, &raw, &pin)
+        .unwrap()
+        .resume(&rows, schedule, &rows, &labels)
+        .unwrap();
+    assert_eq!(recovered.accepted_updates(), 0);
+    assert_eq!(recovered.projection().projection_id(), p.projection_id());
+}
+
+#[test]
 fn prepared_conditional_batch_matches_guarded_and_raw_training_across_updates() {
     let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
     let prompts = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
@@ -401,6 +609,23 @@ fn retention_rejects_a_real_flip_and_refuses_stale_protection_state() {
             indexed.checkpoint_with_retention(&indexed_guard).unwrap(),
             before
         );
+        let mut session = NativeCausalLmConditionalAnswerSession::new(
+            &a,
+            &indexed_guard,
+            &prompts,
+            vec![(vec![0], rival_objective.to_vec())],
+            CausalLmConditionalAnswerConfig {
+                max_trials: 1,
+                ..cfg
+            },
+            16,
+        )
+        .unwrap();
+        let slot = session.step().unwrap().unwrap();
+        assert!(!slot.report.step.committed);
+        assert_eq!((slot.position, slot.accepted_updates), (1, 0));
+        assert_eq!(session.projection().projection_id(), a.projection_id());
+        assert!(session.step().unwrap().is_none());
         assert!(plain
             .step_conditional_answers_retaining(&prompts, &rival_objective, cfg, &mut stale)
             .is_err());

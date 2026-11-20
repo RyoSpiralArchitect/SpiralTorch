@@ -65,9 +65,20 @@ pub(super) fn advance_new<S: Clone, R, P: AsRef<[u8]>>(
     step: impl Fn(&mut S) -> CausalLmResult<Option<R>>,
     snapshot: impl FnOnce(&S) -> CausalLmResult<(P, String)>,
 ) -> CausalLmResult<(Vec<R>, String)> {
+    advance_new_with(state, count, path, step, snapshot, save)
+}
+
+pub(super) fn advance_new_with<S: Clone, R, P: AsRef<[u8]>>(
+    state: &mut S,
+    count: usize,
+    path: &Path,
+    step: impl Fn(&mut S) -> CausalLmResult<Option<R>>,
+    snapshot: impl FnOnce(&S) -> CausalLmResult<(P, String)>,
+    publish: impl FnOnce(&Path, (P, String)) -> CausalLmResult<String>,
+) -> CausalLmResult<(Vec<R>, String)> {
     admit_new(path)?;
     transaction(state, |next| {
         let reports = steps(next, count, step)?;
-        Ok((reports, save(path, snapshot(next)?)?))
+        Ok((reports, publish(path, snapshot(next)?)?))
     })
 }

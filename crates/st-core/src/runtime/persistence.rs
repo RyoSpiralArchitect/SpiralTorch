@@ -11,6 +11,45 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 
+/// An atomic publication error with the visibility of the new destination.
+#[derive(Debug)]
+pub struct AtomicPublishError {
+    source: io::Error,
+    destination_installed: bool,
+}
+
+impl AtomicPublishError {
+    /// The complete file was installed, but cleanup or directory sync failed.
+    pub fn destination_installed(&self) -> bool {
+        self.destination_installed
+    }
+
+    pub fn into_io_error(self) -> io::Error {
+        self.source
+    }
+}
+
+impl From<io::Error> for AtomicPublishError {
+    fn from(source: io::Error) -> Self {
+        Self {
+            source,
+            destination_installed: false,
+        }
+    }
+}
+
+impl std::fmt::Display for AtomicPublishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(f)
+    }
+}
+
+impl std::error::Error for AtomicPublishError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 const MAX_TEMPFILE_ATTEMPTS: u32 = 128;
 
 /// Write a complete byte snapshot and atomically replace `path`.
@@ -29,11 +68,27 @@ pub fn atomic_create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     publish_with(path, true, |f| f.write_all(bytes))
 }
 
+/// Publish without replacing an existing file, distinguishing post-install errors.
+pub fn atomic_create_new_with_status(path: &Path, bytes: &[u8]) -> Result<(), AtomicPublishError> {
+    publish_detailed(path, true, |f| f.write_all(bytes), sync_parent)
+}
+
 fn publish_with(
     path: &Path,
     create_only: bool,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> io::Result<()> {
+    publish_detailed(path, create_only, write, sync_parent)
+        .map_err(AtomicPublishError::into_io_error)
+}
+
+fn publish_detailed(
+    path: &Path,
+    create_only: bool,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+    finish: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<(), AtomicPublishError> {
+    let path = std::path::absolute(path)?;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -58,32 +113,84 @@ fn publish_with(
                 last_collision = Some(source);
                 continue;
             }
-            Err(source) => return Err(source),
+            Err(source) => return Err(source.into()),
         };
+        let mut destination_installed = false;
+        let mut owns_temporary_name = true;
         let result = (|| {
             write(&mut file)?;
             file.flush()?;
             file.sync_all()?;
+            #[cfg(not(unix))]
             close_before_replace(file);
-            install(&temporary, path, create_only)?;
+            install(&temporary, &path, create_only)?;
+            destination_installed = true;
             #[cfg(unix)]
-            File::open(parent)?.sync_all()?;
+            if !create_only {
+                // A rename onto a hard link to the same inode is a no-op.
+                // Keep the original descriptor alive while checking the name.
+                owns_temporary_name = false;
+                owns_temporary_name = staging_name_refers_to_file(&temporary, &file)?;
+            }
+            #[cfg(not(unix))]
+            {
+                owns_temporary_name = cfg!(not(windows)) && create_only;
+            }
+            if owns_temporary_name {
+                fs::remove_file(&temporary)?;
+            }
+            // Rename or unlink released the name; another publisher may reuse it.
+            owns_temporary_name = false;
+            #[cfg(unix)]
+            drop(file);
+            finish(parent)?;
             Ok::<(), io::Error>(())
         })();
         if let Err(source) = result {
-            let _ = fs::remove_file(&temporary);
-            return Err(source);
+            if owns_temporary_name {
+                let _ = fs::remove_file(&temporary);
+            }
+            return Err(AtomicPublishError {
+                source,
+                destination_installed,
+            });
         }
         return Ok(());
     }
-    Err(last_collision.unwrap_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "could not reserve an atomic runtime-state file",
-        )
-    }))
+    Err(last_collision
+        .unwrap_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "could not reserve an atomic runtime-state file",
+            )
+        })
+        .into())
 }
 
+fn sync_parent(parent: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return File::open(parent)?.sync_all();
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn staging_name_refers_to_file(path: &Path, file: &File) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    match fs::symlink_metadata(path) {
+        Ok(named) => {
+            let staged = file.metadata()?;
+            Ok((named.dev(), named.ino()) == (staged.dev(), staged.ino()))
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(source),
+    }
+}
+
+#[cfg(not(unix))]
 fn close_before_replace(file: fs::File) {
     #[cfg(not(target_arch = "wasm32"))]
     drop(file);
@@ -94,8 +201,7 @@ fn close_before_replace(file: fs::File) {
 #[cfg(not(windows))]
 fn install(source: &Path, destination: &Path, create_only: bool) -> io::Result<()> {
     if create_only {
-        fs::hard_link(source, destination)?;
-        fs::remove_file(source)
+        fs::hard_link(source, destination)
     } else {
         fs::rename(source, destination)
     }
@@ -142,21 +248,205 @@ fn install(source: &Path, destination: &Path, create_only: bool) -> io::Result<(
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn publication_reuses_the_staging_descriptor_slot_for_parent_sync() {
+        const CHILD: &str = "ST_PERSISTENCE_ONE_DESCRIPTOR_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let child = std::process::Command::new("/bin/sh")
+                .args(["-c", "ulimit -n 32 && exec \"$@\"", "persistence-test"])
+                .arg(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    concat!(
+                        module_path!(),
+                        "::publication_reuses_the_staging_descriptor_slot_for_parent_sync"
+                    )
+                    .trim_start_matches("st_core::"),
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}",
+                String::from_utf8_lossy(&child.stdout)
+            );
+            assert!(String::from_utf8_lossy(&child.stdout).contains("1 passed"));
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("checkpoint");
+        let mut occupied = Vec::new();
+        while let Ok(file) = File::open("/dev/null") {
+            occupied.push(file);
+            assert!(
+                occupied.len() <= 32,
+                "child descriptor limit was not applied"
+            );
+        }
+        drop(occupied.pop().expect("at least one slot was available"));
+        let result = atomic_create_new_with_status(&destination, b"complete");
+        drop(occupied);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(fs::read(destination).unwrap(), b"complete");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_publication_is_not_redirected_by_a_working_directory_change() {
+        const CHILD: &str = "ST_PERSISTENCE_CHANGE_DIRECTORY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    concat!(
+                        module_path!(),
+                        "::relative_publication_is_not_redirected_by_a_working_directory_change"
+                    )
+                    .trim_start_matches("st_core::"),
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}",
+                String::from_utf8_lossy(&child.stdout)
+            );
+            assert!(String::from_utf8_lossy(&child.stdout).contains("1 passed"));
+            return;
+        }
+        let initial_directory = std::env::current_dir().unwrap();
+        let original = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(original.path()).unwrap();
+        let result = publish_detailed(
+            Path::new("checkpoint"),
+            true,
+            |file| {
+                file.write_all(b"complete")?;
+                std::env::set_current_dir(elsewhere.path())
+            },
+            sync_parent,
+        );
+        std::env::set_current_dir(initial_directory).unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            fs::read(original.path().join("checkpoint")).unwrap(),
+            b"complete"
+        );
+        assert_eq!(fs::read_dir(original.path()).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(elsewhere.path()).unwrap().count(), 0);
+    }
+
     #[test]
     fn partial_write_never_publishes_a_checkpoint_or_changes_its_predecessor() {
         let dir = tempfile::tempdir().unwrap();
         let previous = dir.path().join("previous.json");
         let failed = dir.path().join("next.json");
         atomic_create_new(&previous, b"retained").unwrap();
-        let result = publish_with(&failed, true, |f| {
-            f.write_all(b"partial")?;
-            assert!(!failed.exists());
-            Err(io::Error::other("injected write failure"))
-        });
-        assert!(result.is_err());
+        let result = publish_detailed(
+            &failed,
+            true,
+            |f| {
+                f.write_all(b"partial")?;
+                assert!(!failed.exists());
+                Err(io::Error::other("injected write failure"))
+            },
+            sync_parent,
+        );
+        assert!(!result.unwrap_err().destination_installed());
         assert!(!failed.exists());
         assert_eq!(fs::read(previous).unwrap(), b"retained");
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failure_after_install_reports_visibility_without_clobbering() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("next.bin");
+        let error = publish_detailed(
+            &dest,
+            true,
+            |f| f.write_all(b"complete"),
+            |_| Err(io::Error::other("injected directory sync failure")),
+        )
+        .unwrap_err();
+        assert!(error.destination_installed());
+        assert_eq!(fs::read(&dest).unwrap(), b"complete");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        let collision = atomic_create_new_with_status(&dest, b"other").unwrap_err();
+        assert!(!collision.destination_installed());
+        assert_eq!(fs::read(&dest).unwrap(), b"complete");
+    }
+
+    #[test]
+    fn post_install_sync_failure_keeps_the_next_writers_temporary_file() {
+        for create_only in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("checkpoint");
+            if !create_only {
+                fs::write(&dest, b"previous").unwrap();
+            }
+            let temporary = dir
+                .path()
+                .join(format!(".checkpoint.{}.0.tmp", std::process::id()));
+            let error = publish_detailed(
+                &dest,
+                create_only,
+                |f| f.write_all(b"installed"),
+                |_| {
+                    // The first publisher has released this name before syncing.
+                    OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(&temporary)
+                        .unwrap()
+                        .write_all(b"next writer")
+                        .unwrap();
+                    Err(io::Error::other("injected directory sync failure"))
+                },
+            )
+            .unwrap_err();
+            assert!(error.destination_installed());
+            assert_eq!(fs::read(&dest).unwrap(), b"installed");
+            assert_eq!(fs::read(&temporary).unwrap(), b"next writer");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_cleans_up_a_staging_name_left_by_same_inode_rename() {
+        for fail_sync in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("checkpoint");
+            let temporary = dir
+                .path()
+                .join(format!(".checkpoint.{}.0.tmp", std::process::id()));
+            let result = publish_detailed(
+                &dest,
+                false,
+                |f| {
+                    f.write_all(b"installed")?;
+                    fs::hard_link(&temporary, &dest)
+                },
+                |_| {
+                    if fail_sync {
+                        Err(io::Error::other("injected directory sync failure"))
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            if fail_sync {
+                assert!(result.unwrap_err().destination_installed());
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(fs::read(&dest).unwrap(), b"installed");
+            assert!(!temporary.exists());
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
