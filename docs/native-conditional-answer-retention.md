@@ -128,10 +128,11 @@ checkpoint embeds the pinned v3 projection checkpoint and adds the schedule
 digest, policy, repeat count, cursor, accepted-update count, and starting
 projection. Legacy v3 and v4 session checkpoints lack the starting projection
 but are still readable.
-Older v3/v4 sessions may contain a retention record without the log
-outside-mass ceiling at subnormal limits. Only legacy session resume
-recomputes a missing ceiling, requires every recorded guard field to
-reproduce and checks the saved endpoint using the recomputed guard.
+Older v3/v4 sessions may omit a subnormal log outside-mass ceiling or
+encode the pair-mass floor using historical log subtraction. Only legacy
+session resume accepts these encodings. It reproduces the historical
+pair floor from the original roster and allowance, matches the remaining
+baseline fields, and tests the saved endpoint using the current guard.
 New sessions and direct retention restore still require an exact baseline.
 `prepare_resume` checks the outer and inner pins before model evaluation.
 Resume requires the exact original pool, ordered batches, and guard roster.

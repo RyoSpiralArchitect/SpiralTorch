@@ -45,6 +45,7 @@ struct MassFloor {
     minimum: f64,
     maximum_outside: f64,
     minimum_log_pair: Option<f64>,
+    legacy_minimum_log_pair: Option<f64>,
     maximum_log_outside: Option<f64>,
 }
 
@@ -76,8 +77,15 @@ impl PairMassMean {
 
 impl MassFloor {
     fn log_pair_limit(&self) -> Option<f64> {
-        self.minimum_log_pair
-            .filter(|&floor| floor < f64::MIN_POSITIVE.ln())
+        Self::stored_log_pair(self.minimum_log_pair)
+    }
+
+    fn legacy_log_pair_limit(&self) -> Option<f64> {
+        Self::stored_log_pair(self.legacy_minimum_log_pair)
+    }
+
+    fn stored_log_pair(value: Option<f64>) -> Option<f64> {
+        value.filter(|&floor| floor < f64::MIN_POSITIVE.ln())
     }
 
     fn log_outside_limit(&self) -> Option<f64> {
@@ -100,6 +108,13 @@ impl MassFloor {
                 .is_some_and(|(mean, allowance)| {
                     (mean - allowance).abs() <= f64::EPSILON * (mean.abs() + allowance.abs())
                 });
+        let legacy_minimum_log_pair = log_mean_pair.and_then(|log_mean| match log_drop {
+            None => Some(log_mean),
+            Some(log_drop) => {
+                let log_ratio = log_drop - log_mean;
+                (log_ratio < 0.).then(|| log_mean + (-log_ratio.exp_m1()).ln())
+            }
+        });
         let minimum_log_pair = if minimum.is_subnormal()
             && drop > 0.
             && drop >= 0.5 * baseline
@@ -109,19 +124,14 @@ impl MassFloor {
             // log rounding can erase their residual.
             Some(minimum.ln())
         } else {
-            log_mean_pair.and_then(|log_mean| match log_drop {
-                None => Some(log_mean),
-                Some(log_drop) => {
-                    let log_ratio = log_drop - log_mean;
-                    (log_ratio < 0.).then(|| log_mean + (-log_ratio.exp_m1()).ln())
-                }
-            })
+            legacy_minimum_log_pair
         };
         Self {
             baseline,
             minimum,
             maximum_outside: (mass.outside.mean(rows as u64) + drop).min(1.),
             minimum_log_pair,
+            legacy_minimum_log_pair,
             maximum_log_outside,
         }
     }
@@ -606,6 +616,8 @@ mod tests {
         let drop = f64::from_bits(baseline.to_bits() - 1);
         let floor = MassFloor::from_baseline(mass_for(&before), 1, drop);
         assert!(floor.minimum > 0. && floor.minimum.is_subnormal());
+        assert_eq!(floor.legacy_log_pair_limit(), None);
+        assert_eq!(floor.log_pair_limit(), Some(floor.minimum.ln()));
         assert!(floor.check(mass_for(&before), 1).permits_commit());
 
         let below = floor.check(mass_for(&[[0., -2., 736.24927]]), 1);
