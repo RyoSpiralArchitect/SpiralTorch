@@ -88,6 +88,7 @@ fn publish_detailed(
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
     finish: impl FnOnce(&Path) -> io::Result<()>,
 ) -> Result<(), AtomicPublishError> {
+    let path = std::path::absolute(path)?;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -122,7 +123,7 @@ fn publish_detailed(
             file.sync_all()?;
             #[cfg(not(unix))]
             close_before_replace(file);
-            install(&temporary, path, create_only)?;
+            install(&temporary, &path, create_only)?;
             destination_installed = true;
             #[cfg(unix)]
             if !create_only {
@@ -140,6 +141,8 @@ fn publish_detailed(
             }
             // Rename or unlink released the name; another publisher may reuse it.
             owns_temporary_name = false;
+            #[cfg(unix)]
+            drop(file);
             finish(parent)?;
             Ok::<(), io::Error>(())
         })();
@@ -244,6 +247,98 @@ fn install(source: &Path, destination: &Path, create_only: bool) -> io::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn publication_reuses_the_staging_descriptor_slot_for_parent_sync() {
+        const CHILD: &str = "ST_PERSISTENCE_ONE_DESCRIPTOR_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let child = std::process::Command::new("/bin/sh")
+                .args(["-c", "ulimit -n 32 && exec \"$@\"", "persistence-test"])
+                .arg(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    concat!(
+                        module_path!(),
+                        "::publication_reuses_the_staging_descriptor_slot_for_parent_sync"
+                    )
+                    .trim_start_matches("st_core::"),
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}",
+                String::from_utf8_lossy(&child.stdout)
+            );
+            assert!(String::from_utf8_lossy(&child.stdout).contains("1 passed"));
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("checkpoint");
+        let mut occupied = Vec::new();
+        while let Ok(file) = File::open("/dev/null") {
+            occupied.push(file);
+            assert!(
+                occupied.len() <= 32,
+                "child descriptor limit was not applied"
+            );
+        }
+        drop(occupied.pop().expect("at least one slot was available"));
+        let result = atomic_create_new_with_status(&destination, b"complete");
+        drop(occupied);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(fs::read(destination).unwrap(), b"complete");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_publication_is_not_redirected_by_a_working_directory_change() {
+        const CHILD: &str = "ST_PERSISTENCE_CHANGE_DIRECTORY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    concat!(
+                        module_path!(),
+                        "::relative_publication_is_not_redirected_by_a_working_directory_change"
+                    )
+                    .trim_start_matches("st_core::"),
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}",
+                String::from_utf8_lossy(&child.stdout)
+            );
+            assert!(String::from_utf8_lossy(&child.stdout).contains("1 passed"));
+            return;
+        }
+        let initial_directory = std::env::current_dir().unwrap();
+        let original = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(original.path()).unwrap();
+        let result = publish_detailed(
+            Path::new("checkpoint"),
+            true,
+            |file| {
+                file.write_all(b"complete")?;
+                std::env::set_current_dir(elsewhere.path())
+            },
+            sync_parent,
+        );
+        std::env::set_current_dir(initial_directory).unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            fs::read(original.path().join("checkpoint")).unwrap(),
+            b"complete"
+        );
+        assert_eq!(fs::read_dir(original.path()).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(elsewhere.path()).unwrap().count(), 0);
+    }
 
     #[test]
     fn partial_write_never_publishes_a_checkpoint_or_changes_its_predecessor() {

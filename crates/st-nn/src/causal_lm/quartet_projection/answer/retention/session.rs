@@ -388,8 +388,9 @@ impl NativeCausalLmConditionalAnswerSession {
     }
 
     pub fn save_checkpoint_new(&self, path: impl AsRef<Path>) -> CausalLmResult<String> {
-        files::admit_new(path.as_ref())?;
-        publish_checkpoint(path.as_ref(), self.checkpoint()?)
+        let path = std::path::absolute(path.as_ref())?;
+        files::admit_new(&path)?;
+        publish_checkpoint(&path, self.checkpoint()?)
     }
 
     /// Publish a complete interval before advancing the live session.
@@ -408,11 +409,20 @@ impl NativeCausalLmConditionalAnswerSession {
         stop: u64,
         path: impl AsRef<Path>,
     ) -> CausalLmResult<CausalLmPreparedConditionalAnswerInterval<'_>> {
+        self.prepare_checkpoint_interval_with_step(stop, path.as_ref(), Self::step)
+    }
+
+    fn prepare_checkpoint_interval_with_step(
+        &mut self,
+        stop: u64,
+        path: &Path,
+        step: impl Fn(&mut Self) -> CausalLmResult<Option<CausalLmConditionalAnswerSessionStep>>,
+    ) -> CausalLmResult<CausalLmPreparedConditionalAnswerInterval<'_>> {
         let count = files::count(self.position(), self.total_batches(), stop)?;
-        let path = std::path::absolute(path.as_ref())?;
+        let path = std::path::absolute(path)?;
         files::admit_new(&path)?;
         let mut next = self.clone();
-        let reports = files::steps(&mut next, count, Self::step)?;
+        let reports = files::steps(&mut next, count, step)?;
         let checkpoint = next.checkpoint()?;
         Ok(CausalLmPreparedConditionalAnswerInterval {
             live: self,
@@ -508,26 +518,61 @@ mod tests {
 
     #[test]
     fn later_step_error_discards_the_staged_interval() {
+        let model = crate::causal_lm::tests::load();
+        let projection = NativeCausalLmRankOneProjection::new(
+            &model,
+            1,
+            CausalLmProjectionSite::Output,
+            &[0., 0.6, -0.8, 0.],
+            &[0.; 4],
+        )
+        .unwrap();
+        let rows = vec![vec![4, 8, 2, 1], vec![8, 4, 1], vec![7, 1, 2, 3]];
+        let pairs: Vec<_> = projection
+            .score_answer_pairs(&rows, &[[2, 7]; 3])
+            .unwrap()
+            .into_iter()
+            .map(|s| {
+                if s.gold_minus_alternative > 0. {
+                    [2, 7]
+                } else {
+                    [7, 2]
+                }
+            })
+            .collect();
+        let guard = projection
+            .prepare_conditional_margin_and_mass_retention(&rows, &pairs, 0.02)
+            .unwrap();
+        let policy = CausalLmConditionalAnswerConfig {
+            length: 0.01,
+            max_trials: 4,
+            mass_inward_cosine: None,
+        };
+        let mut live = NativeCausalLmConditionalAnswerSession::new(
+            &projection,
+            &guard,
+            &rows,
+            vec![(vec![0, 1, 2], pairs); 2],
+            policy,
+            44,
+        )
+        .unwrap();
+        let before = live.checkpoint().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("failed.bin");
-        let mut cursor = 0;
-        let result = files::advance_new_with(
-            &mut cursor,
-            2,
-            &path,
-            |next| {
-                if *next == 1 {
-                    return Err("injected second batch error".into());
-                }
-                *next += 1;
-                Ok(Some(*next))
-            },
-            |_| -> CausalLmResult<(Vec<u8>, String)> { panic!("invalid interval snapshot") },
-            publish_checkpoint,
-        );
-        assert!(result.unwrap_err().to_string().contains("second batch"));
-        assert_eq!(cursor, 0);
+        let result = live.prepare_checkpoint_interval_with_step(2, &path, |staged| {
+            if staged.position() == 1 {
+                assert_eq!(staged.accepted_updates(), 1);
+                return Err("injected second batch error".into());
+            }
+            staged.step()
+        });
+        assert!(matches!(result, Err(error) if error.to_string().contains("second batch")));
+        assert_eq!(live.position(), 0);
+        assert_eq!(live.accepted_updates(), 0);
+        assert_eq!(live.checkpoint().unwrap(), before);
         assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 }
 
