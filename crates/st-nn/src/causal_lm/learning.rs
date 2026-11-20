@@ -570,15 +570,15 @@ impl NativeCausalLm {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn decoder_parameter_pullback(
         &self,
-        mut checkpoints: Vec<Tensor>,
+        checkpoints: Vec<Tensor>,
         hidden_rows: usize,
         selected: Tensor,
         shape: [usize; 2],
         selected_rows: Option<&[usize]>,
         d_normalized: Tensor,
         first_layer: usize,
-        mut target: DecoderTarget<'_>,
-        mut trace: Option<&mut observation::AdaptationTrace>,
+        target: DecoderTarget<'_>,
+        trace: Option<&mut observation::AdaptationTrace>,
     ) -> CausalLmResult<Parameters> {
         let c = &self.config;
         let d_selected = selected.layer_norm_input_backward(
@@ -587,6 +587,31 @@ impl NativeCausalLm {
             c.norm_epsilon,
         )?;
         drop((selected, d_normalized));
+        self.decoder_parameter_pullback_from_selected(
+            checkpoints,
+            hidden_rows,
+            shape,
+            selected_rows,
+            d_selected,
+            first_layer,
+            target,
+            trace,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn decoder_parameter_pullback_from_selected(
+        &self,
+        mut checkpoints: Vec<Tensor>,
+        hidden_rows: usize,
+        shape: [usize; 2],
+        selected_rows: Option<&[usize]>,
+        d_selected: Tensor,
+        first_layer: usize,
+        mut target: DecoderTarget<'_>,
+        mut trace: Option<&mut observation::AdaptationTrace>,
+    ) -> CausalLmResult<Parameters> {
+        let c = &self.config;
         let mut gradient = match &selected_rows {
             Some(rows) => d_selected.scatter_add_rows(rows, hidden_rows)?,
             None => d_selected,

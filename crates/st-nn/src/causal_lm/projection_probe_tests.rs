@@ -865,6 +865,12 @@ fn retained_checkpoint_pins_a_floor_below_the_probability_range() {
 
 #[test]
 fn retained_checkpoint_requires_the_subnormal_residual_after_near_cancellation() {
+    for outside_logit in [700., 709.] {
+        check_retained_checkpoint_near_cancellation(outside_logit);
+    }
+}
+
+fn check_retained_checkpoint_near_cancellation(outside_logit: f32) {
     let mut config = config();
     config["tie_word_embeddings"] = serde_json::json!(false);
     let mut weights = parameters();
@@ -872,7 +878,7 @@ fn retained_checkpoint_requires_the_subnormal_residual_after_near_cancellation()
     weights.get_mut("ln_f.bias").unwrap().1 = vec![1., 0., 0., 0.];
     let mut head = vec![0.; 11 * 4];
     head[4] = -1.;
-    head[8] = 700.;
+    head[8] = outside_logit;
     weights.insert("lm_head.weight".into(), (vec![11, 4], head));
     let m = NativeCausalLm::from_gpt2_json(
         &serde_json::to_vec(&config).unwrap(),

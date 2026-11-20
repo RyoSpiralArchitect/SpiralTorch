@@ -14,14 +14,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 #[cfg(feature = "wgpu")]
-use st_backend_wgpu::{
-    resident_tensor::ResidentTensor, resident_training::parameters::ResidentParameterUpdate,
-    runtime::WgpuRuntime,
-};
+use st_backend_wgpu::{resident_tensor::ResidentTensor, runtime::WgpuRuntime};
 #[cfg(feature = "wgpu")]
 use st_kernel_contracts::classification::{ClassReduction, CrossEntropySpec};
 use st_tensor::NdLayout;
 use std::collections::BTreeSet;
+#[cfg(any(feature = "wgpu", all(test, not(target_arch = "wasm32"))))]
+use std::ops::AsyncFnMut;
 
 /// Errors retain the underlying model, JSON, GPU or study validation error.
 pub type ByteCorpusStudyResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -133,6 +132,33 @@ struct CaseCheckpoint {
 struct TrainingPoint {
     revision: u32,
     ce: f32,
+}
+
+#[cfg(any(feature = "wgpu", test))]
+impl TrainingPoint {
+    fn from_accepted_update(expected: usize, revision: u64, ce: f32) -> Result<Self> {
+        if revision != u64::try_from(expected)? || !ce.is_finite() {
+            return Err("unexpected revision or non-finite training loss".into());
+        }
+        Ok(Self {
+            revision: revision.try_into()?,
+            ce,
+        })
+    }
+}
+
+#[cfg(any(feature = "wgpu", all(test, not(target_arch = "wasm32"))))]
+async fn run_accepted_updates<S, B, U>(
+    state: &mut S,
+    batches: impl Iterator<Item = (usize, B)>,
+    mut submit: impl FnMut(&mut S, usize, B) -> Result<U>,
+    mut accept: impl AsyncFnMut(&mut S, usize, U) -> Result<()>,
+) -> Result<()> {
+    for (step, batch) in batches {
+        let submitted = submit(state, step, batch)?;
+        accept(state, step, submitted).await?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -748,7 +774,7 @@ impl ByteCorpusStudy {
         Ok(())
     }
 
-    /// Original uninterrupted study path; does not capture a model checkpoint.
+    /// Run without returning a checkpoint, accepting each update before the next forward.
     #[cfg(feature = "wgpu")]
     pub async fn run(&self, runtime: WgpuRuntime) -> Result<Value> {
         Ok(self
@@ -764,19 +790,19 @@ impl ByteCorpusStudy {
             .0)
     }
 
-    /// Observe each submitted update before the next forward or scheduled drain.
+    /// Observe each submitted update before reading its acceptance receipt.
     ///
     /// The callback receives the case name, one-based attempted update, and an
     /// immutable model. Submission is not acceptance: ordinary receipt checks
     /// still apply. Returning an error aborts the observed run.
     ///
     /// A caller can retain `model.checkpoint_snapshot()` and read it only after
-    /// this run returns, freezing weights and optimizer state without a per-step
-    /// CPU wait. Alternatively, retain `model.retain_checkpoint()` and submit its
-    /// `snapshot()` copies only after this run returns. The former adds GPU
-    /// copies between updates; both change resource lifetimes and host work.
+    /// this run returns, freezing weights and optimizer state without adding
+    /// another per-update CPU wait. Alternatively, retain `model.retain_checkpoint()`
+    /// and submit its `snapshot()` copies only after this run returns. The former
+    /// adds GPU copies between updates; both change resource lifetimes and host work.
     /// A passing observed run does not establish that `run()` is deterministic.
-    /// No observer, snapshots or additional GPU commands are added to `run()`.
+    /// An ordinary `run()` does not install observers or take observer-requested snapshots.
     #[cfg(feature = "wgpu")]
     pub async fn run_with_update_observer(
         &self,
@@ -903,66 +929,66 @@ impl ByteCorpusStudy {
                 }
                 (Vec::new(), vec![evaluate(&mut model, r).await?])
             };
-            let mut pending: Vec<(ResidentParameterUpdate, ResidentTensor)> = Vec::new();
-            for (step, selections) in r
-                .train_batches
-                .iter()
-                .enumerate()
-                .take(stop_after)
-                .skip(start)
-            {
-                let batch = ByteLmBatch::from_documents(&documents, selections, r.config.steps)?;
-                let resident = model.prepare_batch(&batch)?;
-                let tape = model.forward(&resident)?;
-                let loss =
-                    tape.next_byte_loss(CrossEntropySpec::new(ClassReduction::Mean, -100, 0.)?)?;
-                if let Some(observe) = forward_observer.as_mut() {
-                    observe(&case.name, step + 1, &model, &tape)?;
-                }
-                let gradients = model.backward(&tape, loss.prediction_gradient())?;
-                let update = match (&adamw_steps, gradient_clip) {
-                    (Some(steps), Some(clip)) => {
-                        model.adamw_with_steps_clipped(&gradients, steps, clip)?
+            run_accepted_updates(
+                &mut model,
+                r.train_batches
+                    .iter()
+                    .enumerate()
+                    .take(stop_after)
+                    .skip(start),
+                |model, step, selections| {
+                    let batch =
+                        ByteLmBatch::from_documents(&documents, selections, r.config.steps)?;
+                    let resident = model.prepare_batch(&batch)?;
+                    let tape = model.forward(&resident)?;
+                    let loss = tape.next_byte_loss(CrossEntropySpec::new(
+                        ClassReduction::Mean,
+                        -100,
+                        0.,
+                    )?)?;
+                    if let Some(observe) = forward_observer.as_mut() {
+                        observe(&case.name, step + 1, model, &tape)?;
                     }
-                    (None, Some(clip)) => model.sgd_with_rates_clipped(&gradients, &rates, clip)?,
-                    (Some(steps), None) => model.adamw_with_steps(&gradients, steps)?,
-                    (None, None) => model.sgd_with_rates(&gradients, &rates)?,
-                };
-                pending.push((update, loss.value().clone()));
-                if let Some(observe) = observer.as_mut() {
-                    observe(
-                        &case.name,
-                        step + 1,
-                        SubmittedStep {
-                            model: &model,
-                            tape: &tape,
-                            gradients: &gradients,
-                        },
-                    )?;
-                }
-                if capture || self.evaluation_boundary(step + 1) || step + 1 == stop_after {
-                    // A checkpointed continuation must cross the same accepted
-                    // update boundary as a stop/resume before its next forward.
-                    // Uncheckpointed runs may still drain in bounded bursts.
-                    for (update, loss) in pending.drain(..) {
-                        let receipt = update.snapshot_with_scalar(&loss)?;
-                        #[cfg(not(target_arch = "wasm32"))]
-                        let (revision, ce) = receipt.read()?;
-                        #[cfg(target_arch = "wasm32")]
-                        let (revision, ce) = receipt.read_async().await?;
-                        if revision != training.len() as u64 + 1 || !ce.is_finite() {
-                            return Err("unexpected revision or non-finite training loss".into());
+                    let gradients = model.backward(&tape, loss.prediction_gradient())?;
+                    let update = match (&adamw_steps, gradient_clip) {
+                        (Some(steps), Some(clip)) => {
+                            model.adamw_with_steps_clipped(&gradients, steps, clip)?
                         }
-                        training.push(TrainingPoint {
-                            revision: revision.try_into()?,
-                            ce,
-                        });
+                        (None, Some(clip)) => {
+                            model.sgd_with_rates_clipped(&gradients, &rates, clip)?
+                        }
+                        (Some(steps), None) => model.adamw_with_steps(&gradients, steps)?,
+                        (None, None) => model.sgd_with_rates(&gradients, &rates)?,
+                    };
+                    if let Some(observe) = observer.as_mut() {
+                        observe(
+                            &case.name,
+                            step + 1,
+                            SubmittedStep {
+                                model,
+                                tape: &tape,
+                                gradients: &gradients,
+                            },
+                        )?;
                     }
+                    Ok((update, loss, (gradients, tape, resident)))
+                },
+                async |model, step, (update, loss, submitted_values)| {
+                    let receipt = update.snapshot_with_scalar(loss.value())?;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let (revision, ce) = receipt.read()?;
+                    #[cfg(target_arch = "wasm32")]
+                    let (revision, ce) = receipt.read_async().await?;
+                    training.push(TrainingPoint::from_accepted_update(step + 1, revision, ce)?);
                     if self.evaluation_boundary(step + 1) {
-                        evaluations.push(evaluate(&mut model, r).await?);
+                        evaluations.push(evaluate(model, r).await?);
                     }
-                }
-            }
+                    // Keep the original forward and VJP resources alive through the readback.
+                    drop(submitted_values);
+                    Ok(())
+                },
+            )
+            .await?;
             let final_values = read_many(&model, model.parameter_snapshot().values()).await?;
             if case
                 .parameters
@@ -1052,6 +1078,41 @@ impl ByteCorpusStudy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn training_point_requires_an_exact_accepted_revision_and_finite_ce() {
+        let point = TrainingPoint::from_accepted_update(2, 2, 5.25).unwrap();
+        assert_eq!((point.revision, point.ce), (2, 5.25));
+        for revision in [0, 1, 3] {
+            assert!(TrainingPoint::from_accepted_update(2, revision, 5.25).is_err());
+        }
+        for ce in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
+            assert!(TrainingPoint::from_accepted_update(2, 2, ce).is_err());
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn rejected_non_evaluation_update_prevents_the_next_forward() {
+        for start in [0, 2] {
+            let mut evidence = Vec::new();
+            let result = pollster::block_on(run_accepted_updates(
+                &mut evidence,
+                (start..start + 2).map(|step| (step, ())),
+                |evidence, step, ()| {
+                    evidence.push(("forward", step + 1));
+                    Ok(step + 1)
+                },
+                async |evidence, step, revision| {
+                    assert_eq!(revision, step + 1);
+                    evidence.push(("rejected", revision));
+                    Err("rejected update".into())
+                },
+            ));
+            assert!(matches!(result, Err(e) if e.to_string() == "rejected update"));
+            assert_eq!(evidence, [("forward", start + 1), ("rejected", start + 1)]);
+        }
+    }
 
     pub(super) fn fixture() -> Value {
         let mut p = Vec::new();
