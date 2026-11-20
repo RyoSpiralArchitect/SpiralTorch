@@ -208,6 +208,8 @@ def paired_generation(base, owners, names, ref, scored, prompts, documents, reci
         raise ValueError("paired greedy requires one distinct name per variant and a selected reference")
     if len(scored) != len(prompts) or len(prompts) != len(documents):
         raise ValueError("paired greedy expected one scored answer per document")
+    prompts = [list(prompt) for prompt in prompts]
+    documents = [list(doc) for doc in documents]
     limit, (stop,) = recipe["max_new_tokens"], recipe["eos_token_ids"]
     scoring_config = score_source["config"]
     context = scoring_config["context_length"]

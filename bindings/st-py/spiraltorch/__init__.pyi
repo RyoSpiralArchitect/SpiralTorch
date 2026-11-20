@@ -195,6 +195,9 @@ class NativeCausalLm:
     def evaluate_variants_by_answer(variants: Sequence[NativeCausalLm], token_documents: Sequence[Sequence[int]], context_length: int, *,
                                     microbatch_windows: int | None = None,
                                     labels: Sequence[Sequence[int]] | None = None) -> NativeCausalLmAnswerComparison: ...
+    def validate_answer_comparison_request(self, token_documents: Sequence[Sequence[int]], context_length: int, *,
+                                           variants: int, microbatch_windows: int | None = None,
+                                           labels: Sequence[Sequence[int]] | None = None) -> None: ...
     def admit_answer_comparison_request(self, token_documents: Sequence[Sequence[int]], context_length: int, *,
                                         variants: int, microbatch_windows: int | None = None,
                                         labels: Sequence[Sequence[int]] | None = None) -> str: ...

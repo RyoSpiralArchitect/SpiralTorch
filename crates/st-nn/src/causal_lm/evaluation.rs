@@ -252,6 +252,18 @@ impl NativeCausalLm {
             .ok_or_else(|| "missing evaluation result".into())
     }
 
+    /// Validate a scored-answer request before opening the comparison snapshots.
+    pub fn validate_answer_comparison_request(
+        &self,
+        variants: usize,
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+    ) -> CausalLmResult<()> {
+        self.answer_comparison_admission(variants, documents, labels, config)
+            .map(drop)
+    }
+
     /// Admit a scored-answer request against its frozen source and return the
     /// exact labeled corpus ID. The actual comparison still checks each snapshot.
     pub fn admit_answer_comparison_request(
@@ -261,23 +273,33 @@ impl NativeCausalLm {
         labels: Option<&[Vec<i64>]>,
         config: CausalLmEvaluationConfig,
     ) -> CausalLmResult<String> {
-        if !(2..=MAX_EVALUATION_VARIANTS).contains(&variants) {
-            return Err("native comparison requires 2 to 16 variants".into());
-        }
-        let models = vec![self; variants];
-        Self::comparison_prefix_layers(&models)?;
-        let admitted = self.admit_evaluation(
-            &models,
-            documents,
-            labels,
-            config,
-            Some(&mut answers::AnswerCollector::default()),
-        )?;
+        let admitted = self.answer_comparison_admission(variants, documents, labels, config)?;
         Ok(evaluation_data_id(
             &admitted.plan.plan_id()?,
             documents,
             labels,
         ))
+    }
+
+    fn answer_comparison_admission(
+        &self,
+        variants: usize,
+        documents: &[Vec<usize>],
+        labels: Option<&[Vec<i64>]>,
+        config: CausalLmEvaluationConfig,
+    ) -> CausalLmResult<EvaluationAdmission> {
+        if !(2..=MAX_EVALUATION_VARIANTS).contains(&variants) {
+            return Err("native comparison requires 2 to 16 variants".into());
+        }
+        let models = vec![self; variants];
+        Self::comparison_prefix_layers(&models)?;
+        self.admit_evaluation(
+            &models,
+            documents,
+            labels,
+            config,
+            Some(&mut answers::AnswerCollector::default()),
+        )
     }
 
     fn admit_evaluation(

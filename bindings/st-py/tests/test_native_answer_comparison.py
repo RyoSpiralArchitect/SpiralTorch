@@ -380,6 +380,13 @@ class AnswerComparisonTests(unittest.TestCase):
                     cli["paired_generation"](base, [owner], ["source", "candidate"], 0,
                                              scored, prompts, documents, recipe)
 
+    def test_preflight_keeps_the_validation_only_method(self):
+        source = st.NativeCausalLm.from_gpt2(*FIXTURE())
+        documents, labels = [[1, 7, 8]], [[-100, 7, 8]]
+        self.assertIsNone(source.validate_answer_comparison_request(documents, 3, variants=2, labels=labels))
+        with self.assertRaisesRegex(ValueError, "evaluation context"):
+            source.validate_answer_comparison_request(documents, 10, variants=2, labels=labels)
+
     def test_paired_greedy_binds_exact_input_and_separates_unchanged_outcomes(self):
         cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
         source = st.NativeCausalLm.from_gpt2(*FIXTURE())
@@ -408,6 +415,10 @@ class AnswerComparisonTests(unittest.TestCase):
         self.assertEqual(result["exact_transitions_by_nll"], {"candidate": {
             "nll_equal_exact_both_correct": 1, "nll_equal_exact_both_wrong": 1,
         }})
+        tuple_rows = cli["paired_generation"](
+            source, [owner], names, 0, scored, tuple(map(tuple, prompts)), tuple(map(tuple, documents)), recipe,
+        )
+        self.assertEqual(tuple_rows, result)
 
     def test_paired_greedy_counts_exact_gain_and_loss_independently_of_nll(self):
         cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
