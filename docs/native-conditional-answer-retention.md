@@ -57,9 +57,10 @@ fn train(
   reproduce the verdict unless `log_pair` is present. A positive floor
   below the normal f64 probability range is compared in log space;
   use `log_mean_pair_mass >= minimum_log_mean_pair_mass` in that
-  receipt. For near cancellation from a normal baseline, the
-  represented mean and allowance are subtracted before taking the
-  logarithm, so a positive floor is not lost to rounded logarithms.
+  receipt. When a nearby positive allowance leaves a subnormal
+  difference, subtract the represented mean and allowance before
+  taking the logarithm, so a positive floor is not lost to rounded
+  logarithms.
   If `log_outside` is present, compare
   `log_mean_outside_mass <= maximum_log_mean_outside_mass` instead.
   This handles a positive outside ceiling below the normal f64 range.
@@ -77,8 +78,10 @@ fn train(
   the projection and leaves the guard usable; a commit advances its
   owner without resetting the floor. Do not carry the guard to other
   weights or use held-out evaluation prompts for it. Reuse also
-  revalidates the roster against the receiving model's work limits. There is no
-  guarantee on new prompts, full-vocabulary top-1, or throughput.
+  revalidates the rows the guard will evaluate against the receiving
+  model's work limits: sign anchors only for a sign-only guard, or the
+  whole roster for a mass guard. There is no guarantee on new prompts,
+  full-vocabulary top-1, or throughput.
 
 Each call commits at most one step. A later error does not roll back
 earlier calls in the loop; record each returned step as it completes
