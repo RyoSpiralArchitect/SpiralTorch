@@ -123,9 +123,16 @@ new guard at the saved endpoint.
 
 For a fixed ordered schedule, use `NativeCausalLmConditionalAnswerSession`
 to bind those weights and the guard to a batch cursor. It supports repeated
-epochs without expanding the schedule or rebasing the guard. The v3 session
+epochs without expanding the schedule or rebasing the guard. A session
 checkpoint embeds the pinned v3 projection checkpoint and adds the schedule
-digest, policy, repeat count, cursor, and accepted-update count.
+digest, policy, repeat count, cursor, accepted-update count, and starting
+projection. Legacy v3 and v4 session checkpoints lack the starting projection
+but are still readable.
+Older v3/v4 sessions may contain a retention record without the log
+outside-mass ceiling at subnormal limits. Only legacy session resume
+recomputes a missing ceiling, requires every recorded guard field to
+reproduce and checks the saved endpoint using the recomputed guard.
+New sessions and direct retention restore still require an exact baseline.
 `prepare_resume` checks the outer and inner pins before model evaluation.
 Resume requires the exact original pool, ordered batches, and guard roster.
 `advance_to_checkpoint_new` stages at most 1,024 positions and only advances
@@ -136,6 +143,20 @@ remains at the previous position. The
 Do not overwrite the path or trust its durability. If the file remains
 readable, verify it against that pin and explicitly resume from it only if
 choosing that checkpoint over the prior live state.
+
+An exhausted session can start a new pool and schedule with `next_phase`.
+The child keeps the exact weights and original guard and starts its own
+counters at zero. Its checkpoint pins both the starting projection and
+the immediate predecessor's digest. The digest links the
+checkpoints but does not prove the predecessor's training history.
+An unchanged restored session emits the exact admitted bytes, including
+its original header encoding. Consuming a batch replaces that checkpoint
+identity, even when the candidate update was refused.
+
+`serving_from_checkpoint` reconstructs the pinned projection without the
+prompt pool, original guard roster, or training workspace. It checks the
+outer and inner pins and model recipe; it does not replay the guard.
+Use `prepare_resume` with the original inputs to resume training.
 
 The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
 calls this same implementation without Torch. There is no WASM training

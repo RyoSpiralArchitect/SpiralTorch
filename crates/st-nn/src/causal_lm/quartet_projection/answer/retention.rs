@@ -11,6 +11,7 @@ pub use session::{
     CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
     CausalLmConditionalAnswerSessionStep, CausalLmPreparedConditionalAnswerInterval,
     ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
+    NativeCausalLmConditionalServingSnapshot,
 };
 
 struct Anchor {
