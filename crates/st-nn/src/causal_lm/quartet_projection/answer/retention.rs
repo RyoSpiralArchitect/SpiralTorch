@@ -84,7 +84,17 @@ impl MassFloor {
             .map(|log| log.min(0.));
         let baseline = mass.pair.mean(rows as u64);
         let minimum = (baseline - drop).max(0.);
-        let minimum_log_pair = if minimum.is_subnormal() && drop > 0. && drop >= 0.5 * baseline {
+        let logs_indistinguishable =
+            log_mean_pair
+                .zip(log_drop)
+                .is_some_and(|(mean, allowance)| {
+                    (mean - allowance).abs() <= f64::EPSILON * (mean.abs() + allowance.abs())
+                });
+        let minimum_log_pair = if minimum.is_subnormal()
+            && drop > 0.
+            && drop >= 0.5 * baseline
+            && (baseline.is_normal() || logs_indistinguishable)
+        {
             // Subtract the nearby represented probabilities exactly before
             // log rounding can erase their residual.
             Some(minimum.ln())
@@ -576,6 +586,21 @@ mod tests {
         assert_eq!(within.mean_pair_mass, floor.minimum);
         assert!(below.log_pair.is_some() && !below.permits_commit());
         assert!(within.log_pair.is_some() && within.permits_commit());
+    }
+
+    #[test]
+    fn resolved_subnormal_allowance_does_not_lower_the_log_floor() {
+        let before = [[0., -1., 743.9]];
+        let unit = f64::from_bits(1);
+        let floor = MassFloor::from_baseline(mass_for(&before), 1, unit);
+        assert_eq!(floor.baseline.to_bits(), 2);
+        assert_eq!(floor.minimum.to_bits(), 1);
+        let below = floor.check(mass_for(&[[0., -1., 744.6]]), 1);
+        assert_eq!(below.mean_pair_mass, floor.minimum);
+        let logarithmic = below.log_pair.as_ref().unwrap();
+        assert!(logarithmic.minimum_log_mean_pair_mass > unit.ln());
+        assert!(!below.permits_commit());
+        assert!(floor.check(mass_for(&before), 1).permits_commit());
     }
 
     #[test]

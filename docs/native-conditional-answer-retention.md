@@ -58,9 +58,9 @@ fn train(
   below the normal f64 probability range is compared in log space;
   use `log_mean_pair_mass >= minimum_log_mean_pair_mass` in that
   receipt. When a nearby positive allowance leaves a subnormal
-  difference, subtract the represented mean and allowance before
-  taking the logarithm, so a positive floor is not lost to rounded
-  logarithms.
+  difference, use the represented residual for a normal baseline or
+  when the logs of a subnormal baseline and allowance cannot be
+  distinguished reliably. Otherwise keep the log-space difference.
   If `log_outside` is present, compare
   `log_mean_outside_mass <= maximum_log_mean_outside_mass` instead.
   This handles a positive outside ceiling below the normal f64 range.
