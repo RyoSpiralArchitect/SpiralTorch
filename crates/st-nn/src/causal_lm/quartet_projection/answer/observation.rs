@@ -115,11 +115,7 @@ impl CandidateMassTerms {
         }
     }
 
-    fn readout_upstream(
-        &self,
-        model: &NativeCausalLm,
-        logits: &[f32],
-    ) -> CausalLmResult<(Tensor, f64)> {
+    fn readout_upstream(&self, model: &NativeCausalLm, logits: &[f32]) -> CausalLmResult<Vec<f64>> {
         // The native GPT-2 loader packs each vocabulary row as one contiguous column.
         let head = &model.head;
         let width = head.inner();
@@ -128,7 +124,7 @@ impl CandidateMassTerms {
             return Err("invalid binding observation readout".into());
         }
         if self.outside_den == 0. {
-            return Ok((Tensor::zeros(1, width)?, 1.));
+            return Ok(vec![0.; width]);
         }
         let [first, second] = self
             .pair
@@ -158,26 +154,11 @@ impl CandidateMassTerms {
             }
         }
         let den = self.outside_den * (1. + self.second);
-        let peak = sums.iter().map(|s| s.value().abs()).fold(0., f64::max) / den;
-        if !peak.is_finite() {
-            return Err("nonfinite binding observation readout adjoint".into());
-        }
-        let readout_scale = if peak > f64::from(f32::MAX).sqrt() {
-            // A finite f32 seed can still overflow inside the decoder. Shift
-            // the peak to [2^32, 2^33) to leave headroom for the LayerNorm VJP.
-            let exponent = (peak.to_bits() >> 52) as i32 - 1023;
-            2f64.powi(exponent - 32)
-        } else {
-            1.
-        };
-        let upstream: Vec<_> = sums
-            .iter()
-            .map(|s| ((s.value() / den) / readout_scale) as f32)
-            .collect();
+        let upstream: Vec<_> = sums.iter().map(|s| s.value() / den).collect();
         if upstream.iter().any(|x| !x.is_finite()) {
             return Err("nonfinite binding observation readout adjoint".into());
         }
-        Ok((Tensor::from_vec(1, width, upstream)?, readout_scale))
+        Ok(upstream)
     }
 }
 
@@ -198,10 +179,10 @@ impl NativeCausalLmRankOneProjection {
     ) -> CausalLmResult<(CandidateMassMeasure, Vec<f64>)> {
         let logits = row.logits.data();
         let terms = candidate_mass_terms(logits, pair)?;
-        let (upstream, readout_scale) = terms.readout_upstream(&self.current, logits)?;
-        let mut gradient = self
+        let upstream = terms.readout_upstream(&self.current, logits)?;
+        let (mut gradient, readout_scale) = self
             .current
-            .fixed_left_upstream(row, upstream, self.spec, &self.left)?;
+            .fixed_left_wide_upstream(row, &upstream, self.spec, &self.left)?;
         // Apply the outside probability and restore the readout scale in f64.
         for g in &mut gradient {
             *g *= terms.outside_share * readout_scale;
@@ -282,9 +263,9 @@ mod tests {
             m.head = PackedB::from_tensor_transpose(&head, st_tensor::Tile::col_major()).unwrap();
             for ids in [[0, 1], [1, 0]] {
                 let terms = candidate_mass_terms(&logits, ids).unwrap();
-                let (upstream, scale) = terms.readout_upstream(&m, &logits).unwrap();
-                assert_eq!(upstream.data(), &[expected], "{logits:?}, {ids:?}");
-                assert_eq!(scale, 1.);
+                let upstream = terms.readout_upstream(&m, &logits).unwrap();
+                assert_eq!(upstream.len(), 1);
+                assert_eq!(upstream[0] as f32, expected, "{logits:?}, {ids:?}");
             }
         }
     }
@@ -302,12 +283,8 @@ mod tests {
             if tail == -104. {
                 assert_eq!(terms.outside_share as f32, 0.);
             }
-            let (upstream, scale) = terms.readout_upstream(&model, &logits).unwrap();
-            assert!(scale > 1. && upstream.data()[0].is_finite());
-            assert_eq!(
-                f64::from(upstream.data()[0]) * (terms.outside_share * scale),
-                scaled_expected
-            );
+            let upstream = terms.readout_upstream(&model, &logits).unwrap();
+            assert_eq!(upstream[0] * terms.outside_share, scaled_expected);
         }
     }
 
@@ -340,6 +317,41 @@ mod tests {
                 "{actual} != {expected}"
             );
         }
+    }
+
+    #[test]
+    fn mixed_scale_readout_keeps_the_small_coordinate_amplified_by_final_norm() {
+        let mut model = crate::causal_lm::tests::load_constant_hidden_with_extreme_readout();
+        model.final_norm.gamma = Tensor::from_vec(1, 4, vec![0., 2f32.powi(100), 0., 0.]).unwrap();
+        model.final_norm.beta = Tensor::from_vec(1, 4, vec![0., 0., 1., 0.]).unwrap();
+        let mut head = vec![0.; 12];
+        head[6] = -1.;
+        head[8] = 2f32.powi(80);
+        head[9] = 2f32.powi(-110);
+        head[10] = -104.;
+        let head = Tensor::from_vec(3, 4, head).unwrap();
+        model.head = PackedB::from_tensor_transpose(&head, st_tensor::Tile::col_major()).unwrap();
+        let projection = NativeCausalLmRankOneProjection::new(
+            &model,
+            1,
+            CausalLmProjectionSite::Output,
+            &[1., 0., 0., 0.],
+            &[0.; 4],
+        )
+        .unwrap();
+        let row = model.projection_last_row(&[0], projection.spec).unwrap();
+        assert_eq!(row.logits.data(), &[0., -1., -104.]);
+        let outside = (-104_f64).exp();
+        let share = outside / (1. + (-1_f64).exp() + outside);
+        let expected = 0.75 * 2f64.powi(-10) * share / f64::from(model.config.norm_epsilon).sqrt();
+        let (_, values) = projection
+            .candidate_mass_measured_gradient(row, [0, 1])
+            .unwrap();
+        assert!(
+            (values[1] / expected - 1.).abs() < 2e-6,
+            "{} != {expected}",
+            values[1]
+        );
     }
 
     #[test]

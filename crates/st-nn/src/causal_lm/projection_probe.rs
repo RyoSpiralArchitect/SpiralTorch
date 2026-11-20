@@ -396,6 +396,81 @@ impl NativeCausalLm {
         Ok(())
     }
 
+    pub(super) fn pull_projection_wide_upstream(
+        &self,
+        row: ProjectionLastRow,
+        spec: CausalLmProjectionSpec,
+        upstream: &[f64],
+        capture: &mut dyn ProjectionCapture,
+    ) -> CausalLmResult<f64> {
+        let ProjectionLastRow {
+            steps,
+            checkpoints,
+            selected,
+            ..
+        } = row;
+        let narrow: Vec<_> = upstream.iter().map(|&value| value as f32).collect();
+        let gain = &self.final_norm.gamma;
+        let epsilon = self.config.norm_epsilon;
+        let normal = if upstream
+            .iter()
+            .zip(&narrow)
+            .all(|(&wide, &value)| value.is_finite() && (wide == 0. || value != 0.))
+        {
+            let seed = Tensor::from_vec(selected.shape().0, selected.shape().1, narrow)?;
+            match selected.layer_norm_input_backward(gain, &seed, epsilon) {
+                Ok(value) => Some(value),
+                Err(st_tensor::TensorError::NonFiniteValue {
+                    label: "layernorm_backward_input_grad",
+                    ..
+                }) => None,
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            None
+        };
+        let (d_selected, scale) = if let Some(normal) = normal {
+            (normal, 1.)
+        } else {
+            let wide = selected.layer_norm_input_backward_wide(gain, upstream, epsilon)?;
+            let peak = wide.iter().map(|x| x.abs()).fold(0., f64::max);
+            let scale = if peak > f64::from(f32::MAX).sqrt() {
+                // The dense suffix still uses f32. Scale after the gains and
+                // the normalization pullback, not at the vocabulary readout.
+                let exponent = (peak.to_bits() >> 52) as i32 - 1023;
+                2f64.powi(exponent - 32)
+            } else {
+                1.
+            };
+            let narrowed = wide
+                .into_iter()
+                .map(|value| {
+                    let narrow = (value / scale) as f32;
+                    if !narrow.is_finite() || (value != 0. && narrow == 0.) {
+                        return Err("wide layernorm adjoint exceeds the f32 decoder range");
+                    }
+                    Ok(narrow)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            (
+                Tensor::from_vec(selected.shape().0, selected.shape().1, narrowed)?,
+                scale,
+            )
+        };
+        drop(selected);
+        self.decoder_parameter_pullback_from_selected(
+            checkpoints,
+            steps,
+            [1, steps],
+            Some(&[steps - 1]),
+            d_selected,
+            spec.layer,
+            learning::DecoderTarget::Projection(capture),
+            None,
+        )?;
+        Ok(scale)
+    }
+
     /// Re-run the true decoder with z <- f32(z + bias + input * delta_weight) at exactly one
     /// site's output, before the attention softmax or existing output geometry. No base export
     /// or persistent adaptation: ordinary inference and cache identities are unchanged.
