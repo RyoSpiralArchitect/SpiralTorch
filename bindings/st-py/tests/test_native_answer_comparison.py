@@ -332,6 +332,26 @@ class AnswerComparisonTests(unittest.TestCase):
             self.assertIn("attention pairs", err.getvalue())
             self.assertFalse(output.exists())
 
+    def test_paired_greedy_rejects_a_different_scored_snapshot_or_source(self):
+        cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
+        source = st.NativeCausalLm.from_gpt2(*FIXTURE())
+        projection, guard, rows, pairs, schedule = FIXTURES["conditional_session_inputs"](source)
+        kind = st.NativeCausalLmConditionalAnswerSession
+        session = kind(projection, guard, rows, schedule, length=.01)
+        before = kind.serving_from_checkpoint(source, *session.checkpoint_with_id())
+        session.step()
+        after = kind.serving_from_checkpoint(source, *session.checkpoint_with_id())
+        self.assertNotEqual(before.checkpoint_id, after.checkpoint_id)
+        documents, labels = [[1, 6, 7, 8]], [[-100, -100, 7, 8]]
+        prompts = cli["paired_prompts"](documents, labels, 2, 4, 2, 8)
+        recipe = cli["admit_paired_generation"](source, prompts, 2, 8)
+        scored = type(before).evaluate_variants_by_answer(source, [before], documents, 4, labels=labels)
+        for base, owner in ((source, after), (source.with_readout_accumulator("f64"), before)):
+            with self.subTest(owner=owner.checkpoint_id, readout=base.readout_accumulator):
+                with self.assertRaisesRegex(ValueError, "scored source or snapshot roster"):
+                    cli["paired_generation"](base, [owner], ["source", "candidate"], 0,
+                                             scored, prompts, documents, recipe)
+
     def test_paired_greedy_counts_exact_gain_and_loss_independently_of_nll(self):
         cli = runpy.run_path(str(ROOT / "bindings/st-py/examples/native_answer_comparison.py"))
         source = st.NativeCausalLm.from_gpt2(*FIXTURE())

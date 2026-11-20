@@ -336,6 +336,47 @@ assert pin == reference.checkpoint_id
         with self.assertRaisesRegex(ValueError, "generation token count exceeds budget"):
             snapshot.generator(NoValueRead(), b'{"max_new_tokens":4}')
 
+    def test_conditional_generation_cannot_replace_pinned_session_lora(self):
+        config, weights = fixtures["fixture"](raw_weights=True)
+        original = self.base.with_lora(0, 1, 1.)
+        replacement = self.base.with_lora(0, 2, 4.)
+        trainer = st.NativeCausalLmTrainingSession(original, [[1, 2]], 4, mode="lora", learning_rate=.1,
+                                                  window_policy="covering_targets")
+        example = Path(__file__).resolve().parents[1] / "examples/native_geometry_generation.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.json").write_text(config, encoding="utf-8")
+            (root / "model.safetensors").write_bytes(weights)
+            pin = trainer.save_checkpoint_new(root / "session.ck")
+            (root / "boundary.json").write_text(json.dumps(dict(
+                checkpoint_id=pin, completed_updates=trainer.completed_updates,
+                recorded_data_id=trainer.data_id, post_lora_id=original.lora_artifact_id,
+                post_geometry_id=original.geometry_artifact_id,
+            )), encoding="utf-8")
+            (root / "prompt.json").write_text("[1,2]", encoding="utf-8")
+            (root / "recipe.json").write_text('{"max_new_tokens":2}', encoding="utf-8")
+            for name, model in (("matching", original), ("replacement", replacement)):
+                with self.subTest(name=name):
+                    state, guard, rows, pairs, schedule = fixtures["conditional_session_inputs"](model)
+                    session = st.NativeCausalLmConditionalAnswerSession(state, guard, rows, schedule, length=.01)
+                    raw, projection_pin = session.checkpoint_with_id()
+                    (root / f"{name}.ck").write_bytes(raw)
+                    (root / f"{name}.json").write_text(model.lora_to_json(), encoding="utf-8")
+                    call = subprocess.run([
+                        sys.executable, "-I", "-B", str(example), "--model-dir", ".",
+                        "--session-checkpoint", "session.ck", "--session-checkpoint-id", pin,
+                        "--session-boundary", "boundary.json", "--conditional-checkpoint", f"{name}.ck",
+                        "--conditional-checkpoint-id", projection_pin, "--conditional-source-lora", f"{name}.json",
+                        "--prompt-json", "prompt.json", "--recipe-json", "recipe.json", "--output", name,
+                    ], cwd=root, capture_output=True, text=True, timeout=30)
+                    if name == "matching":
+                        self.assertEqual(call.returncode, 0, call.stderr)
+                        self.assertEqual(json.loads(call.stdout)["lora_artifact_id"], original.lora_artifact_id)
+                    else:
+                        self.assertNotEqual(call.returncode, 0)
+                        self.assertIn("does not match the pinned source LoRA", call.stderr)
+                        self.assertFalse((root / name).exists())
+
     def test_conditional_generation_example_resumes_without_training_data(self):
         config, weights = fixtures["fixture"](raw_weights=True)
         model = self.base.with_readout_accumulator("f64").with_lora(0, 2, 4.)

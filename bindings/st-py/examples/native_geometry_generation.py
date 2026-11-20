@@ -49,7 +49,8 @@ def main(argv=None):
     parser.add_argument("--conditional-checkpoint-id", help="separately retained conditional checkpoint SHA-256 identity")
     parser.add_argument("--legacy-conditional-checkpoint", action="store_true",
                         help="read a historical repeated/family artifact for inference only")
-    parser.add_argument("--conditional-source-lora", type=Path, help="original frozen LoRA JSON for conditional serving")
+    parser.add_argument("--conditional-source-lora", type=Path,
+                        help="original frozen LoRA JSON; must match any pinned training source")
     parser.add_argument("--readout-accumulator", choices=("f32", "f32_wide_backward", "f64"),
                         help="original model arithmetic policy; must match the saved projection owner")
     parser.add_argument("--observed-run", type=Path, help="private source run with an explicitly selected observed pair")
@@ -149,7 +150,11 @@ def main(argv=None):
         del qkv_payload
     elif conditional_payload is not None:
         if args.conditional_source_lora is not None:
-            model = model.with_lora_json(read(args.conditional_source_lora, 64 << 20))
+            source_with_lora = model.with_lora_json(read(args.conditional_source_lora, 64 << 20))
+            if ((args.training_checkpoint is not None or boundary is not None or all(observed))
+                    and source_with_lora.lora_artifact_id != model.lora_artifact_id):
+                raise ValueError("conditional-source-lora does not match the pinned source LoRA")
+            model = source_with_lora
         cls = st.NativeCausalLmConditionalAnswerSession
         serve = cls.serving_from_legacy_checkpoint if args.legacy_conditional_checkpoint else cls.serving_from_checkpoint
         projection = serve(model, conditional_payload, args.conditional_checkpoint_id)

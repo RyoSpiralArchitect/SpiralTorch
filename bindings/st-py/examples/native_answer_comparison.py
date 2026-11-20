@@ -189,13 +189,23 @@ def admit_paired_generation(base, prompts, limit, stop):
 
 
 def paired_generation(base, owners, names, ref, scored, prompts, documents, recipe):
+    score_record = json.loads(scored.to_json())
+    score_roster = score_record["snapshots"]
+    expected_roster = [(i, owner.checkpoint_id, owner.projection_id) for i, owner in enumerate(owners, 1)]
+    score_source = score_record["comparison"]["comparison"]["evaluations"][0]
+    identity = ("base_model_identity", "geometry_artifact_id", "lora_artifact_id", "readout_accumulator")
+    if ([(entry["variant"], entry["checkpoint_id"], entry["projection_id"]) for entry in score_roster]
+            != expected_roster or any(score_source.get(key) != getattr(base, key) for key in identity)):
+        raise ValueError("paired greedy requires the scored source or snapshot roster to match generation")
+    if len(names) != len(owners) + 1 or len(set(names)) != len(names) or not 0 <= ref < len(names):
+        raise ValueError("paired greedy requires one distinct name per variant and a selected reference")
     limit, (stop,) = recipe["max_new_tokens"], recipe["eos_token_ids"]
     config = json.dumps(recipe)
     factories = [lambda prompt, policy: st.NativeCausalLmGenerator(base, prompt, policy)]
     factories.extend(owner.generator for owner in owners)
     rows = []
     joint = {name: {} for i, name in enumerate(names) if i != ref}
-    if len(scored) != len(prompts):
+    if len(scored) != len(prompts) or len(prompts) != len(documents):
         raise ValueError("paired greedy expected one scored answer per document")
     for j, (prompt, doc) in enumerate(zip(prompts, documents)):
         target = doc[len(prompt):]
