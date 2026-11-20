@@ -8,8 +8,9 @@ mod checkpoint;
 mod session;
 pub use checkpoint::CausalLmConditionalRetentionRestore;
 pub use session::{
-    CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerSessionRestore,
-    CausalLmConditionalAnswerSessionStep, CausalLmPreparedConditionalAnswerInterval,
+    CausalLmConditionalAnswerBatch, CausalLmConditionalAnswerComparison,
+    CausalLmConditionalAnswerSessionRestore, CausalLmConditionalAnswerSessionStep,
+    CausalLmConditionalScoredSnapshot, CausalLmPreparedConditionalAnswerInterval,
     ConditionalCheckpointPublicationUncertain, NativeCausalLmConditionalAnswerSession,
     NativeCausalLmConditionalServingSnapshot,
 };

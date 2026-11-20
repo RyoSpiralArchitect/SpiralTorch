@@ -1,10 +1,11 @@
-"""Offline native GPT-2 generation with learned adapters and optional QKV, without Torch."""
+"""Offline native GPT-2 generation with learned adapters and projections, without Torch."""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import stat
+import sys
 
 import spiraltorch as st
 
@@ -44,8 +45,13 @@ def main(argv=None):
     parser.add_argument("--artifact-id")
     parser.add_argument("--qkv-checkpoint", type=Path, help="QKV optimizer snapshot over the selected frozen model/adapters")
     parser.add_argument("--qkv-checkpoint-id", help="separately retained QKV checkpoint SHA-256 identity")
+    parser.add_argument("--conditional-checkpoint", type=Path, help="conditional rank-one session checkpoint for serving")
+    parser.add_argument("--conditional-checkpoint-id", help="separately retained conditional checkpoint SHA-256 identity")
+    parser.add_argument("--legacy-conditional-checkpoint", action="store_true",
+                        help="read a historical repeated/family artifact for inference only")
+    parser.add_argument("--conditional-source-lora", type=Path, help="original frozen LoRA JSON for conditional serving")
     parser.add_argument("--readout-accumulator", choices=("f32", "f32_wide_backward", "f64"),
-                        help="original model arithmetic policy; must match the saved QKV owner")
+                        help="original model arithmetic policy; must match the saved projection owner")
     parser.add_argument("--observed-run", type=Path, help="private source run with an explicitly selected observed pair")
     parser.add_argument("--observed-update", type=int)
     parser.add_argument("--observation-id")
@@ -61,6 +67,19 @@ def main(argv=None):
     if all(qkv) and (not hasattr(st, "NativeCausalLmQkvAdamW")
                      or not hasattr(st.NativeCausalLmQkvAdamW, "generator")):
         parser.error("QKV generation needs a matching source build after 0.4.33")
+    conditional = args.conditional_checkpoint is not None
+    if conditional != (args.conditional_checkpoint_id is not None):
+        parser.error("conditional inference needs conditional-checkpoint and its pinned conditional-checkpoint-id")
+    if args.legacy_conditional_checkpoint and (not conditional or not hasattr(
+            getattr(st, "NativeCausalLmConditionalAnswerSession", None), "serving_from_legacy_checkpoint")):
+        parser.error("legacy conditional serving requires a pinned conditional checkpoint and a matching build")
+    if args.conditional_source_lora is not None and not conditional:
+        parser.error("conditional-source-lora needs a conditional checkpoint")
+    if conditional and all(qkv):
+        parser.error("choose either a QKV projection or a conditional projection")
+    if conditional and (not hasattr(st, "NativeCausalLmConditionalServingSnapshot")
+                        or not hasattr(st.NativeCausalLmConditionalServingSnapshot, "generator")):
+        parser.error("conditional generation needs a SpiralTorch build with conditional snapshot generation")
     observed = (args.observed_run is not None, args.observed_update is not None, args.observation_id is not None)
     if any(observed) and (not all(observed) or not args.observation_id or not 0 < args.observed_update < 2**64):
         parser.error("observed inference needs observed-run, a positive observed-update and observation-id")
@@ -90,6 +109,8 @@ def main(argv=None):
             parser.error("resume needs a pinned generation ID and no replacement prompt/recipe")
     elif args.resume_id or not args.prompt_json or not args.recipe_json:
         parser.error("fresh generation needs prompt-json and recipe-json")
+    if not hasattr(st.NativeCausalLmGenerator, "advance_to_checkpoint_new"):
+        parser.error("this example needs a SpiralTorch build with checkpointed generation")
     if args.output.exists():
         parser.error("output must be a new private directory")
     qkv_payload = None
@@ -97,6 +118,12 @@ def main(argv=None):
         qkv_payload = read_bytes(args.qkv_checkpoint, st.NativeCausalLmQkvAdamW.MAX_CHECKPOINT_BYTES)
         if "sha256:" + hashlib.sha256(qkv_payload).hexdigest() != args.qkv_checkpoint_id:
             raise ValueError("QKV checkpoint differs from pinned identity")
+    conditional_payload = None
+    if conditional:
+        conditional_payload = read_bytes(
+            args.conditional_checkpoint, st.NativeCausalLmConditionalAnswerSession.MAX_CHECKPOINT_BYTES)
+        if "sha256:" + hashlib.sha256(conditional_payload).hexdigest() != args.conditional_checkpoint_id:
+            raise ValueError("conditional checkpoint differs from pinned identity")
     weights = st.SafeTensorArchive(args.model_dir / "model.safetensors")
     model = st.NativeCausalLm.from_gpt2(read(args.model_dir / "config.json", 1_048_576), weights)
     del weights
@@ -120,6 +147,13 @@ def main(argv=None):
     if qkv_payload is not None:
         projection = st.NativeCausalLmQkvAdamW.from_bytes(model, qkv_payload, args.qkv_checkpoint_id)
         del qkv_payload
+    elif conditional_payload is not None:
+        if args.conditional_source_lora is not None:
+            model = model.with_lora_json(read(args.conditional_source_lora, 64 << 20))
+        cls = st.NativeCausalLmConditionalAnswerSession
+        serve = cls.serving_from_legacy_checkpoint if args.legacy_conditional_checkpoint else cls.serving_from_checkpoint
+        projection = serve(model, conditional_payload, args.conditional_checkpoint_id)
+        del conditional_payload
     if args.resume:
         payload = read(args.resume, 1_048_576)
         generator = (projection.restore_generator(payload, args.resume_id) if projection is not None
@@ -135,22 +169,25 @@ def main(argv=None):
         raise ValueError("stop-after must lie between the current cursor and sealed generation end")
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     initial_id = generator.checkpoint_id
+    destination = args.output / "generation.json"
+    reports, checkpoint_id = generator.advance_to_checkpoint_new(stop, destination)
+    print(json.dumps({"event": "generation_checkpoint_published",
+                      "path": str(destination), "checkpoint_id": checkpoint_id}),
+          file=sys.stderr, flush=True)
+    if "sha256:" + hashlib.sha256(read_bytes(destination, 1_048_576)).hexdigest() != checkpoint_id:
+        raise ValueError("saved generation bytes and native identity disagree")
     with (args.output / "steps.jsonl").open("x", encoding="utf-8") as stream:
-        while not generator.finished and len(generator.generated_ids) < stop:
-            stream.write(generator.step().to_json() + "\n")
-            stream.flush()
-    payload = generator.to_json()
-    if "sha256:" + hashlib.sha256(payload.encode()).hexdigest() != generator.checkpoint_id:
-        raise ValueError("generation bytes and native identity disagree")
-    with (args.output / "generation.json").open("x", encoding="utf-8") as stream:
-        stream.write(payload)
+        for report in reports:
+            stream.write(report.to_json() + "\n")
     result = {"schema": "spiraltorch.native_generation_example.v1", "base_model_identity": model.base_model_identity,
               "geometry_artifact_id": model.geometry_artifact_id, "config": recipe, "initial_id": initial_id,
               "readout_accumulator": model.readout_accumulator,
               "execution": recipe.get("execution", {"kind": "full_prefix"}),
-              "checkpoint_id": generator.checkpoint_id, "generated_tokens": len(generator.generated_ids),
+              "checkpoint_id": checkpoint_id, "generated_tokens": len(generator.generated_ids),
               "finished": generator.finished, "finish_reason": generator.finish_reason,
               "scope": "frozen GPT-2 CPU generation; no corpus validation or quality claim"}
+    if args.resume:
+        result["resume_input_id"] = args.resume_id
     if all(observed):
         result["observed_training_boundary"] = {"update": args.observed_update, "observation_id": args.observation_id,
                                                 "training_documents_verified": False}
@@ -158,12 +195,21 @@ def main(argv=None):
         result["lora_artifact_id"] = model.lora_artifact_id
         result["session_boundary"] = {**boundary, "checkpoint_id":args.session_checkpoint_id,
                                       "training_documents_verified":False}
-    if projection is not None:
+    if all(qkv):
         result["lora_artifact_id"] = model.lora_artifact_id
         result["qkv_snapshot"] = {"checkpoint_id": args.qkv_checkpoint_id,
                                   "projection_id": projection.serving_id,
                                   "layer": projection.layer, "optimizer_steps": projection.steps,
                                   "training_documents_verified": False}
+    if conditional:
+        result["lora_artifact_id"] = model.lora_artifact_id
+        result["conditional_snapshot"] = {
+            "checkpoint_id": projection.checkpoint_id, "projection_id": projection.projection_id,
+            "position": projection.position, "total_batches": projection.total_batches,
+            "training_documents_verified": False,
+        }
+        if args.legacy_conditional_checkpoint:
+            result["conditional_snapshot"]["legacy_checkpoint"] = True
     with (args.output / "result.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")

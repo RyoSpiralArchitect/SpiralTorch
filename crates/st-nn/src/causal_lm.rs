@@ -43,6 +43,7 @@ mod session;
 mod sum;
 mod training;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
+pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
 pub use common_geometry::{
     CausalLmCommonGeometryStep, CausalLmGeometrySteeringStep, CausalLmGeometryStepGuard,
@@ -52,12 +53,12 @@ pub use competition_pair::{CausalLmGeometryCompetitionPair, CausalLmGeometryComp
 pub use context::NativeCausalLmContext;
 pub use evaluation::{
     CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
-    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmScoredAnswer,
-    MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
+    CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmLabeledAnswerCorpus,
+    CausalLmScoredAnswer, MAX_ANSWER_SCORE_CELLS, MAX_EVALUATION_TOKENS, MAX_EVALUATION_VARIANTS,
 };
 pub use generation::{
     CausalLmGenerationConfig, CausalLmGenerationExecution, CausalLmGenerationStep,
-    NativeCausalLmGenerator,
+    CausalLmPreparedGenerationInterval, NativeCausalLmGenerator,
 };
 pub use geometry_cohort::{
     CausalLmGeometryCohortStep, MAX_GEOMETRY_COHORT_ELEMENTS, MAX_GEOMETRY_COHORT_MEMBERS,
@@ -101,14 +102,15 @@ pub use quartet_projection::{
     CausalLmAnswerGuardStatus, CausalLmAnswerGuardStep, CausalLmAnswerPoint,
     CausalLmAnswerProjectionStep, CausalLmAnswerProtection, CausalLmAnswerTrial,
     CausalLmBindingGradientObservation, CausalLmConditionalAnswerBatch,
-    CausalLmConditionalAnswerConfig, CausalLmConditionalAnswerPoint,
-    CausalLmConditionalAnswerPrefixBank, CausalLmConditionalAnswerSessionRestore,
-    CausalLmConditionalAnswerSessionStep, CausalLmConditionalAnswerStep,
-    CausalLmConditionalAnswerTrial, CausalLmConditionalMarginRetention,
-    CausalLmConditionalRetentionCheck, CausalLmConditionalRetentionLogMassCheck,
-    CausalLmConditionalRetentionLogOutsideCheck, CausalLmConditionalRetentionMassCheck,
-    CausalLmConditionalRetentionOutsideCheck, CausalLmConditionalRetentionRestore,
-    CausalLmLossGradient, CausalLmPairedAnswerScore, CausalLmPreparedConditionalAnswerBatch,
+    CausalLmConditionalAnswerComparison, CausalLmConditionalAnswerConfig,
+    CausalLmConditionalAnswerPoint, CausalLmConditionalAnswerPrefixBank,
+    CausalLmConditionalAnswerSessionRestore, CausalLmConditionalAnswerSessionStep,
+    CausalLmConditionalAnswerStep, CausalLmConditionalAnswerTrial,
+    CausalLmConditionalMarginRetention, CausalLmConditionalRetentionCheck,
+    CausalLmConditionalRetentionLogMassCheck, CausalLmConditionalRetentionLogOutsideCheck,
+    CausalLmConditionalRetentionMassCheck, CausalLmConditionalRetentionOutsideCheck,
+    CausalLmConditionalRetentionRestore, CausalLmConditionalScoredSnapshot, CausalLmLossGradient,
+    CausalLmPairedAnswerScore, CausalLmPreparedConditionalAnswerBatch,
     CausalLmPreparedConditionalAnswerInterval, CausalLmQuartetObjective, CausalLmQuartetStep,
     CausalLmRetainedConditionalAnswerStep, ConditionalCheckpointPublicationUncertain,
     NativeCausalLmConditionalAnswerSession, NativeCausalLmConditionalServingSnapshot,

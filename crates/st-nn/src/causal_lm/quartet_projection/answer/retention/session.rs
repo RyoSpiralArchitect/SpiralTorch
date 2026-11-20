@@ -3,56 +3,18 @@ use super::super::conditional::{conditional_bank_input_values, MAX_PREPARED_PREF
 use super::checkpoint::{canonical_digest, fingerprint};
 use super::*;
 use crate::causal_lm::checkpoint as files;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+mod evaluation;
+mod legacy;
+pub use evaluation::{CausalLmConditionalAnswerComparison, CausalLmConditionalScoredSnapshot};
 
 const LEGACY_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v3";
 const LEGACY_PHASE_SCHEMA: &str = "spiraltorch.native_conditional_answer_session.v4";
 const SCHEMA: &str = "spiraltorch.native_conditional_answer_session.start_bound.v1";
 const HEADER_LIMIT: usize = 4096;
 
-/// A complete checkpoint was installed but publication did not finish.
-/// The live cursor did not advance. Verify any retained file with this pin
-/// before using it for an explicit recovery.
-#[derive(Debug)]
-pub struct ConditionalCheckpointPublicationUncertain {
-    checkpoint_id: String,
-    source: st_core::runtime::AtomicPublishError,
-}
-
-impl ConditionalCheckpointPublicationUncertain {
-    pub fn checkpoint_id(&self) -> &str {
-        &self.checkpoint_id
-    }
-}
-
-impl std::fmt::Display for ConditionalCheckpointPublicationUncertain {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "conditional checkpoint installed but publication incomplete (pin {}): {}",
-            self.checkpoint_id, self.source
-        )
-    }
-}
-
-impl std::error::Error for ConditionalCheckpointPublicationUncertain {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
-    }
-}
-
-fn publish_checkpoint(path: &Path, (bytes, pin): (Vec<u8>, String)) -> CausalLmResult<String> {
-    match st_core::runtime::atomic_create_new_with_status(path, &bytes) {
-        Ok(()) => Ok(pin),
-        Err(source) if source.destination_installed() => {
-            Err(Box::new(ConditionalCheckpointPublicationUncertain {
-                checkpoint_id: pin,
-                source,
-            }))
-        }
-        Err(source) => Err(source.into_io_error().into()),
-    }
-}
+pub use files::CheckpointPublicationUncertain as ConditionalCheckpointPublicationUncertain;
 
 /// Each scheduled occurrence has an ordered pair, even when indices repeat.
 pub type CausalLmConditionalAnswerBatch = (Vec<usize>, Vec<[usize; 2]>);
@@ -84,28 +46,27 @@ pub struct NativeCausalLmConditionalAnswerSession {
 }
 
 /// A staged interval. Dropping it leaves the session and filesystem unchanged.
-pub struct CausalLmPreparedConditionalAnswerInterval<'a> {
-    live: &'a mut NativeCausalLmConditionalAnswerSession,
-    next: NativeCausalLmConditionalAnswerSession,
-    reports: Vec<CausalLmConditionalAnswerSessionStep>,
-    checkpoint: (Vec<u8>, String),
-    path: PathBuf,
-}
+pub struct CausalLmPreparedConditionalAnswerInterval<'a>(
+    files::PreparedCheckpoint<
+        'a,
+        NativeCausalLmConditionalAnswerSession,
+        CausalLmConditionalAnswerSessionStep,
+        Vec<u8>,
+    >,
+);
 
 impl CausalLmPreparedConditionalAnswerInterval<'_> {
     pub fn reports(&self) -> &[CausalLmConditionalAnswerSessionStep] {
-        &self.reports
+        self.0.reports()
     }
 
     pub fn checkpoint_id(&self) -> &str {
-        &self.checkpoint.1
+        self.0.checkpoint_id()
     }
 
     /// Publish without clobbering the destination, then advance the live session.
     pub fn publish(self) -> CausalLmResult<(Vec<CausalLmConditionalAnswerSessionStep>, String)> {
-        let pin = publish_checkpoint(&self.path, self.checkpoint)?;
-        *self.live = self.next;
-        Ok((self.reports, pin))
+        self.0.publish()
     }
 }
 
@@ -158,6 +119,20 @@ fn read_present_id<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<
     String::deserialize(input).map(Some)
 }
 
+fn frame<'a>(bytes: &'a [u8], expected_id: &str) -> CausalLmResult<(&'a [u8], &'a [u8])> {
+    if !(4..=NativeCausalLmConditionalAnswerSession::MAX_CHECKPOINT_BYTES).contains(&bytes.len())
+        || !canonical_digest(expected_id)
+        || fingerprint(bytes) != expected_id
+    {
+        return Err("conditional session checkpoint length or digest mismatch".into());
+    }
+    let size = u32::from_le_bytes(bytes[..4].try_into()?) as usize;
+    if size > HEADER_LIMIT || size > bytes.len() - 4 {
+        return Err("invalid conditional session checkpoint frame".into());
+    }
+    Ok(bytes[4..].split_at(size))
+}
+
 fn phase_plan_id(schedule: String, predecessor: Option<&str>) -> String {
     let Some(predecessor) = predecessor else {
         return schedule;
@@ -174,6 +149,8 @@ pub struct NativeCausalLmConditionalServingSnapshot {
     model: NativeCausalLm,
     projection_id: String,
     checkpoint_id: String,
+    layer: usize,
+    site: CausalLmProjectionSite,
     position: u64,
     total_batches: u64,
 }
@@ -191,6 +168,44 @@ impl NativeCausalLmConditionalServingSnapshot {
     pub fn total_batches(&self) -> u64 {
         self.total_batches
     }
+    /// Admit the whole generation budget before transferring prompt tokens.
+    pub fn generation_input_count(
+        &self,
+        steps: usize,
+        config: &CausalLmGenerationConfig,
+    ) -> CausalLmResult<usize> {
+        config.validate(&self.model, steps)?;
+        Ok(steps)
+    }
+
+    /// Reuse the native generator with the exact saved projection as its owner.
+    pub fn generator(
+        &self,
+        prompt: Vec<usize>,
+        config: CausalLmGenerationConfig,
+    ) -> CausalLmResult<NativeCausalLmGenerator> {
+        NativeCausalLmGenerator::new_owned(
+            self.model.clone(),
+            prompt,
+            config,
+            Some(self.projection_id.clone()),
+        )
+    }
+
+    /// Restore the same projection and token policy, without training data.
+    pub fn restore_generator(
+        &self,
+        payload: &[u8],
+        expected_id: &str,
+    ) -> CausalLmResult<NativeCausalLmGenerator> {
+        NativeCausalLmGenerator::from_json_owned(
+            self.model.clone(),
+            payload,
+            expected_id,
+            Some(self.projection_id.clone()),
+        )
+    }
+
     pub fn prefill_input_count(
         &self,
         steps: usize,
@@ -502,9 +517,14 @@ impl NativeCausalLmConditionalAnswerSession {
     }
 
     pub fn save_checkpoint_new(&self, path: impl AsRef<Path>) -> CausalLmResult<String> {
-        let path = std::path::absolute(path.as_ref())?;
-        files::admit_new(&path)?;
-        publish_checkpoint(&path, self.checkpoint()?)
+        self.prepare_checkpoint_save(path)?.publish()
+    }
+
+    pub fn prepare_checkpoint_save(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> CausalLmResult<files::CausalLmPreparedCheckpointFile<Vec<u8>>> {
+        files::CausalLmPreparedCheckpointFile::stage(path.as_ref(), || self.checkpoint())
     }
 
     /// Publish a complete interval before advancing the live session.
@@ -533,18 +553,13 @@ impl NativeCausalLmConditionalAnswerSession {
         step: impl Fn(&mut Self) -> CausalLmResult<Option<CausalLmConditionalAnswerSessionStep>>,
     ) -> CausalLmResult<CausalLmPreparedConditionalAnswerInterval<'_>> {
         let count = files::count(self.position(), self.total_batches(), stop)?;
-        let path = std::path::absolute(path)?;
-        files::admit_new(&path)?;
-        let mut next = self.clone();
-        let reports = files::steps(&mut next, count, step)?;
-        let checkpoint = next.checkpoint()?;
-        Ok(CausalLmPreparedConditionalAnswerInterval {
-            live: self,
-            next,
-            reports,
-            checkpoint,
-            path,
+        files::PreparedCheckpoint::stage(self, path, |live| {
+            let mut next = live.clone();
+            let reports = files::steps(&mut next, count, step)?;
+            let checkpoint = next.checkpoint()?;
+            Ok((Some(next), reports, checkpoint))
         })
+        .map(CausalLmPreparedConditionalAnswerInterval)
     }
 
     /// Reconstruct pinned weights without training data or guard replay.
@@ -558,6 +573,8 @@ impl NativeCausalLmConditionalAnswerSession {
         let projection = retained.serving_endpoint()?;
         Ok(NativeCausalLmConditionalServingSnapshot {
             projection_id: projection.projection_id(),
+            layer: projection.spec.layer,
+            site: projection.spec.site,
             model: projection.current,
             checkpoint_id: expected_id.to_owned(),
             position: record.position,
@@ -594,17 +611,7 @@ impl NativeCausalLmConditionalAnswerSession {
         CausalLmConditionalRetentionRestore,
         usize,
     )> {
-        if !(4..=Self::MAX_CHECKPOINT_BYTES).contains(&bytes.len())
-            || !canonical_digest(expected_id)
-            || fingerprint(bytes) != expected_id
-        {
-            return Err("conditional session checkpoint length or digest mismatch".into());
-        }
-        let size = u32::from_le_bytes(bytes[..4].try_into()?) as usize;
-        if size > HEADER_LIMIT || size > bytes.len() - 4 {
-            return Err("invalid conditional session checkpoint frame".into());
-        }
-        let (header, retained) = bytes[4..].split_at(size);
+        let (header, retained) = frame(bytes, expected_id)?;
         let record: Record = serde_json::from_slice(header)?;
         match (
             record.schema.as_str(),

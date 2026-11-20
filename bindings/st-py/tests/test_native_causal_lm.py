@@ -90,6 +90,33 @@ def conditional_session_inputs(model):
     return state, guard, rows, pairs, schedule
 
 
+def legacy_conditional_fixture(payload, *, family=False):
+    size = struct.unpack_from("<I", payload)[0]
+    header = json.loads(payload[4:4 + size])
+    retained = json.loads(payload[4 + size:])
+    assert header["epochs"] > 1
+    header.pop("start_projection_id")
+    header["schema"] = f"spiraltorch.native_conditional_answer_session.v{4 if family else 2}"
+    if family:
+        header["family_size"] = 2
+    retained["schema"] = "spiraltorch.native_conditional_retention.v2"
+    baseline = retained["baseline"]
+    mass = baseline.pop("mass")
+    for field in ("mean_pair_mass_bits", "minimum_mean_pair_mass_bits"):
+        baseline[field] = None if mass is None else mass[field]
+    if mass is not None and struct.unpack("<d", struct.pack("<Q", mass["minimum_mean_pair_mass_bits"]))[0] >= .5:
+        baseline["maximum_mean_outside_mass_bits"] = mass["maximum_mean_outside_mass_bits"]
+    return header, retained
+
+
+def legacy_conditional_bytes(header, retained):
+    inner = json.dumps(retained).encode()
+    header = {**header, "guard_pin": "sha256:" + hashlib.sha256(inner).hexdigest()}
+    outer = json.dumps(header).encode()
+    payload = struct.pack("<I", len(outer)) + outer + inner
+    return payload, "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
 class NativeCausalLmTests(unittest.TestCase):
     def setUp(self):
         self.config, self.weights = fixture()
@@ -313,6 +340,11 @@ class NativeCausalLmTests(unittest.TestCase):
         trainer = st.NativeCausalLmConditionalAnswerSession(state, guard, rows, schedule, length=.01)
         initial_id = state.projection_id
         with tempfile.TemporaryDirectory() as tmp:
+            start = Path(tmp) / "start.ck"
+            initial = trainer.checkpoint_with_id()
+            self.assertEqual(trainer.save_checkpoint_new(start), initial[1])
+            self.assertEqual(start.read_bytes(), initial[0])
+            self.assertEqual(trainer.checkpoint_with_id(), initial)
             path = Path(tmp) / "first.ck"
             reports, pin = trainer.advance_to_checkpoint_new(1, path)
             raw = path.read_bytes()
@@ -644,6 +676,8 @@ assert session.predecessor_checkpoint_id == predecessor
         legacy_pin = "sha256:" + hashlib.sha256(legacy_raw).hexdigest()
         legacy = session.from_bytes(self.model, legacy_raw, legacy_pin, pool, plan, rows, pairs)
         self.assertEqual(legacy.checkpoint_with_id(), (legacy_raw, legacy_pin))
+        with self.assertRaises(ValueError):
+            session.serving_from_legacy_checkpoint(self.model, legacy_raw, legacy_pin)
 
         resumed = session.from_bytes(self.model, raw, pin, pool, plan, rows, pairs)
         self.assertEqual(resumed.predecessor_checkpoint_id, parent_id)
@@ -743,6 +777,62 @@ assert session.predecessor_checkpoint_id == predecessor
             cls.serving_from_checkpoint(restricted, payload, pin).prefill(
                 UnreadablePrompt(), max_cache_values=1,
             )
+
+    def test_legacy_conditional_serving_is_not_training_resume(self):
+        model = self.model.with_lora(0, 2, 4.).with_readout_accumulator("f64")
+        state, guard, rows, pairs, schedule = conditional_session_inputs(model)
+        cls = st.NativeCausalLmConditionalAnswerSession
+        session = cls(state, guard, rows, schedule, length=.01, epochs=2)
+        self.assertTrue(session.step()["report"]["step"]["committed"])
+        current, pin = session.checkpoint_with_id()
+        expected = cls.serving_from_checkpoint(model, current, pin)
+        with self.assertRaises(ValueError):
+            cls.serving_from_legacy_checkpoint(model, current, pin)
+        for family in (False, True):
+            header, retained = legacy_conditional_fixture(current, family=family)
+            payload, expected_id = legacy_conditional_bytes(header, retained)
+            actual = cls.serving_from_legacy_checkpoint(model, payload, expected_id)
+            self.assertEqual((actual.position, actual.total_batches), (1, 4))
+            self.assertEqual(actual.checkpoint_id, expected_id)
+            self.assertEqual(actual.projection_id, expected.projection_id)
+            for owner in (self.model, model.with_readout_accumulator("f32")):
+                with self.assertRaisesRegex(ValueError, "different projection recipe"):
+                    cls.serving_from_legacy_checkpoint(owner, payload, expected_id)
+            with self.assertRaises(ValueError):
+                cls.from_bytes(model, payload, expected_id, rows, schedule, rows, pairs)
+            with self.assertRaises(ValueError):
+                cls.serving_from_checkpoint(model, payload, expected_id)
+            with self.assertRaises(TypeError):
+                cls.serving_from_legacy_checkpoint(model, bytearray(payload), expected_id)
+            with self.assertRaisesRegex(ValueError, "session checkpoint.*digest mismatch"):
+                cls.serving_from_legacy_checkpoint(model, payload + b" ", expected_id)
+            altered = payload + b" "
+            with self.assertRaisesRegex(ValueError, "retention checkpoint.*digest mismatch"):
+                cls.serving_from_legacy_checkpoint(model, altered, "sha256:" + hashlib.sha256(altered).hexdigest())
+            for prompt in ([1, 2], [4, 1, 5]):
+                a, b = expected.prefill(prompt), actual.prefill(prompt)
+                self.assertEqual(a.logits_f32le(), b.logits_f32le())
+                self.assertEqual(a.branch(3).logits_f32le(), b.branch(3).logits_f32le())
+                recipe = '{"max_new_tokens":3}'
+                g, h = expected.generator(prompt, recipe), actual.generator(prompt, recipe)
+                self.assertEqual(g.advance_ids(3), h.advance_ids(3))
+                self.assertEqual(g.checkpoint_id, h.checkpoint_id)
+            for field in ("initial_projection_id", "projection_id"):
+                bad = {**retained, field: "sha256:" + "0"*64}
+                with self.assertRaisesRegex(ValueError, "different projection recipe"):
+                    cls.serving_from_legacy_checkpoint(model, *legacy_conditional_bytes(header, bad))
+            wrong = {**header, "family_size": None}
+            with self.assertRaises(ValueError):
+                cls.serving_from_legacy_checkpoint(model, *legacy_conditional_bytes(wrong, retained))
+            if family:
+                single_epoch = dict(header)
+                single_epoch.pop("epochs")
+                raw, single_epoch_id = legacy_conditional_bytes(single_epoch, retained)
+                inferred = cls.serving_from_legacy_checkpoint(model, raw, single_epoch_id)
+                self.assertEqual(inferred.projection_id, expected.projection_id)
+                self.assertEqual((inferred.position, inferred.total_batches), (1, 4))
+                self.assertEqual(inferred.checkpoint_id, single_epoch_id)
+        self.assertEqual(session.checkpoint_with_id(), (current, pin))
 
     def test_rank_one_forward_does_not_need_training_checkpoint_budget(self):
         restricted = st.NativeCausalLm.from_gpt2(
