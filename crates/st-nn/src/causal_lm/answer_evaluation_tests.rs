@@ -70,6 +70,33 @@ fn answer_scores_match_individual_prefixes_and_preserve_aggregate_receipts() {
             let detail =
                 NativeCausalLm::evaluate_variants_by_answer(&models, &docs, Some(&masks), cfg)
                     .unwrap();
+            let id = base
+                .admit_answer_comparison_request(models.len(), &docs, Some(&masks), cfg)
+                .unwrap();
+            assert!(detail
+                .comparison()
+                .evaluations
+                .iter()
+                .all(|row| row.data_id == id));
+            let mut swapped = docs.clone();
+            swapped[3][0] = 5;
+            assert_ne!(
+                base.admit_answer_comparison_request(models.len(), &swapped, Some(&masks), cfg)
+                    .unwrap(),
+                id
+            );
+            let mut edited_labels = masks.clone();
+            edited_labels[3][3] = 4;
+            assert_ne!(
+                base.admit_answer_comparison_request(
+                    models.len(),
+                    &docs,
+                    Some(&edited_labels),
+                    cfg
+                )
+                .unwrap(),
+                id
+            );
             let scalar =
                 NativeCausalLm::evaluate_variants(&models, &docs, Some(&masks), cfg).unwrap();
             assert_eq!(

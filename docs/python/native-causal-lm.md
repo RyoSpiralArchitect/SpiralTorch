@@ -1515,3 +1515,100 @@ next_logits = prefix.branch(next_token_id).logits_f32le()
 Use the original frozen model, including its adapter and readout recipe.
 This reconstructs the weights and cached inference path without reading
 training tokens. It does not recheck the guard or permit training.
+
+To generate and resume a continuation from those weights:
+
+```python
+from pathlib import Path
+
+generator = snapshot.generator(prompt_ids, recipe_json)
+reports, generation_pin = generator.advance_to_checkpoint_new(8, "generation-0008.json")
+generator = snapshot.restore_generator(
+    Path("generation-0008.json").read_bytes(), generation_pin,
+)
+```
+
+The generation checkpoint pins the projection owner as well as the token
+history, random draw position, EOS policy and decoding configuration.
+Use the same projection when restoring, not the unprojected base.
+`advance_to_checkpoint_new` takes an absolute new-token position within
+the configured limit, may stop early at EOS, and never overwrites a file.
+It commits the staged cursor only after successful publication. A
+post-install cleanup, sync, or destination-check failure leaves the prior live cursor and
+reports the staged pin; verify any file that remains before recovery.
+Use a stable caller-owned directory. On Unix, staging and publication use
+the admitted directory handle and do not write into a replacement directory.
+Python builds the returned reports, pin and tuple before publication.
+If this preparation fails, it does not create a file or advance generation.
+A save-only checkpoint also prepares its Python pin before publication.
+
+The `native_geometry_generation.py` example accepts
+`--conditional-checkpoint` and `--conditional-checkpoint-id` for this path.
+Keep that serving pin separate from the generation pin passed to
+`--resume-id`. Supply the frozen model recipe, not the training roster.
+An explicit LoRA JSON must agree with any LoRA restored from a pinned training source.
+The example emits the native generation pin on stderr immediately after
+publication, so it stays available if writing reports fails. On resume,
+`result.json` distinguishes the exact admitted `resume_input_id` from
+the canonical starting-state `initial_id`.
+
+For a pinned, archived repeated v2 or family v4 session, explicitly use
+`NativeCausalLmConditionalAnswerSession.serving_from_legacy_checkpoint`
+or pass `--legacy-conditional-checkpoint` to the example. This is a
+read-only path and requires the original frozen decoder, including any
+LoRA and readout policy. It does not admit those formats for training.
+
+### Compare full supervised answers from saved projections
+
+```python
+from spiraltorch import NativeCausalLmConditionalServingSnapshot
+
+score = NativeCausalLmConditionalServingSnapshot.evaluate_variants_by_answer(
+    model, [before, after], documents, context_length=128, labels=answer_labels,
+)
+first_answer = score.answer(0)
+after_minus_before = score.contrast(1, 2)
+```
+
+Variant 0 is the frozen source model; the remaining variants follow the
+supplied snapshot order. All must agree on the base weights, LoRA,
+geometry and readout policy. Unshifted labels mark supervised targets:
+`-100` excludes the position from scoring, but model history still uses
+`token_documents`. The evaluator groups contiguous scored targets into
+answers, even when an answer spans covering windows. Context starts over
+at each window's start, so a long answer's NLL is not computed under one
+unbroken prefix. The report includes token-weighted and answer-weighted
+NLL differences. A negative candidate-minus-reference delta means lower NLL.
+
+Decoder work is shared only before the earliest changed projection.
+The `native_answer_comparison.py` example accepts pinned
+`--conditional-variant NAME CHECKPOINT PIN` entries and a separately
+pinned labeled corpus. Rust enforces the document and per-comparison token
+limits as the JSON is decoded. The example does not need the training
+roster or verify split independence. These are teacher-forced scores,
+not free-generation quality or a speed measurement.
+Archived conditional variants require `--legacy-conditional-checkpoints`
+and the same original source recipe; the CLI does not auto-detect them.
+
+Add `--paired-greedy MAX_NEW_TOKENS STOP_ID` (2 to 128 new tokens) to the
+conditional comparison to run a separate prompt-only decoder on the same cases
+and pinned variants.
+Each document must have a nonempty masked prompt followed by an unmasked answer
+whose labels match the input IDs exactly, including one final stop ID. The
+whole prompt and generation budget must fit a single scoring window so neither
+route truncates the prompt. All variants get the same greedy full-prefix recipe.
+Before opening the conditional snapshots, Rust checks both the scoring
+request and each prompt length's generation budget against the frozen source.
+Actual scoring still validates the identities and budgets of the loaded variants.
+The case roster must match Rust's exact scored corpus ID, including its
+prefixes and labeled targets. The decoder never gets the answer IDs or the
+answer's length.
+
+The private output includes generated token IDs, termination, first-token and
+exact answer-plus-stop matches, and per-answer teacher-forced NLL. The joint
+counts distinguish lower NLL without an exact-match gain from gains and losses.
+`exact_transitions_by_nll` also separates unchanged correct answers from
+unchanged failures, without changing the original `joint_counts`.
+Exact match is on IDs, not decoded text or semantic equivalence. Only this mode
+has the smaller 2 MiB input, 128-case, 8,192-step and 131,072-prefix-token
+limits; it does not check that the inputs are fresh.

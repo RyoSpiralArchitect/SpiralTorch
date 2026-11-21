@@ -1,9 +1,11 @@
 //! Transport for Rust-owned conditional schedules and checkpoint publication.
 use super::*;
+use crate::causal_lm::generation::PyNativeCausalLmGenerator;
 use pyo3::types::{PyString, PyTuple};
 use st_nn::causal_lm::{
-    CausalLmConditionalAnswerBatch, NativeCausalLmConditionalAnswerSession,
-    NativeCausalLmConditionalServingSnapshot,
+    CausalLmConditionalAnswerBatch, CausalLmGenerationConfig,
+    NativeCausalLmConditionalAnswerSession, NativeCausalLmConditionalServingSnapshot,
+    NativeCausalLmGenerator,
 };
 use std::path::PathBuf;
 
@@ -22,6 +24,45 @@ struct PyConditionalServing(NativeCausalLmConditionalServingSnapshot);
 
 #[pymethods]
 impl PyConditionalServing {
+    #[classattr]
+    const MAX_COMPARISON_SNAPSHOTS: usize =
+        NativeCausalLmConditionalServingSnapshot::MAX_COMPARISON_SNAPSHOTS;
+
+    #[staticmethod]
+    #[pyo3(signature=(source, snapshots, token_documents, context_length, *, microbatch_windows=None, labels=None))]
+    fn evaluate_variants_by_answer(
+        py: Python<'_>,
+        source: &PyNativeCausalLm,
+        snapshots: &Bound<'_, PyAny>,
+        token_documents: &Bound<'_, PyAny>,
+        context_length: &Bound<'_, PyAny>,
+        microbatch_windows: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<evaluation::PyConditionalAnswerComparison> {
+        let count = snapshots.len()?;
+        if !(1..=Self::MAX_COMPARISON_SNAPSHOTS).contains(&count) {
+            return Err(error("conditional comparison requires 1 to 15 snapshots"));
+        }
+        let owners = (0..count)
+            .map(|i| {
+                snapshots
+                    .get_item(i)?
+                    .cast_into::<Self>()
+                    .map_err(Into::into)
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let snapshots = owners.iter().map(|obj| &obj.get().0).collect::<Vec<_>>();
+        evaluation::compare_conditional_answers(
+            source,
+            &snapshots,
+            py,
+            token_documents,
+            context_length,
+            microbatch_windows,
+            labels,
+        )
+    }
+
     #[getter]
     fn projection_id(&self) -> &str {
         self.0.projection_id()
@@ -37,6 +78,44 @@ impl PyConditionalServing {
     #[getter]
     fn total_batches(&self) -> u64 {
         self.0.total_batches()
+    }
+
+    fn generator(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        config_json: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmGenerator> {
+        let bytes = session_input::payload_with_limit(
+            config_json,
+            CausalLmGenerationConfig::MAX_JSON_BYTES,
+        )?;
+        let config = CausalLmGenerationConfig::from_json(bytes.as_bytes()).map_err(error)?;
+        let count = self
+            .0
+            .generation_input_count(prompt_ids.len()?, &config)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, count)?;
+        py.detach(|| self.0.generator(ids, config))
+            .map(PyNativeCausalLmGenerator::from_native)
+            .map_err(error)
+    }
+
+    fn restore_generator(
+        &self,
+        py: Python<'_>,
+        payload: &Bound<'_, PyAny>,
+        expected_id: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmGenerator> {
+        let pin = session_input::pin(expected_id)?;
+        let bytes = session_input::payload_with_limit(
+            payload,
+            NativeCausalLmGenerator::MAX_CHECKPOINT_BYTES,
+        )?;
+        let payload = bytes.as_bytes();
+        py.detach(|| self.0.restore_generator(payload, &pin))
+            .map(PyNativeCausalLmGenerator::from_native)
+            .map_err(error)
     }
 
     #[pyo3(signature=(prompt, *, max_cache_values=None))]
@@ -250,6 +329,26 @@ impl PyConditionalSession {
         .map_err(error)
     }
 
+    #[staticmethod]
+    fn serving_from_legacy_checkpoint(
+        py: Python<'_>,
+        model: &PyNativeCausalLm,
+        payload: &Bound<'_, PyBytes>,
+        expected_id: &Bound<'_, PyAny>,
+    ) -> PyResult<PyConditionalServing> {
+        let pin = session_input::pin(expected_id)?;
+        let bytes = payload.as_bytes();
+        py.detach(|| {
+            NativeCausalLmConditionalAnswerSession::serving_from_legacy_checkpoint(
+                &model.inner,
+                bytes,
+                &pin,
+            )
+        })
+        .map(PyConditionalServing)
+        .map_err(error)
+    }
+
     #[getter]
     fn position(&self) -> u64 {
         self.0.position()
@@ -296,9 +395,17 @@ impl PyConditionalSession {
         let (raw, pin) = py.detach(|| self.0.checkpoint()).map_err(error)?;
         Ok((PyBytes::new(py, &raw), pin))
     }
-    fn save_checkpoint_new(&self, py: Python<'_>, path: PathBuf) -> PyResult<String> {
-        py.detach(|| self.0.save_checkpoint_new(path))
-            .map_err(error)
+    fn save_checkpoint_new<'py>(
+        &self,
+        py: Python<'py>,
+        path: PathBuf,
+    ) -> PyResult<Bound<'py, PyString>> {
+        let staged = py
+            .detach(|| self.0.prepare_checkpoint_save(path))
+            .map_err(error)?;
+        let pin = PyString::new(py, staged.checkpoint_id());
+        py.detach(|| staged.publish()).map_err(error)?;
+        Ok(pin)
     }
     fn advance_to_checkpoint_new<'py>(
         &mut self,

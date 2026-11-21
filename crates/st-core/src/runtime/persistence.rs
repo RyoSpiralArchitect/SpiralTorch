@@ -11,6 +11,9 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 
+mod destination;
+pub use destination::AtomicNewDestination;
+
 /// An atomic publication error with the visibility of the new destination.
 #[derive(Debug)]
 pub struct AtomicPublishError {
@@ -19,7 +22,7 @@ pub struct AtomicPublishError {
 }
 
 impl AtomicPublishError {
-    /// The complete file was installed, but cleanup or directory sync failed.
+    /// The complete file was installed, but publication did not finish.
     pub fn destination_installed(&self) -> bool {
         self.destination_installed
     }

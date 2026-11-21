@@ -22,7 +22,7 @@ if __name__ == "__main__":
     sys.meta_path.insert(0, NoForeignML())
 import spiraltorch as st  # noqa: E402
 
-FIXTURE = str(Path(__file__).with_name("test_native_causal_lm.py"))
+FIXTURE = str(Path(__file__).resolve().with_name("test_native_causal_lm.py"))
 fixtures = runpy.run_path(FIXTURE)
 DOCS = [[1, 2, 3, 4, 5, 6], [6, 4, 2, 1]]
 WINDOW = [1, 2, 3, 4]

@@ -10,7 +10,9 @@ mod canonical_json;
 #[cfg(feature = "golden")]
 pub mod golden;
 pub(crate) mod persistence;
-pub use persistence::{atomic_create_new, atomic_create_new_with_status, AtomicPublishError};
+pub use persistence::{
+    atomic_create_new, atomic_create_new_with_status, AtomicNewDestination, AtomicPublishError,
+};
 #[cfg(feature = "kdsl")]
 pub mod rank_adaptation;
 pub mod route_selection;
