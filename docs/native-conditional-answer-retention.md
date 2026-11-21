@@ -137,8 +137,9 @@ New sessions and direct retention restore still require an exact baseline.
 `prepare_resume` checks the outer and inner pins before model evaluation.
 Resume requires the exact original pool, ordered batches, and guard roster.
 `advance_to_checkpoint_new` stages at most 1,024 positions and only advances
-the live session after successful no-clobber publication. If a complete file
-was installed but cleanup or parent-directory sync failed, the live session
+the live session after successful no-clobber publication. On Unix the staged
+destination stays bound to the caller's admitted directory, not a later
+replacement. If a complete file was installed but publication did not finish, the live session
 remains at the previous position. The
 `ConditionalCheckpointPublicationUncertain` error carries the staged pin.
 Do not overwrite the path or trust its durability. If the file remains
@@ -158,6 +159,12 @@ identity, even when the candidate update was refused.
 prompt pool, original guard roster, or training workspace. It checks the
 outer and inner pins and model recipe; it does not replay the guard.
 Use `prepare_resume` with the original inputs to resume training.
+
+The explicit read-only `serving_from_legacy_checkpoint` also admits archived
+repeated v2 and family v4 sessions with a v2 retention record. It checks
+both pins and both projection identities against the exact source decoder.
+Linked v4 phases use a different format. No checkpoint is converted, no
+guard is replayed, and these archived formats cannot resume training.
 
 The [Python binding](python/native-causal-lm.md#guarded-rank-one-training-and-restart)
 calls this same implementation without Torch. There is no WASM training

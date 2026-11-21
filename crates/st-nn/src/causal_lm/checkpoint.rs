@@ -1,8 +1,145 @@
 //! Shared no-clobber commit boundary; trainers still own their math and payloads.
 use super::CausalLmResult;
+use st_core::runtime::AtomicNewDestination;
 use std::{fs, io, path::Path};
 
 pub(super) const MAX_INTERVAL: u64 = 1024;
+
+/// A complete checkpoint was installed but publication did not finish.
+/// The live cursor did not advance. Verify any retained file with this pin
+/// before using it for an explicit recovery.
+#[derive(Debug)]
+pub struct CheckpointPublicationUncertain {
+    checkpoint_id: String,
+    source: io::Error,
+}
+
+impl CheckpointPublicationUncertain {
+    pub(super) fn from_installed_file(checkpoint_id: String, source: io::Error) -> Self {
+        Self {
+            checkpoint_id,
+            source,
+        }
+    }
+
+    pub fn checkpoint_id(&self) -> &str {
+        &self.checkpoint_id
+    }
+}
+
+impl std::fmt::Display for CheckpointPublicationUncertain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "checkpoint installed but publication incomplete (pin {}): {}",
+            self.checkpoint_id, self.source
+        )
+    }
+}
+
+impl std::error::Error for CheckpointPublicationUncertain {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+pub(super) fn save_with_status<P: AsRef<[u8]>>(
+    destination: &AtomicNewDestination,
+    (bytes, pin): (P, String),
+) -> CausalLmResult<String> {
+    match destination.publish(bytes.as_ref()) {
+        Ok(()) => Ok(pin),
+        Err(source) if source.destination_installed() => Err(Box::new(
+            CheckpointPublicationUncertain::from_installed_file(pin, source.into_io_error()),
+        )),
+        Err(source) => Err(source.into_io_error().into()),
+    }
+}
+
+/// A frozen checkpoint and destination. Dropping it does not publish a file.
+pub struct CausalLmPreparedCheckpointFile<P> {
+    snapshot: (P, String),
+    destination: AtomicNewDestination,
+}
+
+impl<P: AsRef<[u8]>> CausalLmPreparedCheckpointFile<P> {
+    pub(super) fn stage(
+        path: &Path,
+        snapshot: impl FnOnce() -> CausalLmResult<(P, String)>,
+    ) -> CausalLmResult<Self> {
+        let destination = AtomicNewDestination::admit(path)?;
+        Ok(Self {
+            destination,
+            snapshot: snapshot()?,
+        })
+    }
+
+    pub fn checkpoint_id(&self) -> &str {
+        &self.snapshot.1
+    }
+
+    /// Install the frozen checkpoint without overwriting an existing name.
+    pub fn publish(self) -> CausalLmResult<String> {
+        self.publish_with(save_with_status)
+    }
+
+    fn publish_with(
+        self,
+        publish: impl FnOnce(&AtomicNewDestination, (P, String)) -> CausalLmResult<String>,
+    ) -> CausalLmResult<String> {
+        publish(&self.destination, self.snapshot)
+    }
+}
+
+pub(super) struct PreparedCheckpoint<'a, S, R, P> {
+    live: &'a mut S,
+    next: Option<S>,
+    reports: Vec<R>,
+    file: CausalLmPreparedCheckpointFile<P>,
+}
+
+impl<'a, S, R, P: AsRef<[u8]>> PreparedCheckpoint<'a, S, R, P> {
+    pub(super) fn stage(
+        live: &'a mut S,
+        path: &Path,
+        prepare: impl FnOnce(&S) -> CausalLmResult<(Option<S>, Vec<R>, (P, String))>,
+    ) -> CausalLmResult<Self> {
+        let destination = AtomicNewDestination::admit(path)?;
+        let (next, reports, snapshot) = prepare(live)?;
+        Ok(Self {
+            live,
+            next,
+            reports,
+            file: CausalLmPreparedCheckpointFile {
+                snapshot,
+                destination,
+            },
+        })
+    }
+
+    pub(super) fn reports(&self) -> &[R] {
+        &self.reports
+    }
+
+    pub(super) fn checkpoint_id(&self) -> &str {
+        self.file.checkpoint_id()
+    }
+
+    pub(super) fn publish(self) -> CausalLmResult<(Vec<R>, String)> {
+        self.publish_with(save_with_status)
+    }
+
+    pub(super) fn publish_with(
+        self,
+        publish: impl FnOnce(&AtomicNewDestination, (P, String)) -> CausalLmResult<String>,
+    ) -> CausalLmResult<(Vec<R>, String)> {
+        let pin = self.file.publish_with(publish)?;
+        if let Some(next) = self.next {
+            *self.live = next;
+        }
+        Ok((self.reports, pin))
+    }
+}
 
 pub(super) fn count(cursor: u64, total: u64, stop: u64) -> CausalLmResult<usize> {
     stop.checked_sub(cursor)
