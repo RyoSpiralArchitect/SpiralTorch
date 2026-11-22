@@ -67,3 +67,6 @@ output directories. Neither accepts a pretrained-model path.
 Shared journal SHA-256: `183c4be26d59209f2374ed3ebbfc9a56d5f10a10668164c7e059949d5b63de9c`.
 The pinned pretrained comparison and its wheel are unchanged. No new GPT-2
 calls, held-out scores, GPU runs or release are part of this check.
+
+For a mechanism check using only archived training-site adjoints, see
+[the paired local geometry comparison](objective-metric/RESULTS.md).
