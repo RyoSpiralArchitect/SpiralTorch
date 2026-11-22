@@ -6,6 +6,7 @@ use st_nn::causal_lm::{
 #[wasm_bindgen]
 pub struct CausalLmLineGradients {
     gradients: NativeCausalLmAdaptationGradients,
+    mode: CausalLmAdaptationMode,
 }
 
 #[wasm_bindgen]
@@ -49,24 +50,40 @@ impl NativeCausalLm {
         objective: &JsString,
         #[wasm_bindgen(unchecked_optional_param_type = "number")] max_tile_values: &JsValue,
     ) -> Result<CausalLmLineGradients, JsValue> {
-        self.model
-            .validate_adaptation_mode(CausalLmAdaptationMode::Geometry)
+        self.line_vjp(
+            prompt,
+            content,
+            lengths,
+            stop_id,
+            objective,
+            CausalLmAdaptationMode::Geometry,
+            max_tile_values,
+        )
+    }
+
+    #[wasm_bindgen(js_name = lineAdaptationGradients)]
+    pub fn line_adaptation_gradients(
+        &self,
+        prompt: &Uint32Array,
+        content: &Uint32Array,
+        lengths: &Uint32Array,
+        #[wasm_bindgen(unchecked_param_type = "number")] stop_id: &JsValue,
+        objective: &JsString,
+        mode: &JsString,
+        #[wasm_bindgen(unchecked_optional_param_type = "number")] max_tile_values: &JsValue,
+    ) -> Result<CausalLmLineGradients, JsValue> {
+        let mode = bounded_json_string_from_js(mode, 8, "adaptation mode")?
+            .parse()
             .map_err(js_error)?;
-        let stop = js_u32(stop_id, "stop ID")? as usize;
-        let cap = tile_limit(max_tile_values)?;
-        self.model.line_readout_tile_rows(cap).map_err(js_error)?;
-        let spec = bounded_json_string_from_js(objective, 4096, "complete-line objective")?;
-        let spec: CausalLmLineObjective = serde_json::from_str(&spec).map_err(js_error)?;
-        let n = id_count(prompt, WINDOW_IDS)?;
-        let lens = admitted_ids(lengths, id_count(lengths, MAX_LINE_MENU_CANDIDATES)?)?;
-        spec.training_shape(&self.model, n, &lens, stop)
-            .map_err(js_error)?;
-        let lines = packed_lines(content, lens)?;
-        let prompt = admitted_ids(prompt, n)?;
-        let gradients = spec
-            .gradients(&self.model, &prompt, &lines, stop, cap)
-            .map_err(js_error)?;
-        Ok(CausalLmLineGradients { gradients })
+        self.line_vjp(
+            prompt,
+            content,
+            lengths,
+            stop_id,
+            objective,
+            mode,
+            max_tile_values,
+        )
     }
 
     /// Plain SGD on the owning geometry snapshot, not a finite-decrease guarantee.
@@ -76,12 +93,60 @@ impl NativeCausalLm {
         gradient: &CausalLmLineGradients,
         #[wasm_bindgen(unchecked_param_type = "number")] rate: &JsValue,
     ) -> Result<NativeCausalLm, JsValue> {
+        if gradient.mode != CausalLmAdaptationMode::Geometry {
+            return Err(js_error("expected a geometry-only complete-line gradient"));
+        }
+        self.step_line_adaptation_sgd(gradient, rate)
+    }
+
+    #[wasm_bindgen(js_name = stepLineAdaptationSgd)]
+    pub fn step_line_adaptation_sgd(
+        &self,
+        gradient: &CausalLmLineGradients,
+        #[wasm_bindgen(unchecked_param_type = "number")] rate: &JsValue,
+    ) -> Result<NativeCausalLm, JsValue> {
         let rate = rate
             .as_f64()
             .ok_or_else(|| js_error("learning rate must be numeric"))? as f32;
         self.model
-            .step_adaptation_sgd(&gradient.gradients, CausalLmAdaptationMode::Geometry, rate)
+            .step_adaptation_sgd(&gradient.gradients, gradient.mode, rate)
             .map(|model| NativeCausalLm { model })
             .map_err(js_error)
+    }
+}
+
+impl NativeCausalLm {
+    fn line_vjp(
+        &self,
+        prompt: &Uint32Array,
+        content: &Uint32Array,
+        lengths: &Uint32Array,
+        stop_id: &JsValue,
+        objective: &JsString,
+        mode: CausalLmAdaptationMode,
+        max_tile_values: &JsValue,
+    ) -> Result<CausalLmLineGradients, JsValue> {
+        self.model
+            .validate_adaptation_mode(mode)
+            .map_err(js_error)?;
+        let stop = js_u32(stop_id, "stop ID")? as usize;
+        let cap = tile_limit(max_tile_values)?;
+        self.model.line_readout_tile_rows(cap).map_err(js_error)?;
+        let spec = bounded_json_string_from_js(
+            objective,
+            CausalLmLineObjective::MAX_SPEC_BYTES as u64,
+            "complete-line objective",
+        )?;
+        let spec: CausalLmLineObjective = serde_json::from_str(&spec).map_err(js_error)?;
+        let n = id_count(prompt, WINDOW_IDS)?;
+        let lens = admitted_ids(lengths, id_count(lengths, MAX_LINE_MENU_CANDIDATES)?)?;
+        spec.training_shape_for(&self.model, n, &lens, stop, mode)
+            .map_err(js_error)?;
+        let lines = packed_lines(content, lens)?;
+        let prompt = admitted_ids(prompt, n)?;
+        let gradients = spec
+            .gradients_for(&self.model, &prompt, &lines, stop, cap, mode)
+            .map_err(js_error)?;
+        Ok(CausalLmLineGradients { gradients, mode })
     }
 }

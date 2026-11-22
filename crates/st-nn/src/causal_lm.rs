@@ -73,8 +73,8 @@ pub use key_lag::CausalLmKeyLag;
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use line_menu::{CausalLmLineMenuReport, MAX_LINE_MENU_CANDIDATES, MAX_LINE_MENU_TARGETS};
 pub use line_session::{
-    CausalLmLineObjective, CausalLmLineSessionReport, CausalLmLineSessionStep,
-    NativeCausalLmLineTrainingSession,
+    CausalLmLineAdaptationStep, CausalLmLineObjective, CausalLmLineSessionReport,
+    CausalLmLineSessionStep, NativeCausalLmLineTrainingSession,
 };
 pub use line_set::{
     CausalLmCachedLineScores, CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport,

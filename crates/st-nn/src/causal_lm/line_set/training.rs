@@ -18,10 +18,11 @@ pub struct CausalLmLineTrainingWork {
 }
 
 impl NativeCausalLm {
-    pub(in crate::causal_lm) fn geometry_line_training(
+    pub(in crate::causal_lm) fn line_training(
         &self,
         batch: &PreparedCausalWindow,
         tile: usize,
+        mode: CausalLmAdaptationMode,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
         let plan = batch
             .competition
@@ -47,12 +48,14 @@ impl NativeCausalLm {
             peak_extra_seed_values: tile * vocab,
         };
         if tile == n {
-            let mut g = self.geometry_gradients_for_competition(batch)?;
+            let hidden = self.embed(&batch.input, batch.shape)?;
+            let mut g =
+                self.adaptation_gradients_from_prefix(batch, hidden, 0, Some(mode), None)?;
             g.line_work = Some(work);
             return Ok(g);
         }
 
-        let (first, site) = self.first_geometry_site()?;
+        let (first, site) = self.first_adaptation_site()?;
         let (checkpoints, hidden_rows, selected) = self.training_selected(
             batch,
             self.embed(&batch.input, batch.shape)?,
@@ -157,17 +160,11 @@ impl NativeCausalLm {
             batch.selected_rows.as_deref(),
             Tensor::from_vec(n, width, pulled)?,
             first,
-            learning::DecoderTarget::GeometryFrom(&site),
+            mode.decoder_target(&site),
             None,
         )?;
-        let mut g = self.seal_adaptation_gradients(
-            batch,
-            CausalLmAdaptationMode::Geometry,
-            loss,
-            Some(report),
-            parameters,
-            None,
-        )?;
+        let mut g =
+            self.seal_adaptation_gradients(batch, mode, loss, Some(report), parameters, None)?;
         g.line_work = Some(work);
         Ok(g)
     }

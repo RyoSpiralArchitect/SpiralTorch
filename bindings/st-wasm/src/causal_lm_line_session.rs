@@ -90,7 +90,7 @@ impl NativeCausalLmLineTrainingSession {
     #[wasm_bindgen(js_name=stepJson)]
     pub fn step_json(&mut self) -> Result<Option<String>, JsValue> {
         self.inner
-            .step()
+            .step_adaptation()
             .map_err(js_error)?
             .map(|r| serde_json::to_string(&r).map_err(js_error))
             .transpose()

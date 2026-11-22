@@ -129,9 +129,35 @@ stop after each content line. The last optional WASM argument (Python:
 `max_tile_values=`) is a vocabulary tile budget, not a vocabulary shortlist.
 No held-out check or loss-decrease guarantee is implied by a plain SGD step.
 
+### Choose which adapter learns
+
+A composed decoder applies LoRA at the attention output projection and then the
+geometry at the same site's output. Freezing an adapter keeps its transform in
+the forward pass **and** in the derivative of the other adapter. One joint VJP
+returns both parameter groups from one decoder forward/reverse traversal.
+
+```python
+import json
+
+# geometry_model already owns trainable geometry at transformer.h.0.attn.
+origin = geometry_model.with_lora(layer=0, rank=2, alpha=2.0)
+spec = json.dumps({"kind": "subset", "accepted_indices": [0, 2]})
+g = origin.line_adaptation_gradients([5], [[1], [1, 2], [3, 4]],
+                                     stop_id=0, objective=spec, mode="joint")
+next_model = origin.step_adaptation_sgd(g, mode="joint", learning_rate=0.01)
+```
+
+Use `lora` to freeze geometry, `geometry` to freeze LoRA, or `joint` for both.
+LoRA-only does not require a geometry artifact. In Rust use
+`spec.gradients_for(&model, prompt, lines, stop, cap, mode)?`. In JS use
+`model.lineAdaptationGradients(prompt, flat, lengths, stop, specJson, mode, cap)`
+and `model.stepLineAdaptationSgd(g, rate)`; the returned handle binds the mode.
+`withLoraJson(payload, expectedId)` restores the canonical adapter pinned to its
+base; use `model.with_lora_json(payload, expected_id=pin)` in Python.
+
 ## Resume complete-answer training
 
-Use the same original geometry-bearing model and the same plan bytes on each
+Use the same original adapted model and the same plan bytes on each
 client. A [sample plan](native_line_session_plan.json) switches from set NLL to
 a gold/menu mixture to an accepted subset, then repeats for the next epoch.
 
@@ -163,6 +189,22 @@ try {
   finally { cut.free(); }
 } finally { s.free(); }
 ```
+
+The v1 plan and its checkpoint remain geometry-only, including their original
+byte pins. To select owners, change the plan schema to
+`spiraltorch.native_causal_lm_line_plan.v2` and add a required `"mode": "joint"`
+(or `"lora"` / `"geometry"`). Its v2 checkpoint contains the selected weights
+and both initial/current adapter IDs, but no frozen weights or examples. A
+different mode, frozen companion, LoRA layout, geometry recipe or arithmetic is
+not a continuation. A hash checks the supplied bytes, not authorship or training.
+Rust uses `step_adaptation()` and `advance_adaptation_to_checkpoint_new()` for
+the owner-aware receipt; the original v1 `step()` and its non-null geometry IDs
+are unchanged. Python and WASM dispatch either plan through the same session.
+
+The [three-owner fixture](native_line_owners_fixture.py) compares six fixed
+updates per mode from the same artificial model and round-trips an intermediate
+checkpoint between CPython and WASM. Its losses are in-sample and measure
+execution, not a pretrained language model's quality. See the [matched losses and numerical checks](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_OWNERS.md).
 
 The demo download contains four artificial step-4 checkpoints from an actual
 Python-to-WASM handoff. Resume the matching case, not an unadapted base or a

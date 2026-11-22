@@ -14,6 +14,28 @@ pub enum CausalLmAdaptationMode {
     Joint,
 }
 
+impl std::str::FromStr for CausalLmAdaptationMode {
+    type Err = &'static str;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "lora" => Ok(Self::Lora),
+            "geometry" => Ok(Self::Geometry),
+            "joint" => Ok(Self::Joint),
+            _ => Err("adaptation mode must be lora, geometry or joint"),
+        }
+    }
+}
+
+impl CausalLmAdaptationMode {
+    pub(super) fn decoder_target(self, site: &str) -> learning::DecoderTarget<'_> {
+        match self {
+            Self::Lora => learning::DecoderTarget::Lora,
+            Self::Geometry => learning::DecoderTarget::GeometryFrom(site),
+            Self::Joint => learning::DecoderTarget::Joint,
+        }
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "paired_geometry_tests.rs"]
 mod paired_geometry_tests;
@@ -561,6 +583,13 @@ impl NativeCausalLm {
         Ok((report, parameters))
     }
 
+    pub(super) fn first_adaptation_site(&self) -> CausalLmResult<(usize, String)> {
+        match &self.lora {
+            Some(a) => Ok((a.layer(), format!("transformer.h.{}.attn", a.layer()))),
+            None => self.first_geometry_site(),
+        }
+    }
+
     pub(super) fn geometry_gradients_for_competition(
         &self,
         prepared: &PreparedCausalWindow,
@@ -641,21 +670,14 @@ impl NativeCausalLm {
         NativeCausalLmAdaptationGradients,
         Option<RivalCoverageReference>,
     )> {
-        let (first, site) = match &self.lora {
-            Some(a) => (a.layer(), format!("transformer.h.{}.attn", a.layer())),
-            None => self.first_geometry_site()?,
-        };
+        let (first, site) = self.first_adaptation_site()?;
         let mode = mode.unwrap_or(match (&self.lora, &self.geometry) {
             (Some(_), Some(_)) => CausalLmAdaptationMode::Joint,
             (Some(_), None) => CausalLmAdaptationMode::Lora,
             (None, Some(_)) => CausalLmAdaptationMode::Geometry,
             (None, None) => return Err("native LM has no adaptation parameters".into()),
         });
-        let target = match mode {
-            CausalLmAdaptationMode::Lora => learning::DecoderTarget::Lora,
-            CausalLmAdaptationMode::Geometry => learning::DecoderTarget::GeometryFrom(&site),
-            CausalLmAdaptationMode::Joint => learning::DecoderTarget::Joint,
-        };
+        let target = mode.decoder_target(&site);
         let learning::TrainingReadout {
             checkpoints,
             hidden_rows,

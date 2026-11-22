@@ -1,5 +1,9 @@
 # Restarting complete-answer geometry training
 
+This note describes the v1 geometry-only contract. The optional v2
+[owner comparison](LINE_OWNERS.md) trains LoRA, geometry or both; it does not
+change v1 checkpoints or the geometry-only step.
+
 The Rust line session owns a fixed ordered list of prompts and terminated
 answers. Each example specifies absolute set NLL, a gold/menu mixture, or
 conditional accepted-subset NLL. Each call to `step` performs **one ordinary

@@ -15,7 +15,7 @@ class Capture(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a=dict(attrs)
-        if tag=="pre" and a.get("id") in ("line-transfer","result"):
+        if tag=="pre" and a.get("id") in ("line-transfer","owner-transfer","result"):
             self.current=a["id"]
             if self.current in self.chunks:
                 raise ValueError("duplicate demo field")
@@ -32,7 +32,7 @@ class Capture(HTMLParser):
             self.chunks[self.current].append(value)
 
 
-def extract(dom, out):
+def extract(dom, out, owner_out=None):
     parser=Capture()
     parser.feed(dom.read_text())
     parser.close()
@@ -47,8 +47,18 @@ def extract(dom, out):
         assert pin(r["payload"].encode())==r["id"] and json.loads(r["payload"])["updates"]==4
     with out.open("xb") as stream:
         stream.write(raw)
+    if owner_out is not None:
+        content="".join(parser.chunks["owner-transfer"]).encode()
+        owners=json.loads(content)
+        assert set(owners)=={"lora","geometry","joint"}
+        for mode,row in owners.items():
+            snap=json.loads(row["payload"])
+            assert pin(row["payload"].encode())==row["id"] and snap["mode"]==mode and snap["updates"]==4
+        with owner_out.open("xb") as stream:
+            stream.write(content)
+        result={"line_session":result,"line_owners":json.loads("".join(parser.chunks["result"]))["line_owners"]}
     print(json.dumps(result))
 
 
 if __name__=="__main__":
-    extract(Path(sys.argv[1]),Path(sys.argv[2]))
+    extract(*map(Path,sys.argv[1:]))

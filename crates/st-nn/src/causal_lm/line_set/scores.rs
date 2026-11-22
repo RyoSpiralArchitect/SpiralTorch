@@ -76,7 +76,7 @@ impl NativeCausalLm {
         candidates: &[Vec<usize>],
         stop_id: usize,
     ) -> CausalLmResult<CausalLmLineScores> {
-        let (batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, false)?;
+        let (batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, None)?;
         let hidden = self.decode_hidden(&batch.input, batch.shape)?;
         plan.scores(candidates, &self.causal_logits(hidden, &batch)?)
     }

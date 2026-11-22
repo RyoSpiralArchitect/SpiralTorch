@@ -12,12 +12,7 @@ use st_nn::language_windows::MAX_DOCUMENTS;
 use std::collections::BTreeMap;
 
 pub(super) fn mode(value: &str) -> PyResult<CausalLmAdaptationMode> {
-    match value {
-        "lora" => Ok(CausalLmAdaptationMode::Lora),
-        "geometry" => Ok(CausalLmAdaptationMode::Geometry),
-        "joint" => Ok(CausalLmAdaptationMode::Joint),
-        _ => Err(error("adaptation mode must be lora, geometry or joint")),
-    }
+    value.parse().map_err(error)
 }
 fn mode_name(value: CausalLmAdaptationMode) -> &'static str {
     match value {

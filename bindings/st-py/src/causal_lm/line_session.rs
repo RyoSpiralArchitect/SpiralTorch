@@ -59,7 +59,7 @@ impl PyLineSession {
     }
 
     fn step(&mut self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
-        py.detach(|| self.inner.step())
+        py.detach(|| self.inner.step_adaptation())
             .map_err(error)?
             .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
             .transpose()
@@ -82,7 +82,7 @@ impl PyLineSession {
     ) -> PyResult<(Py<PyAny>, String)> {
         let stop = u32::try_from(dimension(stop_after)?).map_err(error)?;
         let (rs, id) = py
-            .detach(|| self.inner.advance_to_checkpoint_new(stop, path))
+            .detach(|| self.inner.advance_adaptation_to_checkpoint_new(stop, path))
             .map_err(checkpoint_error)?;
         Ok((
             crate::json::json_to_py(py, &serde_json::to_value(rs).map_err(error)?)?,

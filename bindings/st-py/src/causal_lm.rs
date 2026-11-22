@@ -621,6 +621,38 @@ impl PyNativeCausalLm {
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
     }
 
+    /// One Rust pullback for a set, menu or subset of complete answers.
+    #[pyo3(signature=(prompt_ids, candidates, *, stop_id, objective, mode, max_tile_values=None))]
+    fn line_adaptation_gradients(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        candidates: &Bound<'_, PyAny>,
+        stop_id: &Bound<'_, PyAny>,
+        objective: &Bound<'_, PyAny>,
+        mode: &str,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        use st_nn::causal_lm::CausalLmLineObjective;
+        let mode = session::mode(mode)?;
+        self.inner.validate_adaptation_mode(mode).map_err(error)?;
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
+        let spec =
+            session_input::payload_with_limit(objective, CausalLmLineObjective::MAX_SPEC_BYTES)?;
+        let spec: CausalLmLineObjective = serde_json::from_slice(spec.as_bytes()).map_err(error)?;
+        let stop = dimension(stop_id)?;
+        let items = line_menu::LineItems::new(candidates, 1)?;
+        let n = prompt_ids.len()?;
+        spec.training_shape_for(&self.inner, n, &items.lengths, stop, mode)
+            .map_err(error)?;
+        let prompt = tokens(prompt_ids, n)?;
+        let lines = items.into_ids()?;
+        py.detach(|| spec.gradients_for(&self.inner, &prompt, &lines, stop, cap, mode))
+            .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+            .map_err(error)
+    }
+
     /// Absolute probability loss for emitting any one of the terminated alternatives.
     #[pyo3(signature=(prompt_ids, candidates, *, stop_id))]
     fn line_set_loss(
@@ -1300,10 +1332,23 @@ impl PyNativeCausalLm {
         py.detach(|| self.inner.lora_to_json()).map_err(error)
     }
 
-    fn with_lora_json(&self, py: Python<'_>, payload: &str) -> PyResult<Self> {
-        py.detach(|| self.inner.with_lora_json(payload))
-            .map(|inner| Self { inner })
-            .map_err(error)
+    #[pyo3(signature=(payload, *, expected_id=None))]
+    fn with_lora_json(
+        &self,
+        py: Python<'_>,
+        payload: &Bound<'_, PyAny>,
+        expected_id: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let id = expected_id.map(session_input::pin).transpose()?;
+        let bytes =
+            session_input::payload_with_limit(payload, NativeCausalLm::MAX_LORA_ARTIFACT_BYTES)?;
+        let raw = std::str::from_utf8(bytes.as_bytes()).map_err(error)?;
+        py.detach(|| match id {
+            Some(id) => self.inner.with_lora_json_pinned(raw, &id),
+            None => self.inner.with_lora_json(raw),
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
     }
 
     #[pyo3(signature=(windows, shape, *, labels=None))]

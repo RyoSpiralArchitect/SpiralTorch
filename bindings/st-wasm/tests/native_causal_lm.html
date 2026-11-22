@@ -4,6 +4,8 @@
 <h1>Native causal LM: finite-checked geometry learning</h1>
 <p>Four learning controls and six models for cached continuation and terminated answer scoring, using the Rust decoder in WASM host memory. No pretrained model or GPU.</p>
 <p><a id="line-download" download="spiraltorch-line-checkpoints.json" hidden>Download the four artificial checkpoints at update 4 of 6</a></p>
+<p>The complete-answer comparison trains LoRA, geometry, or both from the same tiny model and checks a native checkpoint for each.</p>
+<pre id="owner-transfer" hidden></pre>
 <pre id="line-transfer" hidden></pre>
 <pre id="result" data-status="running">Running...</pre>
 <script type="module">
@@ -11,6 +13,7 @@ import {checkNativeCausalLm} from './native_causal_lm.mjs';
 import {checkCachedSuffix} from './native_causal_lm_cache.mjs';
 import {checkCachedLines} from './native_cached_lines.mjs';
 import {checkLineGradients} from './native_line_gradients.mjs';
+import {checkLineOwners} from './native_line_owners.mjs';
 import {checkLineSession} from './native_line_session.mjs';
 const result = document.getElementById('result');
 try {
@@ -20,7 +23,8 @@ try {
   const report = checkNativeCausalLm(M, fixture);
   const models = await (await fetch('./native_causal_lm_cache_fixture.json')).json();
   report.cached = checkCachedSuffix(M, models);
-  let portable;
+  let portable, owners;
+  report.line_owners=checkLineOwners(M,models,await (await fetch('./native_line_owners_bridge.json')).json(), checkpoints=>{owners=checkpoints;});
   report.line_session=checkLineSession(M,models,await (await fetch('./native_line_session_plan.json')).text(),
     await (await fetch('./native_line_session_bridge.json')).json(), checkpoints => { portable=checkpoints; });
   report.line_gradients = checkLineGradients(M, models, await (await fetch('./native_line_gradients_fixture.json')).json());
@@ -29,6 +33,7 @@ try {
   link.href = URL.createObjectURL(new Blob([JSON.stringify(portable)],{type:'application/json'}));
   link.hidden = false;
   if (new URLSearchParams(location.search).has('capture')) {
+    document.getElementById('owner-transfer').textContent = JSON.stringify(owners);
     document.getElementById('line-transfer').textContent = await (await fetch(link.href)).text();
   }
   result.textContent = JSON.stringify(report, null, 2);

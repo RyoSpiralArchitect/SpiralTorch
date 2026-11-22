@@ -42,7 +42,11 @@ impl Default for Coeff {
 }
 
 impl LineSubset {
-    fn new(support: LineSet, lines: &[Vec<usize>], accepted: &[usize]) -> Self {
+    pub(in crate::causal_lm) fn new(
+        support: LineSet,
+        lines: &[Vec<usize>],
+        accepted: &[usize],
+    ) -> Self {
         let (shared, paths) = paths(&support, lines);
         Self {
             support,
@@ -244,10 +248,9 @@ impl NativeCausalLm {
         candidates: &[Vec<usize>],
         accepted: &[usize],
         stop: usize,
-        training: bool,
     ) -> CausalLmResult<(PreparedCausalWindow, LineSubset)> {
         Self::validate_line_subset(candidates.len(), accepted)?;
-        let (batch, support) = self.prepare_line_set(prompt, candidates, stop, training)?;
+        let (batch, support) = self.prepare_line_set(prompt, candidates, stop, None)?;
         Ok((batch, LineSubset::new(support, candidates, accepted)))
     }
 
@@ -260,7 +263,7 @@ impl NativeCausalLm {
         stop_id: usize,
     ) -> CausalLmResult<CausalLmLineSubsetReport> {
         let (batch, plan) =
-            self.prepare_line_subset(prompt, candidates, accepted_indices, stop_id, false)?;
+            self.prepare_line_subset(prompt, candidates, accepted_indices, stop_id)?;
         let h = self.decode_hidden(&batch.input, batch.shape)?;
         plan.score(&self.causal_logits(h, &batch)?)
     }
@@ -290,11 +293,11 @@ impl NativeCausalLm {
         stop_id: usize,
         max_tile_values: Option<usize>,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        let tile_rows = self.line_readout_tile_rows(max_tile_values)?;
-        let (mut batch, plan) =
-            self.prepare_line_subset(prompt, candidates, accepted_indices, stop_id, true)?;
-        batch.competition = Some(objective::PreparedCompetition::LineSubset(plan));
-        self.geometry_line_training(&batch, tile_rows)
+        Self::validate_line_subset(candidates.len(), accepted_indices)?;
+        CausalLmLineObjective::Subset {
+            accepted_indices: accepted_indices.to_vec(),
+        }
+        .gradients(self, prompt, candidates, stop_id, max_tile_values)
     }
 }
 

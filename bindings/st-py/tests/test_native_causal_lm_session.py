@@ -48,6 +48,51 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_complete_line_owner_mode_before_foreign_ids_and_joint_checkpoint(self):
+        base, m = owners()
+        stop, lines, prompt = 0, [[1], [1, 2], [3]], [1, 2]
+        spec = {"kind": "subset", "accepted_indices": [0, 2]}
+        kw = dict(stop_id=stop, objective=json.dumps(spec).encode(), mode="joint", max_tile_values=11)
+        class Unreadable:
+            def __len__(self):
+                return 2
+            def __getitem__(self, i):
+                raise AssertionError("token copied before admission")
+        for bad in [dict(mode="unspecified"), dict(objective=" " * 4097),
+                    dict(objective='{"kind":"subset","accepted_indices":[4]}'), dict(max_tile_values=10)]:
+            with self.assertRaises(ValueError):
+                m.line_adaptation_gradients(Unreadable(), lines, **dict(kw, **bad))
+        with self.assertRaises(ValueError):
+            base.line_adaptation_gradients(Unreadable(), lines, **kw)
+        with self.assertRaises(ValueError):
+            m.with_lora_json(m.lora_to_json().encode(), expected_id="sha256:" + "0" * 64)
+
+        gradient = m.line_adaptation_gradients(prompt, lines, **kw)
+        selection = {}
+        for mode in ("lora", "geometry"):
+            group = m.line_adaptation_gradients(prompt, lines, **dict(kw, mode=mode))
+            self.assertEqual(group.loss, gradient.loss)
+            self.assertTrue(selection.keys().isdisjoint(group.parameter_gradients()))
+            selection.update(group.parameter_gradients())
+        self.assertEqual(selection, gradient.parameter_gradients())
+        plan = json.dumps({"schema":"spiraltorch.native_causal_lm_line_plan.v2", "mode":"joint",
+                           "epochs":2, "learning_rate":0.125, "max_tile_values":11,
+                           "examples":[dict(prompt_ids=prompt,candidates=lines,stop_id=stop,objective=spec)]})
+        session = st.NativeCausalLmLineTrainingSession(m, plan)
+        manual = m.step_adaptation_sgd(gradient, mode="joint", learning_rate=0.125)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "one.json"
+            reports, ck = session.advance_to_checkpoint_new(1, path)
+            self.assertEqual(reports[0]["post_lora_id"], manual.lora_artifact_id)
+            self.assertEqual(reports[0]["post_geometry_id"], manual.geometry_artifact_id)
+            restored = st.NativeCausalLmLineTrainingSession.from_json(m, plan, path.read_bytes(), ck)
+            before = session.checkpoint_with_id()
+            with self.assertRaises(OSError):
+                session.advance_to_checkpoint_new(2, path)
+            self.assertEqual(before, session.checkpoint_with_id())
+            self.assertEqual(session.step(), restored.step())
+            self.assertEqual(session.checkpoint_with_id(), restored.checkpoint_with_id())
+
     def test_complete_line_session_exact_partition_and_no_clobber(self):
         import hashlib
         base, origin = owners("f32_wide_backward")

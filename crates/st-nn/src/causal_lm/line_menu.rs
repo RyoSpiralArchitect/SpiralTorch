@@ -100,10 +100,10 @@ impl NativeCausalLm {
         &self,
         shape: [usize; 2],
         readout_rows: usize,
-        geometry_gradients: bool,
+        mode: Option<CausalLmAdaptationMode>,
     ) -> CausalLmResult<()> {
-        if geometry_gradients {
-            self.validate_adaptation_mode(CausalLmAdaptationMode::Geometry)?;
+        if let Some(mode) = mode {
+            self.validate_adaptation_mode(mode)?;
             self.adaptation_labeled_input_count(shape, true)?;
         } else {
             self.loss_objective_input_count(shape, true)?;
@@ -119,10 +119,9 @@ impl NativeCausalLm {
         gold: usize,
         stop: usize,
         mix: f64,
-        training: bool,
     ) -> CausalLmResult<(PreparedCausalWindow, LineMenu)> {
         Self::validate_ranking(candidates.len(), gold, mix)?;
-        let (batch, support) = self.prepare_line_set(prompt, candidates, stop, training)?;
+        let (batch, support) = self.prepare_line_set(prompt, candidates, stop, None)?;
         Ok((batch, LineMenu::new(support, candidates, gold, mix)))
     }
 
@@ -153,8 +152,7 @@ impl NativeCausalLm {
         stop_id: usize,
         mix: f64,
     ) -> CausalLmResult<CausalLmLineMenuReport> {
-        let (batch, plan) =
-            self.prepare_line_menu(prompt, candidates, gold_index, stop_id, mix, false)?;
+        let (batch, plan) = self.prepare_line_menu(prompt, candidates, gold_index, stop_id, mix)?;
         let hidden = self.decode_hidden(&batch.input, batch.shape)?;
         plan.score(&self.causal_logits(hidden, &batch)?)
     }
@@ -183,10 +181,12 @@ impl NativeCausalLm {
         mix: f64,
         max_tile_values: Option<usize>,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        let tile_rows = self.line_readout_tile_rows(max_tile_values)?;
-        let (mut batch, plan) =
-            self.prepare_line_menu(prompt, candidates, gold_index, stop_id, mix, true)?;
-        batch.competition = Some(objective::PreparedCompetition::LineMenu(plan));
-        self.geometry_line_training(&batch, tile_rows)
+        CausalLmLineObjective::Menu { gold_index, mix }.gradients(
+            self,
+            prompt,
+            candidates,
+            stop_id,
+            max_tile_values,
+        )
     }
 }

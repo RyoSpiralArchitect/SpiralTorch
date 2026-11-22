@@ -137,6 +137,21 @@ impl NativeCausalLm {
         stop_id: usize,
         training: bool,
     ) -> CausalLmResult<[usize; 2]> {
+        self.line_set_shape_for(
+            prompt_len,
+            lengths,
+            stop_id,
+            training.then_some(CausalLmAdaptationMode::Geometry),
+        )
+    }
+
+    pub(super) fn line_set_shape_for(
+        &self,
+        prompt_len: usize,
+        lengths: &[usize],
+        stop_id: usize,
+        mode: Option<CausalLmAdaptationMode>,
+    ) -> CausalLmResult<[usize; 2]> {
         let (shape, _) = self.terminated_shape(prompt_len, lengths, stop_id)?;
         let mut sorted = lengths.to_vec();
         sorted.sort_unstable();
@@ -148,7 +163,7 @@ impl NativeCausalLm {
         // Each line has a distinct terminal node; every missing depth on the
         // longest line also needs at least one node, in addition to the root.
         let min_nodes = 1 + lengths.len() + (sorted.last().unwrap() - distinct);
-        self.admit_terminated_work([min_lanes, shape[1]], min_nodes, training)?;
+        self.admit_terminated_work([min_lanes, shape[1]], min_nodes, mode)?;
         Ok(shape)
     }
 
@@ -157,17 +172,17 @@ impl NativeCausalLm {
         prompt: &[usize],
         candidates: &[Vec<usize>],
         stop: usize,
-        training: bool,
+        mode: Option<CausalLmAdaptationMode>,
     ) -> CausalLmResult<([usize; 2], LineSet)> {
         if candidates.len() > MAX_LINE_MENU_CANDIDATES {
             return Err("too many complete-line candidates".into());
         }
         let lens = candidates.iter().map(Vec::len).collect::<Vec<_>>();
-        let shape = self.line_set_shape(prompt.len(), &lens, stop, training)?;
+        let shape = self.line_set_shape_for(prompt.len(), &lens, stop, mode)?;
         self.validate_terminated_contents(prompt, candidates, stop)?;
         let plan = LineSet::new(candidates, stop);
         let physical = [plan.leaves.len(), shape[1]];
-        self.admit_terminated_work(physical, plan.nodes.len(), training)?;
+        self.admit_terminated_work(physical, plan.nodes.len(), mode)?;
         Ok((shape, plan))
     }
 
@@ -176,9 +191,9 @@ impl NativeCausalLm {
         prompt: &[usize],
         candidates: &[Vec<usize>],
         stop: usize,
-        training: bool,
+        mode: Option<CausalLmAdaptationMode>,
     ) -> CausalLmResult<(PreparedCausalWindow, LineSet)> {
-        let (shape, plan) = self.admit_line_support(prompt, candidates, stop, training)?;
+        let (shape, plan) = self.admit_line_support(prompt, candidates, stop, mode)?;
         let physical = [plan.leaves.len(), shape[1]];
         let mut ids = Vec::with_capacity(physical[0] * physical[1]);
         for &j in &plan.leaves {
@@ -210,7 +225,7 @@ impl NativeCausalLm {
         candidates: &[Vec<usize>],
         stop_id: usize,
     ) -> CausalLmResult<CausalLmLineSetReport> {
-        let (batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, false)?;
+        let (batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, None)?;
         let hidden = self.decode_hidden(&batch.input, batch.shape)?;
         plan.evaluate(&self.causal_logits(hidden, &batch)?, None)
     }
@@ -233,10 +248,7 @@ impl NativeCausalLm {
         stop_id: usize,
         max_tile_values: Option<usize>,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        let tile_rows = self.line_readout_tile_rows(max_tile_values)?;
-        let (mut batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, true)?;
-        batch.competition = Some(objective::PreparedCompetition::LineSet(plan));
-        self.geometry_line_training(&batch, tile_rows)
+        CausalLmLineObjective::Set {}.gradients(self, prompt, candidates, stop_id, max_tile_values)
     }
 }
 

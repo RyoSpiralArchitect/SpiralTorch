@@ -1,5 +1,17 @@
 import {CausalLmDeclaredBatch, GeometryAdapterArtifact, NativeCausalLm, NativeCausalLmContext, NativeCausalLmLineTrainingSession} from 'spiraltorch-wasm';
 
+export function jointLine(geometry: NativeCausalLm, prompt: Uint32Array, flat: Uint32Array, lengths: Uint32Array) {
+    const m = geometry.withLora(0, 2, 2);
+    try {
+        const g = m.lineAdaptationGradients(prompt, flat, lengths, 0, '{"kind":"set"}', 'joint');
+        try {
+            const n = m.stepLineAdaptationSgd(g, 0.125);
+            try { return n.withLoraJson(n.loraJson(), n.loraArtifactId!); }
+            finally { n.free(); }
+        } finally { g.free(); }
+    } finally { m.free(); }
+}
+
 export function resumeLine(origin: NativeCausalLm, plan: string, checkpoint: string, pin: string) {
     const s = NativeCausalLmLineTrainingSession.fromJson(origin,plan,checkpoint,pin);
     try {

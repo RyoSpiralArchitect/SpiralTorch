@@ -201,6 +201,54 @@ impl NativeCausalLm {
             .map_err(js_error)
     }
 
+    #[wasm_bindgen(js_name = withLora)]
+    pub fn with_lora(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "number")] layer: &JsValue,
+        #[wasm_bindgen(unchecked_param_type = "number")] rank: &JsValue,
+        #[wasm_bindgen(unchecked_param_type = "number")] alpha: &JsValue,
+    ) -> Result<NativeCausalLm, JsValue> {
+        let alpha = alpha
+            .as_f64()
+            .ok_or_else(|| js_error("alpha must be numeric"))? as f32;
+        self.model
+            .with_lora(
+                js_u32(layer, "LoRA layer")? as usize,
+                js_u32(rank, "LoRA rank")? as usize,
+                alpha,
+            )
+            .map(|model| Self { model })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(getter, js_name = loraArtifactId)]
+    pub fn lora_artifact_id(&self) -> Option<String> {
+        self.model.lora_artifact_id().map(str::to_owned)
+    }
+
+    #[wasm_bindgen(js_name = loraJson)]
+    pub fn lora_json(&self) -> Result<String, JsValue> {
+        self.model.lora_to_json().map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = withLoraJson)]
+    pub fn with_lora_json(
+        &self,
+        payload: &JsString,
+        expected_id: &JsString,
+    ) -> Result<NativeCausalLm, JsValue> {
+        let id = bounded_json_string_from_js(expected_id, 71, "expected LoRA ID")?;
+        let raw = bounded_json_string_from_js(
+            payload,
+            Decoder::MAX_LORA_ARTIFACT_BYTES as u64,
+            "LoRA artifact",
+        )?;
+        self.model
+            .with_lora_json_pinned(&raw, &id)
+            .map(|model| Self { model })
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = geometryArtifact)]
     pub fn geometry_artifact(&self) -> Option<GeometryAdapterArtifact> {
         self.model

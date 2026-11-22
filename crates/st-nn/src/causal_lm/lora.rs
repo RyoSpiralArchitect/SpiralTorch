@@ -34,6 +34,14 @@ pub(super) struct NativeLoraAdapter {
 }
 
 impl NativeLoraAdapter {
+    pub(super) fn same_training_layout(&self, other: &Self) -> bool {
+        let (a, b) = (&self.record, &other.record);
+        a.layer == b.layer
+            && a.width == b.width
+            && a.rank == b.rank
+            && a.alpha.to_bits() == b.alpha.to_bits()
+    }
+
     fn create(record: LoraRecord, model: &NativeCausalLm) -> CausalLmResult<Self> {
         if record.schema != "spiraltorch.native_lora.attention_output.v1"
             || record.base_model_identity != model.base_id
@@ -161,6 +169,7 @@ impl NativeCausalLmLoraGradients {
 }
 
 impl NativeCausalLm {
+    pub const MAX_LORA_ARTIFACT_BYTES: usize = MAX_LORA_JSON_BYTES;
     /// Initialize one attention output adapter. A is deterministic and B is zero.
     /// An attached geometry must be the same layer's single attention output site.
     pub fn with_lora(&self, layer: usize, rank: usize, alpha: f32) -> CausalLmResult<Self> {
@@ -235,6 +244,18 @@ impl NativeCausalLm {
         next.lora = Some(Arc::new(NativeLoraAdapter::create(record, self)?));
         next.validate_adaptation_placement()?;
         Ok(next)
+    }
+
+    /// Attach only the expected canonical adapter to this frozen base.
+    pub fn with_lora_json_pinned(&self, json: &str, expected_id: &str) -> CausalLmResult<Self> {
+        if !crate::geometry_artifact::is_sha256_id(expected_id) {
+            return Err("invalid native LoRA artifact pin".into());
+        }
+        let model = self.with_lora_json(json)?;
+        if model.lora_artifact_id() != Some(expected_id) {
+            return Err("native LoRA artifact pin mismatch".into());
+        }
+        Ok(model)
     }
 
     pub(super) fn project_attention_output(

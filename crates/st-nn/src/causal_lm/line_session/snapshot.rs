@@ -1,6 +1,8 @@
 use super::*;
 use std::path::Path;
 
+mod owners;
+
 const SCHEMA: &str = "spiraltorch.native_causal_lm_line_checkpoint.v1";
 
 #[derive(Serialize, Deserialize)]
@@ -27,6 +29,9 @@ impl NativeCausalLmLineTrainingSession {
 
     /// No prompts, candidate text, base weights or frozen LoRA weights are stored.
     pub fn checkpoint_with_id(&self) -> CausalLmResult<(String, String)> {
+        if self.plan.mode.is_some() {
+            return self.owners_checkpoint();
+        }
         let art = self
             .model
             .geometry_artifact()
@@ -35,14 +40,21 @@ impl NativeCausalLmLineTrainingSession {
             schema: SCHEMA.into(),
             plan_id: self.plan_id.clone(),
             base_id: self.model.base_model_identity().into(),
-            origin_geometry_id: self.origin_geometry_id.clone(),
+            origin_geometry_id: self
+                .origin_geometry_id
+                .clone()
+                .ok_or("missing initial geometry")?,
             lora_id: self.model.lora_artifact_id().map(str::to_owned),
             readout_accumulator: self.model.readout_accumulator(),
             updates: self.updates,
             geometry_id: art.artifact_id().into(),
             geometry_json: art.to_json().into(),
         };
-        let raw = serde_json::to_string(&saved)?;
+        Self::finish_checkpoint(&saved)
+    }
+
+    fn finish_checkpoint(value: &impl Serialize) -> CausalLmResult<(String, String)> {
+        let raw = serde_json::to_string(value)?;
         if raw.len() > Self::MAX_CHECKPOINT_BYTES {
             return Err("line checkpoint exceeds byte budget".into());
         }
@@ -65,9 +77,14 @@ impl NativeCausalLmLineTrainingSession {
         {
             return Err("line checkpoint byte limit or pin mismatch".into());
         }
+        let mut session = Self::new(origin, plan)?;
+        if session.plan.mode.is_some() {
+            return session.restore_owners(bytes);
+        }
+        let origin = &session.model;
         let s: Snapshot = serde_json::from_slice(bytes)?;
         if s.schema != SCHEMA
-            || s.plan_id != pin(plan)
+            || s.plan_id != session.plan_id
             || s.base_id != origin.base_model_identity()
             || Some(s.origin_geometry_id.as_str()) != origin.geometry_artifact_id()
             || s.lora_id.as_deref() != origin.lora_artifact_id()
@@ -77,7 +94,6 @@ impl NativeCausalLmLineTrainingSession {
                 "line checkpoint schema, plan, initial model or arithmetic mismatch".into(),
             );
         }
-        let mut session = Self::new(origin, plan)?;
         if s.updates > session.total || (s.updates == 0 && s.geometry_id != s.origin_geometry_id) {
             return Err("impossible line session cursor or initial geometry".into());
         }
@@ -110,10 +126,28 @@ impl NativeCausalLmLineTrainingSession {
         stop: u32,
         path: impl AsRef<Path>,
     ) -> CausalLmResult<(Vec<CausalLmLineSessionStep>, String)> {
+        self.require_geometry_plan()?;
+        self.advance_with(stop, path.as_ref(), Self::step)
+    }
+
+    pub fn advance_adaptation_to_checkpoint_new(
+        &mut self,
+        stop: u32,
+        path: impl AsRef<Path>,
+    ) -> CausalLmResult<(Vec<CausalLmLineAdaptationStep>, String)> {
+        self.advance_with(stop, path.as_ref(), Self::step_adaptation)
+    }
+
+    fn advance_with<R>(
+        &mut self,
+        stop: u32,
+        path: &Path,
+        step: fn(&mut Self) -> CausalLmResult<Option<R>>,
+    ) -> CausalLmResult<(Vec<R>, String)> {
         let n = checkpoint::count(self.updates.into(), self.total.into(), stop.into())?;
-        checkpoint::PreparedCheckpoint::stage(self, path.as_ref(), |origin| {
+        checkpoint::PreparedCheckpoint::stage(self, path, |origin| {
             let mut next = origin.clone();
-            let reports = checkpoint::steps(&mut next, n, Self::step)?;
+            let reports = checkpoint::steps(&mut next, n, step)?;
             let saved = next.checkpoint_with_id()?;
             Ok((Some(next), reports, saved))
         })?

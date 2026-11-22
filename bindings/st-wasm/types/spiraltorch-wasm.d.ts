@@ -24,12 +24,18 @@ declare module "spiraltorch-wasm" {
         private constructor();
         static fromGpt2(config: string, weights: Uint8Array): NativeCausalLm;
         readonly baseModelIdentity: string;
+        withLora(layer: number, rank: number, alpha: number): NativeCausalLm;
+        readonly loraArtifactId: string | undefined;
+        withLoraJson(payload: string, expectedId: string): NativeCausalLm;
+        loraJson(): string;
         withGeometry(artifact: GeometryAdapterArtifact): NativeCausalLm;
         geometryArtifact(): GeometryAdapterArtifact | undefined;
         nextLogits(promptJson: string): Float32Array;
         prefill(promptIds: Uint32Array, maxCacheValues: number): NativeCausalLmContext;
         /** Geometry-only full-vocabulary VJP. Objective JSON kind: set, menu (gold_index, mix), or subset (accepted_indices). */
         geometryLineGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, maxTileValues?: number): CausalLmLineGradients;
+        lineAdaptationGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, mode: "lora" | "geometry" | "joint", maxTileValues?: number): CausalLmLineGradients;
+        stepLineAdaptationSgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
         stepLineGeometrySgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
         declaredSetNllJson(batch: CausalLmDeclaredBatch): string;
         stepDeclaredSetGeometryAtDistance(batch: CausalLmDeclaredBatch, distance: number): CausalLmDeclaredStep;

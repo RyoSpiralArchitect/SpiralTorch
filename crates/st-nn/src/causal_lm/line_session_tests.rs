@@ -14,6 +14,114 @@ fn pin(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn version_two_roundtrips_each_selected_owner_and_cannot_relabel_or_inject_weights() {
+    for mode in ["lora", "geometry", "joint"] {
+        for composed in [false, true] {
+            let mut origin = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+            if !composed {
+                match mode {
+                    "joint" => continue,
+                    "lora" => {
+                        origin = load()
+                            .with_lora_json(&origin.lora_to_json().unwrap())
+                            .unwrap()
+                    }
+                    _ => {
+                        origin = load()
+                            .with_geometry(origin.geometry_artifact().unwrap().clone())
+                            .unwrap()
+                    }
+                }
+            }
+            let mut v = wire();
+            v["schema"] = json!("spiraltorch.native_causal_lm_line_plan.v2");
+            v["mode"] = json!(mode);
+            let plan = v.to_string();
+            let mut s = Session::new(origin.clone(), plan.as_bytes()).unwrap();
+            let mut cuts = vec![s.checkpoint_with_id().unwrap()];
+            assert!(s.step().is_err());
+            assert_eq!(s.completed_updates(), 0);
+            let mut receipts = vec![];
+            while let Some(r) = s.step_adaptation().unwrap() {
+                assert_eq!(r.mode, Some(mode.parse().unwrap()));
+                assert_eq!(r.pre_lora_id != r.post_lora_id, mode != "geometry");
+                assert_eq!(r.pre_geometry_id != r.post_geometry_id, mode != "lora");
+                cuts.push(s.checkpoint_with_id().unwrap());
+                receipts.push(serde_json::to_vec(&r).unwrap());
+            }
+            for (i, (raw, id)) in cuts.iter().enumerate() {
+                let mut n =
+                    Session::restore(origin.clone(), plan.as_bytes(), raw.as_bytes(), id).unwrap();
+                assert_eq!(&n.checkpoint_with_id().unwrap(), &cuts[i]);
+                for r in &receipts[i..] {
+                    assert_eq!(
+                        &serde_json::to_vec(&n.step_adaptation().unwrap().unwrap()).unwrap(),
+                        r
+                    );
+                }
+                assert_eq!(n.checkpoint_with_id().unwrap(), *cuts.last().unwrap());
+                assert!(n.step_adaptation().unwrap().is_none());
+            }
+            let value: serde_json::Value = serde_json::from_str(&cuts[1].0).unwrap();
+            let reject = |v: serde_json::Value| {
+                let bytes = serde_json::to_vec(&v).unwrap();
+                assert!(
+                    Session::restore(origin.clone(), plan.as_bytes(), &bytes, &pin(&bytes))
+                        .is_err()
+                );
+            };
+            for (key, selected) in [("lora", mode != "geometry"), ("geometry", mode != "lora")] {
+                assert_eq!(value[key]["weights"].is_string(), selected);
+                let mut v = value.clone();
+                v[key].as_object_mut().unwrap().remove("origin_id");
+                reject(v);
+                let mut v = value.clone();
+                v[key]["weights"] = if selected { json!(null) } else { json!("{}") };
+                reject(v);
+                let mut v = value.clone();
+                v[key]["id"] = json!("different");
+                reject(v);
+            }
+            let mut changed = value.clone();
+            changed["updates"] = json!(0);
+            reject(changed);
+            let mut changed = value.clone();
+            changed["mode"] = json!(if mode == "joint" { "lora" } else { "joint" });
+            reject(changed);
+            if mode != "geometry" {
+                let mut raw: serde_json::Value =
+                    serde_json::from_str(value["lora"]["weights"].as_str().unwrap()).unwrap();
+                raw["alpha"] = json!(1.5);
+                let other = origin.with_lora_json(&raw.to_string()).unwrap();
+                let mut changed = value;
+                changed["lora"]["weights"] = json!(other.lora_to_json().unwrap());
+                changed["lora"]["id"] = json!(other.lora_artifact_id());
+                reject(changed);
+            }
+        }
+    }
+}
+
+#[test]
+fn plan_versions_do_not_implicitly_acquire_or_downgrade_owners() {
+    let origin = model(1, CausalLmReadoutAccumulator::F32);
+    for (version, mode) in [
+        (1, Some(json!(null))),
+        (1, Some(json!("joint"))),
+        (2, None),
+        (2, Some(json!(null))),
+        (2, Some(json!("guess"))),
+    ] {
+        let mut p = wire();
+        p["schema"] = json!(format!("spiraltorch.native_causal_lm_line_plan.v{version}"));
+        if let Some(m) = mode {
+            p["mode"] = m;
+        }
+        assert!(Session::new(origin.clone(), p.to_string().as_bytes()).is_err());
+    }
+}
+
+#[test]
 fn all_cuts_match_manual_gradients_sgd_receipts_and_both_owners() {
     let plan = serde_json::to_vec(&wire()).unwrap();
     let p = [1, 3];
