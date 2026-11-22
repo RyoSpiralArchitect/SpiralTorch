@@ -80,6 +80,30 @@ def artifact(kind="affine", *, frozen_gate=False):
 
 
 class NativeGeometryTests(unittest.TestCase):
+    def test_two_wave_directions_share_a_snapshot_not_buffers(self):
+        rt = st.NativeGeometryRuntime(artifact("affine"))
+        x = array("f", [1.8, -.2, .7, -.6, 1.4, .3])
+        a = array("f", [.3, -.6, .7, .2, .8, -.2])
+        b = array("f", [-.1, .7, -.2, .5, -.6, .9])
+        cfg = dict(curvature=-1., saturation=1., porosity=.05, log_radius=0.)
+        batch = rt.forward_buffer("site", x, 2)
+        original = rt.artifact().artifact_id
+        first, second = batch.wave_parameter_pullback_pair_buffer(a, b, cfg)
+        self.assertEqual(set(first), {"affine", "saturation", "projection", "both"})
+        for result, direction in [(first,a), (second,b)]:
+            self.assertEqual(result["affine"], batch.vjp_parameters_buffer(direction))
+            self.assertTrue(all(set(p) == {"gate", "bias"} for p in result.values()))
+        self.assertNotEqual(first["both"]["bias"], second["both"]["bias"])
+        self.assertEqual(batch.wave_parameter_pullback_pair_buffer(b, a, cfg), (second, first))
+        first["both"]["bias"][0] ^= 1
+        self.assertNotEqual(batch.wave_parameter_pullback_pair_buffer(a, b, cfg)[0], first)
+        self.assertEqual(rt.artifact().artifact_id, original)
+        for bad in [memoryview(b)[::2], array("d", b), b[:2], array("f", [float("nan")]*6)]:
+            with self.assertRaises((BufferError, TypeError, ValueError)):
+                batch.wave_parameter_pullback_pair_buffer(a, bad, cfg)
+        with self.assertRaises(ValueError):
+            batch.wave_parameter_pullback_pair_buffer(object(), object(), dict(cfg, log_radius=100.))
+
     def test_projection_offsets_survive_sub_ulp_sgd_and_reload_before_becoming_visible(self):
         state = json.loads(artifact().state_json())
         placement = state["placements"][0]

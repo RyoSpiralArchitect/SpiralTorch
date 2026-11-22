@@ -23,6 +23,7 @@ mod fractional;
 mod wave_factorial;
 pub use wave_factorial::{
     ChannelParameterVjp, WaveFactorConfig, WaveFactorEnergies, WaveFactorObservation,
+    WaveParameterMaps,
 };
 mod optimizer;
 pub use optimizer::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};

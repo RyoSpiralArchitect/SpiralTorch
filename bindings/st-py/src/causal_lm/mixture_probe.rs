@@ -11,19 +11,6 @@ fn f32le<'py>(py: Python<'py>, values: &[f32]) -> PyResult<Bound<'py, PyBytes>> 
     })
 }
 
-pub(super) fn wave_config(
-    value: &Bound<'_, PyAny>,
-) -> PyResult<st_nn::geometry_runtime::WaveFactorConfig> {
-    serde_json::from_value(crate::json::py_to_json_bounded(
-        value,
-        2048,
-        16,
-        3,
-        "wave factorial",
-    )?)
-    .map_err(error)
-}
-
 pub(super) fn wave_margin(
     py: Python<'_>,
     probe: st_nn::causal_lm::CausalLmWaveMarginPullbacks,

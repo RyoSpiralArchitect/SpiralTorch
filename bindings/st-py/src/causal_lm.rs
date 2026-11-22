@@ -801,7 +801,7 @@ impl PyNativeCausalLm {
     ) -> PyResult<Py<PyAny>> {
         let target = dimension(target_id)?;
         let rival = dimension(rival_id)?;
-        let config = mixture_probe::wave_config(config)?;
+        let config = crate::geometry_runtime::wave_config(config)?;
         let count = self
             .inner
             .wave_margin_input_count(prompt_ids.len()?, target, rival, config)
@@ -825,7 +825,7 @@ impl PyNativeCausalLm {
         config: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<String> {
-        let config = mixture_probe::wave_config(config)?;
+        let config = crate::geometry_runtime::wave_config(config)?;
         self.inner.admit_wave_factorial(config).map_err(error)?;
         let shape = self::shape(shape)?;
         let count = self
