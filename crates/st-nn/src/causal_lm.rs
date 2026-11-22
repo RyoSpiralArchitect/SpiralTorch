@@ -50,8 +50,9 @@ mod wave_margin;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use adaptation_ray::{CausalLmAdaptationRayGroup, CausalLmAdaptationRayStep};
 pub use anchor_kl::{
-    CausalLmAnchorKlCriterion, CausalLmAnchorKlMatch, CausalLmAnchorKlPeak, CausalLmAnchorKlPolicy,
-    CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
+    CausalLmAnchorDirection, CausalLmAnchorKlCriterion, CausalLmAnchorKlMatch,
+    CausalLmAnchorKlPeak, CausalLmAnchorKlPolicy, CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
+    CausalLmSecantAnchor, CausalLmSecantReport,
 };
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;

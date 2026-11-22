@@ -34,6 +34,10 @@ pub(super) struct NativeLoraAdapter {
 }
 
 impl NativeLoraAdapter {
+    pub(super) fn factor_values(&self) -> [(&'static str, &[f32]); 2] {
+        [("a", &self.record.a), ("b", &self.record.b)]
+    }
+
     pub(super) fn parameter_count(&self) -> usize {
         self.record.a.len() + self.record.b.len()
     }

@@ -48,6 +48,39 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_secant_plan_is_strict_resumable_and_reports_source_descent(self):
+        _, model = owners("f32_wide_backward")
+        create = st.NativeCausalLmLineTrainingSession
+        examples = [dict(prompt_ids=p, candidates=[[1], [2]], stop_id=0, objective={"kind": "set"})
+                    for p in ([1, 2], [3, 4, 2])]
+        update = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/32,
+                      anchor_examples=[0, 1])
+        plan = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="joint",
+                    examples=examples, update=update)
+        for bad in (None, {"kind": "loss_gradient", "probe_l2": 1/256},
+                    {"kind": "secant_projection", "anchor": "largest", "probe_l2": 1}):
+            update["direction"] = bad
+            with self.assertRaises(ValueError):
+                create(model, json.dumps(plan))
+        update["direction"] = dict(kind="secant_projection", anchor="largest", probe_l2=1/256)
+        measured = create(model, json.dumps(plan)).attempt_step()["refusal"]
+        self.assertNotIn("source_loss_dot_step", measured["direction"])
+        # One reachable mean on this unit fixture, not the frozen comparison's target.
+        update["target_kl"] = measured["trials"][0]["mean_kl"] * 1.005
+        plan_text = json.dumps(plan)
+        live = create(model, plan_text)
+        raw, pin = live.checkpoint_with_id()
+        cold = create.from_json(model, plan_text, raw, pin)
+        update["direction"]["anchor"] = "successor"
+        with self.assertRaises(ValueError):
+            create.from_json(model, json.dumps(plan), raw, pin)
+        step = live.step()
+        self.assertEqual(cold.step(), step)
+        self.assertEqual(cold.checkpoint_with_id(), live.checkpoint_with_id())
+        self.assertEqual(step["anchor_kl"]["anchor_readouts"], 6)
+        self.assertLess(step["anchor_kl"]["direction"]["source_loss_dot_step"], 0)
+        self.assertEqual(step["parameter_ray"]["method"], "selected_parameter_secant_projected_ray_f32.v1")
+
     def test_unmatched_anchor_kl_does_not_publish_or_advance(self):
         _, model = owners()
         update = dict(kind="anchor_forward_kl", target_kl=1e6,

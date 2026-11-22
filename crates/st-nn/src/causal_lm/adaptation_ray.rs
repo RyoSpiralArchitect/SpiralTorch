@@ -21,7 +21,8 @@ pub struct CausalLmAdaptationRayStep {
     pub realized_l2: f64,
     /// L2 error of the realized displacement vector divided by the requested distance.
     pub relative_vector_error: f64,
-    /// First-order prediction only. No post-update forward pass is performed.
+    /// Ray direction dotted with the realized displacement. This is a loss
+    /// linearization only for the unshaped loss-gradient method.
     pub gradient_dot_step: f64,
     pub lora: Option<CausalLmAdaptationRayGroup>,
     pub geometry: Option<CausalLmAdaptationRayGroup>,
@@ -70,10 +71,19 @@ impl NativeCausalLm {
         mode: CausalLmAdaptationMode,
         target_l2: f64,
     ) -> CausalLmResult<(Self, CausalLmAdaptationRayStep)> {
-        use CausalLmAdaptationMode::{Geometry, Lora};
         self.validate_adaptation_mode(mode)?;
         self.validate_adaptation_gradient_owner(grads)?;
-        let params = grads.parameters();
+        self.step_parameter_ray(grads.parameters(), mode, target_l2)
+    }
+
+    // Only callers inside the decoder may supply a derived parameter direction.
+    pub(super) fn step_parameter_ray(
+        &self,
+        params: &crate::geometry_runtime::ParameterGradients,
+        mode: CausalLmAdaptationMode,
+        target_l2: f64,
+    ) -> CausalLmResult<(Self, CausalLmAdaptationRayStep)> {
+        use CausalLmAdaptationMode::{Geometry, Lora};
         let mut ls = GradientSize::default();
         let lora = if mode != Geometry {
             let l = self.lora.as_ref().expect("admitted LoRA");

@@ -39,7 +39,7 @@ def position(rule, mean, peak):
     return "matched" if metric/target >= 0.98 else "below"
 
 
-def check_trials(report, rule, applied):
+def check_trials(report, rule, applied, probe_banks=0):
     assert report["policy"]==dict(target_kl=C if rule=="peak" else T,max_parameter_l2=DISTANCE)
     if rule=="mean":
         assert "criterion" not in report
@@ -47,7 +47,7 @@ def check_trials(report, rule, applied):
         expected = dict(kind="mean_with_cap",max_anchor_kl=C) if rule=="capped" else dict(kind="peak")
         assert report["criterion"]==expected
     trials=report["trials"]
-    assert 1<=len(trials)<=20 and report["anchor_readouts"]==len(CASES)*(1+len(trials))
+    assert 1<=len(trials)<=20 and report["anchor_readouts"]==len(CASES)*(1+probe_banks+len(trials))
     lo, hi = 0., DISTANCE
     for i,t in enumerate(trials):
         d, mean = t["requested_l2"], t["mean_kl"]

@@ -42,6 +42,27 @@ impl Reference {
         ))
     }
 
+    pub(super) fn probability_delta(&self, proposed: &[f32]) -> CausalLmResult<Vec<f32>> {
+        if self.0.len() != proposed.len() {
+            return Err("anchor KL vocabulary mismatch".into());
+        }
+        let norm = Normalizer::new(proposed)?;
+        Ok(self
+            .0
+            .iter()
+            .zip(proposed)
+            .map(|(&(lp, p), &x)| {
+                let lq = norm.log_p(x);
+                let t = lq - lp;
+                (if t.abs() < 0.5 {
+                    p * t.exp_m1()
+                } else {
+                    lq.exp() - p
+                }) as f32
+            })
+            .collect())
+    }
+
     pub(super) fn forward_kl(&self, proposed: &[f32]) -> CausalLmResult<f64> {
         if self.0.len() != proposed.len() {
             return Err("anchor KL vocabulary mismatch".into());
@@ -83,6 +104,12 @@ mod tests {
         let check = |v: f64, want: f64| assert!((v - want).abs() < 1e-12);
         check(p.forward_kl(&[-1000., 1000.]).unwrap(), 1000. - 2f64.ln());
         let concentrated = Reference::new(&[-1000., 1000.]).unwrap();
+        assert_eq!(
+            concentrated.probability_delta(&[1000., -1000.]).unwrap(),
+            vec![1., -1.]
+        );
+        assert_eq!(p.probability_delta(&[800., 800.]).unwrap(), vec![0., 0.]);
+        assert!(p.probability_delta(&[1.]).is_err());
         check(concentrated.forward_kl(&[0., 0.]).unwrap(), 2f64.ln());
         check(concentrated.forward_kl(&[1000., -1000.]).unwrap(), 2000.);
         assert!(p.forward_kl(&[0.]).is_err());

@@ -300,6 +300,38 @@ applies a successful step exactly once, and does not retry or alter the cursor
 on a bounded miss. Other errors still propagate; strict `step()` in Python
 and `stepJson()` in WASM still raise on a miss. See the [matched and stopped trajectories](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_ANCHOR_ENVELOPE.md).
 
+### Experimental direction control
+
+The default remains the unmodified loss gradient. In a v3 `anchor_forward_kl`
+update, Python and WASM can opt into the same Rust implementation:
+
+```json
+{"kind":"secant_projection","probe_l2":0.00390625,"anchor":"largest"}
+```
+
+Put this object under `update.direction`; `"successor"` selects the next
+anchor in cyclic bank order as a matched-cost control. From the origin, a
+single uncommitted loss-gradient probe measures which prompt changed most.
+For the chosen prompt the origin decoder pulls back the probe-minus-origin
+probabilities, and removes the loss-gradient component along this vector in
+trainable coordinates. This is a finite secant approximation, not an exact
+Hessian or a guarantee that the next search succeeds. The KL acceptance
+criterion, scalar trial limit and parameter ceiling are unchanged.
+
+Each shaped attempt costs one extra bank of readouts, plus one checkpointed
+origin forward and one seeded backward for the selected anchor. The readout
+count includes the extra bank, not the backward. Inspect `direction` on
+the match or refusal for selected bank indices, probe KLs and retained norm.
+On an accepted step, `parameter_ray.gradient_dot_step` refers to the
+**shaped** gradient; `anchor_kl.direction.source_loss_dot_step` measures the
+original gradient against the actual displacement, not a new loss evaluation.
+At least two distinct anchors, a positive probe at most the search ceiling,
+and at most 1,048,576 selected trainable coordinates are required. An
+unresolved normal, a retained fraction below 0.001, or a non-descent
+displacement fails without advancing; it is not silently replaced by the raw
+gradient. See the [synthetic comparison](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_SECANT.md)
+before choosing this instead of the default.
+
 ## Finite-checked learning
 
 ```js

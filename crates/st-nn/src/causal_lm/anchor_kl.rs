@@ -2,9 +2,11 @@
 use super::*;
 
 mod criterion;
+mod direction;
 mod distribution;
 pub use criterion::CausalLmAnchorKlCriterion;
 use criterion::Position;
+pub use direction::{CausalLmAnchorDirection, CausalLmSecantAnchor, CausalLmSecantReport};
 use distribution::Reference;
 
 #[derive(Debug, Copy, Clone, Serialize)]
@@ -33,12 +35,14 @@ pub struct CausalLmAnchorKlPeak {
 #[derive(Debug, Clone, Serialize)]
 pub struct CausalLmAnchorKlMatch {
     pub method: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<CausalLmSecantReport>,
     pub policy: CausalLmAnchorKlPolicy,
     #[serde(skip_serializing_if = "CausalLmAnchorKlCriterion::is_mean")]
     pub criterion: CausalLmAnchorKlCriterion,
     pub mean_kl: f64,
     pub per_anchor_kl: Vec<f64>,
-    /// Counts individual last-position vocabulary readouts, including the origin.
+    /// Counts last-position vocabulary readouts at the origin, optional probe and candidates.
     pub anchor_readouts: usize,
     pub trials: Vec<CausalLmAnchorKlTrial>,
 }
@@ -47,6 +51,8 @@ pub struct CausalLmAnchorKlMatch {
 #[derive(Debug, Serialize)]
 pub struct CausalLmAnchorKlRefusal {
     pub reason: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<CausalLmSecantReport>,
     pub policy: CausalLmAnchorKlPolicy,
     #[serde(skip_serializing_if = "CausalLmAnchorKlCriterion::is_mean")]
     pub criterion: CausalLmAnchorKlCriterion,
@@ -134,15 +140,52 @@ impl NativeCausalLm {
         policy: CausalLmAnchorKlPolicy,
         criterion: CausalLmAnchorKlCriterion,
     ) -> CausalLmResult<(Self, CausalLmAdaptationRayStep, CausalLmAnchorKlMatch)> {
+        self.step_adaptation_at_anchor_kl_with_direction(
+            grads,
+            mode,
+            prompts,
+            policy,
+            criterion,
+            Default::default(),
+        )
+    }
+
+    /// Optionally reshape the selected loss ray before the unchanged finite KL search.
+    pub fn step_adaptation_at_anchor_kl_with_direction(
+        &self,
+        grads: &NativeCausalLmAdaptationGradients,
+        mode: CausalLmAdaptationMode,
+        prompts: &[&[usize]],
+        policy: CausalLmAnchorKlPolicy,
+        criterion: CausalLmAnchorKlCriterion,
+        direction: CausalLmAnchorDirection,
+    ) -> CausalLmResult<(Self, CausalLmAdaptationRayStep, CausalLmAnchorKlMatch)> {
         policy.admit(self, mode, prompts, criterion)?;
+        self.validate_adaptation_gradient_owner(grads)?;
+        direction.admit(self, mode, prompts, policy.max_parameter_l2)?;
         let (mut lo, mut hi) = (0., policy.max_parameter_l2);
         let mut distance = hi;
         let mut refs = Vec::with_capacity(prompts.len());
+        let (shaped, mut guidance) = match direction {
+            CausalLmAnchorDirection::LossGradient {} => (None, None),
+            CausalLmAnchorDirection::SecantProjection { probe_l2, anchor } => {
+                let (h, info) = self.secant_direction(
+                    grads.parameters(),
+                    mode,
+                    prompts,
+                    probe_l2,
+                    anchor,
+                    &mut refs,
+                )?;
+                (Some(h), Some(info))
+            }
+        };
+        let params = shaped.as_ref().unwrap_or_else(|| grads.parameters());
+        let banks = if guidance.is_some() { 2 } else { 1 };
         let mut trials = Vec::new();
         for i in 0..CausalLmAnchorKlPolicy::MAX_TRIALS {
-            let (candidate, ray) =
-                self.step_adaptation_gradient_at_distance(grads, mode, distance)?;
-            if i == 0 {
+            let (candidate, mut ray) = self.step_parameter_ray(params, mode, distance)?;
+            if refs.is_empty() {
                 for p in prompts {
                     refs.push(Reference::new(self.next_token_logits(p)?.data())?);
                 }
@@ -167,11 +210,17 @@ impl NativeCausalLm {
                 mean_kl,
                 peak: (!criterion.is_mean()).then_some(peak),
             });
-            let anchor_readouts = (1 + trials.len()) * prompts.len();
+            let anchor_readouts = (banks + trials.len()) * prompts.len();
             match criterion.position(policy.target_kl, mean_kl, peak.kl) {
                 Position::Matched => {
+                    if let Some(info) = guidance.as_mut() {
+                        info.source_loss_dot_step =
+                            Some(self.source_loss_motion(&candidate, mode, grads.parameters())?);
+                        ray.method = "selected_parameter_secant_projected_ray_f32.v1";
+                    }
                     let report = CausalLmAnchorKlMatch {
                         method: "last_token_anchor_forward_kl.v1",
+                        direction: guidance,
                         policy,
                         criterion,
                         mean_kl,
@@ -184,6 +233,7 @@ impl NativeCausalLm {
                 Position::Below if i == 0 => {
                     return Err(CausalLmAnchorKlRefusal {
                         reason: "ceiling below matching interval",
+                        direction: guidance,
                         policy,
                         criterion,
                         anchor_readouts,
@@ -201,9 +251,10 @@ impl NativeCausalLm {
         }
         Err(CausalLmAnchorKlRefusal {
             reason: "bounded bracket exhausted",
+            direction: guidance,
             policy,
             criterion,
-            anchor_readouts: (1 + trials.len()) * prompts.len(),
+            anchor_readouts: (banks + trials.len()) * prompts.len(),
             trials,
         }
         .into())

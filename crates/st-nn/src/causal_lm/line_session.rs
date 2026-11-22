@@ -151,6 +151,8 @@ enum Update {
         anchor_examples: Vec<usize>,
         #[serde(default)]
         criterion: CausalLmAnchorKlCriterion,
+        #[serde(default)]
+        direction: CausalLmAnchorDirection,
     },
 }
 
@@ -193,6 +195,7 @@ impl Plan {
                     target_kl,
                     max_parameter_l2,
                     criterion,
+                    direction,
                 } = policy
                 {
                     let prompts = self.anchor_prompts(anchor_examples)?;
@@ -201,6 +204,7 @@ impl Plan {
                         max_parameter_l2: *max_parameter_l2,
                     }
                     .admit(origin, mode, &prompts, *criterion)?;
+                    direction.admit(origin, mode, &prompts, *max_parameter_l2)?;
                 }
                 (mode, policy.clone())
             }
@@ -460,9 +464,10 @@ impl NativeCausalLmLineTrainingSession {
                 max_parameter_l2,
                 anchor_examples,
                 criterion,
+                direction,
             } => {
                 let prompts = self.plan.anchor_prompts(anchor_examples)?;
-                let (next, ray, report) = self.model.step_adaptation_at_anchor_kl_with_criterion(
+                let (next, ray, report) = self.model.step_adaptation_at_anchor_kl_with_direction(
                     &g,
                     self.mode,
                     &prompts,
@@ -471,6 +476,7 @@ impl NativeCausalLmLineTrainingSession {
                         max_parameter_l2: *max_parameter_l2,
                     },
                     *criterion,
+                    *direction,
                 )?;
                 (next, Some(ray), Some(report))
             }

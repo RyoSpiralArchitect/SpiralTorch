@@ -55,6 +55,9 @@ the mean-only control. This does not rescue the missing capped-mean ranking
 or demonstrate generalization. A different budget is matched; all scores
 are in-sample and each loss represents a different example/objective.
 
+The [follow-up direction comparison](LINE_SECANT.md) holds the capped-mean
+criterion fixed and changes the ray instead; all stopped trajectories are retained.
+
 Rust owns the bounded search, weights and cursor. The six new trajectories
 made **24 updates and 2 bounded refusals**; another 18 mean-only updates
 were reference checks. The native client recomputed KL from actual pre/post

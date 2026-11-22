@@ -1,0 +1,150 @@
+{
+  "outcomes": {
+    "largest/geometry": {
+      "additional_anchor_vjps": 1,
+      "anchor_readouts": 9,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.003113561336377096,
+        "peak_bank_index": 2,
+        "requested_l2": 0.125
+      },
+      "candidate_trials": 1,
+      "completed": 0,
+      "first_probe_peak": 1,
+      "first_retained_fraction": 0.017252868359623547,
+      "first_selected": 1,
+      "reason": "ceiling below matching interval"
+    },
+    "largest/joint": {
+      "additional_anchor_vjps": 1,
+      "anchor_readouts": 66,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.699425761768032,
+        "peak_bank_index": 1,
+        "requested_l2": 0.022484779357910156
+      },
+      "candidate_trials": 20,
+      "completed": 0,
+      "first_probe_peak": 2,
+      "first_retained_fraction": 0.9310644644226637,
+      "first_selected": 2,
+      "reason": "bounded bracket exhausted"
+    },
+    "largest/lora": {
+      "additional_anchor_vjps": 1,
+      "anchor_readouts": 66,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.8892052057863894,
+        "peak_bank_index": 0,
+        "requested_l2": 0.10454988479614258
+      },
+      "candidate_trials": 20,
+      "completed": 0,
+      "first_probe_peak": 2,
+      "first_retained_fraction": 0.8934983564172685,
+      "first_selected": 2,
+      "reason": "bounded bracket exhausted"
+    },
+    "raw/geometry": {
+      "additional_anchor_vjps": 0,
+      "anchor_readouts": 63,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.7090180498961579,
+        "peak_bank_index": 1,
+        "requested_l2": 0.009796619415283203
+      },
+      "candidate_trials": 20,
+      "completed": 0,
+      "first_probe_peak": null,
+      "first_retained_fraction": null,
+      "first_selected": null,
+      "reason": "bounded bracket exhausted"
+    },
+    "raw/joint": {
+      "additional_anchor_vjps": 0,
+      "anchor_readouts": 63,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.8596196359046971,
+        "peak_bank_index": 2,
+        "requested_l2": 0.010596752166748047
+      },
+      "candidate_trials": 20,
+      "completed": 0,
+      "first_probe_peak": null,
+      "first_retained_fraction": null,
+      "first_selected": null,
+      "reason": "bounded bracket exhausted"
+    },
+    "raw/lora": {
+      "additional_anchor_vjps": 0,
+      "anchor_readouts": 237,
+      "best_cap_safe_at_stop": null,
+      "candidate_trials": 73,
+      "completed": 6,
+      "first_probe_peak": null,
+      "first_retained_fraction": null,
+      "first_selected": null,
+      "reason": null
+    },
+    "successor/geometry": {
+      "additional_anchor_vjps": 1,
+      "anchor_readouts": 9,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.06092871499552068,
+        "peak_bank_index": 1,
+        "requested_l2": 0.125
+      },
+      "candidate_trials": 1,
+      "completed": 0,
+      "first_probe_peak": 1,
+      "first_retained_fraction": 0.014003633654535138,
+      "first_selected": 2,
+      "reason": "ceiling below matching interval"
+    },
+    "successor/joint": {
+      "additional_anchor_vjps": 1,
+      "anchor_readouts": 66,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.6908952948975792,
+        "peak_bank_index": 1,
+        "requested_l2": 0.01022958755493164
+      },
+      "candidate_trials": 20,
+      "completed": 0,
+      "first_probe_peak": 2,
+      "first_retained_fraction": 0.4506169895229905,
+      "first_selected": 0,
+      "reason": "bounded bracket exhausted"
+    },
+    "successor/lora": {
+      "additional_anchor_vjps": 1,
+      "anchor_readouts": 66,
+      "best_cap_safe_at_stop": {
+        "mean_over_target": 0.7950564569062794,
+        "peak_bank_index": 2,
+        "requested_l2": 0.013979911804199219
+      },
+      "candidate_trials": 20,
+      "completed": 0,
+      "first_probe_peak": 2,
+      "first_retained_fraction": 0.05841904342466117,
+      "first_selected": 0,
+      "reason": "bounded bracket exhausted"
+    }
+  },
+  "pretrained_calls": 0,
+  "schema": "spiraltorch.synthetic_line_secant_summary.v1",
+  "sha256": {
+    "cuts": "f09f54e533ed6d309b3f80c643233f7f9ee5c5c32aba1d2d0cde9795790a9483",
+    "journal": "aa227f6808e8ee6992ef9638bcca3fab54fbf2b17b8ec2865bfad97e36f4c98a",
+    "raw": "8216bcd62220a8806551e4d0376aa3276acfe8b09fca57ecb8ccb51eefca6926",
+    "wasm": "e96c0d2e3576d0a58ddd5840b6d5b235670b7240b7f44af9fb7845204eb77ad1"
+  },
+  "wasm_refusals": 8,
+  "wasm_suffix_updates": 4,
+  "work": {
+    "additional_anchor_vjps": 6,
+    "anchor_readouts": 645,
+    "candidate_trials": 195
+  }
+}
