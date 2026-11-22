@@ -1021,6 +1021,16 @@ impl PyTensor {
         Ok(PyTensor { inner: dst_tensor })
     }
 
+    /// Pairwise row dot products (self @ other.T), using the native CPU wide accumulator.
+    #[pyo3(signature = (other=None))]
+    pub fn row_gram_wide(&self, other: Option<&PyTensor>, py: Python<'_>) -> PyResult<PyTensor> {
+        let rhs = &other.unwrap_or(self).inner;
+        let inner = py
+            .detach(|| self.inner.row_gram_wide(rhs))
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner })
+    }
+
     /// Matrix multiply: self @ other
     #[pyo3(signature = (other, *, backend=None, out=None))]
     pub fn matmul(

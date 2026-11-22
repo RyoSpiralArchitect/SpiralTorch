@@ -2,6 +2,21 @@
 use super::*;
 
 impl Tensor {
+    /// Pairwise row dot products (self * other^T), with f64 accumulation and
+    /// f32 storage/output. An owned row-major RHS already has the packed
+    /// orientation needed by the CPU wide kernel.
+    pub fn row_gram_wide(&self, other: &Self) -> PureResult<Self> {
+        self.layout.expect_row_major("row Gram lhs")?;
+        other.layout.expect_row_major("row Gram rhs")?;
+        if self.cols != other.cols {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        self.matmul_prepacked_wide(&PackedB::from_tensor_transpose(other, Tile::col_major())?)
+    }
+
     /// f32 inputs and output with four fixed f64 partial sums per dot product.
     /// CPU-only, including WASM CPU. No implicit WGPU or foreign fallback.
     pub fn matmul_prepacked_wide(&self, packed: &PackedB) -> PureResult<Self> {
@@ -86,6 +101,38 @@ mod tests {
             Tile::col_major(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn wide_gram_pairs_rows_without_an_explicit_transpose() {
+        let a = Tensor::from_vec(2, 4, vec![1., 1., 1., 1., 1., 0., 0., 0.]).unwrap();
+        let b = Tensor::from_vec(
+            3,
+            4,
+            vec![1e8, 1., -1e8, 1., 2., -3., 4., -5., 0., 0., 0., 0.],
+        )
+        .unwrap();
+        let cross = a.row_gram_wide(&b).unwrap();
+        assert_eq!(cross.shape(), (2, 3));
+        assert_eq!(cross.data(), &[2., -2., 0., 1e8, 2., 0.]);
+        assert_eq!(a.row_gram_wide(&a).unwrap().data(), &[4., 1., 1., 1.]);
+        let empty = Tensor::zeros(3, 0).unwrap();
+        assert_eq!(
+            empty
+                .row_gram_wide(&Tensor::zeros(2, 0).unwrap())
+                .unwrap()
+                .data(),
+            &[0.; 6]
+        );
+        assert!(a.row_gram_wide(&empty).is_err());
+        let mut bad = a.clone();
+        bad.layout = Layout::ColMajor;
+        assert!(a.row_gram_wide(&bad).is_err());
+        assert!(bad.row_gram_wide(&a).is_err());
+        assert!(Tensor::zeros(usize::MAX, 0)
+            .unwrap()
+            .row_gram_wide(&empty)
+            .is_err());
     }
 
     #[test]
