@@ -32,6 +32,82 @@ pub struct NativeCausalLmAdaptationGradients {
     competition: Option<objective::CompetitionReport>,
 }
 
+/// Block input before the earliest attached geometry, never an output of that geometry.
+struct GeometryBoundary {
+    layer: usize,
+    site: String,
+    hidden: Tensor,
+}
+
+/// Private to one training call: keep the exact batch layout, selected labels and prefix together.
+pub(super) struct DeclaredSetTraining<'a> {
+    model: &'a NativeCausalLm,
+    window: PreparedCausalWindow,
+    rows: Vec<DeclaredRivalRow>,
+    boundary: GeometryBoundary,
+}
+
+impl DeclaredSetTraining<'_> {
+    pub(super) fn gradients(
+        &self,
+    ) -> CausalLmResult<(
+        NativeCausalLmAdaptationGradients,
+        NativeCausalLmAdaptationGradients,
+        DeclaredSetNll,
+    )> {
+        let (scores, [within, coverage]) =
+            self.model
+                .geometry_pair_pullbacks(&self.window, &self.boundary, |logits| {
+                    logits.declared_set_nll_capture_within(
+                        &self.window.labels,
+                        &self.rows,
+                        |seed| self.model.vocabulary_head_pullback(seed),
+                    )
+                })?;
+        let mode = CausalLmAdaptationMode::Geometry;
+        Ok((
+            self.model.seal_adaptation_gradients(
+                &self.window,
+                mode,
+                scores.within_nll as f32,
+                None,
+                within,
+                None,
+            )?,
+            self.model.seal_adaptation_gradients(
+                &self.window,
+                mode,
+                scores.coverage_nll as f32,
+                None,
+                coverage,
+                None,
+            )?,
+            scores,
+        ))
+    }
+
+    /// Only for the geometry-only candidate constructed from this call's immutable origin.
+    pub(super) fn score_candidate(
+        self,
+        candidate: &NativeCausalLm,
+    ) -> CausalLmResult<DeclaredSetNll> {
+        if candidate.base_id != self.model.base_id
+            || candidate.lora_artifact_id() != self.model.lora_artifact_id()
+            || candidate.readout_accumulator != self.model.readout_accumulator
+            || candidate.forward_storage != self.model.forward_storage
+            || candidate.frozen_prefix_layers()? < self.boundary.layer
+        {
+            return Err("candidate does not share the declared-set batch's frozen prefix".into());
+        }
+        let hidden = candidate.forward_blocks(
+            self.boundary.hidden,
+            self.window.shape,
+            self.boundary.layer..candidate.blocks.len(),
+        )?;
+        candidate.declared_set_scores(hidden, &self.window, &self.rows)
+    }
+}
+
 impl NativeCausalLmAdaptationGradients {
     pub fn context_token_preference_report(&self) -> Option<&ContextTokenPreference> {
         match &self.competition {
@@ -341,11 +417,16 @@ impl NativeCausalLm {
         let count = self.geometry_gradient_pair_input_count(shape, labels.is_some())?;
         let (prepared, rows) =
             self.prepare_declared_rows(windows, shape, labels, plan, mix, count)?;
-        let (report, [full, declared]) = self.geometry_pair_pullbacks(&prepared, |logits| {
-            logits.declared_rival_cross_entropy_capture_full(&prepared.labels, &rows, mix, |seed| {
-                self.vocabulary_head_pullback(seed)
-            })
-        })?;
+        let boundary = self.geometry_boundary(&prepared)?;
+        let (report, [full, declared]) =
+            self.geometry_pair_pullbacks(&prepared, &boundary, |logits| {
+                logits.declared_rival_cross_entropy_capture_full(
+                    &prepared.labels,
+                    &rows,
+                    mix,
+                    |seed| self.vocabulary_head_pullback(seed),
+                )
+            })?;
         let mode = CausalLmAdaptationMode::Geometry;
         Ok((
             self.seal_adaptation_gradients(&prepared, mode, report.full_ce, None, full, None)?,
@@ -372,9 +453,18 @@ impl NativeCausalLm {
         let (prepared, rows) =
             self.prepare_declared_rows(windows, shape, labels, plan, 1., count)?;
         let hidden = self.decode_hidden(&prepared.input, prepared.shape)?;
+        self.declared_set_scores(hidden, &prepared, &rows)
+    }
+
+    fn declared_set_scores(
+        &self,
+        hidden: Tensor,
+        prepared: &PreparedCausalWindow,
+        rows: &[DeclaredRivalRow],
+    ) -> CausalLmResult<DeclaredSetNll> {
         Ok(self
-            .causal_logits(hidden, &prepared)?
-            .declared_set_nll(&prepared.labels, &rows)?)
+            .causal_logits(hidden, prepared)?
+            .declared_set_nll(&prepared.labels, rows)?)
     }
 
     /// Return (within-set gradient, set-coverage gradient, scores) on the same snapshot.
@@ -390,49 +480,60 @@ impl NativeCausalLm {
         NativeCausalLmAdaptationGradients,
         DeclaredSetNll,
     )> {
+        self.declared_set_training(windows, shape, labels, plan)?
+            .gradients()
+    }
+
+    pub(super) fn declared_set_training(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        plan: &[DeclaredRivalRow],
+    ) -> CausalLmResult<DeclaredSetTraining<'_>> {
         let count = self.geometry_gradient_pair_input_count(shape, labels.is_some())?;
-        let (prepared, rows) =
-            self.prepare_declared_rows(windows, shape, labels, plan, 1., count)?;
-        let (scores, [within, coverage]) = self.geometry_pair_pullbacks(&prepared, |logits| {
-            logits.declared_set_nll_capture_within(&prepared.labels, &rows, |seed| {
-                self.vocabulary_head_pullback(seed)
-            })
-        })?;
-        let mode = CausalLmAdaptationMode::Geometry;
-        Ok((
-            self.seal_adaptation_gradients(
-                &prepared,
-                mode,
-                scores.within_nll as f32,
-                None,
-                within,
-                None,
-            )?,
-            self.seal_adaptation_gradients(
-                &prepared,
-                mode,
-                scores.coverage_nll as f32,
-                None,
-                coverage,
-                None,
-            )?,
-            scores,
-        ))
+        let (window, rows) = self.prepare_declared_rows(windows, shape, labels, plan, 1., count)?;
+        let boundary = self.geometry_boundary(&window)?;
+        Ok(DeclaredSetTraining {
+            model: self,
+            window,
+            rows,
+            boundary,
+        })
+    }
+
+    fn geometry_boundary(&self, window: &PreparedCausalWindow) -> CausalLmResult<GeometryBoundary> {
+        let (layer, site) = self.first_geometry_site()?;
+        let hidden = self.forward_blocks(
+            self.embed(&window.input, window.shape)?,
+            window.shape,
+            0..layer,
+        )?;
+        Ok(GeometryBoundary {
+            layer,
+            site,
+            hidden,
+        })
     }
 
     fn geometry_pair_pullbacks<R>(
         &self,
         prepared: &PreparedCausalWindow,
+        boundary: &GeometryBoundary,
         seeds: impl FnOnce(&Tensor) -> CausalLmResult<(R, Tensor, Tensor)>,
     ) -> CausalLmResult<(R, [crate::geometry_runtime::ParameterGradients; 2])> {
-        let (first, site) = self.first_geometry_site()?;
-        let hidden = self.embed(&prepared.input, prepared.shape)?;
         let learning::TrainingPrimal {
             checkpoints,
             hidden_rows,
             selected,
             logits,
-        } = self.training_primal(prepared, hidden, 0, first, None)?;
+        } = self.training_primal(
+            prepared,
+            boundary.hidden.clone(),
+            boundary.layer,
+            boundary.layer,
+            None,
+        )?;
         let (report, second_seed, first_normalized) = seeds(&logits)?;
         drop(logits);
         let second_normalized = self.vocabulary_head_pullback(&second_seed)?;
@@ -448,8 +549,8 @@ impl NativeCausalLm {
             prepared.shape,
             prepared.selected_rows.as_deref(),
             adjoints,
-            first,
-            learning::DecoderTarget::GeometryFrom(&site),
+            boundary.layer,
+            learning::DecoderTarget::GeometryFrom(&boundary.site),
             None,
         )?;
         Ok((report, parameters))

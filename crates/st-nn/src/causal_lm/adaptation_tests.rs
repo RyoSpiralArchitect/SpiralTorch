@@ -984,7 +984,7 @@ fn finite_declared_set_step_checks_one_candidate_and_never_advances_another_owne
     let (next, r) = m
         .step_declared_set_geometry_at_distance(&ids, shape, Some(&labels), &plan, 1. / 256.)
         .unwrap();
-    assert_eq!(decoder::work_counts::take(), [4, 1, 2]);
+    assert_eq!(decoder::work_counts::take(), [3, 1, 2]);
     assert_eq!(
         r.accepted,
         r.proposed.within_nll < r.before.within_nll
@@ -1002,6 +1002,123 @@ fn finite_declared_set_step_checks_one_candidate_and_never_advances_another_owne
             .unwrap(),
         if r.accepted { r.proposed } else { r.before }
     );
+}
+
+#[test]
+fn checked_suffix_matches_full_candidate_redecode_across_sites_and_sparse_labels() {
+    let ids = [1, 2, 3, 4, 5, 6, 7, 8];
+    let shape = [2, 4];
+    let labels = [-100, -100, 3, -100, -100, -100, -100, 8];
+    let plan = [
+        DeclaredRivalRow {
+            position: 2,
+            target: 3,
+            rivals: vec![1, 7],
+        },
+        DeclaredRivalRow {
+            position: 7,
+            target: 8,
+            rivals: vec![4],
+        },
+    ];
+    use CausalLmReadoutAccumulator::{F32WideBackward, F32, F64};
+    for p in [F32, F32WideBackward, F64] {
+        let lagged = load()
+            .with_key_lag(CausalLmKeyLag { layer: 0, lag: 1 })
+            .unwrap()
+            .with_readout_accumulator(p);
+        let late = geometry(&lagged, 1, 0.25);
+        let mut multi = late.record().clone();
+        let mut early = multi.placements[0].clone();
+        early.path = "transformer.h.0.mlp".into();
+        multi.placements.push(early);
+        for (m, skipped) in [
+            (model(0, p), 0),
+            (model(1, p), 1),
+            (lagged.with_geometry(late).unwrap(), 1),
+            (
+                lagged
+                    .with_geometry(GeometryAdapterArtifact::create(multi).unwrap())
+                    .unwrap(),
+                0,
+            ),
+        ] {
+            for (storage, mask) in [
+                (
+                    CausalLmForwardStorage::OriginalPacked,
+                    Some(labels.as_slice()),
+                ),
+                (CausalLmForwardStorage::PreferCachedTranspose, None),
+            ] {
+                let m = m.with_forward_readout_storage(storage);
+                let (w, c, s) = m
+                    .geometry_declared_set_gradients(&ids, shape, mask, &plan)
+                    .unwrap();
+                let (candidate, _) = m.step_geometry_gradient_at_distance(&w, 1. / 256.).unwrap();
+                let (safe, g) = m
+                    .guard_geometry_step(&candidate, &[&[&w], &[&c]], 1e-5)
+                    .unwrap();
+                let expected = safe.declared_set_nll(&ids, shape, mask, &plan).unwrap();
+                decoder::work_counts::take();
+                let (next, r) = m
+                    .step_declared_set_geometry_at_distance(&ids, shape, mask, &plan, 1. / 256.)
+                    .unwrap();
+                assert_eq!(decoder::work_counts::take(), [4 - skipped, 2 - skipped, 2]);
+                assert_eq!(
+                    serde_json::to_vec(&r.proposal_guard).unwrap(),
+                    serde_json::to_vec(&g).unwrap()
+                );
+                for (a, b) in [(r.before, s), (r.proposed, expected)] {
+                    assert_eq!(
+                        (a.target_tokens, a.contrasted_tokens),
+                        (b.target_tokens, b.contrasted_tokens)
+                    );
+                    assert_eq!(a.within_nll.to_bits(), b.within_nll.to_bits());
+                    assert_eq!(a.coverage_nll.to_bits(), b.coverage_nll.to_bits());
+                    assert_eq!(a.full_nll.to_bits(), b.full_nll.to_bits());
+                }
+                let accepted =
+                    expected.within_nll < s.within_nll && expected.coverage_nll < s.coverage_nll;
+                assert_eq!(r.accepted, accepted);
+                assert_eq!(
+                    next.geometry_artifact_id(),
+                    if accepted {
+                        safe.geometry_artifact_id()
+                    } else {
+                        m.geometry_artifact_id()
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn recheck_refuses_a_foreign_prefix_before_scoring() {
+    let base = load();
+    let late = base.with_geometry(geometry(&base, 1, 0.2)).unwrap();
+    let different_base = base
+        .with_key_lag(CausalLmKeyLag { layer: 0, lag: 1 })
+        .unwrap();
+    for foreign in [
+        base.with_geometry(geometry(&base, 0, 0.2)).unwrap(),
+        different_base,
+        late.with_lora(1, 2, 3.).unwrap(),
+        late.with_readout_accumulator(CausalLmReadoutAccumulator::F64),
+        late.with_forward_readout_storage(CausalLmForwardStorage::OriginalPacked),
+    ] {
+        let plan = [DeclaredRivalRow {
+            position: 2,
+            target: 3,
+            rivals: vec![1],
+        }];
+        let batch = late
+            .declared_set_training(&[1, 2, 3], [1, 3], None, &plan)
+            .unwrap();
+        decoder::work_counts::take();
+        assert!(batch.score_candidate(&foreign).is_err());
+        assert_eq!(decoder::work_counts::take(), [0; 3]);
+    }
 }
 
 #[test]

@@ -50,15 +50,15 @@ impl NativeCausalLm {
         target_l2: f64,
     ) -> CausalLmResult<(Self, CausalLmDeclaredSetStep)> {
         self.validate_declared_set_step(plan, target_l2)?;
+        let batch = self.declared_set_training(windows, shape, labels, plan)?;
         let (guarded, proposal_guard, before) = {
-            let (within, coverage, before) =
-                self.geometry_declared_set_gradients(windows, shape, labels, plan)?;
+            let (within, coverage, before) = batch.gradients()?;
             let (candidate, _) = self.step_geometry_gradient_at_distance(&within, target_l2)?;
             let (guarded, guard) =
                 self.guard_geometry_step(&candidate, &[&[&within], &[&coverage]], 1e-5)?;
             (guarded, guard, before)
         };
-        let proposed = guarded.declared_set_nll(windows, shape, labels, plan)?;
+        let proposed = batch.score_candidate(&guarded)?;
         let accepted =
             proposed.within_nll < before.within_nll && proposed.coverage_nll < before.coverage_nll;
         let result = if accepted { guarded } else { self.clone() };
