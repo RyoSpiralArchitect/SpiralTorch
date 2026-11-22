@@ -129,6 +129,45 @@ stop after each content line. The last optional WASM argument (Python:
 `max_tile_values=`) is a vocabulary tile budget, not a vocabulary shortlist.
 No held-out check or loss-decrease guarantee is implied by a plain SGD step.
 
+## Resume complete-answer training
+
+Use the same original geometry-bearing model and the same plan bytes on each
+client. A [sample plan](native_line_session_plan.json) switches from set NLL to
+a gold/menu mixture to an accepted subset, then repeats for the next epoch.
+
+```python
+from pathlib import Path
+import spiraltorch as st
+
+plan = Path("native_line_session_plan.json").read_bytes()
+session = st.NativeCausalLmLineTrainingSession(origin, plan)
+reports, pin = session.advance_to_checkpoint_new(2, "update-2.json")
+# Retain the pin separately. A new process can re-create origin and continue.
+again = st.NativeCausalLmLineTrainingSession.from_json(
+    origin, plan, Path("update-2.json").read_bytes(), pin
+)
+step = again.step()  # update 3; returns None once exhausted
+```
+
+The same checkpoint is valid in Rust through
+`NativeCausalLmLineTrainingSession::restore(origin, plan, payload, pin)`.
+In the browser, keep the plan as text: parsing and reformatting it changes its pin.
+
+```js
+const plan = await (await fetch('./native_line_session_plan.json')).text();
+const s = M.NativeCausalLmLineTrainingSession.fromJson(origin, plan, payload, pin);
+try {
+  const report = s.stepJson(); // JSON string or undefined on exhaustion
+  const cut = s.checkpoint();
+  try { console.log(report, cut.id); /* persist both cut.payload and cut.id */ }
+  finally { cut.free(); }
+} finally { s.free(); }
+```
+
+The demo download contains four artificial step-4 checkpoints from an actual
+Python-to-WASM handoff. Resume the matching case, not an unadapted base or a
+later version of its geometry. [Tests, limits and measured portability](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_SESSION.md).
+
 ## Finite-checked learning
 
 ```js

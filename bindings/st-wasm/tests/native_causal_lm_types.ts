@@ -1,4 +1,14 @@
-import {CausalLmDeclaredBatch, GeometryAdapterArtifact, NativeCausalLm, NativeCausalLmContext} from 'spiraltorch-wasm';
+import {CausalLmDeclaredBatch, GeometryAdapterArtifact, NativeCausalLm, NativeCausalLmContext, NativeCausalLmLineTrainingSession} from 'spiraltorch-wasm';
+
+export function resumeLine(origin: NativeCausalLm, plan: string, checkpoint: string, pin: string) {
+    const s = NativeCausalLmLineTrainingSession.fromJson(origin,plan,checkpoint,pin);
+    try {
+        const step: string | undefined = s.stepJson();
+        const next = s.checkpoint();
+        try { return {step,payload:next.payload,id:next.id,updates:s.completedUpdates}; }
+        finally { next.free(); }
+    } finally { s.free(); }
+}
 
 export function update(config: string, weights: Uint8Array, geometry: string, id: string, wire: string) {
     const base = NativeCausalLm.fromGpt2(config, weights);

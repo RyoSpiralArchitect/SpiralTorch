@@ -3,12 +3,15 @@
 <title>Native causal LM: finite-checked geometry learning</title>
 <h1>Native causal LM: finite-checked geometry learning</h1>
 <p>Four learning controls and six models for cached continuation and terminated answer scoring, using the Rust decoder in WASM host memory. No pretrained model or GPU.</p>
+<p><a id="line-download" download="spiraltorch-line-checkpoints.json" hidden>Download the four artificial checkpoints at update 4 of 6</a></p>
+<pre id="line-transfer" hidden></pre>
 <pre id="result" data-status="running">Running...</pre>
 <script type="module">
 import {checkNativeCausalLm} from './native_causal_lm.mjs';
 import {checkCachedSuffix} from './native_causal_lm_cache.mjs';
 import {checkCachedLines} from './native_cached_lines.mjs';
 import {checkLineGradients} from './native_line_gradients.mjs';
+import {checkLineSession} from './native_line_session.mjs';
 const result = document.getElementById('result');
 try {
   const M = await import('../pkg/spiraltorch_wasm.js');
@@ -17,8 +20,17 @@ try {
   const report = checkNativeCausalLm(M, fixture);
   const models = await (await fetch('./native_causal_lm_cache_fixture.json')).json();
   report.cached = checkCachedSuffix(M, models);
+  let portable;
+  report.line_session=checkLineSession(M,models,await (await fetch('./native_line_session_plan.json')).text(),
+    await (await fetch('./native_line_session_bridge.json')).json(), checkpoints => { portable=checkpoints; });
   report.line_gradients = checkLineGradients(M, models, await (await fetch('./native_line_gradients_fixture.json')).json());
   report.lines = checkCachedLines(M, models, await (await fetch('./native_cached_lines_fixture.json')).json());
+  const link = document.getElementById('line-download');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(portable)],{type:'application/json'}));
+  link.hidden = false;
+  if (new URLSearchParams(location.search).has('capture')) {
+    document.getElementById('line-transfer').textContent = await (await fetch(link.href)).text();
+  }
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = 'passed';
 } catch (e) {

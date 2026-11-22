@@ -1,0 +1,192 @@
+{
+  "cases": {
+    "lag/history_gain": {
+      "endpoint": {
+        "logits": [
+          -0.0535227470099926,
+          0.3497813940048218,
+          0.1356094777584076,
+          -0.3179565668106079,
+          -0.21022756397724152,
+          0.2686203122138977,
+          0.2732674181461334,
+          -0.20448985695838928,
+          -0.3212571442127228,
+          0.12909720838069916,
+          0.35155370831489563
+        ],
+        "parameters": {
+          "transformer.h.0.attn": {
+            "gate": [
+              1.9999119,
+              -1.0008842,
+              0.49230835
+            ],
+            "local_gate": [
+              0.19955115,
+              -0.09164519,
+              0.15214472
+            ],
+            "log_alpha": [
+              -0.20530063
+            ],
+            "log_gain": [
+              0.09576352
+            ]
+          }
+        }
+      },
+      "final_checkpoint": "sha256:77008174997c96acaf481d41de4690206e3c09a2c3e0351d607addca47f66425",
+      "final_id": "sha256:1cb101c838ad41ecfb7d0231b220b1392fb5173cc2eef2d3a7284e2c19c14ab3",
+      "id": "sha256:89d0c9de6924ff31ad37cf8f1fef2dd96e6a3d4501fc3a2e762930f748c65ec9",
+      "losses": [
+        4.507339954376221,
+        2.6471850872039795,
+        0.11237791180610657,
+        4.506924629211426,
+        2.6472227573394775,
+        0.11220771074295044
+      ],
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v1\",\"plan_id\":\"sha256:38a69706e984596722ac9be32deba0b4d5d052cf81a5c32757466ffdf6505962\",\"base_id\":\"sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a\",\"origin_geometry_id\":\"sha256:ff7a5994ea66e7fd14465c1aaa6ff8786605bfdf6bad95012d995f62ce780b95\",\"lora_id\":null,\"readout_accumulator\":\"f32\",\"updates\":2,\"geometry_id\":\"sha256:3c157bc0b329734d5d4b2ee6b1ac59e51afb6dda4d619b583ec6fed36a3e991e\",\"geometry_json\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.fractional_gain_history_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"kernel_len\\\":5,\\\"step\\\":0.8,\\\"max_values\\\":96,\\\"max_products\\\":480},\\\"lag_window\\\":[1,4]},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.00013,-0.9983592,0.49689925],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"local_gate\\\",\\\"shape\\\":[3],\\\"values\\\":[0.19710715,-0.10026141,0.15003508],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"log_alpha\\\",\\\"shape\\\":[],\\\"values\\\":[-0.20252046],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"log_gain\\\",\\\"shape\\\":[],\\\"values\\\":[0.09690639],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}"
+    },
+    "lag/wave": {
+      "endpoint": {
+        "logits": [
+          -0.12664172053337097,
+          0.27337050437927246,
+          0.19079634547233582,
+          -0.22859439253807068,
+          -0.2444429099559784,
+          0.17122849822044373,
+          0.284626841545105,
+          -0.10443224012851715,
+          -0.3091350197792053,
+          0.03188439458608627,
+          0.3166176378726959
+        ],
+        "parameters": {
+          "transformer.h.0.attn": {
+            "bias": [
+              1.0366032,
+              1.9999577,
+              2.9999921
+            ],
+            "gate": [
+              2.0000055,
+              -1.0000136,
+              0.49999958
+            ]
+          }
+        }
+      },
+      "final_checkpoint": "sha256:e3ca3515dc0c09198f34f0445b36f4a4a55e419c68d3be3bba03f9d114cade3e",
+      "final_id": "sha256:dd62d5707bd02e102a93b5079b6c73cefb83ff20fde1169aec7b6e89dda23f78",
+      "id": "sha256:5028295a3649d94986824ad4eae6e8358ee535c7d618dc5d70f5df9e8b16e4ec",
+      "losses": [
+        4.573275089263916,
+        2.5697855949401855,
+        0.1123378723859787,
+        4.573302745819092,
+        2.5683352947235107,
+        0.11249607056379318
+      ],
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v1\",\"plan_id\":\"sha256:38a69706e984596722ac9be32deba0b4d5d052cf81a5c32757466ffdf6505962\",\"base_id\":\"sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a\",\"origin_geometry_id\":\"sha256:83919fa79548a9c5b4b28c7d624cfcddfd9a5787455205fc774471dda584765e\",\"lora_id\":null,\"readout_accumulator\":\"f32\",\"updates\":2,\"geometry_id\":\"sha256:cf994f73367f1b2bfad99b5f8af84797074ae76b86a0b962e1a7d17ae915e184\",\"geometry_json\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.wave_gate_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"curvature\\\":-1.0,\\\"saturation\\\":1.0,\\\"porosity\\\":0.05,\\\"max_values\\\":64}},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"bias\\\",\\\"shape\\\":[3],\\\"values\\\":[1.0351961,1.9999874,3.0000079],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.000005,-1.0000136,0.50000036],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}"
+    },
+    "ordinary/history_gain": {
+      "endpoint": {
+        "logits": [
+          -0.05237467586994171,
+          0.350522518157959,
+          0.134635329246521,
+          -0.31892627477645874,
+          -0.20948098599910736,
+          0.2697652280330658,
+          0.27278953790664673,
+          -0.20574694871902466,
+          -0.3210742771625519,
+          0.13039720058441162,
+          0.35167592763900757
+        ],
+        "parameters": {
+          "transformer.h.0.attn": {
+            "gate": [
+              1.9999168,
+              -1.0008548,
+              0.49234277
+            ],
+            "local_gate": [
+              0.19928989,
+              -0.09238388,
+              0.15211017
+            ],
+            "log_alpha": [
+              -0.20539746
+            ],
+            "log_gain": [
+              0.0957942
+            ]
+          }
+        }
+      },
+      "final_checkpoint": "sha256:2ce3a11a409d037d5c7cee763e6f69870b4455dcf76561c09ba649505578f6da",
+      "final_id": "sha256:46f1db855039f076da2865bdc9075669387500736ab3d7dc6a78d8d8d4c56f18",
+      "id": "sha256:79b5d412fda10edb98fe2ea831c560ebcdde9433b9ea7a9fa4254b9dad8a040c",
+      "losses": [
+        4.506439685821533,
+        2.6473817825317383,
+        0.11262369155883789,
+        4.506059169769287,
+        2.647411823272705,
+        0.11246693134307861
+      ],
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v1\",\"plan_id\":\"sha256:38a69706e984596722ac9be32deba0b4d5d052cf81a5c32757466ffdf6505962\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"origin_geometry_id\":\"sha256:22c111d008461af04a9eefb6e2d5a06137493e10603edf579e8ae57b1b2fbec1\",\"lora_id\":null,\"readout_accumulator\":\"f32\",\"updates\":2,\"geometry_id\":\"sha256:bed89446a6551901e58197c91db3171f1708215d28d2e3b0096f5c6a98461d98\",\"geometry_json\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.fractional_gain_history_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"kernel_len\\\":5,\\\"step\\\":0.8,\\\"max_values\\\":96,\\\"max_products\\\":480},\\\"lag_window\\\":[1,4]},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.0001311,-0.9983938,0.49692237],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"local_gate\\\",\\\"shape\\\":[3],\\\"values\\\":[0.19699381,-0.100542285,0.15001391],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"log_alpha\\\",\\\"shape\\\":[],\\\"values\\\":[-0.20260341],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"log_gain\\\",\\\"shape\\\":[],\\\"values\\\":[0.09699693],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}"
+    },
+    "ordinary/wave": {
+      "endpoint": {
+        "logits": [
+          -0.12553845345973969,
+          0.275073766708374,
+          0.1900928020477295,
+          -0.23046275973320007,
+          -0.24417781829833984,
+          0.17315909266471863,
+          0.28481483459472656,
+          -0.10631871223449707,
+          -0.3097657263278961,
+          0.03362284600734711,
+          0.31765633821487427
+        ],
+        "parameters": {
+          "transformer.h.0.attn": {
+            "bias": [
+              1.0365127,
+              1.9999604,
+              2.9999928
+            ],
+            "gate": [
+              2.0000055,
+              -1.0000135,
+              0.49999958
+            ]
+          }
+        }
+      },
+      "final_checkpoint": "sha256:fa5783e66f27991cc3cda2406da4b999fcc4ca13c7fa170e1e1a8393ab32e354",
+      "final_id": "sha256:c5e9159b8872926fb420d18e0618ad27d3643206e993f036617e5dd99d1aa399",
+      "id": "sha256:882d5e74e72cea4372b81c6e444e4e3413de45b9ece296843ed6b2362da0979a",
+      "losses": [
+        4.571942329406738,
+        2.5703656673431396,
+        0.11240557581186295,
+        4.571956157684326,
+        2.5689053535461426,
+        0.11256486177444458
+      ],
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v1\",\"plan_id\":\"sha256:38a69706e984596722ac9be32deba0b4d5d052cf81a5c32757466ffdf6505962\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"origin_geometry_id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"lora_id\":null,\"readout_accumulator\":\"f32\",\"updates\":2,\"geometry_id\":\"sha256:b148ed63b18453b2808a0c32d01a87fd2748b83e2ad0966b79816fd329670b23\",\"geometry_json\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.wave_gate_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"curvature\\\":-1.0,\\\"saturation\\\":1.0,\\\"porosity\\\":0.05,\\\"max_values\\\":64}},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"bias\\\",\\\"shape\\\":[3],\\\"values\\\":[1.034871,1.9999878,3.0000083],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.000005,-1.0000135,0.50000036],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}"
+    }
+  },
+  "cut": 2,
+  "plan_id": "sha256:38a69706e984596722ac9be32deba0b4d5d052cf81a5c32757466ffdf6505962",
+  "return_at": 4,
+  "total": 6
+}

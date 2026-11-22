@@ -152,13 +152,13 @@ impl NativeCausalLm {
         Ok(shape)
     }
 
-    pub(super) fn prepare_line_set(
+    pub(super) fn admit_line_support(
         &self,
         prompt: &[usize],
         candidates: &[Vec<usize>],
         stop: usize,
         training: bool,
-    ) -> CausalLmResult<(PreparedCausalWindow, LineSet)> {
+    ) -> CausalLmResult<([usize; 2], LineSet)> {
         if candidates.len() > MAX_LINE_MENU_CANDIDATES {
             return Err("too many complete-line candidates".into());
         }
@@ -168,6 +168,18 @@ impl NativeCausalLm {
         let plan = LineSet::new(candidates, stop);
         let physical = [plan.leaves.len(), shape[1]];
         self.admit_terminated_work(physical, plan.nodes.len(), training)?;
+        Ok((shape, plan))
+    }
+
+    pub(super) fn prepare_line_set(
+        &self,
+        prompt: &[usize],
+        candidates: &[Vec<usize>],
+        stop: usize,
+        training: bool,
+    ) -> CausalLmResult<(PreparedCausalWindow, LineSet)> {
+        let (shape, plan) = self.admit_line_support(prompt, candidates, stop, training)?;
+        let physical = [plan.leaves.len(), shape[1]];
         let mut ids = Vec::with_capacity(physical[0] * physical[1]);
         for &j in &plan.leaves {
             let end = ids.len() + physical[1];

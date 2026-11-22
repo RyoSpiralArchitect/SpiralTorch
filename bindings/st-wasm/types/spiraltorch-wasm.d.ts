@@ -59,6 +59,24 @@ declare module "spiraltorch-wasm" {
         anchorWaveProjection(path: string): GeometryAdapterArtifact;
         free(): void;
     }
+    export class NativeCausalLmLineTrainingSession {
+        constructor(origin: NativeCausalLm, plan: string);
+        static fromJson(origin: NativeCausalLm, plan: string, payload: string, expectedId: string): NativeCausalLmLineTrainingSession;
+        readonly planId: string;
+        readonly completedUpdates: number;
+        readonly totalUpdates: number;
+        readonly exhausted: boolean;
+        modelSnapshot(): NativeCausalLm;
+        stepJson(): string | undefined;
+        checkpoint(): CausalLmLineCheckpoint;
+        free(): void;
+    }
+    export class CausalLmLineCheckpoint {
+        private constructor();
+        readonly payload: string;
+        readonly id: string;
+        free(): void;
+    }
     export class CausalLmLineGradients {
         private constructor();
         reportJson(): string;

@@ -63,3 +63,5 @@ Node and headless Chrome compared both tile policies to these gradients and
 tested snapshot-checked SGD; maximum absolute gradient difference from native
 was below 1.11e-8. See [the WASM/Python example](../../../../../bindings/st-wasm/tests/native_causal_lm.md#train-on-complete-answers).
 This is evidence about numerical agreement, work and memory, not model quality.
+The [continuation follow-up](LINE_SESSION.md) exercises these objectives across
+multiple SGD updates and real CPython/browser checkpoint boundaries.

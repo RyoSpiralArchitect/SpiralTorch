@@ -1,0 +1,71 @@
+{
+  "cases": {
+    "lag/history_gain": {
+      "browser_prefix": "sha256:e5edc1887740702c14e43031477f4bee9d0d69507cc8a08368a72353651141bc",
+      "native_prefix": "sha256:89d0c9de6924ff31ad37cf8f1fef2dd96e6a3d4501fc3a2e762930f748c65ec9",
+      "return_payload_bytes": 1469,
+      "returned_geometry_id_exact": true,
+      "returned_native_endpoint_error": 0.0,
+      "suffix_loss_ulps": [
+        1,
+        0
+      ],
+      "wasm_logit_error": 1.4901161193847656e-08,
+      "wasm_parameter_error": 0.0
+    },
+    "lag/wave": {
+      "browser_prefix": "sha256:a1accc061512ed55bf122d3fed23165a36973eeccd4d15352e94d4bfc8e0e737",
+      "native_prefix": "sha256:5028295a3649d94986824ad4eae6e8358ee535c7d618dc5d70f5df9e8b16e4ec",
+      "return_payload_bytes": 1216,
+      "returned_geometry_id_exact": true,
+      "returned_native_endpoint_error": 0.0,
+      "suffix_loss_ulps": [
+        0,
+        0
+      ],
+      "wasm_logit_error": 0.0,
+      "wasm_parameter_error": 0.0
+    },
+    "ordinary/history_gain": {
+      "browser_prefix": "sha256:84fbd04365861f52b8cc19eba078d46cabcc2f3ac55e7eca8f7b7bbfd79f90bd",
+      "native_prefix": "sha256:79b5d412fda10edb98fe2ea831c560ebcdde9433b9ea7a9fa4254b9dad8a040c",
+      "return_payload_bytes": 1470,
+      "returned_geometry_id_exact": true,
+      "returned_native_endpoint_error": 0.0,
+      "suffix_loss_ulps": [
+        0,
+        0
+      ],
+      "wasm_logit_error": 0.0,
+      "wasm_parameter_error": 0.0
+    },
+    "ordinary/wave": {
+      "browser_prefix": "sha256:2caf8a97a2ee0cfae7659918d248fc017098d028de28a869a722082eec6258b0",
+      "native_prefix": "sha256:882d5e74e72cea4372b81c6e444e4e3413de45b9ece296843ed6b2362da0979a",
+      "return_payload_bytes": 1215,
+      "returned_geometry_id_exact": true,
+      "returned_native_endpoint_error": 0.0,
+      "suffix_loss_ulps": [
+        0,
+        0
+      ],
+      "wasm_logit_error": 0.0,
+      "wasm_parameter_error": 0.0
+    }
+  },
+  "plan_id": "sha256:38a69706e984596722ac9be32deba0b4d5d052cf81a5c32757466ffdf6505962",
+  "schema": "spiraltorch.artificial_line_session_transfer.v1",
+  "source_sha256": {
+    "chrome_download": "9eac5ef921f435b3c2056d5f14b5613dfa288b477ec7149b2097d89e34712c01",
+    "direct": "ba521ce02b2a7bc037d8c29228bb6777dd3bb3cbb8760661c69be78d1580adb5",
+    "native_bridge": "f420ed59eeb13a6539574cc2df1f3fc48fcb4a89ebf5083ba452d2c479e32f2f",
+    "native_take_back": "f081bcdfdb3b3761509a72f34eebd4ee8580d1feee286389523d6017842a925b",
+    "node_download": "9eac5ef921f435b3c2056d5f14b5613dfa288b477ec7149b2097d89e34712c01",
+    "plan": "38a69706e984596722ac9be32deba0b4d5d052cf81a5c32757466ffdf6505962"
+  },
+  "transfer_cursors": [
+    2,
+    4
+  ],
+  "updates_per_host": 6
+}

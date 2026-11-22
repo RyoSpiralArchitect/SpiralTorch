@@ -9696,7 +9696,7 @@ for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAd
               "NativeCausalLmConditionalAnswerSession",
               "NativeCausalLmConditionalServingSnapshot",
               "NativeCausalLmConditionalAnswerComparison",
-              "NativeCausalLmTrainingPrefixCache", "NativeCausalLmTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
+              "NativeCausalLmTrainingPrefixCache", "NativeCausalLmTrainingSession", "NativeCausalLmLineTrainingSession", "NativeCausalLmTrainingSessionStep", "NativeCausalLmTrainer",
               "NativeCausalLmTrainingStep", "NativeCausalLmObservedTrainingStep", "NativeCausalLmGenerator",
               "NativeCausalLmGenerationStep", "NativeCausalLmContext"):
     if _resolve_rs_attr(_name) is not None:

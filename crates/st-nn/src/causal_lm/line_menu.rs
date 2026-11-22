@@ -42,7 +42,11 @@ impl NativeCausalLm {
         self.line_set_shape(prompt_len, content_lengths, stop_id, geometry_gradients)
     }
 
-    fn validate_ranking(count: usize, gold_index: usize, mix: f64) -> CausalLmResult<()> {
+    pub(super) fn validate_ranking(
+        count: usize,
+        gold_index: usize,
+        mix: f64,
+    ) -> CausalLmResult<()> {
         if count < 2 || gold_index >= count || !(0.0..=1.0).contains(&mix) {
             return Err("invalid complete-line menu size, gold, stop, prompt or mix".into());
         }

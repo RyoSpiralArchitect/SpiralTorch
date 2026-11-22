@@ -548,6 +548,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "NativeCausalLmAdaptationGradients",
         "NativeCausalLmTrainingPrefixCache",
         "NativeCausalLmTrainingSession",
+        "NativeCausalLmLineTrainingSession",
         "NativeCausalLmTrainingSessionStep",
         "NativeCausalLmTrainer",
         "NativeCausalLmTrainingStep",

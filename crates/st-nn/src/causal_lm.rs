@@ -27,6 +27,7 @@ mod gradient_alignment;
 mod key_lag;
 mod learning;
 mod line_menu;
+mod line_session;
 mod line_set;
 mod lora;
 mod mixture_probe;
@@ -71,6 +72,10 @@ pub use gradient_alignment::{CausalLmGradientAlignment, CausalLmGradientPairStat
 pub use key_lag::CausalLmKeyLag;
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use line_menu::{CausalLmLineMenuReport, MAX_LINE_MENU_CANDIDATES, MAX_LINE_MENU_TARGETS};
+pub use line_session::{
+    CausalLmLineObjective, CausalLmLineSessionReport, CausalLmLineSessionStep,
+    NativeCausalLmLineTrainingSession,
+};
 pub use line_set::{
     CausalLmCachedLineScores, CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport,
     CausalLmLineTrainingWork,

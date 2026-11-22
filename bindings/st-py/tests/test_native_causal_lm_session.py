@@ -48,6 +48,49 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_complete_line_session_exact_partition_and_no_clobber(self):
+        import hashlib
+        base, origin = owners("f32_wide_backward")
+        plan = json.dumps({"schema":"spiraltorch.native_causal_lm_line_plan.v1","epochs":2,
+            "learning_rate":0.125,"max_tile_values":11,"examples":[
+                {"prompt_ids":[1,2],"candidates":[[1],[1,3]],"stop_id":0,"objective":{"kind":"set"}},
+                {"prompt_ids":[1,3],"candidates":[[2],[3]],"stop_id":0,"objective":{"kind":"menu","gold_index":1,"mix":0.5}}
+            ]}).encode()
+        S = st.NativeCausalLmLineTrainingSession
+        uninterrupted, split = S(origin, plan), S(origin, plan.decode())
+        expected = [uninterrupted.step() for _ in range(4)]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/"step.json"
+            initial = split.checkpoint_with_id()
+            for bad in (True,0,-1,5):
+                with self.assertRaises((ValueError,TypeError,OverflowError)):
+                    split.advance_to_checkpoint_new(bad,path)
+                self.assertFalse(path.exists())
+                self.assertEqual(split.checkpoint_with_id(),initial)
+            receipts, pin = split.advance_to_checkpoint_new(2,path)
+            self.assertEqual(receipts,expected[:2])
+            payload = path.read_bytes()
+            self.assertEqual(pin,"sha256:"+hashlib.sha256(payload).hexdigest())
+            before = split.checkpoint_with_id()
+            with self.assertRaises(FileExistsError):
+                split.advance_to_checkpoint_new(3,path)
+            self.assertEqual(payload,path.read_bytes())
+            self.assertEqual(split.checkpoint_with_id(),before)
+            for owner, data, ck, identity in [(base,plan,payload,pin),(origin,plan+b" ",payload,pin),
+                    (origin,plan,payload+b" ",pin),(split.model,plan,payload,pin),(origin,plan,payload,"sha256:bad")]:
+                with self.assertRaises(ValueError):
+                    S.from_json(owner,data,ck,identity)
+            resumed = S.from_json(origin,plan,payload,pin)
+            self.assertEqual(resumed.checkpoint_with_id(),before)
+            self.assertEqual([resumed.step(),resumed.step()],expected[2:])
+            self.assertIsNone(resumed.step())
+            self.assertTrue(resumed.exhausted)
+            self.assertEqual(resumed.checkpoint_with_id(),uninterrupted.checkpoint_with_id())
+            self.assertEqual(resumed.model.lora_to_json(),origin.lora_to_json())
+            self.assertEqual(resumed.model.geometry_artifact().to_json(),uninterrupted.model.geometry_artifact().to_json())
+            self.assertNotIn("examples",json.loads(payload))
+            self.assertNotIn("lora_json",json.loads(payload))
+
     def test_multi_site_observation_preserves_early_stop_and_non_wave_pullbacks(self):
         geo = runpy.run_path(str(Path(__file__).with_name("test_native_geometry_runtime.py")))
         config, weights = fixtures["fixture"](width=3, heads=1)

@@ -21,6 +21,7 @@ mod evaluation;
 mod generation;
 mod groups;
 mod line_menu;
+mod line_session;
 mod mixture_probe;
 mod output_margin;
 mod prefix_cache;
@@ -1864,6 +1865,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     evaluation::register(module)?;
     training::register(module)?;
     session::register(module)?;
+    module.add_class::<line_session::PyLineSession>()?;
     generation::register(module)?;
     context::register(module)?;
     Ok(())

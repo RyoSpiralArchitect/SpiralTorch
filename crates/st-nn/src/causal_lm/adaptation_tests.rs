@@ -3,6 +3,10 @@ use super::*;
 #[path = "line_menu_decoder_tests.rs"]
 mod line_menu_decoder;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "line_session_tests.rs"]
+mod line_session;
+
 #[path = "projection_probe_tests.rs"]
 mod projection_probe;
 
