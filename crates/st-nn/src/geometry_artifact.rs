@@ -18,7 +18,7 @@ pub const GEOMETRY_ADAPTER_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub const GEOMETRY_ADAPTER_MAX_VALUES: usize = 1_048_576;
 pub const GEOMETRY_ADAPTER_MAX_KERNEL_TAPS: usize = 65_536;
 mod displacement;
-pub use displacement::{GeometryDeltaMatch, MAX_RELATIVE_DELTA_ERROR};
+pub use displacement::{GeometryDeltaMatch, GeometryGradientStep, MAX_RELATIVE_DELTA_ERROR};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

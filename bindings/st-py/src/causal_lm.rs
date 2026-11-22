@@ -858,6 +858,27 @@ impl PyNativeCausalLm {
         ))
     }
 
+    /// Take a distance-matched step along the sealed gradient before parameter rounding.
+    fn step_geometry_gradient_at_distance(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmAdaptationGradients,
+        target_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        reject_bool(target_l2)?;
+        let distance = target_l2.extract::<f64>()?;
+        let (inner, report) = py
+            .detach(|| {
+                self.inner
+                    .step_geometry_gradient_at_distance(&gradients.inner, distance)
+            })
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)?,
+        ))
+    }
+
     /// Apply one equal-vote mean of sealed geometry gradients from this snapshot.
     #[pyo3(signature=(gradients, learning_rate, *, target_l2=None))]
     fn step_geometry_cohort_sgd(

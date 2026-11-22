@@ -1779,6 +1779,63 @@ assert session.predecessor_checkpoint_id == predecessor
         with self.assertRaises(ValueError):
             updated.step_geometry_sgd_at_distance(grad, .75, 0.)
 
+    def test_gradient_ray_updates_only_trainables_at_the_requested_distance(self):
+        path = "transformer.h.1.attn"
+        start = self.model.with_geometry(artifact(self.model, path=path, trainable=True))
+        grad = start.adaptation_loss_gradients([1, 2, 3], [1, 3], mode="geometry")
+        target = 1 / 256
+        next_model, report = start.step_geometry_gradient_at_distance(grad, target_l2=target)
+        def values(model):
+            ts = json.loads(model.geometry_artifact().to_json())["placements"][0]["tensors"]
+            return {t["name"]: struct.pack("<4f", *t["values"]) for t in ts}
+        before, after = values(start), values(next_model)
+        self.assertEqual(before["bias"], after["bias"])
+        gs = grad.parameter_gradients()[path]["gate"]
+        gnorm = math.sqrt(math.fsum(g*g for g in gs))
+        want = struct.pack("<4f", *(v - target*(g/gnorm) for v,g in zip(struct.unpack("<4f", before["gate"]), gs)))
+        self.assertEqual(after["gate"], want)
+        self.assertEqual(report["method"], "gradient_ray_f32.v1")
+        self.assertEqual(report["trainable_values"], 4)
+        self.assertEqual(report["origin_id"], start.geometry_artifact_id)
+        self.assertEqual(report["result_id"], next_model.geometry_artifact_id)
+        self.assertAlmostEqual(report["gradient_l2"], gnorm)
+        self.assertLess(report["gradient_dot_step"], 0.)
+        self.assertLessEqual(report["relative_vector_error"], 1e-4)
+        self.assertEqual(report["realized_l2"], start.geometry_artifact().trainable_delta_l2(next_model.geometry_artifact()))
+        for bad in (True, -1., float("inf"), float("nan")):
+            with self.assertRaises((TypeError, ValueError)):
+                start.step_geometry_gradient_at_distance(grad, bad)
+        with self.assertRaises(ValueError):
+            next_model.step_geometry_gradient_at_distance(grad, 0.)
+
+    def test_gradient_ray_uses_one_norm_across_geometry_placements(self):
+        paths = ("transformer.h.0.attn", "transformer.h.1.mlp")
+        left, right = [json.loads(artifact(self.model, path=p, trainable=True).to_json()) for p in paths]
+        left["placements"].extend(right["placements"])
+        origin = self.model.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(left)))
+        g = origin.geometry_declared_rival_gradients(
+            [1, 2, 4], [1, 3], contrasts=[(2, 4, [3])], mix=1., labels=[-100, -100, 4],
+        )
+        steps = g.parameter_gradients()
+        norms = [math.fsum(x*x for x in steps[path]["gate"]) for path in paths]
+        self.assertGreater(min(norms), 0.)
+        norm = math.sqrt(math.fsum(norms))
+        trial, receipt = origin.step_geometry_gradient_at_distance(g, .015625)
+        self.assertEqual(receipt["trainable_values"], 8)
+        self.assertAlmostEqual(receipt["gradient_l2"], norm, places=12)
+        result = json.loads(trial.geometry_artifact().to_json())["placements"]
+        before = json.loads(origin.geometry_artifact().to_json())["placements"]
+        for p, q in zip(before, result):
+            self.assertEqual(p["path"], q["path"])
+            gate = steps[p["path"]]["gate"]
+            for t, u in zip(p["tensors"], q["tensors"]):
+                if not t["requires_grad"]:
+                    self.assertEqual(t, u)
+                    continue
+                old = struct.unpack("<4f", struct.pack("<4f", *t["values"]))
+                expected = struct.pack("<4f", *(v - .015625*(d/norm) for v,d in zip(old, gate)))
+                self.assertEqual(struct.pack("<4f", *u["values"]), expected)
+
     def test_coverage_guard_is_opt_in_and_uses_reference_members(self):
         reference = self.model.with_geometry(artifact(self.model, path="transformer.h.1.attn", trainable=True))
         other = self.model.with_geometry(artifact(self.model, path="transformer.h.1.attn", gate=-.8, trainable=True))

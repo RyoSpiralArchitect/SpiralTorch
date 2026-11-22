@@ -15,6 +15,20 @@ pub struct GeometryDeltaMatch {
     pub relative_vector_error: f64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct GeometryGradientStep {
+    pub method: &'static str,
+    pub origin_id: String,
+    pub result_id: String,
+    pub trainable_values: usize,
+    pub gradient_l2: f64,
+    pub requested_l2: f64,
+    pub realized_l2: f64,
+    pub relative_vector_error: f64,
+    /// First-order change at the realized f32 parameters, not a measured loss.
+    pub gradient_dot_step: f64,
+}
+
 impl GeometryDeltaMatch {
     pub(crate) fn validate_requested_l2(requested: f64) -> Result<()> {
         if !requested.is_finite() || requested < 0.0 {
@@ -50,7 +64,97 @@ fn trainable(t: &GeometryAdapterTensor) -> bool {
     t.role == GeometryAdapterTensorRole::Parameter && t.requires_grad
 }
 
+fn check_distance_range(requested: f64, values: usize) -> Result<()> {
+    if requested > 2.0 * f64::from(f32::MAX) * (values as f64).sqrt() {
+        return Err("requested geometry displacement exceeds f32 range".into());
+    }
+    Ok(())
+}
+
+fn check_realization(requested: f64, realized: f64, relative: f64) -> Result<()> {
+    if !relative.is_finite()
+        || relative > MAX_RELATIVE_DELTA_ERROR
+        || (realized / requested - 1.0).abs() > MAX_RELATIVE_DELTA_ERROR
+    {
+        return Err(
+            "requested geometry direction or distance cannot be represented accurately in f32"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 impl GeometryAdapterArtifact {
+    /// Called only after the runtime admits a complete, sealed geometry VJP.
+    pub(crate) fn match_validated_gradient_ray(
+        &self,
+        gradients: &BTreeMap<String, BTreeMap<String, Vec<f32>>>,
+        requested_l2: f64,
+    ) -> Result<(Self, GeometryGradientStep)> {
+        GeometryDeltaMatch::validate_requested_l2(requested_l2)?;
+        let mut count = 0;
+        let mut norm = Squares::default();
+        for p in &self.record.placements {
+            for t in p.tensors.iter().filter(|t| trainable(t)) {
+                let g = &gradients[&p.path][&t.name];
+                count += g.len();
+                for &x in g {
+                    norm.add(f64::from(x));
+                }
+            }
+        }
+        let gradient_l2 = norm.norm();
+        let (result, realized_l2, relative_vector_error, gradient_dot_step) = if requested_l2 == 0.0
+        {
+            (self.clone(), 0.0, 0.0, 0.0)
+        } else {
+            if gradient_l2 == 0.0 {
+                return Err("cannot assign a positive distance to a zero geometry gradient".into());
+            }
+            check_distance_range(requested_l2, count)?;
+            let mut record = self.record.clone();
+            let (mut actual, mut error) = (Squares::default(), Squares::default());
+            let mut dot = 0.0;
+            for p in &mut record.placements {
+                for t in p.tensors.iter_mut().filter(|t| trainable(t)) {
+                    for (x, &g) in t.values.iter_mut().zip(&gradients[&p.path][&t.name]) {
+                        if g == 0.0 {
+                            continue;
+                        }
+                        let g = f64::from(g);
+                        let origin = f64::from(*x);
+                        let unit = -g / gradient_l2;
+                        let rounded = (origin + requested_l2 * unit) as f32;
+                        if !rounded.is_finite() {
+                            return Err("geometry displacement overflowed f32".into());
+                        }
+                        *x = rounded;
+                        let applied = f64::from(rounded) - origin;
+                        actual.add(applied);
+                        error.add(applied / requested_l2 - unit);
+                        dot += g * applied;
+                    }
+                }
+            }
+            let realized = actual.norm();
+            let relative = error.norm();
+            check_realization(requested_l2, realized, relative)?;
+            (Self::create(record)?, realized, relative, dot)
+        };
+        let report = GeometryGradientStep {
+            method: "gradient_ray_f32.v1",
+            origin_id: self.artifact_id().to_owned(),
+            result_id: result.artifact_id().to_owned(),
+            trainable_values: count,
+            gradient_l2,
+            requested_l2,
+            realized_l2,
+            relative_vector_error,
+            gradient_dot_step,
+        };
+        Ok((result, report))
+    }
+
     fn checked_delta(&self, endpoint: &Self) -> Result<(usize, f64)> {
         if self.record.training != endpoint.record.training
             || self.layout_id()? != endpoint.layout_id()?
@@ -117,9 +221,7 @@ impl GeometryAdapterArtifact {
             (endpoint.clone(), direction_l2, 0.0)
         } else {
             // Reject impossible extrapolations before squaring residuals or casting to f32.
-            if requested_l2 > 2.0 * f64::from(f32::MAX) * (n as f64).sqrt() {
-                return Err("requested geometry displacement exceeds f32 range".into());
-            }
+            check_distance_range(requested_l2, n)?;
             let scale = requested_l2 / direction_l2;
             let mut record = self.record.clone();
             let (mut actual, mut error) = (Squares::default(), Squares::default());
@@ -153,12 +255,7 @@ impl GeometryAdapterArtifact {
             }
             let realized = actual.norm();
             let relative = error.norm();
-            if !relative.is_finite()
-                || relative > MAX_RELATIVE_DELTA_ERROR
-                || (realized / requested_l2 - 1.0).abs() > MAX_RELATIVE_DELTA_ERROR
-            {
-                return Err("requested geometry direction or distance cannot be represented accurately in f32".into());
-            }
+            check_realization(requested_l2, realized, relative)?;
             (Self::create(record)?, realized, relative)
         };
         let report = GeometryDeltaMatch {

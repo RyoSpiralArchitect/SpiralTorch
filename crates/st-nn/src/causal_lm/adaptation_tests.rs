@@ -273,6 +273,86 @@ fn paired_and_archived_distance_steps_reject_incompatible_owners_and_budgets() {
 }
 
 #[test]
+fn gradient_ray_recovers_a_direction_lost_by_the_preliminary_sgd_rounding() {
+    let start = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let mut record = start.geometry_artifact().unwrap().record().clone();
+    for t in &mut record.placements[0].tensors {
+        if t.requires_grad {
+            t.values.fill(0.5);
+        }
+    }
+    let start = start
+        .with_geometry(GeometryAdapterArtifact::create(record).unwrap())
+        .unwrap();
+    let ids = [1, 2, 4, 3];
+    let labels = [-100, -100, -100, 3];
+    let mode = CausalLmAdaptationMode::Geometry;
+    let grad = start
+        .adaptation_loss_gradients_with_labels(&ids, [1, 4], Some(&labels), Some(mode))
+        .unwrap();
+    let artifact = start.geometry_artifact().unwrap();
+    let target = 0.02;
+    let rounded = start
+        .step_adaptation_sgd(&grad, mode, f32::MIN_POSITIVE)
+        .unwrap();
+    assert_eq!(rounded.geometry_artifact_id(), start.geometry_artifact_id());
+    let error = start
+        .step_geometry_sgd_at_distance(&grad, f32::MIN_POSITIVE, target)
+        .unwrap_err();
+    assert!(error.to_string().contains("zero geometry direction"));
+    let (next, receipt) = start
+        .step_geometry_gradient_at_distance(&grad, target)
+        .unwrap();
+    assert!(receipt.gradient_l2 > 0. && receipt.gradient_dot_step < 0.);
+    assert_eq!(receipt.method, "gradient_ray_f32.v1");
+    assert_eq!(receipt.origin_id, artifact.artifact_id());
+    assert_eq!(
+        next.geometry_artifact_id(),
+        Some(receipt.result_id.as_str())
+    );
+    assert_eq!(next.lora_artifact_id(), start.lora_artifact_id());
+    assert_eq!(
+        receipt.realized_l2,
+        artifact
+            .trainable_delta_l2(next.geometry_artifact().unwrap())
+            .unwrap()
+    );
+    assert!((receipt.realized_l2 / target - 1.).abs() <= 1e-4);
+    assert!(receipt.relative_vector_error <= 1e-4);
+
+    let (same, zero) = start.step_geometry_gradient_at_distance(&grad, 0.).unwrap();
+    assert_eq!(same.geometry_artifact_id(), start.geometry_artifact_id());
+    assert_eq!((zero.realized_l2, zero.gradient_dot_step), (0., 0.));
+    for loss in [f64::from_bits(1), f64::MAX, -1., f64::NAN] {
+        assert!(start
+            .step_geometry_gradient_at_distance(&grad, loss)
+            .is_err());
+    }
+    assert!(next
+        .step_geometry_gradient_at_distance(&grad, target)
+        .is_err());
+    let other_policy = start.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+    assert!(other_policy
+        .step_geometry_gradient_at_distance(&grad, 0.)
+        .is_err());
+    let without_lora = load().with_geometry(artifact.clone()).unwrap();
+    assert!(without_lora
+        .step_geometry_gradient_at_distance(&grad, 0.)
+        .is_err());
+    let joint = start
+        .adaptation_loss_gradients_with_labels(
+            &ids,
+            [1, 4],
+            Some(&labels),
+            Some(CausalLmAdaptationMode::Joint),
+        )
+        .unwrap();
+    assert!(start
+        .step_geometry_gradient_at_distance(&joint, target)
+        .is_err());
+}
+
+#[test]
 fn paired_geometry_models_without_lora_have_an_exact_plain_ce_control() {
     let base = load();
     let x = base.with_geometry(geometry(&base, 1, 0.2)).unwrap();
@@ -322,6 +402,13 @@ fn paired_zero_signal_preserves_mixed_owner_and_cannot_invent_a_positive_step() 
         .geometry_competition_gradients(&ids, [1, 3], None, recipe)
         .unwrap();
     assert!(x.step_geometry_sgd_at_distance(&g, 0.5, 1e-4).is_err());
+    assert!(x.step_geometry_gradient_at_distance(&g, 1e-4).is_err());
+    let (still, zero) = x.step_geometry_gradient_at_distance(&g, 0.).unwrap();
+    assert_eq!(still.geometry_artifact_id(), x.geometry_artifact_id());
+    assert_eq!(
+        (zero.gradient_l2, zero.realized_l2, zero.gradient_dot_step),
+        (0., 0., 0.)
+    );
     let (_, m, r) = x
         .geometry_competition_pair(&x, recipe, 0.5)
         .unwrap()
