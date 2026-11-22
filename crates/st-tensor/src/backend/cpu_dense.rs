@@ -179,21 +179,37 @@ pub fn matmul_packed_wide_into(
     }
     for (out, row) in dst.chunks_exact_mut(cols).zip(lhs.chunks_exact(inner)) {
         for (value, column) in out.iter_mut().zip(packed_rhs.chunks_exact(inner)) {
-            let mut sums = [0.0f64; 4];
-            let full = inner / 4 * 4;
-            for k in (0..full).step_by(4) {
-                for lane in 0..4 {
-                    sums[lane] += f64::from(row[k + lane]) * f64::from(column[k + lane]);
-                }
-            }
-            let mut sum = (sums[0] + sums[1]) + (sums[2] + sums[3]);
-            for k in full..inner {
-                sum += f64::from(row[k]) * f64::from(column[k]);
-            }
-            *value = sum as f32;
+            *value = wide_dot(row, |k| column[k]);
         }
     }
     Ok(())
+}
+
+#[inline]
+fn wide_dot(row: &[f32], weight: impl Fn(usize) -> f32) -> f32 {
+    let mut sums = [0.0f64; 4];
+    let full = row.len() / 4 * 4;
+    for k in (0..full).step_by(4) {
+        for lane in 0..4 {
+            sums[lane] += f64::from(row[k + lane]) * f64::from(weight(k + lane));
+        }
+    }
+    finish_wide_dot(
+        sums,
+        row[full..]
+            .iter()
+            .enumerate()
+            .map(|(k, &a)| (a, weight(full + k))),
+    )
+}
+
+#[inline]
+pub(crate) fn finish_wide_dot(sums: [f64; 4], tail: impl Iterator<Item = (f32, f32)>) -> f32 {
+    let mut sum = (sums[0] + sums[1]) + (sums[2] + sums[3]);
+    for (a, b) in tail {
+        sum += f64::from(a) * f64::from(b);
+    }
+    sum as f32
 }
 
 #[inline]
@@ -365,11 +381,9 @@ unsafe fn microkernel_8x12_simd(
         let a_slice = core::slice::from_raw_parts(a.add(p * lda), M8N12_TM);
         let a_vec = Simd8::from_slice(a_slice);
 
-        let mut b_ptr = b.add(p);
         for col in 0..M8N12_TN {
-            let b_vec = Simd8::splat(*b_ptr);
+            let b_vec = Simd8::splat(*b.add(col * ldb + p));
             acc[col] += a_vec * b_vec;
-            b_ptr = b_ptr.add(ldb);
         }
     }
 
@@ -403,10 +417,8 @@ unsafe fn microkernel_8x12_scalar(
     let mut acc = [[0.0f32; M8N12_TM]; M8N12_TN];
 
     for p in 0..k {
-        let mut b_ptr = b.add(p);
         for col in 0..M8N12_TN {
-            let b_val = *b_ptr;
-            b_ptr = b_ptr.add(ldb);
+            let b_val = *b.add(col * ldb + p);
             for row in 0..M8N12_TM {
                 let a_val = *a.add(p * lda + row);
                 acc[col][row] += a_val * b_val;
@@ -463,11 +475,9 @@ unsafe fn microkernel_4x16_simd(
         let a_slice = core::slice::from_raw_parts(a.add(p * lda), M4N16_TM);
         let a_vec = Simd4::from_slice(a_slice);
 
-        let mut b_ptr = b.add(p);
         for col in 0..M4N16_TN {
-            let b_vec = Simd4::splat(*b_ptr);
+            let b_vec = Simd4::splat(*b.add(col * ldb + p));
             acc[col] += a_vec * b_vec;
-            b_ptr = b_ptr.add(ldb);
         }
     }
 
@@ -499,10 +509,8 @@ unsafe fn microkernel_4x16_scalar(
     let mut acc = [[0.0f32; M4N16_TM]; M4N16_TN];
 
     for p in 0..k {
-        let mut b_ptr = b.add(p);
         for col in 0..M4N16_TN {
-            let b_val = *b_ptr;
-            b_ptr = b_ptr.add(ldb);
+            let b_val = *b.add(col * ldb + p);
             for row in 0..M4N16_TM {
                 let a_val = *a.add(p * lda + row);
                 acc[col][row] += a_val * b_val;
@@ -1342,6 +1350,7 @@ mod tests {
         for spec in MICROKERNELS {
             for (rows, inner, cols) in [
                 (spec.tm, 1, spec.tn),
+                (spec.tm * 2, 37, spec.tn * 2),
                 (spec.tm * 2 + 1, 37, spec.tn * 2 + 3),
                 (spec.tm + 1, 1025, spec.tn + 1),
                 (spec.tm * 3 + 1, 137, spec.tn * 16 + 3),

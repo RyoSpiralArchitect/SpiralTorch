@@ -16,9 +16,12 @@ pub mod differential;
 pub mod fractal;
 pub mod measure;
 pub mod python;
+mod readout_panels;
 pub mod topos;
 pub mod wasm_canvas;
 mod wide_matmul;
+
+pub use readout_panels::CpuReadoutPanels;
 
 pub use self::differential::{
     DifferentialResonance, FunctorDifferential, HomotopyDifferential, InfinityDifferential,

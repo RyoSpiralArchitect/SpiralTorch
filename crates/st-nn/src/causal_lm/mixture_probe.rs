@@ -95,12 +95,7 @@ impl NativeCausalLm {
     ) -> CausalLmResult<Tensor> {
         let cache = &primal.cache;
         let steps = cache.after_attention.shape().0;
-        let head = learning::frozen_pullback(
-            &self.head,
-            &self.backward_head,
-            seed,
-            policy.backward_precision(),
-        )?;
+        let head = self.vocabulary_head_pullback_as(seed, policy.backward_precision())?;
         let last = primal.selected.layer_norm_input_backward(
             &self.final_norm.gamma,
             &head,

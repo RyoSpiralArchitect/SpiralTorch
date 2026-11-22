@@ -117,7 +117,9 @@ pub use quartet_projection::{
     NativeCausalLmConditionalAnswerSession, NativeCausalLmConditionalServingSnapshot,
     NativeCausalLmProjectionPrefix, NativeCausalLmRankOneProjection, MAX_CONDITIONAL_BANK_ROWS,
 };
-pub use readout_policy::{CausalLmHeadPrecision, CausalLmReadoutAccumulator};
+pub use readout_policy::{
+    CausalLmForwardStorage, CausalLmHeadPrecision, CausalLmReadoutAccumulator,
+};
 pub use repetition::CausalLmRepetition;
 pub use scalar_output::{
     CausalLmScalarPairLoss, CausalLmScalarPairStep, CausalLmScalarSearch,
@@ -281,10 +283,11 @@ pub struct NativeCausalLm {
     blocks: Vec<DecoderBlock>,
     final_norm: Norm,
     head: PackedB,
-    backward_head: TransposeCache,
+    backward_head: Arc<OnceLock<Result<readout_policy::TrainingHeadPack, String>>>,
     geometry: Option<Arc<NativeGeometryRuntime>>,
     lora: Option<Arc<lora::NativeLoraAdapter>>,
     readout_accumulator: CausalLmReadoutAccumulator,
+    forward_storage: CausalLmForwardStorage,
 }
 
 fn product(values: &[usize], budget: usize, label: &'static str) -> CausalLmResult<usize> {
@@ -320,12 +323,6 @@ impl NativeCausalLm {
         let mut model = self.clone();
         model.readout_accumulator = accumulator;
         model
-    }
-
-    fn project_readout(&self, normalized: &Tensor) -> CausalLmResult<Tensor> {
-        self.readout_accumulator
-            .forward_precision()
-            .multiply(normalized, &self.head)
     }
 
     pub fn base_model_identity(&self) -> &str {

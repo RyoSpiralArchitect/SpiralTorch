@@ -191,12 +191,7 @@ fn geometry_pullback(
 
 impl NativeCausalLm {
     pub(super) fn vocabulary_head_pullback(&self, seed: &Tensor) -> CausalLmResult<Tensor> {
-        frozen_pullback(
-            &self.head,
-            &self.backward_head,
-            seed,
-            self.readout_accumulator.backward_precision(),
-        )
+        self.vocabulary_head_pullback_as(seed, self.readout_accumulator.backward_precision())
     }
     pub(super) fn first_geometry_site(&self) -> CausalLmResult<(usize, String)> {
         let runtime = self

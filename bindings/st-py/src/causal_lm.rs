@@ -7,8 +7,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyBytesMethods};
 use st_nn::causal_lm::{
-    CausalLmLimits, CausalLmObjective, CausalLmReadoutAccumulator, NativeCausalLm,
-    NativeCausalLmGradients, NativeCausalLmLoraGradients, TargetClassScore,
+    CausalLmForwardStorage, CausalLmLimits, CausalLmObjective, CausalLmReadoutAccumulator,
+    NativeCausalLm, NativeCausalLmGradients, NativeCausalLmLoraGradients, TargetClassScore,
 };
 use std::collections::BTreeMap;
 
@@ -1274,6 +1274,19 @@ impl PyNativeCausalLm {
             .map_err(error)?;
         Ok(Self {
             inner: self.inner.with_readout_accumulator(accumulator),
+        })
+    }
+
+    #[getter]
+    fn forward_readout_storage(&self) -> &'static str {
+        self.inner.forward_readout_storage().as_str()
+    }
+
+    fn with_forward_readout_storage(&self, storage: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: self.inner.with_forward_readout_storage(
+                storage.parse::<CausalLmForwardStorage>().map_err(error)?,
+            ),
         })
     }
 

@@ -122,6 +122,26 @@ class NativeCausalLmTests(unittest.TestCase):
         self.config, self.weights = fixture()
         self.model = st.NativeCausalLm.from_gpt2(self.config, self.weights)
 
+    def test_forward_storage_hint_is_local_and_checkpoint_neutral(self):
+        base = self.model.with_readout_accumulator("f32_wide_backward")
+        model = base.with_lora(1, 2, 4.)
+        docs = [[1, 3, 2, 6], [2, 5, 3, 1]]
+        self.assertEqual(model.forward_readout_storage, "auto")
+        with self.assertRaisesRegex(ValueError, "forward readout storage"):
+            model.with_forward_readout_storage("force_repack")
+        checkpoints = []
+        for hint in ("original_packed", "prefer_cached_transpose"):
+            session = st.NativeCausalLmTrainingSession(model.with_forward_readout_storage(hint),
+                docs, 4, learning_rate=.025, mode="lora", epochs=1)
+            session.step()
+            checkpoints.append(session.checkpoint_with_id())
+            restored = st.NativeCausalLmTrainingSession.from_json(base, docs, *checkpoints[-1])
+            self.assertEqual(session.model.forward_readout_storage, hint)
+            self.assertEqual(restored.model.forward_readout_storage, "auto")
+            self.assertEqual(session.step().to_json(), restored.step().to_json())
+            self.assertEqual(session.checkpoint_with_id(), restored.checkpoint_with_id())
+        self.assertEqual(checkpoints[0], checkpoints[1])
+
     def test_rank_one_indexed_updates_match_and_serve_the_trained_snapshot(self):
         axis = struct.pack("<4d", 0., .6, -.8, 0.)
         spec = dict(site="output", layer=1, left_f64le=axis)
