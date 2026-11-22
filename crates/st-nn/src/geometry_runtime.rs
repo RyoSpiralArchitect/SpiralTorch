@@ -21,7 +21,9 @@ use std::collections::BTreeMap;
 mod elliptic;
 mod fractional;
 mod wave_factorial;
-pub use wave_factorial::{WaveFactorConfig, WaveFactorEnergies, WaveFactorObservation};
+pub use wave_factorial::{
+    ChannelParameterVjp, WaveFactorConfig, WaveFactorEnergies, WaveFactorObservation,
+};
 mod optimizer;
 pub use optimizer::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW};
 
@@ -566,6 +568,9 @@ impl NativeGeometryBatch {
     }
     pub fn source_artifact_id(&self) -> &str {
         &self.source_id
+    }
+    pub(crate) fn residual_strength(&self) -> f32 {
+        self.strength
     }
     pub fn sequence_shape(&self) -> Option<[usize; 3]> {
         self.sequence_shape

@@ -42,6 +42,7 @@ mod scalar_output;
 mod session;
 mod sum;
 mod training;
+mod wave_margin;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
@@ -137,6 +138,7 @@ pub use training::{
     CausalLmObservedCheckpointFiles, CausalLmTrainingConfig, CausalLmTrainingResume,
     CausalLmTrainingStep, NativeCausalLmTrainer,
 };
+pub use wave_margin::CausalLmWaveMarginPullbacks;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 

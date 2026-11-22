@@ -762,6 +762,32 @@ impl PyNativeCausalLm {
         mixture_probe::to_python(py, report)
     }
 
+    /// Last-token unit logit-margin VJP: four local gate/bias maps, one factual decoder.
+    #[pyo3(signature=(prompt_ids, target_id, rival_id, config))]
+    fn last_attention_wave_margin_pullbacks(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        target_id: &Bound<'_, PyAny>,
+        rival_id: &Bound<'_, PyAny>,
+        config: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let target = dimension(target_id)?;
+        let rival = dimension(rival_id)?;
+        let config = mixture_probe::wave_config(config)?;
+        let count = self
+            .inner
+            .wave_margin_input_count(prompt_ids.len()?, target, rival, config)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, count)?;
+        py.detach(|| {
+            self.inner
+                .last_attention_wave_margin_pullbacks(&ids, target, rival, config)
+        })
+        .map_err(error)
+        .and_then(|p| mixture_probe::wave_margin(py, p))
+    }
+
     /// Four local channel maps on a single factual decoder forward and CE pullback.
     #[pyo3(signature=(windows, shape, config, *, labels=None))]
     fn wave_factorial_observation_json(
@@ -772,14 +798,7 @@ impl PyNativeCausalLm {
         config: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<String> {
-        let config = serde_json::from_value(crate::json::py_to_json_bounded(
-            config,
-            2048,
-            16,
-            3,
-            "wave factorial",
-        )?)
-        .map_err(error)?;
+        let config = mixture_probe::wave_config(config)?;
         self.inner.admit_wave_factorial(config).map_err(error)?;
         let shape = self::shape(shape)?;
         let count = self
