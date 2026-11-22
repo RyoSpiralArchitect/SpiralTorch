@@ -1,11 +1,11 @@
 //! Bounded host-memory access to the st-nn decoder. JS never proposes or selects weights.
 use crate::geometry_artifact::GeometryAdapterArtifact;
-use crate::utils::{bounded_json_string_from_js, js_error};
-use js_sys::{JsString, Uint8Array};
+use crate::utils::{bounded_json_string_from_js, js_error, js_u32};
+use js_sys::{JsString, Uint32Array, Uint8Array};
 use serde::Deserialize;
 use st_nn::causal_lm::{
     CausalLmDeclaredSetStep, CausalLmLimits, DeclaredRivalRow, NativeCausalLm as Decoder,
-    MAX_DECLARED_RIVAL_IDS,
+    NativeCausalLmContext as CoreContext, MAX_DECLARED_RIVAL_IDS,
 };
 use st_nn::weights::{SafeTensorArchive, WeightLoadLimits};
 use wasm_bindgen::prelude::*;
@@ -13,13 +13,14 @@ use wasm_bindgen::prelude::*;
 const FILE_BYTES: usize = 64 << 20;
 const PARAMETERS: usize = 8 << 20;
 const WINDOW_IDS: usize = 65_536;
+const CACHE_VALUES: usize = 1 << 20;
 
 #[wasm_bindgen(inline_js = r#"
 const proto = Object.getPrototypeOf(Uint8Array.prototype);
 const getter = (p, k) => Function.prototype.call.bind(Object.getOwnPropertyDescriptor(p, k).get);
 const brand = getter(proto, Symbol.toStringTag), length = getter(proto, 'length');
 const buffer = getter(proto, 'buffer'), ordinary = getter(ArrayBuffer.prototype, 'byteLength');
-const Bytes = Uint8Array, copy = Function.prototype.call.bind(Bytes.prototype.set);
+const Bytes = Uint8Array, Words = Uint32Array, copy = Function.prototype.call.bind(Bytes.prototype.set);
 export function causalLmArchiveSnapshot(value, maximum) {
     if (brand(value) !== 'Uint8Array') throw new TypeError('weights must be a Uint8Array');
     ordinary(buffer(value)); // A concurrently writable SharedArrayBuffer is not a snapshot.
@@ -29,10 +30,35 @@ export function causalLmArchiveSnapshot(value, maximum) {
     copy(result, value);
     return result;
 }
+export function causalLmIdCount(value, maximum) {
+    if (brand(value) !== 'Uint32Array') throw new TypeError('token IDs must be a Uint32Array');
+    ordinary(buffer(value));
+    const n = length(value);
+    if (n === 0 || n > maximum) throw new RangeError('invalid cached token count');
+    return n;
+}
+export function causalLmIdSnapshot(value, admitted) {
+    if (length(value) !== admitted) throw new RangeError('token count changed after admission');
+    const result = new Words(admitted);
+    copy(result, value);
+    return result;
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(catch, js_name = causalLmArchiveSnapshot)]
     fn archive_snapshot(value: &JsValue, maximum: usize) -> Result<Uint8Array, JsValue>;
+    #[wasm_bindgen(catch, js_name = causalLmIdCount)]
+    fn id_count(value: &Uint32Array, maximum: usize) -> Result<usize, JsValue>;
+    #[wasm_bindgen(catch, js_name = causalLmIdSnapshot)]
+    fn id_snapshot(value: &Uint32Array, admitted: usize) -> Result<Uint32Array, JsValue>;
+}
+
+fn admitted_ids(ids: &Uint32Array, admitted: usize) -> Result<Vec<usize>, JsValue> {
+    Ok(id_snapshot(ids, admitted)?
+        .to_vec()
+        .into_iter()
+        .map(|id| id as usize)
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -161,6 +187,25 @@ impl NativeCausalLm {
             .map_err(js_error)
     }
 
+    /// Own the model snapshot and its native K/V state, including causal geometry history.
+    pub fn prefill(
+        &self,
+        prompt: &Uint32Array,
+        max_cache_values: &JsValue,
+    ) -> Result<NativeCausalLmContext, JsValue> {
+        let budget = js_u32(max_cache_values, "cache value limit")? as usize;
+        if !(1..=CACHE_VALUES).contains(&budget) {
+            return Err(js_error("invalid WASM cache value limit"));
+        }
+        let count = self
+            .model
+            .context_prefill_count(id_count(prompt, WINDOW_IDS)?, budget)
+            .map_err(js_error)?;
+        CoreContext::new(self.model.clone(), admitted_ids(prompt, count)?, budget)
+            .map(|inner| NativeCausalLmContext { inner })
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = declaredSetNllJson)]
     pub fn declared_set_nll_json(&self, b: &CausalLmDeclaredBatch) -> Result<String, JsValue> {
         let scores = self
@@ -190,6 +235,47 @@ impl NativeCausalLm {
             )
             .map_err(js_error)?;
         Ok(CausalLmDeclaredStep { model, report })
+    }
+}
+
+#[wasm_bindgen]
+pub struct NativeCausalLmContext {
+    inner: CoreContext,
+}
+
+#[wasm_bindgen]
+impl NativeCausalLmContext {
+    /// Fork the prefix. No JS KV, hidden re-prefill or intermediate vocabulary readouts.
+    #[wasm_bindgen(js_name = withSuffix)]
+    pub fn with_suffix(&self, suffix: &Uint32Array) -> Result<Self, JsValue> {
+        let count = self
+            .inner
+            .suffix_input_count(id_count(suffix, WINDOW_IDS)?)
+            .map_err(js_error)?;
+        self.inner
+            .with_suffix(&admitted_ids(suffix, count)?)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = nextLogits)]
+    pub fn next_logits(&self) -> Vec<f32> {
+        self.inner.logit_values().to_vec()
+    }
+
+    #[wasm_bindgen(getter, js_name = cacheValues)]
+    pub fn cache_values(&self) -> usize {
+        self.inner.cache_values()
+    }
+
+    #[wasm_bindgen(getter, js_name = tokenCount)]
+    pub fn token_count(&self) -> usize {
+        self.inner.token_ids().len()
+    }
+
+    #[wasm_bindgen(getter, js_name = geometryArtifactId)]
+    pub fn geometry_artifact_id(&self) -> Option<String> {
+        self.inner.geometry_artifact_id().map(str::to_owned)
     }
 }
 

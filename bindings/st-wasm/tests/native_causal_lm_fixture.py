@@ -42,6 +42,50 @@ def build():
     return {"schema": "spiraltorch.wasm.artificial_declared_step.v1", "cases": cases}
 
 
+def build_cache_reference():
+    """The oracle only uses full-prefix and the original one-token API, never with_suffix."""
+    directory = Path(__file__).resolve().parents[2] / "st-py/tests"
+    helpers = runpy.run_path(str(directory / "test_native_causal_lm.py"))
+    recipes = runpy.run_path(str(directory / "test_native_geometry_runtime.py"))
+    st = helpers["st"]
+    config, raw = helpers["fixture"](width=3, heads=3, raw_weights=True)
+    weights = st.SafeTensorArchive.from_bytes(raw)
+    prompt, chunk, tails = [1, 2], [3, 4, 5], [[6, 7], [2, 8]]
+    cases = []
+    for lag in (False, True):
+        cfg = json.loads(config)
+        if lag:
+            cfg.update(model_type="spiraltorch_gpt2_key_lag_v1", spiraltorch_key_lag={"layer": 1, "lag": 2})
+        cfg = json.dumps(cfg)
+        base = st.NativeCausalLm.from_gpt2(cfg, weights)
+        for kind in ("plain", "wave", "history_gain"):
+            m = base
+            if kind != "plain":
+                state = json.loads(recipes["artifact"](kind).state_json())
+                state["base_model_identity"] = base.base_model_identity
+                state["placements"][0]["path"] = "transformer.h.0.attn"
+                m = base.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+                grad = m.geometry_loss_gradients([2, 1, 3, 4], [1, 4])
+                learned = m.step_geometry_sgd(grad, .125)
+                if learned.geometry_artifact_id == m.geometry_artifact_id:
+                    raise ValueError("artificial geometry did not move")
+                m = learned
+            refs = []
+            for suffix in ([], chunk, *[chunk + tail for tail in tails]):
+                ids = prompt + suffix
+                full = m.forward(ids, [1, len(ids)], last_only=True).values()
+                ctx = st.NativeCausalLmContext(m, prompt, max_cache_values=1024)
+                for t in suffix:
+                    ctx.append(t)
+                if not all(abs(a-b) <= 3e-6 for a, b in zip(ctx.logits().values(), full)):
+                    raise ValueError("legacy scalar cache differs from full prefix")
+                refs.append(full)
+            art = m.geometry_artifact()
+            cases.append(dict(name=("lag/" if lag else "ordinary/") + kind, config=cfg, base_id=m.base_model_identity,
+                              geometry=art.to_json() if art else None, geometry_id=m.geometry_artifact_id, refs=refs))
+    return dict(weights=base64.b64encode(raw).decode("ascii"), prompt=prompt, chunk=chunk, tails=tails, cases=cases)
+
+
 def verify_wasm(fixture_file, selected_file):
     import spiraltorch as st
     fixture = json.loads(Path(fixture_file).read_bytes())
@@ -77,10 +121,11 @@ if __name__ == "__main__":
     sys.addaudithook(native_only)
     if len(sys.argv) == 4 and sys.argv[1] == "--verify-wasm":
         verify_wasm(sys.argv[2], sys.argv[3])
-    elif len(sys.argv) == 2:
-        payload = (json.dumps(build(), allow_nan=False, indent=2) + "\n").encode()
-        with Path(sys.argv[1]).open("xb") as output:
+    elif len(sys.argv) == 2 or (len(sys.argv) == 3 and sys.argv[1] == "--cache"):
+        data = build() if len(sys.argv) == 2 else build_cache_reference()
+        payload = (json.dumps(data, allow_nan=False, indent=2) + "\n").encode()
+        with Path(sys.argv[-1]).open("xb") as output:
             output.write(payload)
         print(hashlib.sha256(payload).hexdigest())
     else:
-        sys.exit("usage: OUTPUT | --verify-wasm FIXTURE_JSON SELECTED_JSON")
+        sys.exit("usage: [--cache] OUTPUT | --verify-wasm FIXTURE_JSON SELECTED_JSON")

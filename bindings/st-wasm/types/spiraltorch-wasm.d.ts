@@ -27,8 +27,19 @@ declare module "spiraltorch-wasm" {
         withGeometry(artifact: GeometryAdapterArtifact): NativeCausalLm;
         geometryArtifact(): GeometryAdapterArtifact | undefined;
         nextLogits(promptJson: string): Float32Array;
+        prefill(promptIds: Uint32Array, maxCacheValues: number): NativeCausalLmContext;
         declaredSetNllJson(batch: CausalLmDeclaredBatch): string;
         stepDeclaredSetGeometryAtDistance(batch: CausalLmDeclaredBatch, distance: number): CausalLmDeclaredStep;
+        free(): void;
+    }
+    /** Immutable single-sequence Rust KV cache; fork with already known continuation IDs. */
+    export class NativeCausalLmContext {
+        private constructor();
+        readonly cacheValues: number;
+        readonly tokenCount: number;
+        readonly geometryArtifactId: string | undefined;
+        nextLogits(): Float32Array;
+        withSuffix(suffixIds: Uint32Array): NativeCausalLmContext;
         free(): void;
     }
     export class GeometryAdapterArtifact {

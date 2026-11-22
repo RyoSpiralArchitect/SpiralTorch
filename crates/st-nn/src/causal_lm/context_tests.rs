@@ -91,6 +91,92 @@ fn cached_work_uses_one_query_budget_not_a_hidden_full_prefix_fallback() {
 }
 
 #[test]
+fn cached_suffix_matches_all_splits_and_preserves_forks_and_final_only_readout() {
+    let ids = [2, 4, 1, 8, 1, 5, 3];
+    let base = load();
+    for m in [
+        base.clone(),
+        base.with_key_lag(CausalLmKeyLag { layer: 1, lag: 2 })
+            .unwrap(),
+    ] {
+        let m = m
+            .with_geometry(artifact(&m, "transformer.h.0.attn", 0.3))
+            .unwrap();
+        for split in 1..ids.len() {
+            let root = NativeCausalLmContext::new(m.clone(), ids[..split].to_vec(), 1024).unwrap();
+            let start = root.logit_values().to_vec();
+            decoder::work_counts::take();
+            let child = root.with_suffix(&ids[split..]).unwrap();
+            assert_eq!(decoder::work_counts::take(), [0, 0, 1]);
+            let mut serial = root.clone();
+            for &id in &ids[split..] {
+                serial.append(id).unwrap();
+            }
+            assert_eq!(decoder::work_counts::take(), [0, 0, ids.len() - split]);
+            close(child.logit_values(), serial.logit_values());
+            close(
+                child.logit_values(),
+                m.next_token_logits(&ids).unwrap().data(),
+            );
+            assert_eq!(child.token_ids(), &ids);
+            assert_eq!(child.cache_values(), serial.cache_values());
+            assert_eq!(child.geometry_artifact_id(), root.geometry_artifact_id());
+            for layer in 0..m.config.layers {
+                for pos in 0..ids.len() {
+                    let key = child.key_row(layer, pos).unwrap();
+                    close(&key, &serial.key_row(layer, pos).unwrap());
+                    if pos < split {
+                        assert_eq!(key, root.key_row(layer, pos).unwrap());
+                    }
+                }
+            }
+            for t in [0, 6] {
+                let branch = child.with_suffix(&[t]).unwrap();
+                let mut prompt = ids.to_vec();
+                prompt.push(t);
+                close(
+                    branch.logit_values(),
+                    m.next_token_logits(&prompt).unwrap().data(),
+                );
+            }
+            assert_eq!(root.token_ids(), &ids[..split]);
+            assert_eq!(root.logit_values(), start);
+        }
+    }
+}
+
+#[test]
+fn cached_suffix_admits_rectangular_work_and_refuses_before_a_head_or_partial_commit() {
+    let m = NativeCausalLm::from_gpt2_json(
+        &serde_json::to_vec(&config()).unwrap(),
+        &archive(&parameters()),
+        CausalLmLimits {
+            max_attention_pairs: 40,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let root = NativeCausalLmContext::new(m.clone(), vec![1, 2, 3], 1024).unwrap();
+    let ok = root.with_suffix(&[4, 5]).unwrap(); // 2 layers * 2 heads * 2 new queries * 5 keys
+    assert!(m.next_token_logits(&[1, 2, 3, 4, 5]).is_err());
+    close(
+        ok.logit_values(),
+        load().next_token_logits(&[1, 2, 3, 4, 5]).unwrap().data(),
+    );
+    decoder::work_counts::take();
+    for bad in [&[][..], &[4, 5, 6], &[4, 11]] {
+        assert!(root.with_suffix(bad).is_err());
+    }
+    assert!(root.suffix_input_count(usize::MAX).is_err());
+    assert_eq!(decoder::work_counts::take(), [0; 3]);
+    assert_eq!(root.token_ids(), &[1, 2, 3]);
+    assert_eq!(
+        root.with_suffix(&[4, 5]).unwrap().logit_values(),
+        ok.logit_values()
+    );
+}
+
+#[test]
 fn numerical_failure_after_cached_appends_preserves_continuation() {
     let mut cfg = config();
     cfg["tie_word_embeddings"] = json!(false);
@@ -109,6 +195,9 @@ fn numerical_failure_after_cached_appends_preserves_continuation() {
     context.append(3).unwrap();
     context.append(4).unwrap();
     let mut unchanged = context.clone();
+    assert!(context.with_suffix(&[10, 5]).is_err());
+    assert_eq!(context.token_ids(), unchanged.token_ids());
+    assert_eq!(context.logit_values(), unchanged.logit_values());
     for _ in 0..2 {
         assert!(context.append(10).is_err());
         assert_eq!(context.token_ids(), unchanged.token_ids());

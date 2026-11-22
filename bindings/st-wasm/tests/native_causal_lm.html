@@ -2,16 +2,19 @@
 <meta charset="utf-8">
 <title>Native causal LM: finite-checked geometry learning</title>
 <h1>Native causal LM: finite-checked geometry learning</h1>
-<p>Four synthetic controls, using the Rust decoder in WASM host memory. No pretrained model or GPU.</p>
+<p>Four learning controls and six cached-continuation models, using the Rust decoder in WASM host memory. No pretrained model or GPU.</p>
 <pre id="result" data-status="running">Running...</pre>
 <script type="module">
 import {checkNativeCausalLm} from './native_causal_lm.mjs';
+import {checkCachedSuffix} from './native_causal_lm_cache.mjs';
 const result = document.getElementById('result');
 try {
   const M = await import('../pkg/spiraltorch_wasm.js');
   await M.default();
   const fixture = await (await fetch('./native_causal_lm_fixture.json')).json();
-  result.textContent = JSON.stringify(checkNativeCausalLm(M, fixture), null, 2);
+  const report = checkNativeCausalLm(M, fixture);
+  report.cached = checkCachedSuffix(M, await (await fetch('./native_causal_lm_cache_fixture.json')).json());
+  result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = 'passed';
 } catch (e) {
   result.textContent = String(e?.stack || e);

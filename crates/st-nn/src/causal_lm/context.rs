@@ -43,25 +43,27 @@ impl NativeCausalLm {
     fn incremental_geometry(
         &self,
         path: &str,
-        row: Tensor,
+        rows: Tensor,
         previous: Option<&Tensor>,
         steps: usize,
     ) -> CausalLmResult<(Tensor, Option<Tensor>)> {
+        let added = rows.shape().0;
         if !self.geometry_needs_history(path)? {
             return Ok((
-                self.geometry_output(path, row, [1, 1], &mut decoder::BlockPass::Forward)?
+                self.geometry_output(path, rows, [1, added], &mut decoder::BlockPass::Forward)?
                     .0,
                 None,
             ));
         }
         let previous = previous.ok_or("missing causal geometry history")?;
-        if previous.shape() != (steps - 1, self.config.width) {
+        let start = steps - added;
+        if previous.shape() != (start, self.config.width) {
             return Err("invalid causal geometry history shape".into());
         }
         let mut values = Vec::new();
         values.try_reserve_exact(steps * self.config.width)?;
         values.extend_from_slice(previous.data());
-        values.extend_from_slice(row.data());
+        values.extend_from_slice(rows.data());
         let input = Tensor::from_vec(steps, self.config.width, values)?;
         let output = self
             .geometry_output(
@@ -71,7 +73,10 @@ impl NativeCausalLm {
                 &mut decoder::BlockPass::Forward,
             )?
             .0;
-        Ok((output.gather_rows(&[steps - 1])?, Some(input)))
+        Ok((
+            output.gather_rows(&(start..steps).collect::<Vec<_>>())?,
+            Some(input),
+        ))
     }
 
     /// Persistent f32 K/V and geometry input history, excluding frozen weights,
@@ -120,10 +125,19 @@ impl NativeCausalLm {
         steps: usize,
         max_cache_values: usize,
     ) -> CausalLmResult<usize> {
+        self.cached_query_count(steps, 1, max_cache_values)
+    }
+
+    fn cached_query_count(
+        &self,
+        steps: usize,
+        added: usize,
+        max_cache_values: usize,
+    ) -> CausalLmResult<usize> {
         self.context_cache_values(steps, max_cache_values)?;
-        self.input_count([1, 1], true)?;
+        self.input_count([1, added], true)?;
         product(
-            &[self.config.layers, self.config.heads, steps],
+            &[self.config.layers, self.config.heads, added, steps],
             self.limits.max_attention_pairs,
             "cached attention pairs",
         )?;
@@ -158,14 +172,14 @@ impl NativeCausalLm {
     }
 }
 
-fn append_head_rows(previous: &[f32], row: &[f32], heads: usize) -> CausalLmResult<Vec<f32>> {
+fn extend_head_rows(previous: &[f32], suffix: &[f32], heads: usize) -> CausalLmResult<Vec<f32>> {
     let mut values = Vec::new();
-    values.try_reserve_exact(previous.len() + row.len())?;
+    values.try_reserve_exact(previous.len() + suffix.len())?;
     let old_stride = previous.len() / heads;
-    let width = row.len() / heads;
+    let added_stride = suffix.len() / heads;
     for h in 0..heads {
         values.extend_from_slice(&previous[h * old_stride..(h + 1) * old_stride]);
-        values.extend_from_slice(&row[h * width..(h + 1) * width]);
+        values.extend_from_slice(&suffix[h * added_stride..(h + 1) * added_stride]);
     }
     Ok(values)
 }
@@ -280,6 +294,30 @@ impl NativeCausalLmContext {
         &self.logits
     }
 
+    /// The already computed host row; borrowing it does not run the decoder or read a device.
+    pub fn logit_values(&self) -> &[f32] {
+        self.logits.data()
+    }
+
+    /// Admit suffix work before a client extracts IDs. This is rectangular cached attention,
+    /// not full-prefix admission and not a promise that many one-token calls fit as one chunk.
+    pub fn suffix_input_count(&self, added: usize) -> CausalLmResult<usize> {
+        let steps = self
+            .tokens
+            .len()
+            .checked_add(added)
+            .ok_or("context length overflow")?;
+        self.model
+            .cached_query_count(steps, added, self.max_cache_values)?;
+        Ok(added)
+    }
+
+    /// Fork with a known, nonempty suffix. Only its last position is projected into vocabulary
+    /// space. Neither success nor failure changes the source cache or learned parameters.
+    pub fn with_suffix(&self, ids: &[usize]) -> CausalLmResult<Self> {
+        self.preview_suffix_with_edit(ids, None)
+    }
+
     /// Appending a token does not sample. Failed admission/execution leaves this context untouched.
     pub fn append(&mut self, token: usize) -> CausalLmResult<NdTensor> {
         let next = self.preview(token)?;
@@ -349,27 +387,27 @@ impl NativeCausalLmContext {
         token: usize,
         edit: Option<(usize, usize, &[f32])>,
     ) -> CausalLmResult<Self> {
+        self.preview_suffix_with_edit(&[token], edit)
+    }
+
+    fn preview_suffix_with_edit(
+        &self,
+        suffix: &[usize],
+        edit: Option<(usize, usize, &[f32])>,
+    ) -> CausalLmResult<Self> {
         let model = &self.model;
         let c = &model.config;
-        let steps = self
-            .tokens
-            .len()
-            .checked_add(1)
-            .ok_or("context length overflow")?;
-        model.cached_input_count(steps, self.max_cache_values)?;
-        if token >= c.vocabulary {
-            return Err("cached token is outside vocabulary".into());
-        }
-        let mut hidden = model.token.gather_rows(&[token])?.add_with_backend(
-            &model.position.gather_rows(&[steps - 1])?,
-            TensorUtilBackend::Cpu,
-        )?;
+        let added = self.suffix_input_count(suffix.len())?;
+        let start = self.tokens.len();
+        let steps = start + added;
+        let shape = [1, added];
+        let mut hidden = model.embed_at(suffix, shape, start)?;
         let mut blocks = Vec::with_capacity(c.layers);
         for (index, previous) in self.blocks.iter().enumerate() {
             let block = &model.blocks[index];
             let norm = block.first_norm.forward(&hidden, c.norm_epsilon)?;
-            let qkv = model.split_heads::<3>(&block.qkv.forward(&norm)?, [1, 1])?;
-            let mut key = append_head_rows(&previous.key, &qkv[1], c.heads)?;
+            let qkv = model.split_heads::<3>(&block.qkv.forward(&norm)?, shape)?;
+            let mut key = extend_head_rows(&previous.key, &qkv[1], c.heads)?;
             if let Some((_, pos, row)) = edit.filter(|(layer, _, _)| *layer == index) {
                 let dim = c.width / c.heads;
                 for (head, replacement) in
@@ -378,16 +416,16 @@ impl NativeCausalLmContext {
                     head[pos * dim..(pos + 1) * dim].copy_from_slice(replacement);
                 }
             }
-            let value = append_head_rows(&previous.value, &qkv[2], c.heads)?;
-            let qshape = [1, c.heads, 1, c.width / c.heads];
+            let value = extend_head_rows(&previous.value, &qkv[2], c.heads)?;
+            let qshape = [1, c.heads, added, c.width / c.heads];
             let kshape = [1, c.heads, steps, c.width / c.heads];
             let spec = AttentionSpec::new(
                 &qshape,
                 &kshape,
                 &kshape,
-                model.attention_spec(index, [1, 1])?.scale(),
+                model.attention_spec(index, shape)?.scale(),
                 AttentionMask::Causal {
-                    query_offset: steps - 1,
+                    query_offset: start,
                 },
             )?;
             let attended = attention_key_lag_reference(
@@ -401,7 +439,7 @@ impl NativeCausalLmContext {
             )?;
             let attention = model.project_attention_output(
                 index,
-                &model.merge_heads([attended.as_slice()], [1, 1])?,
+                &model.merge_heads([attended.as_slice()], shape)?,
             )?;
             let path = format!("transformer.h.{index}");
             let (attention, attention_history) = model.incremental_geometry(
@@ -433,10 +471,16 @@ impl NativeCausalLmContext {
                 history: [attention_history, mlp_history, block_history],
             }));
         }
-        let logits = model.context_readout(&hidden)?;
-        let mut tokens = self.tokens.clone();
-        tokens.try_reserve(1)?;
-        tokens.push(token);
+        let last = if added == 1 {
+            hidden
+        } else {
+            hidden.gather_rows(&[added - 1])?
+        };
+        let logits = model.context_readout(&last)?;
+        let mut tokens = Vec::new();
+        tokens.try_reserve_exact(steps)?;
+        tokens.extend_from_slice(&self.tokens);
+        tokens.extend_from_slice(suffix);
         Ok(Self {
             model: model.clone(),
             max_cache_values: self.max_cache_values,

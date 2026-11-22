@@ -1,0 +1,390 @@
+{
+  "weights": "DAkAAAAAAAB7Ind0ZS53ZWlnaHQiOiB7ImR0eXBlIjogIkYzMiIsICJzaGFwZSI6IFsxMSwgM10sICJkYXRhX29mZnNldHMiOiBbMCwgMTMyXX0sICJ3cGUud2VpZ2h0IjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbOCwgM10sICJkYXRhX29mZnNldHMiOiBbMTMyLCAyMjhdfSwgImguMC5sbl8xLndlaWdodCI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzNdLCAiZGF0YV9vZmZzZXRzIjogWzIyOCwgMjQwXX0sICJoLjAubG5fMS5iaWFzIjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbM10sICJkYXRhX29mZnNldHMiOiBbMjQwLCAyNTJdfSwgImguMC5sbl8yLndlaWdodCI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzNdLCAiZGF0YV9vZmZzZXRzIjogWzI1MiwgMjY0XX0sICJoLjAubG5fMi5iaWFzIjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbM10sICJkYXRhX29mZnNldHMiOiBbMjY0LCAyNzZdfSwgImguMC5hdHRuLmNfYXR0bi53ZWlnaHQiOiB7ImR0eXBlIjogIkYzMiIsICJzaGFwZSI6IFszLCA5XSwgImRhdGFfb2Zmc2V0cyI6IFsyNzYsIDM4NF19LCAiaC4wLmF0dG4uY19hdHRuLmJpYXMiOiB7ImR0eXBlIjogIkYzMiIsICJzaGFwZSI6IFs5XSwgImRhdGFfb2Zmc2V0cyI6IFszODQsIDQyMF19LCAiaC4wLmF0dG4uY19wcm9qLndlaWdodCI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzMsIDNdLCAiZGF0YV9vZmZzZXRzIjogWzQyMCwgNDU2XX0sICJoLjAuYXR0bi5jX3Byb2ouYmlhcyI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzNdLCAiZGF0YV9vZmZzZXRzIjogWzQ1NiwgNDY4XX0sICJoLjAubWxwLmNfZmMud2VpZ2h0IjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbMywgMTJdLCAiZGF0YV9vZmZzZXRzIjogWzQ2OCwgNjEyXX0sICJoLjAubWxwLmNfZmMuYmlhcyI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzEyXSwgImRhdGFfb2Zmc2V0cyI6IFs2MTIsIDY2MF19LCAiaC4wLm1scC5jX3Byb2oud2VpZ2h0IjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbMTIsIDNdLCAiZGF0YV9vZmZzZXRzIjogWzY2MCwgODA0XX0sICJoLjAubWxwLmNfcHJvai5iaWFzIjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbM10sICJkYXRhX29mZnNldHMiOiBbODA0LCA4MTZdfSwgImguMS5sbl8xLndlaWdodCI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzNdLCAiZGF0YV9vZmZzZXRzIjogWzgxNiwgODI4XX0sICJoLjEubG5fMS5iaWFzIjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbM10sICJkYXRhX29mZnNldHMiOiBbODI4LCA4NDBdfSwgImguMS5sbl8yLndlaWdodCI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzNdLCAiZGF0YV9vZmZzZXRzIjogWzg0MCwgODUyXX0sICJoLjEubG5fMi5iaWFzIjogeyJkdHlwZSI6ICJGMzIiLCAic2hhcGUiOiBbM10sICJkYXRhX29mZnNldHMiOiBbODUyLCA4NjRdfSwgImguMS5hdHRuLmNfYXR0bi53ZWlnaHQiOiB7ImR0eXBlIjogIkYzMiIsICJzaGFwZSI6IFszLCA5XSwgImRhdGFfb2Zmc2V0cyI6IFs4NjQsIDk3Ml19LCAiaC4xLmF0dG4uY19hdHRuLmJpYXMiOiB7ImR0eXBlIjogIkYzMiIsICJzaGFwZSI6IFs5XSwgImRhdGFfb2Zmc2V0cyI6IFs5NzIsIDEwMDhdfSwgImguMS5hdHRuLmNfcHJvai53ZWlnaHQiOiB7ImR0eXBlIjogIkYzMiIsICJzaGFwZSI6IFszLCAzXSwgImRhdGFfb2Zmc2V0cyI6IFsxMDA4LCAxMDQ0XX0sICJoLjEuYXR0bi5jX3Byb2ouYmlhcyI6IHsiZHR5cGUiOiAiRjMyIiwgInNoYXBlIjogWzNdLCAiZGF0YV9v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",
+  "prompt": [
+    1,
+    2
+  ],
+  "chunk": [
+    3,
+    4,
+    5
+  ],
+  "tails": [
+    [
+      6,
+      7
+    ],
+    [
+      2,
+      8
+    ]
+  ],
+  "cases": [
+    {
+      "name": "ordinary/plain",
+      "config": "{\"model_type\": \"gpt2\", \"vocab_size\": 11, \"n_positions\": 8, \"n_embd\": 3, \"n_head\": 3, \"n_layer\": 2}",
+      "base_id": "sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5",
+      "geometry": null,
+      "geometry_id": null,
+      "refs": [
+        [
+          -0.1248362585902214,
+          0.27614468336105347,
+          0.18964192271232605,
+          -0.23163947463035583,
+          -0.24400310218334198,
+          0.17437678575515747,
+          0.2849258780479431,
+          -0.10751034319400787,
+          -0.3101564347743988,
+          0.03472280502319336,
+          0.31830519437789917
+        ],
+        [
+          0.2417498230934143,
+          0.047560349106788635,
+          -0.23058833181858063,
+          -0.10167485475540161,
+          0.2067272812128067,
+          0.15018966794013977,
+          -0.17148074507713318,
+          -0.19043278694152832,
+          0.12678995728492737,
+          0.22018784284591675,
+          -0.07511623948812485
+        ],
+        [
+          -0.18061980605125427,
+          0.14623335003852844,
+          0.21493785083293915,
+          -0.09579169750213623,
+          -0.2374182641506195,
+          0.040074340999126434,
+          0.24682292342185974,
+          0.01785009354352951,
+          -0.2426338791847229,
+          -0.07479143887758255,
+          0.22508178651332855
+        ],
+        [
+          0.08779095113277435,
+          0.35959285497665405,
+          -0.00340164452791214,
+          -0.36039116978645325,
+          -0.08117499947547913,
+          0.3413410186767578,
+          0.16128095984458923,
+          -0.30349159240722656,
+          -0.23250441253185272,
+          0.24892741441726685,
+          0.29092270135879517
+        ]
+      ]
+    },
+    {
+      "name": "ordinary/wave",
+      "config": "{\"model_type\": \"gpt2\", \"vocab_size\": 11, \"n_positions\": 8, \"n_embd\": 3, \"n_head\": 3, \"n_layer\": 2}",
+      "base_id": "sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5",
+      "geometry": "{\"schema\":\"spiraltorch.geometry_adapter_artifact.v1\",\"base_model_identity\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"policy\":\"full_prefix_f32_no_cache.v1\",\"training\":true,\"placements\":[{\"path\":\"transformer.h.0.attn\",\"recipe\":{\"schema\":\"spiraltorch.wave_gate_adapter.v1\",\"features\":3,\"strength\":0.5,\"kernel\":{\"curvature\":-1.0,\"saturation\":1.0,\"porosity\":0.05,\"max_values\":64}},\"training\":true,\"tensors\":[{\"name\":\"bias\",\"shape\":[3],\"values\":[1.0126338,2.0000093,3.0000143],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"gate\",\"shape\":[3],\"values\":[2.0000021,-0.99999785,0.5000006],\"requires_grad\":true,\"role\":\"parameter\"}]}]}",
+      "geometry_id": "sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31",
+      "refs": [
+        [
+          -0.1255692094564438,
+          0.27502667903900146,
+          0.19011250138282776,
+          -0.23041106760501862,
+          -0.2441854029893875,
+          0.17310559749603271,
+          0.2848098576068878,
+          -0.10626637935638428,
+          -0.30974847078323364,
+          0.03357456251978874,
+          0.31762775778770447
+        ],
+        [
+          0.24125389754772186,
+          0.05747775733470917,
+          -0.22776499390602112,
+          -0.11092966794967651,
+          0.20173200964927673,
+          0.1582721769809723,
+          -0.16458866000175476,
+          -0.19689786434173584,
+          0.11838065832853317,
+          0.22467944025993347,
+          -0.06565284729003906
+        ],
+        [
+          -0.18008354306221008,
+          0.14828301966190338,
+          0.21488261222839355,
+          -0.09785435348749161,
+          -0.23784708976745605,
+          0.04203633964061737,
+          0.24771219491958618,
+          0.01609678566455841,
+          -0.24393460154533386,
+          -0.07334338128566742,
+          0.2267223596572876
+        ],
+        [
+          0.08987404406070709,
+          0.3585389256477356,
+          -0.0057320743799209595,
+          -0.3598841428756714,
+          -0.07872558385133743,
+          0.3414088487625122,
+          0.15884745121002197,
+          -0.304130494594574,
+          -0.23022085428237915,
+          0.2501022219657898,
+          0.28891485929489136
+        ]
+      ]
+    },
+    {
+      "name": "ordinary/history_gain",
+      "config": "{\"model_type\": \"gpt2\", \"vocab_size\": 11, \"n_positions\": 8, \"n_embd\": 3, \"n_head\": 3, \"n_layer\": 2}",
+      "base_id": "sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5",
+      "geometry": "{\"schema\":\"spiraltorch.geometry_adapter_artifact.v1\",\"base_model_identity\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"policy\":\"full_prefix_f32_no_cache.v1\",\"training\":true,\"placements\":[{\"path\":\"transformer.h.0.attn\",\"recipe\":{\"schema\":\"spiraltorch.fractional_gain_history_adapter.v1\",\"features\":3,\"strength\":0.5,\"kernel\":{\"kernel_len\":5,\"step\":0.8,\"max_values\":96,\"max_products\":480},\"lag_window\":[1,4]},\"training\":true,\"tensors\":[{\"name\":\"gate\",\"shape\":[3],\"values\":[2.00014,-0.99823576,0.50064826],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"local_gate\",\"shape\":[3],\"values\":[0.19760978,-0.10360135,0.1489757],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"log_alpha\",\"shape\":[],\"values\":[-0.20020676],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"log_gain\",\"shape\":[],\"values\":[0.099092446],\"requires_grad\":true,\"role\":\"parameter\"}]}]}",
+      "geometry_id": "sha256:22c111d008461af04a9eefb6e2d5a06137493e10603edf579e8ae57b1b2fbec1",
+      "refs": [
+        [
+          -0.0533396452665329,
+          0.3499027490615845,
+          0.13545486330986023,
+          -0.31811416149139404,
+          -0.21010994911193848,
+          0.2688055634498596,
+          0.27319324016571045,
+          -0.2046925127506256,
+          -0.32123053073883057,
+          0.12930607795715332,
+          0.3515760898590088
+        ],
+        [
+          0.2423856407403946,
+          0.010666981339454651,
+          -0.23988230526447296,
+          -0.0669625848531723,
+          0.22416752576828003,
+          0.11957026273012161,
+          -0.19610673189163208,
+          -0.16559261083602905,
+          0.1572454571723938,
+          0.20249499380588531,
+          -0.10972391068935394
+        ],
+        [
+          -0.15638743340969086,
+          0.21704483032226562,
+          0.20732355117797852,
+          -0.16839012503623962,
+          -0.24684135615825653,
+          0.11046135425567627,
+          0.2727644443511963,
+          -0.0464489609003067,
+          -0.28366512060165405,
+          -0.020121611654758453,
+          0.2789429724216461
+        ],
+        [
+          0.19328565895557404,
+          0.24836646020412445,
+          -0.13499897718429565,
+          -0.28004804253578186,
+          0.06927724927663803,
+          0.2963060438632965,
+          0.0002598799765110016,
+          -0.2962450385093689,
+          -0.06978270411491394,
+          0.2798684239387512,
+          0.13546228408813477
+        ]
+      ]
+    },
+    {
+      "name": "lag/plain",
+      "config": "{\"model_type\": \"spiraltorch_gpt2_key_lag_v1\", \"vocab_size\": 11, \"n_positions\": 8, \"n_embd\": 3, \"n_head\": 3, \"n_layer\": 2, \"spiraltorch_key_lag\": {\"layer\": 1, \"lag\": 2}}",
+      "base_id": "sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a",
+      "geometry": null,
+      "geometry_id": null,
+      "refs": [
+        [
+          -0.1259266585111618,
+          0.2744753956794739,
+          0.1903405785560608,
+          -0.22980625927448273,
+          -0.24427154660224915,
+          0.17248056828975677,
+          0.2847493290901184,
+          -0.10565555840730667,
+          -0.3095445930957794,
+          0.033011600375175476,
+          0.3172917366027832
+        ],
+        [
+          0.24113333225250244,
+          0.05935489386320114,
+          -0.22720390558242798,
+          -0.11267513036727905,
+          0.20076130330562592,
+          0.1597898304462433,
+          -0.1632618010044098,
+          -0.1981041133403778,
+          0.11677069962024689,
+          0.225507915019989,
+          -0.06384848058223724
+        ],
+        [
+          -0.18137699365615845,
+          0.1432708501815796,
+          0.21499979496002197,
+          -0.09281467646360397,
+          -0.23678156733512878,
+          0.03724673390388489,
+          0.2455226480960846,
+          0.020372547209262848,
+          -0.24074162542819977,
+          -0.07686981558799744,
+          0.2227017879486084
+        ],
+        [
+          0.08339333534240723,
+          0.36207473278045654,
+          0.0015784092247486115,
+          -0.3617042899131775,
+          -0.08646322786808014,
+          0.34141311049461365,
+          0.16658610105514526,
+          -0.30231866240501404,
+          -0.2375342845916748,
+          0.24657408893108368,
+          0.29540032148361206
+        ]
+      ]
+    },
+    {
+      "name": "lag/wave",
+      "config": "{\"model_type\": \"spiraltorch_gpt2_key_lag_v1\", \"vocab_size\": 11, \"n_positions\": 8, \"n_embd\": 3, \"n_head\": 3, \"n_layer\": 2, \"spiraltorch_key_lag\": {\"layer\": 1, \"lag\": 2}}",
+      "base_id": "sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a",
+      "geometry": "{\"schema\":\"spiraltorch.geometry_adapter_artifact.v1\",\"base_model_identity\":\"sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a\",\"policy\":\"full_prefix_f32_no_cache.v1\",\"training\":true,\"placements\":[{\"path\":\"transformer.h.0.attn\",\"recipe\":{\"schema\":\"spiraltorch.wave_gate_adapter.v1\",\"features\":3,\"strength\":0.5,\"kernel\":{\"curvature\":-1.0,\"saturation\":1.0,\"porosity\":0.05,\"max_values\":64}},\"training\":true,\"tensors\":[{\"name\":\"bias\",\"shape\":[3],\"values\":[1.0129019,2.00001,3.0000143],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"gate\",\"shape\":[3],\"values\":[2.0000021,-0.9999977,0.5000006],\"requires_grad\":true,\"role\":\"parameter\"}]}]}",
+      "geometry_id": "sha256:83919fa79548a9c5b4b28c7d624cfcddfd9a5787455205fc774471dda584765e",
+      "refs": [
+        [
+          -0.1266726404428482,
+          0.27332258224487305,
+          0.1908160001039505,
+          -0.22854182124137878,
+          -0.24445024132728577,
+          0.17117422819137573,
+          0.2846214175224304,
+          -0.10437922179698944,
+          -0.3091171681880951,
+          0.03183556720614433,
+          0.3165883421897888
+        ],
+        [
+          0.24047449231147766,
+          0.06880705803632736,
+          -0.22432681918144226,
+          -0.12145210802555084,
+          0.19582442939281464,
+          0.16740822792053223,
+          -0.15653705596923828,
+          -0.20414432883262634,
+          0.10862843692302704,
+          0.2296372801065445,
+          -0.05473712086677551
+        ],
+        [
+          -0.18086348474025726,
+          0.1452811062335968,
+          0.2149580717086792,
+          -0.09483472257852554,
+          -0.2372138798236847,
+          0.03916533291339874,
+          0.2464051991701126,
+          0.018661081790924072,
+          -0.24202583730220795,
+          -0.07545974105596542,
+          0.22431693971157074
+        ],
+        [
+          0.08520376682281494,
+          0.3612309992313385,
+          -0.0004300251603126526,
+          -0.36133190989494324,
+          -0.08436739444732666,
+          0.34153255820274353,
+          0.1645182967185974,
+          -0.30292338132858276,
+          -0.23560842871665955,
+          0.247630774974823,
+          0.2937224209308624
+        ]
+      ]
+    },
+    {
+      "name": "lag/history_gain",
+      "config": "{\"model_type\": \"spiraltorch_gpt2_key_lag_v1\", \"vocab_size\": 11, \"n_positions\": 8, \"n_embd\": 3, \"n_head\": 3, \"n_layer\": 2, \"spiraltorch_key_lag\": {\"layer\": 1, \"lag\": 2}}",
+      "base_id": "sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a",
+      "geometry": "{\"schema\":\"spiraltorch.geometry_adapter_artifact.v1\",\"base_model_identity\":\"sha256:902379e6912f78836636ec1281020dcd13de77e99e5b7af7d7c56732abb08b1a\",\"policy\":\"full_prefix_f32_no_cache.v1\",\"training\":true,\"placements\":[{\"path\":\"transformer.h.0.attn\",\"recipe\":{\"schema\":\"spiraltorch.fractional_gain_history_adapter.v1\",\"features\":3,\"strength\":0.5,\"kernel\":{\"kernel_len\":5,\"step\":0.8,\"max_values\":96,\"max_products\":480},\"lag_window\":[1,4]},\"training\":true,\"tensors\":[{\"name\":\"gate\",\"shape\":[3],\"values\":[2.000139,-0.99818957,0.5006315],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"local_gate\",\"shape\":[3],\"values\":[0.19762136,-0.10369026,0.14900139],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"log_alpha\",\"shape\":[],\"values\":[-0.2001435],\"requires_grad\":true,\"role\":\"parameter\"},{\"name\":\"log_gain\",\"shape\":[],\"values\":[0.09898552],\"requires_grad\":true,\"role\":\"parameter\"}]}]}",
+      "geometry_id": "sha256:ff7a5994ea66e7fd14465c1aaa6ff8786605bfdf6bad95012d995f62ce780b95",
+      "refs": [
+        [
+          -0.054574549198150635,
+          0.3490945100784302,
+          0.13650009036064148,
+          -0.317060649394989,
+          -0.2109079360961914,
+          0.2675647735595703,
+          0.2737000584602356,
+          -0.2033327966928482,
+          -0.32141822576522827,
+          0.1279023140668869,
+          0.3514343798160553
+        ],
+        [
+          0.24249321222305298,
+          0.020610786974430084,
+          -0.23765625059604645,
+          -0.07638398557901382,
+          0.2197304368019104,
+          0.12795040011405945,
+          -0.1897030472755432,
+          -0.17246991395950317,
+          0.1492277979850769,
+          0.2074907124042511,
+          -0.10053384304046631
+        ],
+        [
+          -0.15715250372886658,
+          0.21525318920612335,
+          0.20766812562942505,
+          -0.16651760041713715,
+          -0.2467464953660965,
+          0.1086110919713974,
+          0.27223536372184753,
+          -0.04472286254167557,
+          -0.28273093700408936,
+          -0.021628476679325104,
+          0.2776551842689514
+        ],
+        [
+          0.19011318683624268,
+          0.25456702709198,
+          -0.1303713619709015,
+          -0.2851625978946686,
+          0.06344937533140182,
+          0.3000529408454895,
+          0.006967082619667053,
+          -0.298417866230011,
+          -0.07699982076883316,
+          0.2803475260734558,
+          0.14279182255268097
+        ]
+      ]
+    }
+  ]
+}

@@ -7,6 +7,43 @@ Serve the resulting `bindings/st-wasm` directory over loopback HTTP and open
 `node bindings/st-wasm/tests/native_causal_lm_node.mjs bindings/st-wasm/pkg/spiraltorch_wasm.js`.
 Both execute the same four artificial controls and compare against native Python results.
 
+## Cached continuation
+
+For a known sequence (for example, a document suffix or one answer candidate),
+reuse a prefix rather than running the full decoder for every token:
+
+```js
+const prefix = model.prefill(Uint32Array.of(1, 2), 1024);
+try {
+  const branch = prefix.withSuffix(Uint32Array.of(3, 4, 5));
+  try { console.log(branch.nextLogits(), branch.tokenCount); } finally { branch.free(); }
+} finally { prefix.free(); }
+```
+
+The same operation is `prefix.with_suffix(&ids)?` in Rust and
+`ctx.with_suffix(ids).logits().values()` in Python. In WASM, pass an ordinary,
+non-shared `Uint32Array`; the explicit cache budget is at most 1,048,576
+persistent f32 values per context, excluding transient storage and other forks.
+The source remains usable after either success or failure. The child owns its
+model and may outlive the JS handles for the source and model.
+
+Only the last suffix position gets vocabulary logits. Rust applies the absolute
+position offset and causal mask to all new queries; existing decoder keys and
+values are copied into the fork, not reprojected. A causal geometry site may
+still replay its retained input history. The attention budget charges the
+rectangular query-by-key shape, including masked slots. A large chunk can
+exceed it even if separate single-token calls fit. This API neither guesses
+future tokens nor scores intermediate ones: extend by one when each next
+token depends on the prediction. A successful chunk does not certify the
+vocabulary logits or loss of any skipped intermediate row.
+
+The browser and Node controls also include six nonconstant models (ordinary
+and key-lag attention; bare, trained WaveGate and trained fractional history).
+Their fixture was generated with the original full-prefix and one-token Python
+interfaces using `native_causal_lm_fixture.py --cache OUTPUT`.
+
+## Finite-checked learning
+
 ```js
 // M is the initialized web package. configJson and weights (Uint8Array)
 // identify a local decoder. Pin the geometry JSON to both its digest and this base.

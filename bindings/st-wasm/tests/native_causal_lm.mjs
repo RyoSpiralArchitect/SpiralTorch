@@ -66,6 +66,10 @@ export function checkNativeCausalLm(M, fixture, onSelected) {
             : report.proposed.within_nll < start.within_nll && report.proposed.coverage_nll > start.coverage_nll,
             'expected finite improvements or coverage regression');
           const saved = keep(result.geometryArtifact());
+          const prefix = keep(result.prefill(Uint32Array.of(2), 128));
+          const cached = keep(prefix.withSuffix(Uint32Array.of(1, 0)));
+          need(cached.geometryArtifactId === saved.artifactId && prefix.tokenCount === 1, 'cache not pinned to selected model');
+          equal([...cached.nextLogits()], [...result.nextLogits('[2,1,0]')], 'post-step cache');
           need(saved.artifactId === report.result_geometry_id && g.pre_geometry_id === f.origin_id &&
             g.post_geometry_id !== f.origin_id &&
             report.result_geometry_id === (accept ? g.post_geometry_id : f.origin_id), 'selected artifact identity');

@@ -57,11 +57,24 @@ pub(super) struct BlockOutput {
 
 impl NativeCausalLm {
     pub(super) fn embed(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {
-        let rows = shape[0] * shape[1];
-        if ids.len() != rows || ids.iter().any(|&id| id >= self.config.vocabulary) {
+        self.embed_at(ids, shape, 0)
+    }
+
+    pub(super) fn embed_at(
+        &self,
+        ids: &[usize],
+        shape: [usize; 2],
+        offset: usize,
+    ) -> CausalLmResult<Tensor> {
+        if shape[0].checked_mul(shape[1]) != Some(ids.len())
+            || offset
+                .checked_add(shape[1])
+                .is_none_or(|end| end > self.config.positions)
+            || ids.iter().any(|&id| id >= self.config.vocabulary)
+        {
             return Err("native causal LM token count or ID is invalid".into());
         }
-        let positions: Vec<_> = (0..rows).map(|row| row % shape[1]).collect();
+        let positions: Vec<_> = (0..ids.len()).map(|row| offset + row % shape[1]).collect();
         Ok(self.token.gather_rows(ids)?.add_with_backend(
             &self.position.gather_rows(&positions)?,
             TensorUtilBackend::Cpu,
@@ -195,7 +208,7 @@ impl NativeCausalLm {
                 fused = d.apply(&norm, &fused, part)?;
             }
         }
-        let qkv = self.split_heads::<3>(&fused, shape)?;
+        let mut qkv = self.split_heads::<3>(&fused, shape)?;
         drop(fused);
         let attended = attention_key_lag_reference(
             self.attention_spec(index, shape)?,
@@ -239,8 +252,8 @@ impl NativeCausalLm {
         }
         let (output, block_geometry) = self.geometry_output(&path, output, shape, &mut pass)?;
         let inference_cache = inference.then(|| InferenceBlockCache {
-            key: qkv[1].clone(),
-            value: qkv[2].clone(),
+            key: std::mem::take(&mut qkv[1]),
+            value: std::mem::take(&mut qkv[2]),
             history,
         });
         let cache = capture.then(|| BlockCache {

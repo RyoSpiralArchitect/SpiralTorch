@@ -43,6 +43,17 @@ impl PyNativeCausalLmContext {
             .map(|inner| PyNdTensor { inner })
             .map_err(error)
     }
+    /// Fork the cache for a known suffix, projecting only its final position.
+    fn with_suffix(&self, py: Python<'_>, suffix_ids: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let count = self
+            .inner
+            .suffix_input_count(suffix_ids.len()?)
+            .map_err(error)?;
+        let ids = tokens(suffix_ids, count)?;
+        py.detach(|| self.inner.with_suffix(&ids))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
     fn logits(&self, py: Python<'_>) -> PyResult<PyNdTensor> {
         py.detach(|| self.inner.logits())
             .map(|inner| PyNdTensor { inner })

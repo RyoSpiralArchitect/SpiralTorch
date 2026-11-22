@@ -50,10 +50,19 @@ class NativeCausalLmContextTests(unittest.TestCase):
                     context = st.NativeCausalLmContext(model, [1, 2], max_cache_values=1024)
                     self.assertEqual(context.geometry_artifact_id, model.geometry_artifact_id)
                     self.assertEqual(context.base_model_identity, model.base_model_identity)
+                    fork = context.with_suffix([3, 4, 5])
+                    tail = fork.with_suffix([6, 7])
+                    self.assertEqual(context.token_ids, [1, 2])
+                    self.assertEqual(fork.token_ids, [1, 2, 3, 4, 5])
+                    self.assertEqual(tail.geometry_artifact_id, context.geometry_artifact_id)
                     for token in (3, 4, 5, 6, 7):
                         ids = context.token_ids
                         self.close(context.logits().values(), model.forward(ids, [1, len(ids)], last_only=True).values())
                         result = context.append(token)
+                        if token in (5, 7):
+                            child = fork if token == 5 else tail
+                            self.assertEqual(child.cache_values, context.cache_values)
+                            self.close(result.values(), child.logits().values())
                         self.assertEqual(result.values(), context.logits().values())
                         history = 1 if kind in ("causal", "gated", *geometry["FRACTIONAL_KINDS"]) else 0
                         self.assertEqual(context.cache_values, (4 + history) * len(context.token_ids) * 3)
@@ -106,6 +115,21 @@ class NativeCausalLmContextTests(unittest.TestCase):
         self.close(actual.values(), full.forward([1, 2, 3], [1, 3], last_only=True).values())
         with self.assertRaisesRegex(ValueError, "attention"):
             context.append(4)
+
+    def test_suffix_admission_precedes_extraction_and_failure_keeps_fork_usable(self):
+        _, m = pair(max_attention_pairs=12)
+        root = st.NativeCausalLmContext(m, [1, 2])
+        class Unreadable:
+            def __len__(self): return 2
+            def __getitem__(self, key): raise AssertionError("over-budget suffix read")
+        with self.assertRaisesRegex(ValueError, "attention"):
+            root.with_suffix(Unreadable())
+        for bad in ([], [True], [11]):
+            with self.assertRaises((ValueError, TypeError)):
+                root.with_suffix(bad)
+        fork = root.with_suffix([4])
+        self.assertEqual(fork.token_ids, [1, 2, 4])
+        self.assertEqual(root.token_ids, [1, 2])
 
     def test_every_recipe_cached_generation_resumes_exactly(self):
         for kind in KINDS:
