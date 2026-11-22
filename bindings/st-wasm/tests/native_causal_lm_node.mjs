@@ -7,6 +7,7 @@ import {checkCachedLines} from './native_cached_lines.mjs';
 import {checkLineGradients} from './native_line_gradients.mjs';
 import {checkLineOwners} from './native_line_owners.mjs';
 import {checkLineAnchorKl} from './native_line_anchor_kl.mjs';
+import {checkLineEnvelope} from './native_line_envelope.mjs';
 import {checkLineSession} from './native_line_session.mjs';
 
 const glue = pathToFileURL(resolve(process.argv[2]));
@@ -18,6 +19,8 @@ const report = checkNativeCausalLm(M, fixture, item => selected.push(item));
 const models = JSON.parse(readFileSync(new URL('./native_causal_lm_cache_fixture.json', import.meta.url)));
 report.cached = checkCachedSuffix(M, models);
 const owners = JSON.parse(readFileSync(new URL('./native_line_owners_bridge.json',import.meta.url)));
+report.line_envelope=checkLineEnvelope(M,models,owners,process.env.ST_SYNTHETIC_ENVELOPE_CUTS
+  ? JSON.parse(readFileSync(process.env.ST_SYNTHETIC_ENVELOPE_CUTS)) : undefined);
 report.line_anchor_kl=checkLineAnchorKl(M,models,owners,
   process.env.ST_SYNTHETIC_LINE_KL_BRIDGE ? JSON.parse(readFileSync(process.env.ST_SYNTHETIC_LINE_KL_BRIDGE)) : undefined);
 const ray = JSON.parse(readFileSync(new URL('./native_line_ray_bridge.json',import.meta.url)));

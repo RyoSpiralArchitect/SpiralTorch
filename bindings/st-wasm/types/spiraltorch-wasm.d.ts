@@ -75,6 +75,8 @@ declare module "spiraltorch-wasm" {
         readonly exhausted: boolean;
         modelSnapshot(): NativeCausalLm;
         stepJson(): string | undefined;
+        /** Applied, bounded KL refusal (unchanged state), or undefined when exhausted. */
+        attemptStepJson(): string | undefined;
         checkpoint(): CausalLmLineCheckpoint;
         free(): void;
     }

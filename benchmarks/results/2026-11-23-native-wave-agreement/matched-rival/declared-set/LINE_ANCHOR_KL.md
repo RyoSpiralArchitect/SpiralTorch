@@ -39,8 +39,8 @@ This is **not** a per-prompt upper bound. The largest single-prompt KL reached
 It also does not bound how all answer continuations or unseen inputs change:
 only the three next-token anchor rows are constrained. KL from the common
 origin to the endpoint is measured separately, not summed from update KLs.
-A next control would cap individual-anchor KL alongside the mean and check
-whether the menu ordering survives.
+The [individual-anchor control](LINE_ANCHOR_ENVELOPE.md) measures whether
+this ordering survives, distinguishing true six-step results from refused updates.
 
 ## Cost and evidence
 

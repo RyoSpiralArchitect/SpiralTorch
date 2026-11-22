@@ -3,6 +3,9 @@ use CausalLmAdaptationMode::{Geometry, Joint, Lora};
 
 const ANCHORS: &[&[usize]] = &[&[1, 3], &[2, 4, 5]];
 
+#[path = "anchor_envelope_tests.rs"]
+mod envelope;
+
 fn independent(a: &NativeCausalLm, b: &NativeCausalLm) -> Vec<f64> {
     let logs = |m: &NativeCausalLm, p| {
         let row = m.next_token_logits(p).unwrap();

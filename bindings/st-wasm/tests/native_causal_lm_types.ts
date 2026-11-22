@@ -15,6 +15,10 @@ export function jointLine(geometry: NativeCausalLm, prompt: Uint32Array, flat: U
     } finally { m.free(); }
 }
 
+export function tryScheduledStep(s: NativeCausalLmLineTrainingSession): string | undefined {
+    return s.attemptStepJson();
+}
+
 export function resumeLine(origin: NativeCausalLm, plan: string, checkpoint: string, pin: string) {
     const s = NativeCausalLmLineTrainingSession.fromJson(origin,plan,checkpoint,pin);
     try {

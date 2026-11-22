@@ -65,6 +65,35 @@ class NativeCausalLmSessionTests(unittest.TestCase):
         self.assertEqual(session.completed_updates, 0)
         self.assertEqual(session.checkpoint_with_id(), before)
 
+        structured = st.NativeCausalLmLineTrainingSession(model, json.dumps(plan))
+        attempt = structured.attempt_step()
+        self.assertEqual((attempt["status"], attempt["next_update"], attempt["example_index"]),
+                         ("unmatched", 1, 0))
+        self.assertEqual(attempt["refusal"]["anchor_readouts"], 2)
+        self.assertEqual(structured.checkpoint_with_id(), before)
+
+    def test_peak_rule_and_legacy_plan_do_not_share_checkpoint_pins(self):
+        _, model = owners()
+        examples = [dict(prompt_ids=[1,2], candidates=[[1],[2]], stop_id=0, objective={"kind":"set"})]
+        opt = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/16, anchor_examples=[0])
+        p = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="joint",
+                 update=opt, examples=examples)
+        S = st.NativeCausalLmLineTrainingSession
+        legacy = S(model,json.dumps(p))
+        raw,pin = legacy.checkpoint_with_id()
+        opt["criterion"] = {"kind":"peak"}
+        with self.assertRaises(ValueError):
+            S.from_json(model,json.dumps(p),raw,pin)
+        peak = S(model,json.dumps(p))
+        r = peak.attempt_step()["refusal"]
+        self.assertEqual(r["criterion"], {"kind":"peak"})
+        self.assertEqual(r["trials"][0]["peak"], {"anchor_index":0,"kl":r["trials"][0]["mean_kl"]})
+        self.assertEqual(peak.completed_updates,0)
+        for wrong in (None, {"kind":"peak","max_anchor_kl":2e6}, {"kind":"mean_with_cap","max_anchor_kl":1}):
+            opt["criterion"]=wrong
+            with self.assertRaises(ValueError):
+                S(model,json.dumps(p))
+
     def test_global_ray_admission_and_joint_checkpointed_segment(self):
         base, m = owners()
         args=([1,2], [[1],[1,2],[3]])

@@ -22,6 +22,12 @@
 <thead><tr><th scope="col">Weights</th><th scope="col">KL budget used</th><th scope="col">Parameter path</th></tr></thead>
 <tbody></tbody></table>
 </section>
+<section id="envelope" hidden>
+<h2>Protect the most changed prompt</h2>
+<p>The capped mean must use the original average budget without spending more than twice that amount on any one prompt. The peak-only control matches the largest change, not the average.</p>
+<table><caption>Actual updates applied out of six. A stopped row is not a six-step score.</caption>
+<thead><tr><th scope="col">Rule / weights</th><th scope="col">Updates</th><th scope="col">Outcome</th></tr></thead><tbody></tbody></table>
+</section>
 <pre id="ray-transfer" hidden></pre>
 <pre id="owner-transfer" hidden></pre>
 <pre id="line-transfer" hidden></pre>
@@ -33,6 +39,7 @@ import {checkCachedLines} from './native_cached_lines.mjs';
 import {checkLineGradients} from './native_line_gradients.mjs';
 import {checkLineOwners} from './native_line_owners.mjs';
 import {checkLineAnchorKl} from './native_line_anchor_kl.mjs';
+import {checkLineEnvelope} from './native_line_envelope.mjs';
 import {checkLineSession} from './native_line_session.mjs';
 const result = document.getElementById('result');
 try {
@@ -45,6 +52,7 @@ try {
   let portable, owners, ray;
   const ownersRef=await (await fetch('./native_line_owners_bridge.json')).json();
   report.line_anchor_kl=checkLineAnchorKl(M,models,ownersRef);
+  report.line_envelope=checkLineEnvelope(M,models,ownersRef);
   const rayRef=await (await fetch('./native_line_ray_bridge.json')).json();
   report.line_ray=checkLineOwners(M,models,{...ownersRef,...rayRef,expected_measurements:rayRef.measurements.ray}, checkpoints=>{ray=checkpoints;});
   report.line_owners=checkLineOwners(M,models,{...ownersRef,expected_measurements:rayRef.measurements.sgd}, checkpoints=>{owners=checkpoints;});
@@ -79,6 +87,14 @@ try {
     tr.insertCell().textContent=m.parameter_path.toFixed(5);
   }
   distribution.hidden=false;
+  const envelope=document.getElementById('envelope');
+  for(const [label,c] of Object.entries(report.line_envelope.cases)) {
+    const tr=envelope.querySelector('tbody').insertRow(), th=document.createElement('th');
+    th.scope='row';th.textContent=label.replace('/',' / ');tr.append(th);
+    tr.insertCell().textContent=c.steps.length+' / 6';
+    tr.insertCell().textContent=c.reason?'Stopped; peak on anchor '+(1+c.limiting_anchor_at_stop):'Complete';
+  }
+  envelope.hidden=false;
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = 'passed';
 } catch (e) {

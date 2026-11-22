@@ -149,6 +149,8 @@ enum Update {
         target_kl: f64,
         max_parameter_l2: f64,
         anchor_examples: Vec<usize>,
+        #[serde(default)]
+        criterion: CausalLmAnchorKlCriterion,
     },
 }
 
@@ -190,6 +192,7 @@ impl Plan {
                     anchor_examples,
                     target_kl,
                     max_parameter_l2,
+                    criterion,
                 } = policy
                 {
                     let prompts = self.anchor_prompts(anchor_examples)?;
@@ -197,7 +200,7 @@ impl Plan {
                         target_kl: *target_kl,
                         max_parameter_l2: *max_parameter_l2,
                     }
-                    .admit(origin, mode, &prompts)?;
+                    .admit(origin, mode, &prompts, *criterion)?;
                 }
                 (mode, policy.clone())
             }
@@ -266,6 +269,21 @@ pub struct CausalLmLineAdaptationStep {
     pub loss: f32,
     pub objective: CausalLmLineSessionReport,
     pub work: CausalLmLineTrainingWork,
+}
+
+/// Opt-in structured refusal; other decoder, validation and numerical errors stay errors.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CausalLmLineAttempt {
+    Applied {
+        step: Box<CausalLmLineAdaptationStep>,
+    },
+    Unmatched {
+        plan_id: String,
+        next_update: u32,
+        example_index: usize,
+        refusal: CausalLmAnchorKlRefusal,
+    },
 }
 
 fn pin(bytes: &[u8]) -> String {
@@ -387,6 +405,25 @@ impl NativeCausalLmLineTrainingSession {
         self.next_step(Ok)
     }
 
+    /// Like step_adaptation, but a bounded KL miss returns its measured trials
+    /// and leaves the cursor and both owners at their entry state. Never retries.
+    pub fn attempt_adaptation_step(&mut self) -> CausalLmResult<Option<CausalLmLineAttempt>> {
+        match self.step_adaptation() {
+            Ok(step) => Ok(step.map(|step| CausalLmLineAttempt::Applied {
+                step: Box::new(step),
+            })),
+            Err(e) => {
+                let refusal = *e.downcast::<CausalLmAnchorKlRefusal>()?;
+                Ok(Some(CausalLmLineAttempt::Unmatched {
+                    plan_id: self.plan_id.clone(),
+                    next_update: self.updates + 1,
+                    example_index: self.updates as usize % self.plan.examples.len(),
+                    refusal,
+                }))
+            }
+        }
+    }
+
     fn next_step<R>(
         &mut self,
         finish: impl FnOnce(CausalLmLineAdaptationStep) -> CausalLmResult<R>,
@@ -422,9 +459,10 @@ impl NativeCausalLmLineTrainingSession {
                 target_kl,
                 max_parameter_l2,
                 anchor_examples,
+                criterion,
             } => {
                 let prompts = self.plan.anchor_prompts(anchor_examples)?;
-                let (next, ray, report) = self.model.step_adaptation_at_anchor_kl(
+                let (next, ray, report) = self.model.step_adaptation_at_anchor_kl_with_criterion(
                     &g,
                     self.mode,
                     &prompts,
@@ -432,6 +470,7 @@ impl NativeCausalLmLineTrainingSession {
                         target_kl: *target_kl,
                         max_parameter_l2: *max_parameter_l2,
                     },
+                    *criterion,
                 )?;
                 (next, Some(ray), Some(report))
             }

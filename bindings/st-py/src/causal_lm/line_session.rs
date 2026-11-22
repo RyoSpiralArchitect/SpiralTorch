@@ -65,6 +65,14 @@ impl PyLineSession {
             .transpose()
     }
 
+    /// Apply one scheduled update or return structured KL evidence without advancing.
+    fn attempt_step(&mut self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        py.detach(|| self.inner.attempt_adaptation_step())
+            .map_err(error)?
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
     fn checkpoint_with_id(&self, py: Python<'_>) -> PyResult<(String, String)> {
         py.detach(|| self.inner.checkpoint_with_id()).map_err(error)
     }

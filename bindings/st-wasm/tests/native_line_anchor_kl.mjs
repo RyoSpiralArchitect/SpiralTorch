@@ -1,21 +1,21 @@
 // Rust chooses each proposal. JS independently measures full-vocabulary KL
 // from actual pre/post model snapshots, not a metric reconstructed from receipts.
-export function checkLineAnchorKl(M, fixture, owners, native) {
-  const need = (ok, message) => { if (!ok) throw Error(message); };
-  const near = (x,y,tol=4e-15) => need(Number.isFinite(x) && Math.abs(x-y)<=tol,'anchor KL mismatch: '+x+' vs '+y);
+export function forwardKl(a,b) {
   const logP = row => {
     const top=Math.max(...row), z=Math.log(row.reduce((s,x)=>s+Math.exp(x-top),0));
     return row.map(x=>(x-top)-z);
   };
-  const kl = (a,b) => {
-    const x=logP(a), y=logP(b);
-    return x.reduce((s,p,i)=>s+Math.exp(p)*(p-y[i]),0);
-  };
-  const rows = (m,p) => p.update.anchor_examples.map(i=>Array.from(m.nextLogits(JSON.stringify(p.examples[i].prompt_ids))));
-  const stateRows = (s,p) => {
-    const m=s.modelSnapshot();
-    try {return rows(m,p);} finally {m.free();}
-  };
+  const x=logP(a), y=logP(b);
+  return x.reduce((s,p,i)=>s+Math.exp(p)*(p-y[i]),0);
+}
+export const rows = (m,p) => p.update.anchor_examples.map(i=>Array.from(m.nextLogits(JSON.stringify(p.examples[i].prompt_ids))));
+export const stateRows = (s,p) => {
+  const m=s.modelSnapshot();
+  try {return rows(m,p);} finally {m.free();}
+};
+export function checkLineAnchorKl(M, fixture, owners, native) {
+  const need = (ok, message) => { if (!ok) throw Error(message); };
+  const near = (x,y,tol=4e-15) => need(Number.isFinite(x) && Math.abs(x-y)<=tol,'anchor KL mismatch: '+x+' vs '+y);
   const S=M.NativeCausalLmLineTrainingSession;
   const target=1/65536, ceiling=1/8;
   const f=fixture.cases.find(x=>x.name===owners.host);
@@ -41,7 +41,7 @@ export function checkLineAnchorKl(M, fixture, owners, native) {
         for (let i=0;i<6;i++) {
           const r=JSON.parse(live.stepJson()), k=r.anchor_kl;
           last=stateRows(live,p);
-          const by=prior.map((z,j)=>kl(z,last[j]));
+          const by=prior.map((z,j)=>forwardKl(z,last[j]));
           by.forEach((v,j)=>near(v,k.per_anchor_kl[j]));
           const mean=by.reduce((s,x)=>s+x,0)/by.length;
           near(mean,k.mean_kl);
@@ -69,7 +69,7 @@ export function checkLineAnchorKl(M, fixture, owners, native) {
         }
         need(live.exhausted && restored.exhausted,'incomplete KL trajectory');
         stateRows(restored,p).forEach((z,j)=>z.forEach((x,h)=>near(x,last[j][h],3e-6)));
-        const end=last.map((z,j)=>kl(z0[j],z)).reduce((s,x)=>s+x,0)/last.length;
+        const end=last.map((z,j)=>forwardKl(z0[j],z)).reduce((s,x)=>s+x,0)/last.length;
         cases[mode]={steps,parameter_path:path,endpoint_kl:end,trials:probes};
       } finally {restored?.free();live?.free();}
     }

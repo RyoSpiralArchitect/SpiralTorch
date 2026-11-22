@@ -50,7 +50,8 @@ mod wave_margin;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use adaptation_ray::{CausalLmAdaptationRayGroup, CausalLmAdaptationRayStep};
 pub use anchor_kl::{
-    CausalLmAnchorKlMatch, CausalLmAnchorKlPolicy, CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
+    CausalLmAnchorKlCriterion, CausalLmAnchorKlMatch, CausalLmAnchorKlPeak, CausalLmAnchorKlPolicy,
+    CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
 };
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
@@ -79,8 +80,8 @@ pub use key_lag::CausalLmKeyLag;
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use line_menu::{CausalLmLineMenuReport, MAX_LINE_MENU_CANDIDATES, MAX_LINE_MENU_TARGETS};
 pub use line_session::{
-    CausalLmLineAdaptationStep, CausalLmLineObjective, CausalLmLineSessionReport,
-    CausalLmLineSessionStep, NativeCausalLmLineTrainingSession,
+    CausalLmLineAdaptationStep, CausalLmLineAttempt, CausalLmLineObjective,
+    CausalLmLineSessionReport, CausalLmLineSessionStep, NativeCausalLmLineTrainingSession,
 };
 pub use line_set::{
     CausalLmCachedLineScores, CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport,

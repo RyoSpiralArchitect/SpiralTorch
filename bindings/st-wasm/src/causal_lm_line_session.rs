@@ -96,6 +96,15 @@ impl NativeCausalLmLineTrainingSession {
             .transpose()
     }
 
+    #[wasm_bindgen(js_name=attemptStepJson)]
+    pub fn attempt_step_json(&mut self) -> Result<Option<String>, JsValue> {
+        self.inner
+            .attempt_adaptation_step()
+            .map_err(js_error)?
+            .map(|r| serde_json::to_string(&r).map_err(js_error))
+            .transpose()
+    }
+
     pub fn checkpoint(&self) -> Result<CausalLmLineCheckpoint, JsValue> {
         self.inner
             .checkpoint_with_id()

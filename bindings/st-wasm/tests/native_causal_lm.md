@@ -265,6 +265,41 @@ Every trial costs one extra forward per anchor, not another backward.
 Rust also exposes `NativeCausalLm::step_adaptation_at_anchor_kl` for explicit
 anchor slices without a session. See the [three-owner comparison](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_ANCHOR_KL.md).
 
+To protect each prompt as well as the mean, set the v3 update's optional
+`criterion` (all quantities are full-vocabulary forward KL in nats):
+
+```json
+{"kind":"anchor_forward_kl","target_kl":0.0000152587890625,"max_parameter_l2":0.125,"anchor_examples":[0,1,2],"criterion":{"kind":"mean_with_cap","max_anchor_kl":0.000030517578125}}
+```
+
+Every prompt must satisfy the cap in addition to the existing mean band. For
+a different control use `"criterion":{"kind":"peak"}` with `target_kl` set to
+the desired maximum; it matches 98-100% of that peak, **not** of the mean.
+Omitting the criterion preserves old plan pins, successful receipts and trajectories. Each
+new trial includes `peak.kl` and `peak.anchor_index` (zero-based **bank**
+position, first on a tie). A cap smaller than the mean floor is rejected at
+plan admission. A changed criterion requires a new plan/checkpoint lineage.
+
+For one scheduled update, use *either* the strict step or the attempt API:
+
+```python
+outcome = session.attempt_step()
+if outcome is None:
+    print("schedule exhausted")
+elif outcome["status"] == "unmatched":
+    failure = outcome["refusal"]
+    print(outcome["next_update"], failure["reason"], failure["trials"][-1])
+else:
+    print(outcome["step"]["anchor_kl"]["mean_kl"])
+```
+
+WASM: `attemptStepJson()` returns the same tagged JSON, or `undefined` when
+exhausted. Rust: `attempt_adaptation_step()`; for an explicit gradient and
+anchor bank use `step_adaptation_at_anchor_kl_with_criterion`. The attempt
+applies a successful step exactly once, and does not retry or alter the cursor
+on a bounded miss. Other errors still propagate; strict `step()` in Python
+and `stepJson()` in WASM still raise on a miss. See the [matched and stopped trajectories](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_ANCHOR_ENVELOPE.md).
+
 ## Finite-checked learning
 
 ```js
