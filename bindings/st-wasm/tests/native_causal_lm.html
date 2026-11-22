@@ -28,6 +28,14 @@
 <table><caption>Actual updates applied out of six. A stopped row is not a six-step score.</caption>
 <thead><tr><th scope="col">Rule / weights</th><th scope="col">Updates</th><th scope="col">Outcome</th></tr></thead><tbody></tbody></table>
 </section>
+<section id="midpoint" hidden>
+<h2>Keep the step that works</h2>
+<p>If a normal update misses the same KL limits, try one direction halfway to the corrected gradient. Compare protecting the probe's most changed prompt with protecting the next prompt in the bank.</p>
+<button type="button">Run six small comparisons</button>
+<p role="status" data-status="ready">Ready. Generated weights only; no GPU or network model.</p>
+<table hidden><caption>Each row allows six updates. Raw and corrected are counts of applied updates, not accuracy scores.</caption>
+<thead><tr><th scope="col">Anchor / weights</th><th scope="col">Raw</th><th scope="col">Corrected</th><th scope="col">Outcome</th></tr></thead><tbody></tbody></table>
+</section>
 <pre id="ray-transfer" hidden></pre>
 <pre id="owner-transfer" hidden></pre>
 <pre id="line-transfer" hidden></pre>
@@ -40,6 +48,7 @@ import {checkLineGradients} from './native_line_gradients.mjs';
 import {checkLineOwners} from './native_line_owners.mjs';
 import {checkLineAnchorKl} from './native_line_anchor_kl.mjs';
 import {checkLineEnvelope} from './native_line_envelope.mjs';
+import {checkLineMidpoint} from './native_line_midpoint.mjs';
 import {checkLineSession} from './native_line_session.mjs';
 const result = document.getElementById('result');
 try {
@@ -95,6 +104,22 @@ try {
     tr.insertCell().textContent=c.reason?'Stopped; peak on anchor '+(1+c.limiting_anchor_at_stop):'Complete';
   }
   envelope.hidden=false;
+  const midpoint=document.getElementById('midpoint');
+  const button=midpoint.querySelector('button'),status=midpoint.querySelector('[role="status"]');
+  button.addEventListener('click',async()=>{
+    button.disabled=true;status.dataset.status='running';status.textContent='Checking both directions on three parameter groups...';
+    await new Promise(resolve=>setTimeout(resolve,0));
+    try {
+      const {cases}=checkLineMidpoint(M,models,ownersRef),table=midpoint.querySelector('table');
+      for(const [label,c] of Object.entries(cases)) {
+        const tr=table.tBodies[0].insertRow(),th=document.createElement('th');
+        th.scope='row';th.textContent=label.replace('/',' / ');tr.append(th);
+        for(const cell of [c.raw,c.rescued,c.reason?'Stopped at '+(c.completed+1):'Complete'])tr.insertCell().textContent=cell;
+      }
+      table.hidden=false;status.textContent='Finished. Every applied update was checked against all three prompts.';status.dataset.status='passed';
+    } catch(e) {status.textContent='Comparison stopped: '+String(e?.message||e);status.dataset.status='failed';}
+  },{once:true});
+  midpoint.hidden=false;
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = 'passed';
 } catch (e) {

@@ -21,7 +21,7 @@ def plan(mode, selection):
     return json.dumps(p, sort_keys=True, separators=(",", ":"))
 
 
-def audit_probe(origin, old_z, info, i, mode, selection):
+def audit_probe(origin, old_z, info, i, mode, selection, kind="secant_projection"):
     g = common["grad"](origin, cases[i % len(cases)], mode)
     candidate, r = origin.step_adaptation_gradient_at_distance(g, mode=mode, target_l2=H)
     kl = prev["readout"](old_z, ray["logits"](candidate))
@@ -30,7 +30,7 @@ def audit_probe(origin, old_z, info, i, mode, selection):
     peak = max(range(len(kl)), key=kl.__getitem__)
     index = peak if selection == "largest" else (peak+1) % len(kl)
     assert (info["peak_anchor"], info["selected_anchor"]) == (peak,index)
-    assert info["policy"] == dict(kind="secant_projection", probe_l2=H, anchor=selection)
+    assert info["policy"] == dict(kind=kind, probe_l2=H, anchor=selection)
     assert prev["near"](info["source_gradient_l2"], r["gradient_l2"])
     assert info["normal_l2"] > 0 and abs(info["projected_normal_cosine"]) < 1e-6
     assert 0.001 <= info["retained_fraction"] <= 1+1e-6

@@ -286,7 +286,7 @@ pub enum CausalLmLineAttempt {
         plan_id: String,
         next_update: u32,
         example_index: usize,
-        refusal: CausalLmAnchorKlRefusal,
+        refusal: Box<CausalLmAnchorKlRefusal>,
     },
 }
 
@@ -417,7 +417,7 @@ impl NativeCausalLmLineTrainingSession {
                 step: Box::new(step),
             })),
             Err(e) => {
-                let refusal = *e.downcast::<CausalLmAnchorKlRefusal>()?;
+                let refusal = e.downcast::<CausalLmAnchorKlRefusal>()?;
                 Ok(Some(CausalLmLineAttempt::Unmatched {
                     plan_id: self.plan_id.clone(),
                     next_update: self.updates + 1,

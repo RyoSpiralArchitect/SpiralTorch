@@ -12,6 +12,11 @@ pub enum CausalLmAnchorDirection {
         probe_l2: f64,
         anchor: CausalLmSecantAnchor,
     },
+    /// Try one angular midpoint only after the raw ray has a measured KL miss.
+    RawThenSecantMidpoint {
+        probe_l2: f64,
+        anchor: CausalLmSecantAnchor,
+    },
 }
 
 impl Default for CausalLmAnchorDirection {
@@ -28,6 +33,13 @@ pub enum CausalLmSecantAnchor {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct CausalLmSecantMidpoint {
+    pub gradient_l2: f64,
+    pub source_cosine: f64,
+    pub projected_cosine: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct CausalLmSecantReport {
     pub policy: CausalLmAnchorDirection,
     pub probe_per_anchor_kl: Vec<f64>,
@@ -39,12 +51,28 @@ pub struct CausalLmSecantReport {
     pub retained_fraction: f64,
     /// After projecting and rounding the new ray coordinates to f32.
     pub projected_normal_cosine: f64,
+    /// The fields above describe the full orthogonal projection, even when
+    /// this midpoint rather than the projection is used for the actual ray.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midpoint: Option<Box<CausalLmSecantMidpoint>>,
     /// The original loss gradient dotted with the actual f32 parameter displacement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_loss_dot_step: Option<f64>,
 }
 
 impl CausalLmAnchorDirection {
+    fn secant(self) -> Option<(f64, CausalLmSecantAnchor)> {
+        match self {
+            Self::LossGradient {} => None,
+            Self::SecantProjection { probe_l2, anchor }
+            | Self::RawThenSecantMidpoint { probe_l2, anchor } => Some((probe_l2, anchor)),
+        }
+    }
+
+    pub(super) fn is_rescue(self) -> bool {
+        matches!(self, Self::RawThenSecantMidpoint { .. })
+    }
+
     pub(in crate::causal_lm) fn admit(
         self,
         m: &NativeCausalLm,
@@ -52,7 +80,7 @@ impl CausalLmAnchorDirection {
         prompts: &[&[usize]],
         ceiling: f64,
     ) -> CausalLmResult<()> {
-        if let Self::SecantProjection { probe_l2, .. } = self {
+        if let Some((probe_l2, _)) = self.secant() {
             if prompts.len() < 2 || !probe_l2.is_finite() || probe_l2 <= 0. || probe_l2 > ceiling {
                 return Err(
                     "secant direction needs two anchors and a positive probe within the ceiling"
@@ -138,39 +166,47 @@ impl NativeCausalLm {
         &self,
         g: &ParameterGradients,
         mode: CausalLmAdaptationMode,
-        prompts: &[&[usize]],
-        probe_l2: f64,
-        anchor: CausalLmSecantAnchor,
-        refs: &mut Vec<Reference>,
+        policy: CausalLmAnchorDirection,
+        bank: &mut AnchorBank<'_>,
     ) -> CausalLmResult<(ParameterGradients, CausalLmSecantReport)> {
+        let (probe_l2, anchor) = policy.secant().ok_or("expected a secant direction")?;
         let (probe, _) = self.step_parameter_ray(g, mode, probe_l2)?;
-        let mut kls = Vec::with_capacity(prompts.len());
-        let mut rows = Vec::with_capacity(prompts.len());
+        let mut kls = Vec::with_capacity(bank.prompts.len());
+        let mut rows = Vec::with_capacity(bank.prompts.len());
         let mut peak = 0;
-        for (i, p) in prompts.iter().enumerate() {
-            let r = Reference::new(self.next_token_logits(p)?.data())?;
-            let row = probe.next_token_logits(p)?;
-            kls.push(r.forward_kl(row.data())?);
+        bank.observe(self, &probe, |i, kl, row| {
+            kls.push(kl);
             if kls[i] > kls[peak] {
                 peak = i;
             }
-            refs.push(r);
             rows.push(row);
-        }
+        })?;
         drop(probe);
         let selected = match anchor {
             CausalLmSecantAnchor::Largest => peak,
-            CausalLmSecantAnchor::Successor => (peak + 1) % prompts.len(),
+            CausalLmSecantAnchor::Successor => (peak + 1) % bank.prompts.len(),
         };
-        let delta = refs[selected].probability_delta(rows[selected].data())?;
+        let delta = bank.refs[selected].probability_delta(rows[selected].data())?;
         drop(rows);
-        let mut u = self.anchor_normal(prompts[selected], delta, mode)?;
+        let mut u = self.anchor_normal(bank.prompts[selected], delta, mode)?;
+        let weights = selected_weights(self, mode);
         let (source_gradient_l2, normal_l2, projected_l2, projected_normal_cosine) =
-            project(&selected_weights(self, mode), g, &mut u)?;
+            project(&weights, g, &mut u)?;
+        let midpoint = if policy.is_rescue() {
+            Some(Box::new(angular_midpoint(
+                &weights,
+                g,
+                &mut u,
+                source_gradient_l2,
+                projected_l2,
+            )?))
+        } else {
+            None
+        };
         Ok((
             u,
             CausalLmSecantReport {
-                policy: CausalLmAnchorDirection::SecantProjection { probe_l2, anchor },
+                policy,
                 probe_per_anchor_kl: kls,
                 peak_anchor: peak,
                 selected_anchor: selected,
@@ -179,6 +215,7 @@ impl NativeCausalLm {
                 projected_l2,
                 retained_fraction: projected_l2 / source_gradient_l2,
                 projected_normal_cosine,
+                midpoint,
                 source_loss_dot_step: None,
             },
         ))
@@ -222,6 +259,16 @@ fn gradient<'a>(
         .ok_or_else(|| "missing or malformed secant gradient block".into())
 }
 
+#[derive(Debug)]
+pub(super) struct UnresolvedSecant(pub(super) &'static str);
+
+impl std::fmt::Display for UnresolvedSecant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for UnresolvedSecant {}
+
 // u is recycled as the shaped parameter map. Nontrainable entries are not coordinates.
 fn project(
     w: &Blocks<'_>,
@@ -249,8 +296,14 @@ fn project(
         uu.value().sqrt(),
         gu.value() / uu.value(),
     );
-    if !scale.is_finite() || !gn.is_finite() || gn == 0. || !un.is_finite() || un == 0. {
-        return Err("unresolved secant normal or source gradient".into());
+    if !gn.is_finite() || !un.is_finite() {
+        return Err("nonfinite secant normal or source gradient".into());
+    }
+    if gn == 0. || un == 0. {
+        return Err(UnresolvedSecant("unresolved secant normal or source gradient").into());
+    }
+    if !scale.is_finite() {
+        return Err("nonfinite secant projection coefficient".into());
     }
     let (mut hh, mut hu) = (sum::Sum::default(), sum::Sum::default());
     for (key, values) in w {
@@ -266,17 +319,86 @@ fn project(
         }
     }
     let hn = hh.value().sqrt();
-    if !hn.is_finite() || hn < 0.001 * gn {
-        return Err(
-            "secant projection retains less than 0.001 of the source norm or is nonfinite".into(),
-        );
+    if !hn.is_finite() {
+        return Err("nonfinite projected gradient norm".into());
+    }
+    if hn < 0.001 * gn {
+        return Err(UnresolvedSecant(
+            "secant projection retains less than 0.001 of the source norm",
+        )
+        .into());
     }
     Ok((gn, un, hn, hu.value() / (hn * un)))
+}
+
+fn angular_midpoint(
+    w: &Blocks<'_>,
+    g: &ParameterGradients,
+    h: &mut ParameterGradients,
+    gn: f64,
+    hn: f64,
+) -> CausalLmResult<CausalLmSecantMidpoint> {
+    // Equal-length rays, not equal coefficients of two differently sized gradients.
+    let ratio = gn / hn;
+    let (mut qq, mut qg, mut qh) = (
+        sum::Sum::default(),
+        sum::Sum::default(),
+        sum::Sum::default(),
+    );
+    for (key, values) in w {
+        let projected = h
+            .get_mut(&key.0)
+            .and_then(|b| b.get_mut(&key.1))
+            .ok_or("missing midpoint block")?;
+        for (&a, b) in gradient(g, key, values.len())?.iter().zip(projected) {
+            let a = f64::from(a);
+            let old = f64::from(*b);
+            *b = (0.5 * (a + ratio * old)) as f32;
+            let q = f64::from(*b);
+            qq.add(q * q);
+            qg.add(q * a);
+            qh.add(q * old);
+        }
+    }
+    let gradient_l2 = qq.value().sqrt();
+    let source_cosine = qg.value() / (gradient_l2 * gn);
+    let projected_cosine = qh.value() / (gradient_l2 * hn);
+    if !gradient_l2.is_finite()
+        || !source_cosine.is_finite()
+        || !projected_cosine.is_finite()
+        || source_cosine <= 0.
+        || projected_cosine <= 0.
+    {
+        return Err("unrepresentable or non-descent angular midpoint".into());
+    }
+    Ok(CausalLmSecantMidpoint {
+        gradient_l2,
+        source_cosine,
+        projected_cosine,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn midpoint_bisects_unit_rays_not_unnormalized_gradients() {
+        let w = Blocks::from([(("a".into(), "b".into()), &[0., 0.][..])]);
+        let map = |v| ParameterGradients::from([("a".into(), BTreeMap::from([("b".into(), v)]))]);
+        let g = map(vec![3., 4.]);
+        let mut u = map(vec![2., 0.]);
+        let (gn, _, hn, cos) = project(&w, &g, &mut u).unwrap();
+        assert_eq!((gn, hn, cos), (5., 4., 0.));
+        let mid = angular_midpoint(&w, &g, &mut u, gn, hn).unwrap();
+        assert_eq!(u["a"]["b"], vec![1.5, 4.5]);
+        assert!((mid.source_cosine - 0.9f64.sqrt()).abs() < 1e-15);
+        assert!((mid.source_cosine - mid.projected_cosine).abs() < 1e-15);
+        let zero = project(&w, &g, &mut map(vec![0., 0.])).unwrap_err();
+        assert!(zero.downcast_ref::<UnresolvedSecant>().is_some());
+        let malformed = project(&w, &g, &mut map(vec![f32::NAN, 0.])).unwrap_err();
+        assert!(malformed.downcast_ref::<UnresolvedSecant>().is_none());
+    }
 
     #[test]
     fn no_silent_fallback_on_degenerate_normals_or_misspelled_policy() {
@@ -285,6 +407,8 @@ mod tests {
             r#"{"kind":"secant_projection","probe_l2":0.1,"anchor":"second"}"#,
             r#"{"kind":"secant_projection","probe_l2":0.1,"anchor":"largest","strength":0.5}"#,
             r#"{"kind":"secant_projection","anchor":"largest"}"#,
+            r#"{"kind":"raw_then_secant_midpoint","probe_l2":0.1,"anchor":"largest","fraction":0.25}"#,
+            r#"{"kind":"raw_then_secant_midpoint","anchor":"largest"}"#,
         ] {
             assert!(serde_json::from_str::<CausalLmAnchorDirection>(json).is_err());
         }

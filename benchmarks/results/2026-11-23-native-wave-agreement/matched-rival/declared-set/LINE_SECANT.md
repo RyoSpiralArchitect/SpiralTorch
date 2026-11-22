@@ -80,3 +80,6 @@ A useful next control, **not run**, is to leave any already feasible raw step
 alone and test a predeclared partial rather than full correction on the blocked
 step. Evaluate it against the same unchanged all-prompt acceptance rule; do not
 interpret easier acceptance as better language learning.
+
+The [subsequent preregistered comparison](LINE_MIDPOINT.md) tests this
+raw-first policy against the cyclic-successor control.

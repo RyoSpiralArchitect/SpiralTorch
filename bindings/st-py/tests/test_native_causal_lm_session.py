@@ -48,6 +48,44 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_raw_first_unresolved_midpoint_keeps_refusal_and_never_publishes(self):
+        _, m = owners()
+        record = json.loads(m.geometry_artifact().to_json())
+        placement = record["placements"][0]
+        placement["recipe"] = dict(schema="spiraltorch.wave_gate_adapter.v2", features=4, strength=.5,
+                                   kernel=dict(curvature=-1., saturation=1., porosity=.05, max_values=1024),
+                                   learnable_radius=True)
+        for t in placement["tensors"]:
+            t["requires_grad"] = False
+        placement["tensors"].append(dict(name="log_radius", shape=[], values=[-2.], role="parameter",
+                                         requires_grad=True))
+        # The single trainable coordinate has no nonzero orthogonal residual.
+        m = m.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(record)))
+        update = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/16, anchor_examples=[0,1],
+                      direction=dict(kind="raw_then_secant_midpoint", probe_l2=1/256, anchor="largest"))
+        plan = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="geometry", update=update,
+                    examples=[dict(prompt_ids=p, candidates=[[1],[2]], stop_id=0, objective={"kind":"set"})
+                              for p in ([1,2], [3,4,2])])
+        S = st.NativeCausalLmLineTrainingSession
+        s = S(m,json.dumps(plan))
+        before = s.checkpoint_with_id()
+        failure = s.attempt_step()["refusal"]
+        self.assertEqual(failure["raw_miss"]["reason"], "ceiling below matching interval")
+        self.assertEqual(failure["raw_miss"]["anchor_readouts"], 4)
+        self.assertEqual(failure["raw_miss"]["rescue_policy"], update["direction"])
+        self.assertIn(failure["reason"], ("secant projection retains less than 0.001 of the source norm",
+                                         "unresolved secant normal or source gradient"))
+        self.assertEqual((failure["anchor_readouts"],failure["trials"]),(6,[]))
+        self.assertEqual(s.checkpoint_with_id(), before)
+        self.assertEqual(s.completed_updates, 0)
+        cold = S.from_json(m,json.dumps(plan),*before)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"must-not-exist.json"
+            with self.assertRaisesRegex(ValueError, "anchor KL not matched"):
+                cold.advance_to_checkpoint_new(1,path)
+            self.assertFalse(path.exists())
+        self.assertEqual(cold.checkpoint_with_id(), before)
+
     def test_secant_plan_is_strict_resumable_and_reports_source_descent(self):
         _, model = owners("f32_wide_backward")
         create = st.NativeCausalLmLineTrainingSession

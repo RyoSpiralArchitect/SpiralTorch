@@ -4,10 +4,14 @@ use super::*;
 mod criterion;
 mod direction;
 mod distribution;
+mod search;
 pub use criterion::CausalLmAnchorKlCriterion;
 use criterion::Position;
-pub use direction::{CausalLmAnchorDirection, CausalLmSecantAnchor, CausalLmSecantReport};
+pub use direction::{
+    CausalLmAnchorDirection, CausalLmSecantAnchor, CausalLmSecantMidpoint, CausalLmSecantReport,
+};
 use distribution::Reference;
+use search::{AnchorBank, RaySearch};
 
 #[derive(Debug, Copy, Clone, Serialize)]
 pub struct CausalLmAnchorKlPolicy {
@@ -33,10 +37,22 @@ pub struct CausalLmAnchorKlPeak {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CausalLmRawRayMiss {
+    pub reason: &'static str,
+    pub trials: Vec<CausalLmAnchorKlTrial>,
+    /// Work performed before the optional rescue, including the one shared origin bank.
+    pub anchor_readouts: usize,
+    pub rescue_policy: CausalLmAnchorDirection,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CausalLmAnchorKlMatch {
     pub method: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<CausalLmSecantReport>,
+    /// Present only if the first bounded loss-gradient search missed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_miss: Option<Box<CausalLmRawRayMiss>>,
     pub policy: CausalLmAnchorKlPolicy,
     #[serde(skip_serializing_if = "CausalLmAnchorKlCriterion::is_mean")]
     pub criterion: CausalLmAnchorKlCriterion,
@@ -44,6 +60,7 @@ pub struct CausalLmAnchorKlMatch {
     pub per_anchor_kl: Vec<f64>,
     /// Counts last-position vocabulary readouts at the origin, optional probe and candidates.
     pub anchor_readouts: usize,
+    /// Only the terminal ray. Earlier raw trials, if any, are in raw_miss.
     pub trials: Vec<CausalLmAnchorKlTrial>,
 }
 
@@ -53,10 +70,13 @@ pub struct CausalLmAnchorKlRefusal {
     pub reason: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<CausalLmSecantReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_miss: Option<Box<CausalLmRawRayMiss>>,
     pub policy: CausalLmAnchorKlPolicy,
     #[serde(skip_serializing_if = "CausalLmAnchorKlCriterion::is_mean")]
     pub criterion: CausalLmAnchorKlCriterion,
     pub anchor_readouts: usize,
+    /// Empty if a raw miss triggered a probe but no midpoint direction could be formed.
     pub trials: Vec<CausalLmAnchorKlTrial>,
 }
 impl std::fmt::Display for CausalLmAnchorKlRefusal {
@@ -163,100 +183,45 @@ impl NativeCausalLm {
         policy.admit(self, mode, prompts, criterion)?;
         self.validate_adaptation_gradient_owner(grads)?;
         direction.admit(self, mode, prompts, policy.max_parameter_l2)?;
-        let (mut lo, mut hi) = (0., policy.max_parameter_l2);
-        let mut distance = hi;
-        let mut refs = Vec::with_capacity(prompts.len());
-        let (shaped, mut guidance) = match direction {
-            CausalLmAnchorDirection::LossGradient {} => (None, None),
-            CausalLmAnchorDirection::SecantProjection { probe_l2, anchor } => {
-                let (h, info) = self.secant_direction(
-                    grads.parameters(),
-                    mode,
-                    prompts,
-                    probe_l2,
-                    anchor,
-                    &mut refs,
-                )?;
-                (Some(h), Some(info))
+        let mut search = RaySearch::new(self, grads.parameters(), mode, prompts, policy, criterion);
+        let raw_miss = if !matches!(direction, CausalLmAnchorDirection::SecantProjection { .. }) {
+            match search.run(None, None, None) {
+                Ok(step) => return Ok(step),
+                Err(err) if direction.is_rescue() => {
+                    // Only a measured bracket miss is a license to change directions.
+                    let miss = *err.downcast::<CausalLmAnchorKlRefusal>()?;
+                    Some(Box::new(CausalLmRawRayMiss {
+                        reason: miss.reason,
+                        trials: miss.trials,
+                        anchor_readouts: miss.anchor_readouts,
+                        rescue_policy: direction,
+                    }))
+                }
+                Err(err) => return Err(err),
             }
+        } else {
+            None
         };
-        let params = shaped.as_ref().unwrap_or_else(|| grads.parameters());
-        let banks = if guidance.is_some() { 2 } else { 1 };
-        let mut trials = Vec::new();
-        for i in 0..CausalLmAnchorKlPolicy::MAX_TRIALS {
-            let (candidate, mut ray) = self.step_parameter_ray(params, mode, distance)?;
-            if refs.is_empty() {
-                for p in prompts {
-                    refs.push(Reference::new(self.next_token_logits(p)?.data())?);
+        let shaped = self.secant_direction(grads.parameters(), mode, direction, &mut search.bank);
+        let (h, report) = match shaped {
+            Ok(result) => result,
+            Err(err) if raw_miss.is_some() => {
+                // A vanishing normal or residual is a documented, non-advancing
+                // mathematical outcome. Other numeric/ownership errors stay errors.
+                let unresolved = err.downcast::<direction::UnresolvedSecant>()?;
+                return Err(CausalLmAnchorKlRefusal {
+                    reason: unresolved.0,
+                    policy,
+                    criterion,
+                    raw_miss,
+                    direction: None,
+                    anchor_readouts: search.bank.readouts,
+                    trials: Vec::new(),
                 }
+                .into());
             }
-            let mut sum = sum::Sum::default();
-            let mut per_anchor_kl = Vec::with_capacity(prompts.len());
-            let mut peak = CausalLmAnchorKlPeak {
-                anchor_index: 0,
-                kl: 0.,
-            };
-            for (anchor_index, (p, source)) in prompts.iter().zip(&refs).enumerate() {
-                let kl = source.forward_kl(candidate.next_token_logits(p)?.data())?;
-                sum.add(kl);
-                if kl > peak.kl {
-                    peak = CausalLmAnchorKlPeak { anchor_index, kl };
-                }
-                per_anchor_kl.push(kl);
-            }
-            let mean_kl = sum.mean(prompts.len() as u64);
-            trials.push(CausalLmAnchorKlTrial {
-                requested_l2: distance,
-                mean_kl,
-                peak: (!criterion.is_mean()).then_some(peak),
-            });
-            let anchor_readouts = (banks + trials.len()) * prompts.len();
-            match criterion.position(policy.target_kl, mean_kl, peak.kl) {
-                Position::Matched => {
-                    if let Some(info) = guidance.as_mut() {
-                        info.source_loss_dot_step =
-                            Some(self.source_loss_motion(&candidate, mode, grads.parameters())?);
-                        ray.method = "selected_parameter_secant_projected_ray_f32.v1";
-                    }
-                    let report = CausalLmAnchorKlMatch {
-                        method: "last_token_anchor_forward_kl.v1",
-                        direction: guidance,
-                        policy,
-                        criterion,
-                        mean_kl,
-                        per_anchor_kl,
-                        anchor_readouts,
-                        trials,
-                    };
-                    return Ok((candidate, ray, report));
-                }
-                Position::Below if i == 0 => {
-                    return Err(CausalLmAnchorKlRefusal {
-                        reason: "ceiling below matching interval",
-                        direction: guidance,
-                        policy,
-                        criterion,
-                        anchor_readouts,
-                        trials,
-                    }
-                    .into());
-                }
-                Position::Below => lo = distance,
-                Position::Above => hi = distance,
-            }
-            distance = lo + 0.5 * (hi - lo);
-            if distance <= lo || distance >= hi {
-                break;
-            }
-        }
-        Err(CausalLmAnchorKlRefusal {
-            reason: "bounded bracket exhausted",
-            direction: guidance,
-            policy,
-            criterion,
-            anchor_readouts: (banks + trials.len()) * prompts.len(),
-            trials,
-        }
-        .into())
+            Err(err) => return Err(err),
+        };
+        search.run(Some(&h), Some(report), raw_miss)
     }
 }

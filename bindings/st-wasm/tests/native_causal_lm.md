@@ -288,7 +288,7 @@ if outcome is None:
     print("schedule exhausted")
 elif outcome["status"] == "unmatched":
     failure = outcome["refusal"]
-    print(outcome["next_update"], failure["reason"], failure["trials"][-1])
+    print(outcome["next_update"], failure["reason"], failure["trials"][-1:] or "no terminal candidate")
 else:
     print(outcome["step"]["anchor_kl"]["mean_kl"])
 ```
@@ -331,6 +331,30 @@ unresolved normal, a retained fraction below 0.001, or a non-descent
 displacement fails without advancing; it is not silently replaced by the raw
 gradient. See the [synthetic comparison](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_SECANT.md)
 before choosing this instead of the default.
+
+For a **raw-first** update put
+`{"kind":"raw_then_secant_midpoint","probe_l2":0.00390625,"anchor":"largest"}`
+under `update.direction` (or use `"successor"` as the order-dependent control).
+If the raw ray meets the unchanged KL test, its weights, ray receipt and
+decoder work are exactly the raw method's. The plan/checkpoint pins still
+distinguish the two policies. Only a bounded raw miss triggers one extra bank
+of probe readouts and one anchor backward. Rust then bisects the angle between
+the raw direction and the full projection; this is **not** halving the
+un-normalized correction. At most two searches of 20 candidates each use the
+same origin bank and the same loss gradient. No intermediate model is installed.
+
+On rescue, `raw_miss` records the first reason, trials and readout count.
+Top-level `anchor_readouts` is the **total**, not something to add to the raw
+count. Top-level `trials` belongs to the terminal direction (empty if a
+normal/residual could not be resolved). `direction.midpoint` gives the
+actual ray norm and its cosines to both input directions. After a rescued
+match check `direction.source_loss_dot_step` for the original loss derivative.
+An invalid raw step is not a reason to try a different one.
+In Rust, `CausalLmLineAttempt::Unmatched.refusal` is boxed; matching code
+can borrow it or move out with `*refusal`. Its JSON representation is unchanged.
+
+Open **Keep the step that works** in the browser demo to [reproduce the six
+generated trajectories](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_MIDPOINT.md).
 
 ## Finite-checked learning
 

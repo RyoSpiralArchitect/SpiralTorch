@@ -52,7 +52,7 @@ pub use adaptation_ray::{CausalLmAdaptationRayGroup, CausalLmAdaptationRayStep};
 pub use anchor_kl::{
     CausalLmAnchorDirection, CausalLmAnchorKlCriterion, CausalLmAnchorKlMatch,
     CausalLmAnchorKlPeak, CausalLmAnchorKlPolicy, CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
-    CausalLmSecantAnchor, CausalLmSecantReport,
+    CausalLmRawRayMiss, CausalLmSecantAnchor, CausalLmSecantMidpoint, CausalLmSecantReport,
 };
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;

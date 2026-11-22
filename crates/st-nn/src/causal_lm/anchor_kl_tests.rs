@@ -9,6 +9,9 @@ mod envelope;
 #[path = "anchor_secant_tests.rs"]
 mod secant;
 
+#[path = "anchor_midpoint_tests.rs"]
+mod midpoint;
+
 fn independent(a: &NativeCausalLm, b: &NativeCausalLm) -> Vec<f64> {
     let logs = |m: &NativeCausalLm, p| {
         let row = m.next_token_logits(p).unwrap();
