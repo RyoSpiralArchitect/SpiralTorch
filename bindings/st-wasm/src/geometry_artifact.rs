@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 /// Shared portable state validation, not a browser HF execution adapter.
 #[wasm_bindgen]
 pub struct GeometryAdapterArtifact {
-    inner: CoreArtifact,
+    pub(crate) inner: CoreArtifact,
 }
 
 /// Token lengths only; document content and tokenization remain client-owned.

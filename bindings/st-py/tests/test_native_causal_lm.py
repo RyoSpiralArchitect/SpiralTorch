@@ -66,6 +66,26 @@ def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weigh
     return json.dumps(config), bytes(weights) if raw_weights else st.SafeTensorArchive.from_bytes(weights)
 
 
+def uniform_set_fixture(*outside_rows):
+    """Portable artificial readout: zero hidden input, trainable downstream bias."""
+    vocab = 2 + len(outside_rows)
+    config, raw = fixture(vocabulary=vocab, layers=1, constant_logits=[0.] * vocab, raw_weights=True)
+    size, = struct.unpack_from("<Q", raw)
+    header = json.loads(raw[8:8+size])
+    buf = bytearray(raw)
+    def put(key, values):
+        a, b = header[key]["data_offsets"]
+        assert b-a == 4 * len(values)
+        struct.pack_into(f"<{len(values)}f", buf, 8 + size + a, *values)
+    put("ln_f.weight", [1.] * 4)
+    put("ln_f.bias", [0.] * 4)
+    head = [0., 0., 0., 0., 1., -1., 0., 0.]
+    for axis, tilt in outside_rows:
+        head.extend([axis, -axis, tilt, -tilt])
+    put("lm_head.weight", head)
+    return config, bytes(buf)
+
+
 def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False, trainable_names=("gate",)):
     return st.GeometryAdapterArtifact.create_json(json.dumps({
         "schema": "spiraltorch.geometry_adapter_artifact.v1", "base_model_identity": model.base_model_identity,
@@ -1305,22 +1325,8 @@ assert session.predecessor_checkpoint_id == predecessor
             self.model.geometry_full_and_declared_gradients(Unread(), shape, **kw)
 
     def _uniform_set_geometry(self, *outside_rows):
-        vocab = 2 + len(outside_rows)
-        config, raw = fixture(vocabulary=vocab, layers=1, constant_logits=[0.] * vocab, raw_weights=True)
-        size, = struct.unpack_from("<Q", raw)
-        header = json.loads(raw[8:8+size])
-        buf = bytearray(raw)
-        def put(key, values):
-            a, b = header[key]["data_offsets"]
-            self.assertEqual(b-a, 4 * len(values))
-            struct.pack_into(f"<{len(values)}f", buf, 8 + size + a, *values)
-        put("ln_f.weight", [1.] * 4)
-        put("ln_f.bias", [0.] * 4)
-        head = [0.,0.,0.,0., 1.,-1.,0.,0.]
-        for axis, tilt in outside_rows:
-            head.extend([axis,-axis,tilt,-tilt])
-        put("lm_head.weight", head)
-        base = st.NativeCausalLm.from_gpt2(config, st.SafeTensorArchive.from_bytes(bytes(buf)))
+        config, raw = uniform_set_fixture(*outside_rows)
+        base = st.NativeCausalLm.from_gpt2(config, st.SafeTensorArchive.from_bytes(raw))
         return base.with_geometry(artifact(base, path="transformer.h.0", gate=0.,
                                            trainable=True, trainable_names=("bias",)))
 

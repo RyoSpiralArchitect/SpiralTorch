@@ -435,6 +435,11 @@ impl NativeCausalLm {
         ])?)
     }
 
+    /// A [1, vocabulary] host tensor from the last position, without an N-D readback.
+    pub fn next_token_logits(&self, prompt_ids: &[usize]) -> CausalLmResult<Tensor> {
+        self.logits(prompt_ids, [1, prompt_ids.len()], true)
+    }
+
     pub fn next_token_ids(
         &self,
         input_ids: &[usize],
@@ -487,7 +492,7 @@ impl NativeCausalLm {
         target_id: usize,
     ) -> CausalLmResult<TargetClassScore> {
         TargetClassScore::validate_domain(self.config.vocabulary, target_id)?;
-        let logits = self.logits(prompt_ids, [1, prompt_ids.len()], true)?;
+        let logits = self.next_token_logits(prompt_ids)?;
         Ok(TargetClassScore::from_logits(logits.data(), target_id)?)
     }
 
@@ -500,7 +505,7 @@ impl NativeCausalLm {
         alternative_id: usize,
     ) -> CausalLmResult<CausalLmTokenContrast> {
         self.check_contrast_candidates(target_id, alternative_id)?;
-        let logits = self.logits(prompt_ids, [1, prompt_ids.len()], true)?;
+        let logits = self.next_token_logits(prompt_ids)?;
         Ok(Self::contrast_row(
             logits.data(),
             prompt_ids.len(),

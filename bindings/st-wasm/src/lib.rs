@@ -3,6 +3,8 @@
 mod api_llm_policy;
 mod autograd;
 #[cfg(all(target_arch = "wasm32", feature = "nn"))]
+mod causal_lm;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
 mod channel_affine;
 mod cobol;
 mod concept_diffusion;
@@ -14,7 +16,7 @@ mod fractional_learning;
 mod free_energy;
 mod generation_control;
 mod generation_evidence;
-#[cfg(feature = "nn")]
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
 mod geometry_artifact;
 mod imaginary_time_schrodinger;
 #[cfg(all(target_arch = "wasm32", feature = "nn"))]
@@ -99,6 +101,8 @@ pub use autograd::*;
 #[cfg(target_arch = "wasm32")]
 pub use canvas::*;
 #[cfg(all(target_arch = "wasm32", feature = "nn"))]
+pub use causal_lm::*;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
 pub use channel_affine::*;
 pub use cobol::*;
 #[cfg(target_arch = "wasm32")]
@@ -115,7 +119,7 @@ pub use fractional_learning::*;
 pub use free_energy::*;
 pub use generation_control::*;
 pub use generation_evidence::*;
-#[cfg(feature = "nn")]
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
 pub use geometry_artifact::*;
 pub use imaginary_time_schrodinger::*;
 #[cfg(all(target_arch = "wasm32", feature = "nn"))]

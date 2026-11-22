@@ -246,6 +246,10 @@ fn complete_decoder_preserves_batch_causality_and_last_projection() {
     );
     let last = model.forward(&[1, 2, 3, 4, 5, 6], [2, 3], true).unwrap();
     assert_eq!(last.shape(), [2, 1, 11]);
+    let row = model.next_token_logits(&[4, 5, 6]).unwrap();
+    assert_eq!(row.shape(), (1, 11));
+    close(row.data(), &values[55..66]);
+    assert!(model.next_token_logits(&[]).is_err());
     close(
         &last.read_values().unwrap(),
         &[&values[22..33], &values[55..66]].concat(),

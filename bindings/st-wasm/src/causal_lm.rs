@@ -1,0 +1,214 @@
+//! Bounded host-memory access to the st-nn decoder. JS never proposes or selects weights.
+use crate::geometry_artifact::GeometryAdapterArtifact;
+use crate::utils::{bounded_json_string_from_js, js_error};
+use js_sys::{JsString, Uint8Array};
+use serde::Deserialize;
+use st_nn::causal_lm::{
+    CausalLmDeclaredSetStep, CausalLmLimits, DeclaredRivalRow, NativeCausalLm as Decoder,
+    MAX_DECLARED_RIVAL_IDS,
+};
+use st_nn::weights::{SafeTensorArchive, WeightLoadLimits};
+use wasm_bindgen::prelude::*;
+
+const FILE_BYTES: usize = 64 << 20;
+const PARAMETERS: usize = 8 << 20;
+const WINDOW_IDS: usize = 65_536;
+
+#[wasm_bindgen(inline_js = r#"
+const proto = Object.getPrototypeOf(Uint8Array.prototype);
+const getter = (p, k) => Function.prototype.call.bind(Object.getOwnPropertyDescriptor(p, k).get);
+const brand = getter(proto, Symbol.toStringTag), length = getter(proto, 'length');
+const buffer = getter(proto, 'buffer'), ordinary = getter(ArrayBuffer.prototype, 'byteLength');
+const Bytes = Uint8Array, copy = Function.prototype.call.bind(Bytes.prototype.set);
+export function causalLmArchiveSnapshot(value, maximum) {
+    if (brand(value) !== 'Uint8Array') throw new TypeError('weights must be a Uint8Array');
+    ordinary(buffer(value)); // A concurrently writable SharedArrayBuffer is not a snapshot.
+    const n = length(value);
+    if (n < 8 || n > maximum) throw new RangeError('safetensors archive byte budget');
+    const result = new Bytes(n);
+    copy(result, value);
+    return result;
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch, js_name = causalLmArchiveSnapshot)]
+    fn archive_snapshot(value: &JsValue, maximum: usize) -> Result<Uint8Array, JsValue>;
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BatchWire {
+    shape: [usize; 2],
+    ids: Vec<usize>,
+    labels: Option<Vec<i64>>,
+    #[serde(default)]
+    contrasts: Vec<(usize, usize, Vec<usize>)>,
+}
+
+/// Unshifted [batch,time] IDs, optional labels (-100 ignores) and sorted [position,target,rivals].
+#[wasm_bindgen]
+pub struct CausalLmDeclaredBatch {
+    shape: [usize; 2],
+    ids: Vec<usize>,
+    labels: Option<Vec<i64>>,
+    rows: Vec<DeclaredRivalRow>,
+}
+
+#[wasm_bindgen]
+impl CausalLmDeclaredBatch {
+    #[wasm_bindgen(js_name = fromJson)]
+    pub fn from_json(value: &JsString) -> Result<Self, JsValue> {
+        let text = bounded_json_string_from_js(value, 1 << 20, "causal batch")?;
+        let v: BatchWire = serde_json::from_str(&text).map_err(js_error)?;
+        let [b, t] = v.shape;
+        let count = b.checked_mul(t).filter(|&n| n <= WINDOW_IDS);
+        if b == 0
+            || t < 2
+            || count != Some(v.ids.len())
+            || v.labels.as_ref().is_some_and(|x| Some(x.len()) != count)
+        {
+            return Err(js_error("invalid causal batch shape or window length"));
+        }
+        if v.contrasts.len() > v.ids.len()
+            || v.contrasts.iter().map(|r| r.2.len()).sum::<usize>() > MAX_DECLARED_RIVAL_IDS
+        {
+            return Err(js_error("causal batch exceeds declared rival budget"));
+        }
+        Ok(Self {
+            shape: v.shape,
+            ids: v.ids,
+            labels: v.labels,
+            rows: v
+                .contrasts
+                .into_iter()
+                .map(|(position, target, rivals)| DeclaredRivalRow {
+                    position,
+                    target,
+                    rivals,
+                })
+                .collect(),
+        })
+    }
+}
+
+#[wasm_bindgen]
+pub struct NativeCausalLm {
+    model: Decoder,
+}
+
+#[wasm_bindgen]
+impl NativeCausalLm {
+    /// One in-memory, bounded GPT-2-format safetensors archive. No network, GPU or model code.
+    #[wasm_bindgen(js_name = fromGpt2)]
+    pub fn from_gpt2(config: &JsString, weights: &JsValue) -> Result<Self, JsValue> {
+        let config = bounded_json_string_from_js(config, 131_072, "GPT-2 config")?;
+        let bytes = archive_snapshot(weights, FILE_BYTES)?.to_vec();
+        let archive = SafeTensorArchive::from_owned_bytes(
+            bytes,
+            WeightLoadLimits {
+                max_file_bytes: FILE_BYTES,
+                max_header_bytes: 1 << 20,
+                max_tensors: 4096,
+                max_tensor_elements: PARAMETERS,
+                ..Default::default()
+            },
+        )
+        .map_err(js_error)?;
+        let limits = CausalLmLimits {
+            max_parameter_elements: PARAMETERS,
+            max_activation_elements: 1 << 20,
+            max_attention_pairs: 1 << 20,
+            max_logit_elements: 1 << 20,
+            max_training_checkpoint_elements: 1 << 20,
+        };
+        Decoder::from_gpt2_json(config.as_bytes(), &archive, limits)
+            .map(|model| Self { model })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(getter, js_name = baseModelIdentity)]
+    pub fn base_model_identity(&self) -> String {
+        self.model.base_model_identity().to_owned()
+    }
+
+    #[wasm_bindgen(js_name = withGeometry)]
+    pub fn with_geometry(&self, artifact: &GeometryAdapterArtifact) -> Result<Self, JsValue> {
+        self.model
+            .with_geometry(artifact.inner.clone())
+            .map(|model| Self { model })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = geometryArtifact)]
+    pub fn geometry_artifact(&self) -> Option<GeometryAdapterArtifact> {
+        self.model
+            .geometry_artifact()
+            .cloned()
+            .map(|inner| GeometryAdapterArtifact { inner })
+    }
+
+    /// Final-position vocabulary logits for one nonempty prompt, without appending a target.
+    #[wasm_bindgen(js_name = nextLogits)]
+    pub fn next_logits(&self, prompt: &JsString) -> Result<Vec<f32>, JsValue> {
+        let prompt = bounded_json_string_from_js(prompt, 1 << 20, "causal prompt")?;
+        let ids: Vec<usize> = serde_json::from_str(&prompt).map_err(js_error)?;
+        if ids.len() > WINDOW_IDS {
+            return Err(js_error("causal prompt exceeds token budget"));
+        }
+        self.model
+            .next_token_logits(&ids)
+            .map(|row| row.data().to_vec())
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = declaredSetNllJson)]
+    pub fn declared_set_nll_json(&self, b: &CausalLmDeclaredBatch) -> Result<String, JsValue> {
+        let scores = self
+            .model
+            .declared_set_nll(&b.ids, b.shape, b.labels.as_deref(), &b.rows)
+            .map_err(js_error)?;
+        serde_json::to_string(&scores).map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = stepDeclaredSetGeometryAtDistance)]
+    pub fn step_declared_set_geometry_at_distance(
+        &self,
+        b: &CausalLmDeclaredBatch,
+        distance: &JsValue,
+    ) -> Result<CausalLmDeclaredStep, JsValue> {
+        let distance = distance
+            .as_f64()
+            .ok_or_else(|| js_error("distance must be a number"))?;
+        let (model, report) = self
+            .model
+            .step_declared_set_geometry_at_distance(
+                &b.ids,
+                b.shape,
+                b.labels.as_deref(),
+                &b.rows,
+                distance,
+            )
+            .map_err(js_error)?;
+        Ok(CausalLmDeclaredStep { model, report })
+    }
+}
+
+#[wasm_bindgen]
+pub struct CausalLmDeclaredStep {
+    model: Decoder,
+    report: CausalLmDeclaredSetStep,
+}
+
+#[wasm_bindgen]
+impl CausalLmDeclaredStep {
+    #[wasm_bindgen(js_name = reportJson)]
+    pub fn report_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.report).map_err(js_error)
+    }
+
+    /// Consumes the step, not the origin. On a finite rejection this returns the unchanged model.
+    #[wasm_bindgen(js_name = intoModel)]
+    pub fn into_model(self) -> NativeCausalLm {
+        NativeCausalLm { model: self.model }
+    }
+}

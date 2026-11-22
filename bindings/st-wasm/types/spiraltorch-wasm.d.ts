@@ -19,6 +19,42 @@ declare module "spiraltorch-wasm" {
     export function alignCausalTargetsJson(input: string): string;
     /** Requires nn. Bind independently encoded prompt, content and training IDs; optional source offsets. */
     export function prepareCausalCompletionJson(input: string): string;
+    /** Requires nn. One immutable native GPT-2-format decoder in WASM host memory. */
+    export class NativeCausalLm {
+        private constructor();
+        static fromGpt2(config: string, weights: Uint8Array): NativeCausalLm;
+        readonly baseModelIdentity: string;
+        withGeometry(artifact: GeometryAdapterArtifact): NativeCausalLm;
+        geometryArtifact(): GeometryAdapterArtifact | undefined;
+        nextLogits(promptJson: string): Float32Array;
+        declaredSetNllJson(batch: CausalLmDeclaredBatch): string;
+        stepDeclaredSetGeometryAtDistance(batch: CausalLmDeclaredBatch, distance: number): CausalLmDeclaredStep;
+        free(): void;
+    }
+    export class GeometryAdapterArtifact {
+        private constructor();
+        static createJson(payload: string): GeometryAdapterArtifact;
+        static fromJson(payload: string, expected_id: string, expected_base_model_identity: string): GeometryAdapterArtifact;
+        readonly artifactId: string;
+        readonly layoutId: string;
+        readonly baseModelIdentity: string;
+        toJson(): string;
+        stateJson(): string;
+        anchorWaveProjection(path: string): GeometryAdapterArtifact;
+        free(): void;
+    }
+    export class CausalLmDeclaredBatch {
+        private constructor();
+        static fromJson(windows: string): CausalLmDeclaredBatch;
+        free(): void;
+    }
+    export class CausalLmDeclaredStep {
+        private constructor();
+        reportJson(): string;
+        /** Consumes this handle. Returns the original weights on a finite rejection. */
+        intoModel(): NativeCausalLm;
+        free(): void;
+    }
     /** Requires nn; GPU methods additionally require webgpu. Rust owns all study semantics. */
     export class ByteCorpusStudy {
         private constructor();
