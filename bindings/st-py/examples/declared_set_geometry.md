@@ -35,6 +35,11 @@ base/LoRA, or guarantee for individual examples or unseen prompts. Invalid
 inputs, zero gradients and infeasible directions raise an error rather than
 pretending to have evaluated a candidate. Ordinary training APIs are unchanged.
 
+The finite check reuses **only** this batch's block input immediately before
+the earliest attached geometry. Every affected block, the vocabulary readout
+and both losses are recomputed on the proposal. Nothing is cached across
+steps or prompts. At block zero no transformer blocks can be skipped.
+
 For monitoring only, `model.declared_set_nll(ids, shape, **supervision)`
 needs no adapter and builds no gradient. For a custom update,
 `within, coverage, scores = model.geometry_declared_set_gradients(ids, shape, **supervision)`
