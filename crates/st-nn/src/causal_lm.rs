@@ -62,7 +62,8 @@ pub use generation::{
     CausalLmPreparedGenerationInterval, NativeCausalLmGenerator,
 };
 pub use geometry_cohort::{
-    CausalLmGeometryCohortStep, MAX_GEOMETRY_COHORT_ELEMENTS, MAX_GEOMETRY_COHORT_MEMBERS,
+    CausalLmGeometryCohortRayStep, CausalLmGeometryCohortStep, MAX_GEOMETRY_COHORT_ELEMENTS,
+    MAX_GEOMETRY_COHORT_MEMBERS,
 };
 pub use gradient_alignment::{CausalLmGradientAlignment, CausalLmGradientPairStats};
 pub use key_lag::CausalLmKeyLag;

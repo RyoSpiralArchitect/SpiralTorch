@@ -900,17 +900,37 @@ impl PyNativeCausalLm {
         self.inner
             .validate_geometry_cohort(n, rate, target)
             .map_err(error)?;
-        let owners = (0..n)
-            .map(|i| {
-                gradients
-                    .get_item(i)?
-                    .cast_into::<PyNativeCausalLmAdaptationGradients>()
-                    .map_err(Into::into)
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+        let owners = groups::members(gradients, n)?;
         let members: Vec<_> = owners.iter().map(|o| &o.get().inner).collect();
         let (inner, receipt) = py
             .detach(|| self.inner.step_geometry_cohort_sgd(&members, rate, target))
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(receipt).map_err(error)?)?,
+        ))
+    }
+
+    /// Normalize the f64 equal-vote mean before rounding the updated geometry to f32.
+    fn step_geometry_cohort_gradient_at_distance(
+        &self,
+        py: Python<'_>,
+        gradients: &Bound<'_, PyAny>,
+        target_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        let n = gradients.len()?;
+        reject_bool(target_l2)?;
+        let distance = target_l2.extract::<f64>()?;
+        self.inner
+            .validate_geometry_cohort_ray(n, distance)
+            .map_err(error)?;
+        let owners = groups::members(gradients, n)?;
+        let members: Vec<_> = owners.iter().map(|o| &o.get().inner).collect();
+        let (inner, receipt) = py
+            .detach(|| {
+                self.inner
+                    .step_geometry_cohort_gradient_at_distance(&members, distance)
+            })
             .map_err(error)?;
         Ok((
             Self { inner },

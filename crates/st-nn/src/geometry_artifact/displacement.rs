@@ -91,6 +91,23 @@ impl GeometryAdapterArtifact {
         gradients: &BTreeMap<String, BTreeMap<String, Vec<f32>>>,
         requested_l2: f64,
     ) -> Result<(Self, GeometryGradientStep)> {
+        self.match_gradient_ray(gradients, requested_l2, "gradient_ray_f32.v1")
+    }
+
+    pub(crate) fn match_validated_cohort_ray(
+        &self,
+        mean: &BTreeMap<String, BTreeMap<String, Vec<f64>>>,
+        requested_l2: f64,
+    ) -> Result<(Self, GeometryGradientStep)> {
+        self.match_gradient_ray(mean, requested_l2, "cohort_mean_gradient_ray_f64.v1")
+    }
+
+    fn match_gradient_ray<T: Copy + Into<f64>>(
+        &self,
+        gradients: &BTreeMap<String, BTreeMap<String, Vec<T>>>,
+        requested_l2: f64,
+        method: &'static str,
+    ) -> Result<(Self, GeometryGradientStep)> {
         GeometryDeltaMatch::validate_requested_l2(requested_l2)?;
         let mut count = 0;
         let mut norm = Squares::default();
@@ -99,7 +116,7 @@ impl GeometryAdapterArtifact {
                 let g = &gradients[&p.path][&t.name];
                 count += g.len();
                 for &x in g {
-                    norm.add(f64::from(x));
+                    norm.add(x.into());
                 }
             }
         }
@@ -118,10 +135,10 @@ impl GeometryAdapterArtifact {
             for p in &mut record.placements {
                 for t in p.tensors.iter_mut().filter(|t| trainable(t)) {
                     for (x, &g) in t.values.iter_mut().zip(&gradients[&p.path][&t.name]) {
+                        let g = g.into();
                         if g == 0.0 {
                             continue;
                         }
-                        let g = f64::from(g);
                         let origin = f64::from(*x);
                         let unit = -g / gradient_l2;
                         let rounded = (origin + requested_l2 * unit) as f32;
@@ -142,7 +159,7 @@ impl GeometryAdapterArtifact {
             (Self::create(record)?, realized, relative, dot)
         };
         let report = GeometryGradientStep {
-            method: "gradient_ray_f32.v1",
+            method,
             origin_id: self.artifact_id().to_owned(),
             result_id: result.artifact_id().to_owned(),
             trainable_values: count,

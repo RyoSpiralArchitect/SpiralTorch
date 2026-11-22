@@ -1477,6 +1477,37 @@ assert session.predecessor_checkpoint_id == predecessor
         two,_=m.step_geometry_cohort_sgd([a,b],.125)
         self.assertEqual(pair.geometry_artifact_id,two.geometry_artifact_id)
 
+    def test_cohort_gradient_ray_matches_singletons_and_admits_before_extraction(self):
+        m = self.model.with_lora(1, 2, 3.).with_geometry(
+            artifact(self.model, path="transformer.h.1.attn", trainable=True))
+        g = m.geometry_line_set_gradients([1], [[2]], stop_id=0)
+        single, step = m.step_geometry_gradient_at_distance(g, 1 / 256)
+        end, cohort = m.step_geometry_cohort_gradient_at_distance([g, g], 1 / 256)
+        self.assertEqual(single.geometry_artifact().to_json(), end.geometry_artifact().to_json())
+        self.assertEqual(cohort["step"], {**step, "method": "cohort_mean_gradient_ray_f64.v1"})
+        self.assertEqual((cohort["members"], cohort["total_target_tokens"]), (2, 2 * g.target_tokens))
+        self.assertEqual(end.lora_to_json(), m.lora_to_json())
+        for dot in cohort["member_loss_dots"]:
+            self.assertAlmostEqual(dot, step["gradient_dot_step"], places=14)
+        with self.assertRaises(ValueError):
+            end.step_geometry_cohort_gradient_at_distance([g], 0.)
+
+        class Unread:
+            def __init__(self, size):
+                self.size = size
+            def __len__(self):
+                return self.size
+            def __getitem__(self, i):
+                raise AssertionError("item read before admission")
+
+        for size, distance in [(0, 0.), (257, 0.), (1, -1.), (1, float("nan"))]:
+            with self.assertRaises(ValueError):
+                m.step_geometry_cohort_gradient_at_distance(Unread(size), distance)
+        with self.assertRaises((TypeError, ValueError)):
+            m.step_geometry_cohort_gradient_at_distance(Unread(1), True)
+        with self.assertRaises(TypeError):
+            m.step_geometry_cohort_gradient_at_distance([object()], 0.)
+
     def test_common_geometry_admits_groups_and_checks_post_rounding_descent(self):
         m=self.model.with_lora(1,2,3.).with_geometry(artifact(self.model,path="transformer.h.1.attn",trainable=True))
         a=m.geometry_line_set_gradients([1],[[2]],stop_id=0)
