@@ -13,6 +13,7 @@ use std::sync::{Arc, OnceLock};
 
 mod adaptation;
 mod adaptation_ray;
+mod anchor_kl;
 mod checkpoint;
 mod common_geometry;
 mod competition_pair;
@@ -48,6 +49,9 @@ mod training;
 mod wave_margin;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
 pub use adaptation_ray::{CausalLmAdaptationRayGroup, CausalLmAdaptationRayStep};
+pub use anchor_kl::{
+    CausalLmAnchorKlMatch, CausalLmAnchorKlPolicy, CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
+};
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
 pub use common_geometry::{

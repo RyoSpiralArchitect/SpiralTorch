@@ -1,6 +1,10 @@
 use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "anchor_kl_tests.rs"]
+mod anchor_kl_steps;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "line_ray_tests.rs"]
 mod line_ray;
 

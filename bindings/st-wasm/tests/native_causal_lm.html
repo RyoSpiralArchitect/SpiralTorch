@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>pre {max-width:100%;overflow:auto} #motion {max-width:44rem} #motion table {width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums} #motion th,#motion td {padding:.3rem .4rem;text-align:right;border-bottom:1px solid #aaa} #motion th:first-child,#motion td:first-child {text-align:left} #motion caption {text-align:left;margin:.5rem 0}</style>
+<style>pre {max-width:100%;overflow:auto} section {max-width:44rem} section table {width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums} section th,section td {padding:.3rem .4rem;text-align:right;border-bottom:1px solid #aaa} section th:first-child,section td:first-child {text-align:left} section caption {text-align:left;margin:.5rem 0}</style>
 <title>Native causal LM: finite-checked geometry learning</title>
 <h1>Native causal LM: finite-checked geometry learning</h1>
 <p>Four learning controls and six models for cached continuation and terminated answer scoring, using the Rust decoder in WASM host memory. No pretrained model or GPU.</p>
@@ -15,6 +15,13 @@
 <tbody></tbody></table>
 <p>Fixed distance gives the selected weights one shared budget per step. Equal parameter distances need not produce equal changes in the model's predictions.</p>
 </section>
+<section id="distribution" hidden>
+<h2>Same change in predictions</h2>
+<p>Each of six updates must spend 98&ndash;100% of the same average next-token KL budget on three training prompts. The parameter path is how far the weights actually moved.</p>
+<table><caption>Measured here on the artificial decoder; no held-out texts.</caption>
+<thead><tr><th scope="col">Weights</th><th scope="col">KL budget used</th><th scope="col">Parameter path</th></tr></thead>
+<tbody></tbody></table>
+</section>
 <pre id="ray-transfer" hidden></pre>
 <pre id="owner-transfer" hidden></pre>
 <pre id="line-transfer" hidden></pre>
@@ -25,6 +32,7 @@ import {checkCachedSuffix} from './native_causal_lm_cache.mjs';
 import {checkCachedLines} from './native_cached_lines.mjs';
 import {checkLineGradients} from './native_line_gradients.mjs';
 import {checkLineOwners} from './native_line_owners.mjs';
+import {checkLineAnchorKl} from './native_line_anchor_kl.mjs';
 import {checkLineSession} from './native_line_session.mjs';
 const result = document.getElementById('result');
 try {
@@ -36,6 +44,7 @@ try {
   report.cached = checkCachedSuffix(M, models);
   let portable, owners, ray;
   const ownersRef=await (await fetch('./native_line_owners_bridge.json')).json();
+  report.line_anchor_kl=checkLineAnchorKl(M,models,ownersRef);
   const rayRef=await (await fetch('./native_line_ray_bridge.json')).json();
   report.line_ray=checkLineOwners(M,models,{...ownersRef,...rayRef,expected_measurements:rayRef.measurements.ray}, checkpoints=>{ray=checkpoints;});
   report.line_owners=checkLineOwners(M,models,{...ownersRef,expected_measurements:rayRef.measurements.sgd}, checkpoints=>{owners=checkpoints;});
@@ -61,6 +70,15 @@ try {
     }
   }
   motion.hidden=false;
+  const distribution=document.getElementById('distribution');
+  for(const [owner,m] of Object.entries(report.line_anchor_kl.cases)) {
+    const tr=distribution.querySelector('tbody').insertRow(), name=document.createElement('th');
+    name.scope='row'; name.textContent=owner; tr.append(name);
+    const ratios=m.steps.map(s=>s.mean_kl*65536*100);
+    tr.insertCell().textContent=Math.min(...ratios).toFixed(1)+'\u2013'+Math.max(...ratios).toFixed(1)+'%';
+    tr.insertCell().textContent=m.parameter_path.toFixed(5);
+  }
+  distribution.hidden=false;
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = 'passed';
 } catch (e) {

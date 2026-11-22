@@ -48,6 +48,23 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_unmatched_anchor_kl_does_not_publish_or_advance(self):
+        _, model = owners()
+        update = dict(kind="anchor_forward_kl", target_kl=1e6,
+                      max_parameter_l2=1/16, anchor_examples=[0])
+        plan = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="joint",
+                    update=update, examples=[dict(prompt_ids=[1, 2], candidates=[[1], [2]],
+                                                  stop_id=0, objective={"kind":"set"})])
+        session = st.NativeCausalLmLineTrainingSession(model, json.dumps(plan))
+        before = session.checkpoint_with_id()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"unmatched.json"
+            with self.assertRaisesRegex(ValueError, "anchor KL not matched"):
+                session.advance_to_checkpoint_new(1, path)
+            self.assertFalse(path.exists())
+        self.assertEqual(session.completed_updates, 0)
+        self.assertEqual(session.checkpoint_with_id(), before)
+
     def test_global_ray_admission_and_joint_checkpointed_segment(self):
         base, m = owners()
         args=([1,2], [[1],[1,2],[3]])

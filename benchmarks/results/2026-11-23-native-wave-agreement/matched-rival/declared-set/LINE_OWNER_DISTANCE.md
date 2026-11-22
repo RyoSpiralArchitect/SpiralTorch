@@ -35,6 +35,9 @@ about 3.32 times the geometry-only RMS despite equal path lengths. An intrinsic
 distance, KL budget or output-space trust region is not being matched. LoRA's
 factor coordinates depend on the choice of scale for A and B.
 
+The [matched next-token KL comparison](LINE_ANCHOR_KL.md) tests the prediction-space
+alternative on these same training prompts and reports individual-anchor variation.
+
 ## What the optimizer does
 
 For selected gradients `g`, Rust constructs the concatenated f64 unit direction

@@ -44,6 +44,23 @@ fn group(
 }
 
 impl NativeCausalLm {
+    pub(super) fn admit_adaptation_distance(
+        &self,
+        mode: CausalLmAdaptationMode,
+        distance: f64,
+    ) -> CausalLmResult<()> {
+        let lora = self
+            .lora
+            .as_ref()
+            .filter(|_| mode != CausalLmAdaptationMode::Geometry)
+            .map_or(0, |a| a.parameter_count());
+        let geometry = self
+            .geometry_artifact()
+            .filter(|_| mode != CausalLmAdaptationMode::Lora)
+            .map_or(0, GeometryAdapterArtifact::trainable_values);
+        Ok(ParameterRay::admit_distance(distance, lora + geometry)?)
+    }
+
     /// Normalize the sealed gradient in the concatenation of the selected groups,
     /// before any SGD proposal or f32 parameter rounding. A joint gradient may
     /// also be used for either individual control at the very same origin.

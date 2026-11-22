@@ -136,14 +136,38 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     T::deserialize(d).map(Some)
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Update {
-    Sgd { learning_rate: f32 },
-    ParameterGradientL2 { target_l2: f64 },
+    Sgd {
+        learning_rate: f32,
+    },
+    ParameterGradientL2 {
+        target_l2: f64,
+    },
+    AnchorForwardKl {
+        target_kl: f64,
+        max_parameter_l2: f64,
+        anchor_examples: Vec<usize>,
+    },
 }
 
 impl Plan {
+    fn anchor_prompts(&self, indices: &[usize]) -> CausalLmResult<Vec<&[usize]>> {
+        if !(1..=CausalLmAnchorKlPolicy::MAX_ANCHORS).contains(&indices.len()) {
+            return Err("invalid number of anchor example indices".into());
+        }
+        indices
+            .iter()
+            .map(|&i| {
+                self.examples
+                    .get(i)
+                    .map(|e| e.prompt_ids.as_slice())
+                    .ok_or_else(|| "anchor example index out of range".into())
+            })
+            .collect()
+    }
+
     fn contract(
         &self,
         origin: &NativeCausalLm,
@@ -152,7 +176,7 @@ impl Plan {
             self.schema.as_str(),
             self.mode,
             self.learning_rate,
-            self.update,
+            self.update.as_ref(),
         ) {
             (PLAN_SCHEMA, None, Some(learning_rate), None) => (
                 CausalLmAdaptationMode::Geometry,
@@ -161,7 +185,22 @@ impl Plan {
             (PLAN_V2, Some(mode), Some(learning_rate), None) => {
                 (mode, Update::Sgd { learning_rate })
             }
-            (PLAN_V3, Some(mode), None, Some(policy)) => (mode, policy),
+            (PLAN_V3, Some(mode), None, Some(policy)) => {
+                if let Update::AnchorForwardKl {
+                    anchor_examples,
+                    target_kl,
+                    max_parameter_l2,
+                } = policy
+                {
+                    let prompts = self.anchor_prompts(anchor_examples)?;
+                    CausalLmAnchorKlPolicy {
+                        target_kl: *target_kl,
+                        max_parameter_l2: *max_parameter_l2,
+                    }
+                    .admit(origin, mode, &prompts)?;
+                }
+                (mode, policy.clone())
+            }
             _ => {
                 return Err("invalid complete-line plan schema, owner mode or update policy".into())
             }
@@ -173,16 +212,7 @@ impl Plan {
             }
             Update::ParameterGradientL2 { target_l2 } => {
                 // An impossible global f32 budget can be refused before any decoder work.
-                let lo = origin
-                    .lora
-                    .as_ref()
-                    .filter(|_| mode != CausalLmAdaptationMode::Geometry)
-                    .map_or(0, |a| a.parameter_count());
-                let geo = origin
-                    .geometry_artifact()
-                    .filter(|_| mode != CausalLmAdaptationMode::Lora)
-                    .map_or(0, GeometryAdapterArtifact::trainable_values);
-                crate::geometry_artifact::ParameterRay::admit_distance(target_l2, lo + geo)?
+                origin.admit_adaptation_distance(mode, target_l2)?;
             }
             _ => {}
         }
@@ -218,6 +248,8 @@ pub struct CausalLmLineAdaptationStep {
     pub update: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameter_ray: Option<CausalLmAdaptationRayStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_kl: Option<CausalLmAnchorKlMatch>,
     /// Zero-based epoch and example that produced this one-based update.
     pub epoch: u32,
     pub example_index: usize,
@@ -373,17 +405,35 @@ impl NativeCausalLmLineTrainingSession {
             self.plan.max_tile_values,
             self.mode,
         )?;
-        let (next, parameter_ray) = match self.update_policy {
+        let (next, parameter_ray, anchor_kl) = match &self.update_policy {
             Update::Sgd { learning_rate } => (
                 self.model
-                    .step_adaptation_sgd(&g, self.mode, learning_rate)?,
+                    .step_adaptation_sgd(&g, self.mode, *learning_rate)?,
+                None,
                 None,
             ),
             Update::ParameterGradientL2 { target_l2 } => {
                 let (next, ray) = self
                     .model
-                    .step_adaptation_gradient_at_distance(&g, self.mode, target_l2)?;
-                (next, Some(ray))
+                    .step_adaptation_gradient_at_distance(&g, self.mode, *target_l2)?;
+                (next, Some(ray), None)
+            }
+            Update::AnchorForwardKl {
+                target_kl,
+                max_parameter_l2,
+                anchor_examples,
+            } => {
+                let prompts = self.plan.anchor_prompts(anchor_examples)?;
+                let (next, ray, report) = self.model.step_adaptation_at_anchor_kl(
+                    &g,
+                    self.mode,
+                    &prompts,
+                    CausalLmAnchorKlPolicy {
+                        target_kl: *target_kl,
+                        max_parameter_l2: *max_parameter_l2,
+                    },
+                )?;
+                (next, Some(ray), Some(report))
             }
         };
         let objective = match &e.objective {
@@ -401,6 +451,7 @@ impl NativeCausalLmLineTrainingSession {
         };
         let report = CausalLmLineAdaptationStep {
             parameter_ray,
+            anchor_kl,
             update: self.updates + 1,
             epoch: self.updates / n as u32,
             example_index: i,

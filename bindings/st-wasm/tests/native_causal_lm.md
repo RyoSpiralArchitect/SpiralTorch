@@ -243,6 +243,28 @@ The demo download contains four artificial step-4 checkpoints from an actual
 Python-to-WASM handoff. Resume the matching case, not an unadapted base or a
 later version of its geometry. [Tests, limits and measured portability](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_SESSION.md).
 
+### Match prediction changes instead of parameter distance
+
+Set a v3 line plan's `update` to the following object. Python and WASM sessions
+run the same Rust policy; no client-side optimizer or probability library is needed.
+
+```json
+{"kind":"anchor_forward_kl","target_kl":0.0000152587890625,"max_parameter_l2":0.125,"anchor_examples":[0,1,2]}
+```
+
+`anchor_examples` indexes distinct prompts in the plan. Each accepted update
+uses 98% to 100% of the requested **mean** forward KL in nats,
+`KL(next_token_before || next_token_after)`, on those full-vocabulary last
+rows. Individual anchors can exceed the mean budget. Rust checks the ceiling
+first and then at most 19 bisection trials along the same sealed gradient.
+No match means no update or cursor advance; the ceiling is not a proof about
+unexamined smaller distances. Each step exposes `anchor_kl.per_anchor_kl`,
+`anchor_kl.trials`, the readout count and the accepted `parameter_ray`.
+Maximum 16 prompts, 1,024 anchor token IDs and 1,048,576 reference logits.
+Every trial costs one extra forward per anchor, not another backward.
+Rust also exposes `NativeCausalLm::step_adaptation_at_anchor_kl` for explicit
+anchor slices without a session. See the [three-owner comparison](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_ANCHOR_KL.md).
+
 ## Finite-checked learning
 
 ```js
