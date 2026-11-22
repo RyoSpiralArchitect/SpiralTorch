@@ -12,6 +12,33 @@ pub(super) enum BlockPass<'a> {
     Projection(projection_probe::ProjectionDelta<'a>),
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) mod work_counts {
+    use std::cell::Cell;
+    thread_local! { static COUNTS: Cell<[usize; 3]> = const { Cell::new([0; 3]) }; }
+
+    pub(crate) fn block(pass: &super::BlockPass<'_>) {
+        match pass {
+            super::BlockPass::Forward | super::BlockPass::Observe(_) => bump(0),
+            super::BlockPass::BackwardReplay => bump(1),
+            _ => {}
+        }
+    }
+    pub(crate) fn head() {
+        bump(2);
+    }
+    pub(crate) fn take() -> [usize; 3] {
+        COUNTS.with(Cell::take)
+    }
+    fn bump(i: usize) {
+        COUNTS.with(|c| {
+            let mut n = c.get();
+            n[i] += 1;
+            c.set(n);
+        });
+    }
+}
+
 pub(super) struct BlockCache {
     pub qkv: [Vec<f32>; 3],
     pub attention_input: Tensor,
@@ -156,6 +183,8 @@ impl NativeCausalLm {
         shape: [usize; 2],
         mut pass: BlockPass<'_>,
     ) -> CausalLmResult<BlockOutput> {
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        work_counts::block(&pass);
         let capture = matches!(pass, BlockPass::BackwardReplay);
         let inference = matches!(pass, BlockPass::Prefill);
         let block = &self.blocks[index];

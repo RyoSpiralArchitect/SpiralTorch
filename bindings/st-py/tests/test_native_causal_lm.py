@@ -66,13 +66,13 @@ def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weigh
     return json.dumps(config), bytes(weights) if raw_weights else st.SafeTensorArchive.from_bytes(weights)
 
 
-def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False):
+def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False, trainable_names=("gate",)):
     return st.GeometryAdapterArtifact.create_json(json.dumps({
         "schema": "spiraltorch.geometry_adapter_artifact.v1", "base_model_identity": model.base_model_identity,
         "policy": "full_prefix_f32_no_cache.v1", "training": trainable, "placements": [{
             "path": path, "training": trainable,
             "recipe": {"schema": "spiraltorch.channel_affine_adapter.v1", "features": 4, "strength": .5, "max_values": 1024},
-            "tensors": [{"name": name, "shape": [4], "values": values, "requires_grad": trainable and name == "gate", "role": "parameter"}
+            "tensors": [{"name": name, "shape": [4], "values": values, "requires_grad": trainable and name in trainable_names, "role": "parameter"}
                         for name, values in [("gate", [gate, 0., -gate, gate]), ("bias", [0.] * 4)]],
         }],
     }))
@@ -1265,6 +1265,83 @@ assert session.predecessor_checkpoint_id == predecessor
                 model.geometry_declared_rival_gradients(Unread(), [2, 3], contrasts=bad, mix=mix)
         for bad in [[(5, 2, [1])], [(2, 3, [1])]]:
             with self.assertRaises(ValueError): grad(bad, .5)
+
+    def test_full_and_declared_return_separate_guards_on_one_snapshot(self):
+        site = "transformer.h.1.attn"
+        m = self.model.with_lora(1, 2, 3.).with_geometry(
+            artifact(self.model, path=site, trainable=True)
+        ).with_forward_readout_storage("original_packed")
+        ids, shape = [1, 3, 5, 7], [1, 4]
+        labels, plan = [-100, -100, -100, 7], [(3, 7, [4])]
+        kw = dict(contrasts=plan, mix=1., labels=labels)
+        full, choice = m.geometry_full_and_declared_gradients(ids, shape, **kw)
+        full_ref = m.adaptation_loss_gradients(ids, shape, mode="geometry", labels=labels)
+        choice_ref = m.geometry_declared_rival_gradients(ids, shape, **kw)
+        for g, ref in [(full, full_ref), (choice, choice_ref)]:
+            self.assertEqual(g.loss, ref.loss)
+            self.assertEqual(g.declared_rival_report(), ref.declared_rival_report())
+            self.assertEqual((g.target_tokens, g.window_shape), (1, shape))
+            self.assertEqual((g.geometry_artifact_id, g.lora_artifact_id),
+                             (m.geometry_artifact_id, m.lora_artifact_id))
+            self.assertEqual(g.parameter_gradients(), ref.parameter_gradients())
+        self.assertIsNone(full.declared_rival_report())
+        self.assertEqual(choice.declared_rival_report()["full_ce"], full.loss)
+        self.assertNotEqual(choice.parameter_gradients(), full.parameter_gradients())
+        def guard(f, c):
+            candidate, _ = m.step_geometry_gradient_at_distance(c, 1. / 256)
+            return m.guard_geometry_step(candidate, [[c], [f]])
+        nxt, receipt = guard(full, choice)
+        expected, old_receipt = guard(full_ref, choice_ref)
+        self.assertEqual((nxt.geometry_artifact_id, receipt), (expected.geometry_artifact_id, old_receipt))
+        self.assertEqual(nxt.lora_to_json(), m.lora_to_json())
+        self.assertTrue(all(d < 0 for d in receipt["applied_loss_dots"]))
+        with self.assertRaises(ValueError):
+            nxt.step_geometry_gradient_at_distance(full, 1. / 256)
+        class Unread:
+            def __len__(self): raise AssertionError("extracted tokens before plan admission")
+        with self.assertRaises((ValueError, TypeError)):
+            m.geometry_full_and_declared_gradients(Unread(), shape, contrasts=plan, mix=True)
+        with self.assertRaises(ValueError):
+            self.model.geometry_full_and_declared_gradients(Unread(), shape, **kw)
+
+    def test_full_and_choice_guard_repairs_a_real_logit_conflict_or_refuses_antiparallel(self):
+        config, raw = fixture(vocabulary=3, layers=1, constant_logits=[0.] * 3, raw_weights=True)
+        size, = struct.unpack_from("<Q", raw)
+        header = json.loads(raw[8:8+size])
+        def put(buf, key, values):
+            a, b = header[key]["data_offsets"]
+            self.assertEqual(b-a, 4 * len(values))
+            struct.pack_into(f"<{len(values)}f", buf, 8 + size + a, *values)
+        def losses(m):
+            gold, rival, _ = m.forward([2], [1,1], last_only=True).values()
+            return math.log1p(math.exp(rival-gold)), m.next_token_score([2], 0)["nll"]
+        for tilt in [2., 0.]:
+            with self.subTest(tilt=tilt):
+                buf = bytearray(raw)
+                put(buf, "ln_f.weight", [1.] * 4)
+                put(buf, "ln_f.bias", [0.] * 4)
+                # At zero hidden state the readout is uniform. The distractor reverses
+                # the rival gradient's first axis; tilt adds a shared-descent direction.
+                put(buf, "lm_head.weight", [0.,0.,0.,0., 1.,-1.,0.,0., -3.,3.,tilt,-tilt])
+                base = st.NativeCausalLm.from_gpt2(config, st.SafeTensorArchive.from_bytes(bytes(buf)))
+                m = base.with_geometry(artifact(base, path="transformer.h.0", gate=0.,
+                                                trainable=True, trainable_names=("bias",)))
+                full, choice = m.geometry_full_and_declared_gradients(
+                    [2,0], [1,2], contrasts=[(1,0,[1])], mix=1.)
+                proposal, _ = m.step_geometry_gradient_at_distance(choice, 1. / 65536)
+                start, unsafe = losses(m), losses(proposal)
+                self.assertLess(unsafe[0], start[0])
+                self.assertGreater(unsafe[1], start[1])
+                if not tilt:
+                    with self.assertRaisesRegex(ValueError, "feasible interval"):
+                        m.guard_geometry_step(proposal, [[choice], [full]])
+                    self.assertEqual(losses(m), start)
+                    continue
+                safe, result = m.guard_geometry_step(proposal, [[choice], [full]])
+                self.assertGreater(result["mix"], 0.)
+                self.assertGreater(result["candidate_loss_dots"][1], 0.)
+                self.assertTrue(all(d < 0. for d in result["applied_loss_dots"]))
+                self.assertTrue(all(after < before for after, before in zip(losses(safe), start)))
 
     def test_mixture_probe_pins_forward_and_exports_native_boundary_bytes(self):
         site = "transformer.h.1.attn"

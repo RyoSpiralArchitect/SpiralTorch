@@ -265,8 +265,23 @@ impl NativeCausalLm {
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
         self.validate_adaptation_mode(CausalLmAdaptationMode::Geometry)?;
         let count = self.adaptation_labeled_input_count(shape, labels.is_some())?;
+        let (mut prepared, selected) =
+            self.prepare_declared_rows(windows, shape, labels, plan, mix, count)?;
+        prepared.competition = Some(objective::PreparedCompetition::Declared { selected, mix });
+        self.geometry_gradients_for_competition(&prepared)
+    }
+
+    fn prepare_declared_rows(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        plan: &[DeclaredRivalRow],
+        mix: f64,
+        count: usize,
+    ) -> CausalLmResult<(PreparedCausalWindow, Vec<DeclaredRivalRow>)> {
         DeclaredRivalRow::validate_plan(plan, count, self.config.vocabulary, mix)?;
-        let mut prepared =
+        let prepared =
             self.prepare_objective(windows, shape, labels, CausalLmObjective::default())?;
         let mut selected = Vec::with_capacity(plan.len());
         for r in plan {
@@ -290,8 +305,84 @@ impl NativeCausalLm {
                 rivals: r.rivals.clone(),
             });
         }
-        prepared.competition = Some(objective::PreparedCompetition::Declared { selected, mix });
-        self.geometry_gradients_for_competition(&prepared)
+        Ok((prepared, selected))
+    }
+
+    /// Admit both sealed gradient groups and both dense decoder adjoints before extracting IDs.
+    pub fn geometry_gradient_pair_input_count(
+        &self,
+        shape: [usize; 2],
+        has_labels: bool,
+    ) -> CausalLmResult<usize> {
+        self.validate_geometry_cohort_size(2)?;
+        let count = self.adaptation_labeled_input_count(shape, has_labels)?;
+        product(
+            &[2, shape[0], shape[1] - 1, self.config.width],
+            self.limits.max_activation_elements,
+            "paired geometry adjoints",
+        )?;
+        Ok(count)
+    }
+
+    /// Return (full-vocabulary CE, declared-rival mixture) on exactly the same logits.
+    /// Each is a separately usable geometry-only gradient of this immutable snapshot.
+    /// Share the decoder forward, vocabulary forward and each block's replay, not the VJPs.
+    pub fn geometry_full_and_declared_gradients(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        plan: &[DeclaredRivalRow],
+        mix: f64,
+    ) -> CausalLmResult<(
+        NativeCausalLmAdaptationGradients,
+        NativeCausalLmAdaptationGradients,
+    )> {
+        let count = self.geometry_gradient_pair_input_count(shape, labels.is_some())?;
+        let (prepared, rows) =
+            self.prepare_declared_rows(windows, shape, labels, plan, mix, count)?;
+        let (first, site) = self.first_geometry_site()?;
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        let learning::TrainingPrimal {
+            checkpoints,
+            hidden_rows,
+            selected,
+            logits,
+        } = self.training_primal(&prepared, hidden, 0, first, None)?;
+        let (report, declared_seed, full_normalized) = logits
+            .declared_rival_cross_entropy_capture_full(&prepared.labels, &rows, mix, |seed| {
+                self.vocabulary_head_pullback(seed)
+            })?;
+        drop(logits);
+        let d_normalized = self.vocabulary_head_pullback(&declared_seed)?;
+        drop(declared_seed);
+        let norm_vjp = |d| {
+            selected.layer_norm_input_backward(&self.final_norm.gamma, d, self.config.norm_epsilon)
+        };
+        let adjoints = [norm_vjp(&full_normalized)?, norm_vjp(&d_normalized)?];
+        drop((selected, full_normalized, d_normalized));
+        let [full, declared] = self.decoder_pullback_lanes_from_selected(
+            checkpoints,
+            hidden_rows,
+            prepared.shape,
+            prepared.selected_rows.as_deref(),
+            adjoints,
+            first,
+            learning::DecoderTarget::GeometryFrom(&site),
+            None,
+        )?;
+        let mode = CausalLmAdaptationMode::Geometry;
+        Ok((
+            self.seal_adaptation_gradients(&prepared, mode, report.full_ce, None, full, None)?,
+            self.seal_adaptation_gradients(
+                &prepared,
+                mode,
+                report.loss,
+                Some(objective::CompetitionReport::Declared(report)),
+                declared,
+                None,
+            )?,
+        ))
     }
 
     pub(super) fn geometry_gradients_for_competition(
@@ -419,6 +510,20 @@ impl NativeCausalLm {
             target,
             trace.as_mut(),
         )?;
+        let gradients =
+            self.seal_adaptation_gradients(prepared, mode, loss, competition, parameters, trace)?;
+        Ok((gradients, reference))
+    }
+
+    fn seal_adaptation_gradients(
+        &self,
+        prepared: &PreparedCausalWindow,
+        mode: CausalLmAdaptationMode,
+        loss: f32,
+        competition: Option<objective::CompetitionReport>,
+        parameters: crate::geometry_runtime::ParameterGradients,
+        trace: Option<observation::AdaptationTrace>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
         let want_lora = mode != CausalLmAdaptationMode::Geometry;
         let placements = self
             .geometry
@@ -460,7 +565,7 @@ impl NativeCausalLm {
         if let Some(trace) = trace {
             gradients.observation = Some(Box::new(trace.finish(self, mode, &gradients)?));
         }
-        Ok((gradients, reference))
+        Ok(gradients)
     }
 
     /// Construct both updates from the same immutable source, committing only

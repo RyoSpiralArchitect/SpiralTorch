@@ -712,25 +712,52 @@ impl PyNativeCausalLm {
         mix: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
-        let shape = self::shape(shape)?;
-        reject_bool(mix)?;
-        let mix = mix.extract::<f64>()?;
-        self.inner
-            .validate_adaptation_mode(st_nn::causal_lm::CausalLmAdaptationMode::Geometry)
-            .map_err(error)?;
-        let count = self
-            .inner
-            .adaptation_labeled_input_count(shape, labels.is_some())
-            .map_err(error)?;
-        let plan = declared::extract(contrasts, shape, count, self.inner.config().vocabulary, mix)?;
-        let ids = tokens(windows, count)?;
-        let labels = loss_labels(labels, count)?;
+        let w =
+            declared::Window::extract(&self.inner, windows, shape, contrasts, mix, labels, false)?;
         py.detach(|| {
-            self.inner
-                .geometry_declared_rival_gradients(&ids, shape, labels.as_deref(), &plan, mix)
+            self.inner.geometry_declared_rival_gradients(
+                &w.ids,
+                w.shape,
+                w.labels.as_deref(),
+                &w.plan,
+                w.mix,
+            )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
+    }
+
+    /// Return (full CE, declared mixture) as two geometry handles from one decoder forward.
+    #[pyo3(signature=(windows, shape, *, contrasts, mix, labels=None))]
+    fn geometry_full_and_declared_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        mix: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(
+        PyNativeCausalLmAdaptationGradients,
+        PyNativeCausalLmAdaptationGradients,
+    )> {
+        let w =
+            declared::Window::extract(&self.inner, windows, shape, contrasts, mix, labels, true)?;
+        let (full, declared) = py
+            .detach(|| {
+                self.inner.geometry_full_and_declared_gradients(
+                    &w.ids,
+                    w.shape,
+                    w.labels.as_deref(),
+                    &w.plan,
+                    w.mix,
+                )
+            })
+            .map_err(error)?;
+        Ok((
+            PyNativeCausalLmAdaptationGradients { inner: full },
+            PyNativeCausalLmAdaptationGradients { inner: declared },
+        ))
     }
 
     /// Inspect CE, declared and mixed VJPs after one f32 forward; the second

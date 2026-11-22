@@ -8,6 +8,50 @@ fn decl(p: usize, t: usize, ids: &[usize]) -> DeclaredRivalRow {
 }
 
 #[test]
+fn full_seed_is_available_before_the_rival_blend_and_only_after_input_checks() {
+    let x = Tensor::from_vec(2, 4, vec![0., -0.5, 1., 3., -1., 0.2, 1.5, 0.7])
+        .unwrap()
+        .to_layout(Layout::ColMajor)
+        .unwrap();
+    let labels = [1, 2];
+    let plan = [decl(0, 1, &[3])];
+    let ce = CrossEntropyConfig::default();
+    let full = x
+        .cross_entropy_with_logits_backward(&labels, ce, &Tensor::from_vec(1, 1, vec![1.]).unwrap())
+        .unwrap();
+    let (report, mixed, early) = x
+        .declared_rival_cross_entropy_capture_full(&labels, &plan, 1., |seed| {
+            Ok::<_, TensorError>(seed.data().to_vec())
+        })
+        .unwrap();
+    assert_eq!(early, full.data());
+    assert_ne!(early, mixed.data());
+    assert_eq!(&early[4..], &mixed.data()[4..]);
+    assert_eq!(
+        report.full_ce,
+        x.cross_entropy_with_logits(&labels, ce).unwrap().data()[0]
+    );
+    assert!(x
+        .declared_rival_cross_entropy_capture_full(&[0, 2], &plan, 1., |_| -> PureResult<()> {
+            panic!("callback before validating labels")
+        })
+        .is_err());
+    let error = x
+        .declared_rival_cross_entropy_capture_full(&labels, &plan, 1., |_| {
+            Err::<(), _>(TensorError::InvalidValue {
+                label: "projection sentinel",
+            })
+        })
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        TensorError::InvalidValue {
+            label: "projection sentinel"
+        }
+    ));
+}
+
+#[test]
 fn fixed_subset_keeps_unpaired_ce_and_matches_independent_derivatives() {
     let values = vec![0.1, 3., -0.6, -1.2, 2., 1., 0., -2., 0.1, 0.4, -0.5, 1.2];
     let labels = [0, -100, 2];

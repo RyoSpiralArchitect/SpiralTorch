@@ -69,6 +69,8 @@ impl NativeCausalLm {
     }
 
     pub(super) fn project_readout(&self, lhs: &Tensor) -> CausalLmResult<Tensor> {
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        decoder::work_counts::head();
         let (rows, width) = lhs.shape();
         let precision = self.readout_accumulator.forward_precision();
         if precision == CausalLmHeadPrecision::F32

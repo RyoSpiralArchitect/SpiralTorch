@@ -155,6 +155,9 @@ class NativeCausalLm:
     def geometry_declared_rival_gradients(self, windows: Sequence[int], shape: Sequence[int], *,
                                           contrasts: Sequence[tuple[int, int, Sequence[int]]], mix: float,
                                           labels: Sequence[int] | None = None) -> NativeCausalLmAdaptationGradients: ...
+    def geometry_full_and_declared_gradients(self, windows: Sequence[int], shape: Sequence[int], *,
+                                             contrasts: Sequence[tuple[int, int, Sequence[int]]], mix: float,
+                                             labels: Sequence[int] | None = None) -> tuple[NativeCausalLmAdaptationGradients, NativeCausalLmAdaptationGradients]: ...
     def wave_factorial_observation_json(self, windows: Sequence[int], shape: Sequence[int], config: dict[str, float],
                                         *, labels: Sequence[int] | None = None) -> str: ...
     def adaptation_loss_gradients(self, windows: Sequence[int], shape: Sequence[int], *,

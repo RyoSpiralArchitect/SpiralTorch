@@ -66,6 +66,23 @@ impl Tensor {
         plan: &[DeclaredRivalRow],
         mix: f64,
     ) -> PureResult<(DeclaredRivalReport, Tensor)> {
+        let (report, mixed, ()) =
+            self.declared_rival_cross_entropy_capture_full(labels, plan, mix, |_| {
+                Ok::<_, TensorError>(())
+            })?;
+        Ok((report, mixed))
+    }
+
+    /// Project the ordinary CE seed before blending the declared rows in place.
+    /// The callback can reduce it to a hidden adjoint without retaining or copying
+    /// a second vocabulary-sized tensor. Its error aborts the operation.
+    pub fn declared_rival_cross_entropy_capture_full<T, E: From<TensorError>>(
+        &self,
+        labels: &[i64],
+        plan: &[DeclaredRivalRow],
+        mix: f64,
+        project_full: impl FnOnce(&Tensor) -> Result<T, E>,
+    ) -> Result<(DeclaredRivalReport, Tensor, T), E> {
         let (rows, classes) = self.shape();
         DeclaredRivalRow::validate_plan(plan, rows, classes, mix)?;
         let ce = CrossEntropyConfig::default();
@@ -76,11 +93,13 @@ impl Tensor {
         {
             return Err(TensorError::InvalidValue {
                 label: "declared rival row does not match its active label",
-            });
+            }
+            .into());
         }
         let input = finite_row_major(self, "declared_rival_logits")?;
         let seed = Tensor::from_vec(1, 1, vec![1.])?;
         let mut grad = input.cross_entropy_with_logits_backward(labels, ce, &seed)?;
+        let full = project_full(&grad)?;
         let mut total = 0.;
         let mut restricted_sum = 0.;
         let mut margin_sum = 0.;
@@ -138,6 +157,7 @@ impl Tensor {
                 loss: checked_f32(total / n as f64, "declared_rival_loss")?,
             },
             grad,
+            full,
         ))
     }
 }

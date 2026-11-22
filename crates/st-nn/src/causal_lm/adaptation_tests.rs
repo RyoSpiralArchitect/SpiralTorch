@@ -875,6 +875,113 @@ fn gradient_alignment_allows_different_inputs_not_different_weights_or_coordinat
 }
 
 #[test]
+fn full_and_declared_share_each_primal_and_keep_independent_sealed_vjps() {
+    use decoder::work_counts;
+    use CausalLmReadoutAccumulator::{F32WideBackward, F32, F64};
+    let ids = [1, 2, 3, 4, 5, 6, 7, 8];
+    let labels = [-100, -100, -100, 4, -100, -100, 7, -100];
+    let plan = [DeclaredRivalRow {
+        position: 6,
+        target: 7,
+        rivals: vec![1, 4],
+    }];
+    let assert_same = |a: &NativeCausalLmAdaptationGradients,
+                       b: &NativeCausalLmAdaptationGradients| {
+        assert_eq!(a.loss().to_bits(), b.loss().to_bits());
+        assert_eq!(a.base_model_identity(), b.base_model_identity());
+        assert_eq!(a.lora_artifact_id(), b.lora_artifact_id());
+        assert_eq!(a.geometry_artifact_id(), b.geometry_artifact_id());
+        assert_eq!(a.readout_accumulator(), b.readout_accumulator());
+        assert_eq!(
+            (a.window_shape(), a.target_tokens()),
+            (b.window_shape(), b.target_tokens())
+        );
+        assert_eq!(
+            serde_json::to_vec(&a.declared_rival_report()).unwrap(),
+            serde_json::to_vec(&b.declared_rival_report()).unwrap()
+        );
+        assert_eq!(a.parameters(), b.parameters());
+        for (path, p) in a.parameters() {
+            for (name, v) in p {
+                assert!(v
+                    .iter()
+                    .zip(&b.parameters()[path][name])
+                    .all(|(a, b)| a.to_bits() == b.to_bits()));
+            }
+        }
+    };
+    for policy in [F32, F32WideBackward, F64] {
+        let base = load().with_readout_accumulator(policy);
+        let mut r = geometry(&base, 1, 0.25).record().clone();
+        let mut extra = r.placements[0].clone();
+        extra.path = "transformer.h.0.mlp".into();
+        r.placements.push(extra);
+        let multi = base
+            .with_geometry(GeometryAdapterArtifact::create(r).unwrap())
+            .unwrap();
+        for (m, replays) in [(model(1, policy), 1), (multi, 2)] {
+            let m = m.with_forward_readout_storage(CausalLmForwardStorage::OriginalPacked);
+            for (mask, plan, mix) in [
+                (Some(labels.as_slice()), plan.as_slice(), 1.),
+                (None, plan.as_slice(), 0.5),
+                (None, plan.as_slice(), 0.),
+                (None, &[][..], 1.),
+            ] {
+                work_counts::take();
+                let full = m
+                    .adaptation_loss_gradients_with_labels(
+                        &ids,
+                        [2, 4],
+                        mask,
+                        Some(CausalLmAdaptationMode::Geometry),
+                    )
+                    .unwrap();
+                let declared = m
+                    .geometry_declared_rival_gradients(&ids, [2, 4], mask, plan, mix)
+                    .unwrap();
+                assert_eq!(work_counts::take(), [4, 2 * replays, 2]);
+                let (f, d) = m
+                    .geometry_full_and_declared_gradients(&ids, [2, 4], mask, plan, mix)
+                    .unwrap();
+                assert_eq!(work_counts::take(), [2, replays, 1]);
+                assert_same(&f, &full);
+                assert_same(&d, &declared);
+                assert_eq!(
+                    d.declared_rival_report().unwrap().full_ce.to_bits(),
+                    f.loss().to_bits()
+                );
+                if mix == 1. && !plan.is_empty() {
+                    assert_ne!(f.parameters(), d.parameters());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn shared_geometry_objectives_validate_before_the_decoder() {
+    let m = model(0, CausalLmReadoutAccumulator::F32);
+    let ids = [1, 2, 3, 4];
+    let labels = [-100, -100, 3, 4];
+    decoder::work_counts::take();
+    for (position, target, mix) in [(0, 1, 1.), (1, 2, 1.), (2, 4, 1.), (2, 3, f64::NAN)] {
+        let bad = [DeclaredRivalRow {
+            position,
+            target,
+            rivals: vec![0],
+        }];
+        assert!(m
+            .geometry_full_and_declared_gradients(&ids, [1, 4], Some(&labels), &bad, mix)
+            .is_err());
+    }
+    assert!(m.geometry_gradient_pair_input_count([1, 1], false).is_err());
+    assert!(load()
+        .geometry_gradient_pair_input_count([1, 4], false)
+        .is_err());
+    assert_eq!(decoder::work_counts::take(), [0; 3]);
+}
+
+#[test]
 fn declared_rivals_select_unshifted_positions_and_update_only_geometry() {
     let model = model(0, CausalLmReadoutAccumulator::F32);
     let ids = [1, 2, 3, 4, 5, 6, 7, 8];

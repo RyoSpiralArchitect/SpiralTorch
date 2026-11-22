@@ -1,6 +1,47 @@
 use super::*;
 use st_nn::causal_lm::{DeclaredRivalRow, MAX_DECLARED_RIVAL_IDS, MAX_RIVAL_CLASSES};
 
+pub(super) struct Window {
+    pub ids: Vec<usize>,
+    pub shape: [usize; 2],
+    pub labels: Option<Vec<i64>>,
+    pub plan: Vec<DeclaredRivalRow>,
+    pub mix: f64,
+}
+
+impl Window {
+    pub(super) fn extract(
+        model: &NativeCausalLm,
+        windows: &Bound<'_, PyAny>,
+        dims: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        mix: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+        paired: bool,
+    ) -> PyResult<Self> {
+        let shape = shape(dims)?;
+        reject_bool(mix)?;
+        let mix = mix.extract::<f64>()?;
+        let count = if paired {
+            model.geometry_gradient_pair_input_count(shape, labels.is_some())
+        } else {
+            model
+                .validate_adaptation_mode(st_nn::causal_lm::CausalLmAdaptationMode::Geometry)
+                .map_err(error)?;
+            model.adaptation_labeled_input_count(shape, labels.is_some())
+        }
+        .map_err(error)?;
+        let plan = extract(contrasts, shape, count, model.config().vocabulary, mix)?;
+        Ok(Self {
+            ids: tokens(windows, count)?,
+            labels: loss_labels(labels, count)?,
+            shape,
+            plan,
+            mix,
+        })
+    }
+}
+
 pub(super) fn extract(
     value: &Bound<'_, PyAny>,
     shape: [usize; 2],
