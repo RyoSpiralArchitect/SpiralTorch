@@ -25,8 +25,9 @@ paired ratios, not the ratio of the displayed medians.
 For both menus the maximum absolute difference was zero for token, line,
 conditional and accepted-set NLLs, with identical winners. These are
 small-model CPU timings, not GPT-2 performance, generation quality, general
-latency guarantees, training speedups or GPU results. The trie still needs
-one full-vocabulary row per unique prefix, and a causal geometry placement
+latency guarantees, training speedups or GPU results. This measured revision
+stored one full-vocabulary row per unique prefix (subsequently replaced by
+[bounded streamed projection](STREAMED_LINES.md)), and a causal geometry placement
 can replay retained inputs. Sharing reduced decode work but **increased**
 live fork storage here: 28,800 versus 14,592 persistent f32 values beyond
 the root. Those are logical counts, not measured RSS.

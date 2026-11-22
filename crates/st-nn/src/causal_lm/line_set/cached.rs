@@ -1,5 +1,7 @@
 //! Feed the same terminated-line scorer from one cached prompt and one decode per content prefix.
+use super::stream::EdgeRows;
 use super::*;
+use crate::causal_lm::context::KvPrefix;
 
 #[derive(Debug, Serialize)]
 pub struct CausalLmCachedLineScores {
@@ -9,6 +11,13 @@ pub struct CausalLmCachedLineScores {
     pub decoder_chunks: usize,
     /// Persistent K/V + geometry f32 values in all live forks, excluding the supplied root and temporaries.
     pub peak_fork_cache_values: usize,
+    /// Full-vocabulary values consumed, including the supplied prompt's already computed row.
+    pub scanned_logit_values: usize,
+    /// Largest newly projected output tile, excluding the supplied root and kernel temporaries.
+    pub peak_projected_logit_values: usize,
+    pub readout_batches: usize,
+    /// One raw f32 logit per unique content edge and one terminating edge per line.
+    pub retained_edge_logits: usize,
 }
 
 struct Chunk {
@@ -59,6 +68,14 @@ struct Work {
     peak: usize,
 }
 
+struct Stream<'a> {
+    rows: EdgeRows<'a>,
+    tile_rows: usize,
+    scanned: usize,
+    peak_tile: usize,
+    batches: usize,
+}
+
 impl Chunk {
     fn admit(
         &self,
@@ -88,23 +105,44 @@ impl Chunk {
 
     fn decode(
         &self,
-        parent: &NativeCausalLmContext,
-        dst: &mut [f32],
-        vocab: usize,
+        root: &NativeCausalLmContext,
+        prefix: KvPrefix<'_>,
+        stream: &mut Stream<'_>,
     ) -> CausalLmResult<()> {
-        let (next, logits) = parent.scored_suffix(&self.ids)?;
-        for (&node, row) in self.nodes.iter().zip(logits.data().chunks_exact(vocab)) {
-            dst[node * vocab..(node + 1) * vocab].copy_from_slice(row);
-        }
-        drop(logits);
+        let next =
+            root.visit_scored_suffix(prefix, &self.ids, stream.tile_rows, |start, tile| {
+                let (n, vocab) = tile.shape();
+                stream.scanned += tile.data().len();
+                stream.peak_tile = stream.peak_tile.max(tile.data().len());
+                stream.batches += 1;
+                for (&node, row) in self.nodes[start..start + n]
+                    .iter()
+                    .zip(tile.data().chunks_exact(vocab))
+                {
+                    stream.rows.capture(node, row)?;
+                }
+                Ok(())
+            })?;
         for child in &self.children {
-            child.decode(&next, dst, vocab)?;
+            child.decode(root, next.prefix(), stream)?;
         }
         Ok(())
     }
 }
 
 impl NativeCausalLmContext {
+    /// A tile budget may lower peak projection size, never raise the model's cumulative work limit.
+    pub fn line_readout_tile_rows(&self, max_tile_values: Option<usize>) -> CausalLmResult<usize> {
+        let m = self.decoder();
+        let vocab = m.config.vocabulary;
+        let limit = m.limits.max_logit_elements;
+        let cap = max_tile_values.unwrap_or_else(|| (256 * 1024).max(vocab).min(limit));
+        if !(vocab..=limit).contains(&cap) {
+            return Err("complete-line tile budget must fit one vocabulary row and not exceed the model logit limit".into());
+        }
+        Ok(cap / vocab)
+    }
+
     /// Length-only admission, before extracting foreign token arrays. No padded prompt lanes.
     /// The exact radix-tree shapes and depth-first live cache are checked once IDs are known.
     pub fn admit_line_lengths(&self, lengths: &[usize], stop: usize) -> CausalLmResult<()> {
@@ -122,6 +160,17 @@ impl NativeCausalLmContext {
         lines: &[Vec<usize>],
         stop: usize,
     ) -> CausalLmResult<CausalLmCachedLineScores> {
+        self.score_lines_with_tile_limit(lines, stop, None)
+    }
+
+    /// Same terminated-line scoring; optionally bound a projected tile in f32 values.
+    pub fn score_lines_with_tile_limit(
+        &self,
+        lines: &[Vec<usize>],
+        stop: usize,
+        max_tile_values: Option<usize>,
+    ) -> CausalLmResult<CausalLmCachedLineScores> {
+        let tile_rows = self.line_readout_tile_rows(max_tile_values)?;
         if lines.len() > MAX_LINE_MENU_CANDIDATES {
             return Err("too many complete-line candidates".into());
         }
@@ -129,24 +178,31 @@ impl NativeCausalLmContext {
         let m = self.decoder();
         m.validate_terminated_contents(self.token_ids(), lines, stop)?;
         let set = LineSet::new(lines, stop);
-        let count = m.logit_count(set.nodes.len())?;
+        let expected = m.logit_count(set.nodes.len())?;
         let chunks = set.chunks(0);
         let prompt = self.token_ids().len();
         let mut work = Work::default();
         for c in &chunks {
             c.admit(self, prompt, 0, &mut work)?;
         }
-        let cols = m.config.vocabulary;
-        let mut rows = Vec::new();
-        rows.try_reserve_exact(count)?;
-        rows.resize(count, 0.);
-        rows[..cols].copy_from_slice(self.logit_values());
+        let mut stream = Stream {
+            rows: EdgeRows::new(&set),
+            tile_rows,
+            scanned: self.logit_values().len(),
+            peak_tile: 0,
+            batches: 0,
+        };
+        stream.rows.capture(0, self.logit_values())?;
         for c in &chunks {
-            c.decode(self, &mut rows, cols)?;
+            c.decode(self, self.kv_prefix(), &mut stream)?;
         }
-        let logits = Tensor::from_vec(set.nodes.len(), cols, rows)?;
+        debug_assert_eq!(stream.scanned, expected);
         Ok(CausalLmCachedLineScores {
-            scores: set.scores(lines, &logits)?,
+            retained_edge_logits: stream.rows.edge_count(),
+            scores: stream.rows.finish(lines)?,
+            scanned_logit_values: stream.scanned,
+            readout_batches: stream.batches,
+            peak_projected_logit_values: stream.peak_tile,
             cached_prompt_tokens: prompt,
             decoded_content_tokens: work.content,
             decoder_chunks: work.chunks,

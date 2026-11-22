@@ -70,11 +70,27 @@ can read out many positions together. The root's retained row predicts the
 first token. The stop is predicted, never fed. `decoded_content_tokens` and
 `decoder_chunks` count physical content rows and suffix calls;
 `scores.decoder_lanes` describes maximal candidate paths, not cached calls.
-The bounded vocabulary matrix has one row per trie node (root included).
+Each trie node still costs a **full-vocabulary scan**, including the root.
+Rust reduces each projected row to its outgoing edge logits and the partition
+of all other tokens, then drops the tile. It does not renormalize over answer
+tokens alone. The cumulative model logit budget is unchanged.
 `max_cache_values` also limits all simultaneously live child K/V and geometry
 histories in a depth-first walk. `peak_fork_cache_values` excludes the supplied
 root, frozen weights, token IDs, logits, and temporaries; it is not an RSS measure.
 A rejected request does not fall back to padded execution or modify the root.
+
+To further bound the largest new vocabulary output, pass a fourth argument
+to `ctx.scoreLinesJson(content, lengths, stopId, maxTileValues)`, Python's
+`max_tile_values=` keyword, or Rust's `ctx.score_lines_with_tile_limit(lines,
+stop, Some(max_values))?`. Units are f32 **values**, not bytes or rows; the
+default targets 262,144 values, subject to the model limit and at least one
+full row. An explicit ceiling must fit one vocabulary row and not exceed the
+model limit. It changes only projection tiling, not KV chunking or the
+absolute/conditional score definitions. `scanned_logit_values` counts all
+nodes including the borrowed root; `peak_projected_logit_values` is the
+largest individual new head output, not RSS or a bound on backend temporaries.
+`readout_batches` counts actual projections, and `retained_edge_logits`
+counts distinct outgoing values kept for the final reverse pass.
 
 The same six synthetic models are checked against every token cost from a
 separately built native padded scorer and from individual full-prefix calls.

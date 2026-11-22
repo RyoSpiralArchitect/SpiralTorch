@@ -14,7 +14,7 @@ export function update(config: string, weights: Uint8Array, geometry: string, id
             let logits: Float32Array;
             let scores: string;
             try {
-                scores = ctx.scoreLinesJson(Uint32Array.of(1, 1, 2), Uint32Array.of(1, 2), 0);
+                scores = ctx.scoreLinesJson(Uint32Array.of(1, 1, 2), Uint32Array.of(1, 2), 0, 256);
                 const child = ctx.withSuffix(Uint32Array.of(1, 0));
                 try { logits = child.nextLogits(); } finally { child.free(); }
             } finally { ctx.free(); }

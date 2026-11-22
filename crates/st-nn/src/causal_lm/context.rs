@@ -11,6 +11,28 @@ pub(super) struct InferenceBlockCache {
     pub history: [Option<Tensor>; 3],
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct KvPrefix<'a> {
+    steps: usize,
+    blocks: &'a [Arc<InferenceBlockCache>],
+}
+
+// A scoring branch needs only K/V and causal geometry history, not a new full
+// vocabulary row, copied token history, or a second owner of the model.
+pub(super) struct KvBranch {
+    steps: usize,
+    blocks: Vec<Arc<InferenceBlockCache>>,
+}
+
+impl KvBranch {
+    pub(super) fn prefix(&self) -> KvPrefix<'_> {
+        KvPrefix {
+            steps: self.steps,
+            blocks: &self.blocks,
+        }
+    }
+}
+
 /// Non-serializable acceleration state, never an authority for learned weights.
 /// Causal sequence geometry currently replays its retained input prefix; row-local
 /// geometry only evaluates new rows. Old K/V values are not recomputed.
@@ -303,17 +325,24 @@ impl NativeCausalLmContext {
         &self.model
     }
 
+    pub(super) fn kv_prefix(&self) -> KvPrefix<'_> {
+        KvPrefix {
+            steps: self.tokens.len(),
+            blocks: &self.blocks,
+        }
+    }
+
     /// Admit suffix work before a client extracts IDs. This is rectangular cached attention,
     /// not full-prefix admission and not a promise that many one-token calls fit as one chunk.
     pub fn suffix_input_count(&self, added: usize) -> CausalLmResult<usize> {
-        let steps = self
-            .tokens
-            .len()
-            .checked_add(added)
-            .ok_or("context length overflow")?;
-        self.model
-            .cached_query_count(steps, added, self.max_cache_values)?;
+        self.suffix_end(self.tokens.len(), added)?;
         Ok(added)
+    }
+
+    fn suffix_end(&self, start: usize, added: usize) -> CausalLmResult<usize> {
+        let steps = start.checked_add(added).ok_or("context length overflow")?;
+        self.model
+            .cached_query_count(steps, added, self.max_cache_values)
     }
 
     /// Fork with a known, nonempty suffix. Only its last position is projected into vocabulary
@@ -399,43 +428,60 @@ impl NativeCausalLmContext {
         suffix: &[usize],
         edit: Option<(usize, usize, &[f32])>,
     ) -> CausalLmResult<Self> {
-        let (blocks, hidden) = self.suffix_hidden(suffix, edit)?;
+        let (branch, hidden) = self.suffix_hidden(self.kv_prefix(), suffix, edit)?;
         let last = if suffix.len() == 1 {
             hidden
         } else {
             hidden.gather_rows(&[suffix.len() - 1])?
         };
-        self.finish_suffix(suffix, blocks, self.model.context_readout(&last)?)
+        self.finish_suffix(suffix, branch.blocks, self.model.context_readout(&last)?)
     }
 
-    /// As opposed to with_suffix, every content row here predicts another token or a stop.
-    pub(super) fn scored_suffix(&self, suffix: &[usize]) -> CausalLmResult<(Self, Tensor)> {
-        self.model.logit_count(suffix.len())?;
-        let (blocks, hidden) = self.suffix_hidden(suffix, None)?;
-        let rows = self.model.context_readout(&hidden)?;
-        let rows = if rows.layout() == st_tensor::Layout::RowMajor {
-            rows
-        } else {
-            rows.to_layout(st_tensor::Layout::RowMajor)?
-        };
-        let last = rows.gather_rows(&[suffix.len() - 1])?;
-        Ok((self.finish_suffix(suffix, blocks, last)?, rows))
+    /// Decode attention once, then consume every teacher-forced vocabulary row in bounded tiles.
+    pub(super) fn visit_scored_suffix(
+        &self,
+        prefix: KvPrefix<'_>,
+        suffix: &[usize],
+        tile_rows: usize,
+        mut visit: impl FnMut(usize, &Tensor) -> CausalLmResult<()>,
+    ) -> CausalLmResult<KvBranch> {
+        let (branch, hidden) = self.suffix_hidden(prefix, suffix, None)?;
+        for start in (0..suffix.len()).step_by(tile_rows) {
+            let n = tile_rows.min(suffix.len() - start);
+            let slice;
+            let input = if n == suffix.len() {
+                &hidden
+            } else {
+                slice = hidden.gather_rows(&(start..start + n).collect::<Vec<_>>())?;
+                &slice
+            };
+            let rows = self.model.context_readout(input)?;
+            if rows.layout() == st_tensor::Layout::RowMajor {
+                visit(start, &rows)?;
+            } else {
+                visit(start, &rows.to_layout(st_tensor::Layout::RowMajor)?)?;
+            }
+        }
+        Ok(branch)
     }
 
     fn suffix_hidden(
         &self,
+        prefix: KvPrefix<'_>,
         suffix: &[usize],
         edit: Option<(usize, usize, &[f32])>,
-    ) -> CausalLmResult<(Vec<Arc<InferenceBlockCache>>, Tensor)> {
+    ) -> CausalLmResult<(KvBranch, Tensor)> {
         let model = &self.model;
         let c = &model.config;
-        let added = self.suffix_input_count(suffix.len())?;
-        let start = self.tokens.len();
-        let steps = start + added;
+        let added = suffix.len();
+        let start = prefix.steps;
+        let steps = self.suffix_end(start, added)?;
         let shape = [1, added];
         let mut hidden = model.embed_at(suffix, shape, start)?;
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        decoder::work_counts::suffix(added);
         let mut blocks = Vec::with_capacity(c.layers);
-        for (index, previous) in self.blocks.iter().enumerate() {
+        for (index, previous) in prefix.blocks.iter().enumerate() {
             let block = &model.blocks[index];
             let norm = block.first_norm.forward(&hidden, c.norm_epsilon)?;
             let qkv = model.split_heads::<3>(&block.qkv.forward(&norm)?, shape)?;
@@ -503,7 +549,7 @@ impl NativeCausalLmContext {
                 history: [attention_history, mlp_history, block_history],
             }));
         }
-        Ok((blocks, hidden))
+        Ok((KvBranch { steps, blocks }, hidden))
     }
 
     fn finish_suffix(

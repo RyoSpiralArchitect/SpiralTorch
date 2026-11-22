@@ -17,6 +17,62 @@ pub(super) struct Row {
     outside: f64,
 }
 
+pub(super) fn outside_group(node: &Node, z: &[f32]) -> CausalLmResult<Group> {
+    if node
+        .edges
+        .last_key_value()
+        .is_some_and(|(&k, _)| k >= z.len())
+    {
+        return Err("terminated-line edge outside vocabulary".into());
+    }
+    let mut outside = Group::default();
+    let mut allowed = node.edges.keys().copied().peekable();
+    for (k, &v) in z.iter().enumerate() {
+        if !v.is_finite() {
+            return Err("nonfinite terminated-line logits".into());
+        }
+        if allowed.peek() == Some(&k) {
+            allowed.next();
+        } else {
+            outside.add(Term::logit(v));
+        }
+    }
+    Ok(outside)
+}
+
+// Both the dense gradient path and streaming inference reduce nonedges first,
+// followed by allowed edges in token-ID order. Keep the two-part terms intact.
+pub(super) fn reduce_row(
+    node: &Node,
+    outside: Group,
+    outcomes: &[Outcome],
+    values: impl Iterator<Item = f32>,
+    keep: bool,
+) -> (Outcome, Row) {
+    let (mut yes, mut no, mut total) = (Group::default(), outside, outside);
+    for (&child, v) in node.edges.values().zip(values) {
+        let value = Term::logit(v);
+        let s = child.map_or(Outcome::STOP, |j| outcomes[j]);
+        yes.add(value.plus(s.yes));
+        if let Some(failure) = s.no {
+            no.add(value.plus(failure));
+        }
+        if keep {
+            total.add(value);
+        }
+    }
+    let row = if keep {
+        Row {
+            accepted: yes,
+            total,
+            outside: outside.mass_in(total),
+        }
+    } else {
+        Row::default()
+    };
+    (Outcome::new(yes, no), row)
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct RankingSeed<'a> {
     pub gold_tokens: &'a [Option<usize>],
@@ -27,8 +83,8 @@ pub(super) struct RankingSeed<'a> {
 impl<'a> PrefixPass<'a> {
     pub(super) fn new(set: &LineSet, logits: &'a Tensor, keep_rows: bool) -> CausalLmResult<Self> {
         let (count, cols) = logits.shape();
-        if count != set.nodes.len() || logits.data().iter().any(|v| !v.is_finite()) {
-            return Err("unexpected or nonfinite terminated-line logits".into());
+        if count != set.nodes.len() {
+            return Err("unexpected terminated-line logit shape".into());
         }
         let logits = if logits.layout() == st_tensor::Layout::RowMajor {
             Cow::Borrowed(logits)
@@ -43,35 +99,16 @@ impl<'a> PrefixPass<'a> {
         };
         for (i, node) in set.nodes.iter().enumerate().rev() {
             let z = &logits.data()[i * cols..(i + 1) * cols];
-            let mut outside = Group::default();
-            let mut allowed = node.edges.keys().copied().peekable();
-            for (k, &v) in z.iter().enumerate() {
-                if allowed.peek() == Some(&k) {
-                    allowed.next();
-                } else {
-                    outside.add(Term::logit(v));
-                }
-            }
-            let (mut yes, mut no) = (Group::default(), outside);
-            for (&k, &child) in &node.edges {
-                let value = Term::logit(z[k]);
-                let s = child.map_or(Outcome::STOP, |j| outcomes[j]);
-                yes.add(value.plus(s.yes));
-                if let Some(failure) = s.no {
-                    no.add(value.plus(failure));
-                }
-            }
-            outcomes[i] = Outcome::new(yes, no);
+            let (outcome, row) = reduce_row(
+                node,
+                outside_group(node, z)?,
+                &outcomes,
+                node.edges.keys().map(|&k| z[k]),
+                keep_rows,
+            );
+            outcomes[i] = outcome;
             if keep_rows {
-                let mut total = outside;
-                for &k in node.edges.keys() {
-                    total.add(Term::logit(z[k]));
-                }
-                rows[i] = Row {
-                    accepted: yes,
-                    total,
-                    outside: outside.mass_in(total),
-                };
+                rows[i] = row;
             }
         }
         Ok(Self {

@@ -56,6 +56,27 @@ class NativeCausalLmContextTests(unittest.TestCase):
         self.assertEqual(ctx.token_ids, [1, 2])
         self.assertEqual(ctx.logits().values(), start)
 
+    def test_line_tiles_validate_before_foreign_tokens_and_match_full_vocabulary(self):
+        _, model = pair("history_gain", max_logit_elements=88)
+        ctx = st.NativeCausalLmContext(model, [1,2], max_cache_values=1024)
+        class Untouchable:
+            def __len__(self):
+                raise AssertionError("invalid tile must be refused before examining menu")
+        for cap in (0, 10, 89, True, 11.5):
+            with self.assertRaises((ValueError, TypeError)):
+                ctx.score_lines(Untouchable(), stop_id=0, max_tile_values=cap)
+        lines = [[1], [1,2,3], [1,2,4], [1,5], [7,8]]
+        a = ctx.score_lines(lines, stop_id=0)
+        b = ctx.score_lines(lines, stop_id=0, max_tile_values=11)
+        self.assertEqual((a["readout_batches"], b["readout_batches"]), (6, 7))
+        self.assertEqual((a["peak_projected_logit_values"], b["peak_projected_logit_values"]), (22, 11))
+        self.assertEqual((b["scanned_logit_values"], b["retained_edge_logits"]), (88,12))
+        self.close(a["scores"]["line_nlls"], b["scores"]["line_nlls"])
+        self.assertEqual(a["scores"]["winner_index"], b["scores"]["winner_index"])
+        with self.assertRaises(ValueError):
+            ctx.score_lines(lines+[[9]], stop_id=0, max_tile_values=11)
+        self.assertEqual(ctx.token_ids,[1,2])
+
     def close(self, left, right):
         self.assertEqual(len(left), len(right))
         for a, b in zip(left, right):

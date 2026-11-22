@@ -253,8 +253,15 @@ impl NativeCausalLmContext {
         content: &Uint32Array,
         lengths: &Uint32Array,
         #[wasm_bindgen(unchecked_param_type = "number")] stop_id: &JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "number")] max_tile_values: &JsValue,
     ) -> Result<String, JsValue> {
         let stop = js_u32(stop_id, "stop ID")? as usize;
+        let cap = if max_tile_values.is_undefined() {
+            None
+        } else {
+            Some(js_u32(max_tile_values, "readout tile budget")? as usize)
+        };
+        self.inner.line_readout_tile_rows(cap).map_err(js_error)?;
         let lens = admitted_ids(lengths, id_count(lengths, MAX_LINE_MENU_CANDIDATES)?)?;
         self.inner
             .admit_line_lengths(&lens, stop)
@@ -275,7 +282,10 @@ impl NativeCausalLmContext {
                 line.to_vec()
             })
             .collect();
-        let r = self.inner.score_lines(&lines, stop).map_err(js_error)?;
+        let r = self
+            .inner
+            .score_lines_with_tile_limit(&lines, stop, cap)
+            .map_err(js_error)?;
         serde_json::to_string(&r).map_err(js_error)
     }
 

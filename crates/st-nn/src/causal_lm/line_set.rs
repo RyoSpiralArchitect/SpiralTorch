@@ -13,6 +13,7 @@ pub(super) use subset::LineSubset;
 mod ranking;
 pub(super) use ranking::LineMenu;
 mod readout;
+mod stream;
 use partition::{Group, Outcome, Term};
 
 #[derive(Clone, Debug, Serialize)]

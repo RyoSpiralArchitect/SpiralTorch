@@ -224,6 +224,65 @@ fn branching_lines() -> Vec<Vec<usize>> {
 }
 
 #[test]
+fn streamed_readout_tiles_do_not_redecode_attention_or_relax_full_vocabulary_work() {
+    let mut m = load();
+    m.limits.max_logit_elements = 88;
+    let root = NativeCausalLmContext::new(m, vec![1, 2], 192).unwrap();
+    let lines = branching_lines();
+    let baseline = root.score_lines(&lines, 0).unwrap();
+    let unchanged = root.logit_values().to_vec();
+    for (cap, batches, peak) in [(11, 7, 11), (21, 7, 11), (22, 6, 22), (88, 6, 22)] {
+        decoder::work_counts::take();
+        decoder::work_counts::take_suffixes();
+        let r = root
+            .score_lines_with_tile_limit(&lines, 0, Some(cap))
+            .unwrap();
+        assert_eq!(decoder::work_counts::take(), [0, 0, batches]);
+        assert_eq!(decoder::work_counts::take_suffixes(), (6, 7));
+        assert_eq!(
+            (
+                r.decoder_chunks,
+                r.readout_batches,
+                r.peak_projected_logit_values
+            ),
+            (6, batches, peak)
+        );
+        assert_eq!(
+            (
+                r.scanned_logit_values,
+                r.retained_edge_logits,
+                r.peak_fork_cache_values
+            ),
+            (88, 12, 192)
+        );
+        assert_eq!(
+            serde_json::to_vec(&r.scores).unwrap(),
+            serde_json::to_vec(&baseline.scores).unwrap()
+        );
+    }
+    for cap in [0, 10, 89, usize::MAX] {
+        assert!(root
+            .score_lines_with_tile_limit(&lines, 0, Some(cap))
+            .is_err());
+    }
+    let mut too_many = lines.clone();
+    too_many.push(vec![9]); // nine prefix rows; one-row tiles must not bypass the eight-row ceiling.
+    assert!(root
+        .score_lines_with_tile_limit(&too_many, 0, Some(11))
+        .is_err());
+    assert_eq!(decoder::work_counts::take(), [0; 3]);
+    assert_eq!(root.logit_values(), unchanged);
+    assert_eq!(decoder::work_counts::take_suffixes(), (0, 0));
+    let r = root
+        .score_lines_with_tile_limit(&[vec![1, 2, 3, 4, 5]], 0, Some(22))
+        .unwrap();
+    assert_eq!(
+        (r.decoder_chunks, r.readout_batches, r.scanned_logit_values),
+        (1, 3, 66)
+    );
+    assert_eq!(decoder::work_counts::take_suffixes(), (1, 5));
+}
+#[test]
 fn cached_lines_share_prefixes_and_charge_each_stop_at_its_own_position() {
     let m = load();
     let lines = branching_lines();

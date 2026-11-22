@@ -48,23 +48,33 @@ pub(super) fn costs(
     shared: usize,
     pass: &PrefixPass<'_>,
 ) -> Costs {
-    costs_with_tokens(support, paths, shared, pass, |_, _| {})
+    costs_with_tokens(
+        support,
+        paths,
+        shared,
+        &pass.outcomes,
+        &pass.rows,
+        |i, k| pass.row(i)[k],
+        |_, _| {},
+    )
 }
 
 pub(super) fn costs_with_tokens(
     support: &LineSet,
     paths: &[Path],
     shared: usize,
-    pass: &PrefixPass<'_>,
+    outcomes: &[Outcome],
+    rows: &[readout::Row],
+    logit: impl Fn(usize, usize) -> f32,
     mut visit: impl FnMut(usize, f64),
 ) -> Costs {
     let (mut lines, mut suffixes, mut conditional) = (Vec::new(), Vec::new(), Vec::new());
     for (line, path) in paths.iter().enumerate() {
         let (mut prefix, mut suffix, mut cost) = (Term::ZERO, Term::ZERO, Term::ZERO);
         for (depth, &(i, k)) in path.iter().enumerate() {
-            let value = Term::logit(pass.row(i)[k]);
-            let s = support.nodes[i].edges[&k].map_or(Term::ZERO, |j| pass.outcomes[j].yes);
-            let row = pass.rows[i];
+            let value = Term::logit(logit(i, k));
+            let s = support.nodes[i].edges[&k].map_or(Term::ZERO, |j| outcomes[j].yes);
+            let row = rows[i];
             let token_nll = row.total.nll(value);
             visit(line, token_nll.rounded());
             if depth < shared {

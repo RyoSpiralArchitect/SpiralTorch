@@ -16,6 +16,17 @@ pub(super) enum BlockPass<'a> {
 pub(super) mod work_counts {
     use std::cell::Cell;
     thread_local! { static COUNTS: Cell<[usize; 3]> = const { Cell::new([0; 3]) }; }
+    thread_local! { static SUFFIXES: Cell<(usize,usize)> = const { Cell::new((0,0)) }; }
+
+    pub(crate) fn suffix(queries: usize) {
+        SUFFIXES.with(|c| {
+            let (calls, n) = c.get();
+            c.set((calls + 1, n + queries));
+        });
+    }
+    pub(crate) fn take_suffixes() -> (usize, usize) {
+        SUFFIXES.with(Cell::take)
+    }
 
     pub(crate) fn block(pass: &super::BlockPass<'_>) {
         match pass {
