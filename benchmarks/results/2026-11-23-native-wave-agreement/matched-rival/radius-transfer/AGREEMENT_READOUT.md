@@ -11,7 +11,8 @@ not the gold-oriented margin m = s*z. The four balanced cells determine
     z = B + S*s + A*a + I*s*a.
 
 Compute each coefficient from the four signed logits for the **same noun
-pair**, then average the quartets with equal weight. The original primary
+pair**, checking that matched tokenized prefixes differ only at the subject
+or only at the attractor position. Then average the quartets with equal weight. The original primary
 mean gold margin is exactly S. Congruent and conflicting means are S+A
 and S-A. These identities hold also for final minus each arm's own initial
 state. Thus adding a context-independent verb bias B cannot pass the
@@ -20,6 +21,22 @@ subject switch is 2*(S+a*I); positive means correct ordering, not two correct
 choices. Report the observed gaps, number of correctly ordered pairs and
 number with z(singular)<0<z(plural). Count reverse switches, same-verb
 choices and any exact boundary ties separately. No thresholds are tuned.
+
+For a completed fit only, reread the same hash-verified full-vocabulary
+rows to separate gold-token NLL into two terms:
+
+    choice_nll   = -log P(gold | token belongs to the verb pair)
+    coverage_nll = -log P(token belongs to the verb pair)
+    gold_nll     = choice_nll + coverage_nll
+
+Compare changes from each arm's own initial state. Average pair probability
+and average negative log pair probability are distinct statistics. Compute
+the latter from the outside-versus-pair partition functions with separate
+maxima, not by subtracting nearly equal NLLs. Count vocabulary greedy wins
+using the decoder's first-maximum rule and report ties. The training capture
+has only two logits and the recorded greedy token, so it cannot support an
+estimate of pair mass. This additional split was chosen after inspecting the
+archived initial greedy counts; it is descriptive, not a promotion criterion.
 
 `capture` admits only the prior checksummed training-margin archive. Its
 greedy counts are the token IDs already recorded in the full-vocabulary

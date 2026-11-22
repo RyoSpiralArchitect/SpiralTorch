@@ -1,5 +1,6 @@
 """Controls with known coefficients, ties and before-plan refusal."""
 import json
+import math
 from pathlib import Path
 import runpy
 import tempfile
@@ -14,12 +15,42 @@ def design(bias, subject, attractor, interaction, group="x"):
         for a in (-1, 1):
             key = "%s/%s/%s" % (group, s, a)
             rows.append(dict(key=key, pair=group, plural=s == 1, conflict=s != a,
-                             gold=int(s == 1), rival=int(s == -1)))
+                             gold=int(s == 1), rival=int(s == -1), prefix=[0, s+2, 4, 5, a+7, 10]))
             margins[key] = s * (bias + s*subject + a*attractor + s*a*interaction)
     return rows, margins
 
 
 class AgreementReadout(unittest.TestCase):
+    def test_full_vocab_loss_separates_pair_choice_from_coverage(self):
+        row = M["vocabulary_row"]
+        a = row([0., 0., math.log(2)], 0, 1)
+        self.assertAlmostEqual(a["pair_mass"], .5)
+        self.assertAlmostEqual(a["choice_nll"], math.log(2))
+        self.assertAlmostEqual(a["gold_nll"], math.log(4))
+        self.assertEqual(a["greedy"], "other")
+        x, y, z = [row(v, 0, 1) for v in ([0.,2.,-3.], [2.,0.,-3.], [2.,0.,8.])]
+        self.assertEqual(x["pair_mass"], y["pair_mass"])
+        self.assertGreater(x["choice_nll"], y["choice_nll"])
+        self.assertEqual(y["choice_nll"], z["choice_nll"])
+        self.assertLess(y["coverage_nll"], z["coverage_nll"])
+        self.assertEqual(z, row([66.,64.,72.], 0, 1))
+
+    def test_extreme_gold_logit_two_class_vocab_underflow_and_top_tie(self):
+        row = M["vocabulary_row"]
+        r = row([-1e30, 0., 0.], 0, 1)
+        self.assertEqual(r["gold_nll"] - r["choice_nll"], 0.)
+        self.assertAlmostEqual(r["coverage_nll"], math.log(2))
+        self.assertAlmostEqual(r["pair_mass"], .5)
+        self.assertEqual((r["greedy"], r["top_tie"]), ("rival", True))
+        z = row([0., 0.], 0, 1)
+        self.assertEqual((z["coverage_nll"], z["pair_mass"], z["greedy"], z["top_tie"]), (0.,1.,"gold",True))
+        extreme = row([0.,0.,1000.],0,1)
+        self.assertEqual(extreme["pair_mass"], 0.)
+        self.assertAlmostEqual(extreme["coverage_nll"], 1000.-math.log(2))
+        for values, a, b in [([0., float("nan")],0,1), ([1.],0,0), ([1.,2.],0,2)]:
+            with self.assertRaises(ValueError):
+                row(values,a,b)
+
     def test_constant_verb_prior_changes_choices_not_subject_response(self):
         b = M["describe"](*design(0, 1, 0, 0))
         c = M["describe"](*design(7, 1, 0, 0))
@@ -68,6 +99,8 @@ class AgreementReadout(unittest.TestCase):
         rows, margins = design(0, 1, 0, 0)
         for bad, values in [(rows[:-1], margins), (rows + rows[:1], margins),
                             ([dict(rows[0], gold=1), *rows[1:]], margins),
+                            ([dict(rows[0], prefix=[9]+rows[0]["prefix"][1:]), *rows[1:]], margins),
+                            ([dict(rows[0], prefix=rows[2]["prefix"]), *rows[1:]], margins),
                             (rows, dict(margins, extra=1)),
                             (rows, {**margins, rows[0]["key"]: float("nan")})]:
             with self.assertRaises(ValueError):

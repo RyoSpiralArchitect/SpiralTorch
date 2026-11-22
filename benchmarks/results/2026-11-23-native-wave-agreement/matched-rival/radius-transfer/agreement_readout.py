@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import runpy
+import sys
 
 HERE = Path(__file__).resolve().parent
 E = runpy.run_path(str(HERE / "experiment.py"))
@@ -22,7 +23,7 @@ def mean(xs):
 
 
 def close(x, y):
-    need(math.isclose(x, y, rel_tol=1e-12, abs_tol=1e-12), "factorial and paired margins disagree")
+    need(math.isclose(x, y, rel_tol=1e-12, abs_tol=1e-12), "independent contrasts disagree")
 
 
 def outcome(singular, plural):
@@ -35,18 +36,74 @@ def outcome(singular, plural):
     return "always_singular" if singular < 0 else "always_plural"
 
 
+def softplus(x):
+    return max(x, 0.) + math.log1p(math.exp(-abs(x)))
+
+
+def vocabulary_row(row, gold, rival):
+    need(gold != rival and 0 <= min(gold, rival) <= max(gold, rival) < len(row)
+         and all(map(math.isfinite, row)), "invalid full-vocabulary row")
+    choice = softplus(row[rival] - row[gold])
+    coverage = 0.
+    if len(row) > 2:
+        # Separate pivots preserve pair mass even when full and conditional gold NLL
+        # are both huge and subtracting the rounded losses would erase the difference.
+        pair_peak = max(row[gold], row[rival])
+        def outside():
+            return (v for i, v in enumerate(row) if i != gold and i != rival)
+        out_peak = max(outside())
+        out_norm = math.log(math.fsum(math.exp(v - out_peak) for v in outside()))
+        pair_norm = math.log1p(math.exp(-abs(row[rival] - row[gold])))
+        coverage = softplus((out_peak - pair_peak) + (out_norm - pair_norm))
+    peak = max(row)
+    best = next(i for i, v in enumerate(row) if v == peak)  # first maximum, as in the native decoder
+    return dict(choice_nll=choice, coverage_nll=coverage, pair_mass=math.exp(-coverage),
+                gold_nll=choice + coverage, greedy="gold" if best == gold else "rival" if best == rival else "other",
+                top_tie=sum(v == peak for v in row) > 1)
+
+
+COSTS = ("choice_nll", "coverage_nll", "gold_nll", "pair_mass")
+
+
+def vocabulary_stage(attempt, stage, cases, vocab, digest, scores):
+    raw = (attempt / (stage + ".f32le")).read_bytes()
+    need(sys.byteorder == "little" and len(raw) == 4*len(cases)*vocab and sha(raw) == digest,
+         "wrong archived logits")
+    buf = memoryview(raw).cast("f")
+    rows = {}
+    for i, c in enumerate(cases):
+        row = buf[i*vocab:(i+1)*vocab]
+        v = vocabulary_row(row, c["gold"], c["rival"])
+        need(row[c["gold"]]-row[c["rival"]] == scores[c["key"]]["margin"]
+             and math.isclose(v["gold_nll"], scores[c["key"]]["nll"], rel_tol=1e-12, abs_tol=1e-12),
+             "probability split disagrees with frozen score")
+        rows[c["key"]] = v
+    counts = {k:sum(v["greedy"] == k for v in rows.values()) for k in ("gold", "rival", "other")}
+    return rows, dict(means={k:mean([v[k] for v in rows.values()]) for k in COSTS},
+                      recorded_vocab_rows=len(cases), greedy=counts, top_ties=sum(v["top_tie"] for v in rows.values()))
+
+
 def describe(cases, margins):
     groups = T["checked_cases"](cases)
     need(set(margins) == {c["key"] for c in cases} and all(map(math.isfinite, margins.values())),
          "missing, extra or nonfinite margins")
     grids = {group: {} for group in groups}
+    prefixes = {group: {} for group in groups}
     for c in cases:
         s = 1 if c["plural"] else -1
         a = -s if c["conflict"] else s
         grids[c["pair"]][s, a] = s * margins[c["key"]]  # plural logit minus singular logit
+        prefix = c["prefix"]
+        need(len(prefix) == 6 and all(type(v) is int and v >= 0 for v in prefix), "wrong tokenized template")
+        prefixes[c["pair"]][s, a] = prefix
     quartets, counts = {}, dict.fromkeys(OUTCOMES, 0)
     orders = dict.fromkeys(("correct_order", "reverse_order", "tied"), 0)
     for group, z in grids.items():
+        tokens = prefixes[group]
+        for n in (-1, 1):
+            for first, second, slot in [((-1, n), (1, n), 1), ((n, -1), (n, 1), 4)]:
+                changed = [i for i, (x, y) in enumerate(zip(tokens[first], tokens[second])) if x != y]
+                need(changed == [slot], "not a one-token subject/attractor switch")
         coeff = dict(zip(TERMS, (mean([v * (1, s, a, s*a)[i] for (s, a), v in z.items()])
                                  for i in range(4))))
         pairs = {}
@@ -104,14 +161,19 @@ def completed(root, kind, result_pin):
     need(p["kind"] == kind and p["seconds"] == seconds and p["sources"] == E["sources"](), "wrong sources")
     result = E["replay"](p, attempt)
     need(E["enc"](result) == result_raw, "original protocol does not replay")
-    scores = {stage: {key: row["margin"] for key, row in scores.items()}
-              for stage, scores in result["by_item"].items()}
+    scores = {stage: {key: row["margin"] for key, row in observed.items()}
+              for stage, observed in result["by_item"].items()}
     cases = p["evaluation"]
     stages = {stage: describe(cases, values) for stage, values in scores.items()}
-    changes = {}
+    vocab_rows = {}
+    for stage in stages:
+        vocab_rows[stage], stages[stage]["vocabulary"] = vocabulary_stage(
+            attempt, stage, cases, p["shape"][-1], result["logit_sha256"][stage], result["by_item"][stage])
+    changes, vocab_changes = {}, {}
     for order in result["orders"]:
         seed = order["seed"]
         arms = {}
+        vocab_changes[str(seed)] = {}
         for arm in E["ARMS"]:
             before, after = scores["initial-" + arm], scores["%s-%s" % (seed, arm)]
             vals = {k: after[k] - before[k] for k in before}
@@ -120,10 +182,16 @@ def completed(root, kind, result_pin):
                               ("conflict", coeff["subject"] - coeff["attractor"])]:
                 close(effect, order["arms"][arm][g]["change"])
             arms[arm] = coeff
+            a, b = vocab_rows["initial-"+arm], vocab_rows["%s-%s"%(seed,arm)]
+            deltas = {k:mean([b[key][k]-a[key][k] for key in a]) for k in COSTS}
+            close(deltas["gold_nll"], order["arms"][arm]["all"]["nll_change"])
+            close(deltas["gold_nll"], deltas["coverage_nll"] + deltas["choice_nll"])
+            vocab_changes[str(seed)][arm] = deltas
         close(arms["r4"]["subject"] - arms["r1"]["subject"], order["paired_gain"]["all"])
         changes[str(seed)] = arms
     return dict(scope="completed_radius_fit", kind=kind, plan=plan_pin, result=result_pin,
-                receipt=sha(receipt_raw), original_advance=result["advance"], stages=stages, changes=changes)
+                receipt=sha(receipt_raw), original_advance=result["advance"], stages=stages, changes=changes,
+                vocabulary_changes=vocab_changes)
 
 
 if __name__ == "__main__":
