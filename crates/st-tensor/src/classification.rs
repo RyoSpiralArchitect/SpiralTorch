@@ -13,7 +13,9 @@ pub use competition::{RivalCrossEntropy, RivalCrossEntropyReport, MAX_RIVAL_CLAS
 mod declared;
 pub use declared::{DeclaredRivalReport, DeclaredRivalRow, MAX_DECLARED_RIVAL_IDS};
 mod coverage;
-pub use coverage::{RivalCoverageGuard, RivalCoverageGuardReport, RivalCoverageReference};
+pub use coverage::{
+    DeclaredSetNll, RivalCoverageGuard, RivalCoverageGuardReport, RivalCoverageReference,
+};
 mod target;
 pub use target::TargetClassScore;
 mod context_preference;

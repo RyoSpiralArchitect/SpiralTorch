@@ -1304,28 +1304,35 @@ assert session.predecessor_checkpoint_id == predecessor
         with self.assertRaises(ValueError):
             self.model.geometry_full_and_declared_gradients(Unread(), shape, **kw)
 
-    def test_full_and_choice_guard_repairs_a_real_logit_conflict_or_refuses_antiparallel(self):
-        config, raw = fixture(vocabulary=3, layers=1, constant_logits=[0.] * 3, raw_weights=True)
+    def _uniform_set_geometry(self, *outside_rows):
+        vocab = 2 + len(outside_rows)
+        config, raw = fixture(vocabulary=vocab, layers=1, constant_logits=[0.] * vocab, raw_weights=True)
         size, = struct.unpack_from("<Q", raw)
         header = json.loads(raw[8:8+size])
-        def put(buf, key, values):
+        buf = bytearray(raw)
+        def put(key, values):
             a, b = header[key]["data_offsets"]
             self.assertEqual(b-a, 4 * len(values))
             struct.pack_into(f"<{len(values)}f", buf, 8 + size + a, *values)
+        put("ln_f.weight", [1.] * 4)
+        put("ln_f.bias", [0.] * 4)
+        head = [0.,0.,0.,0., 1.,-1.,0.,0.]
+        for axis, tilt in outside_rows:
+            head.extend([axis,-axis,tilt,-tilt])
+        put("lm_head.weight", head)
+        base = st.NativeCausalLm.from_gpt2(config, st.SafeTensorArchive.from_bytes(bytes(buf)))
+        return base.with_geometry(artifact(base, path="transformer.h.0", gate=0.,
+                                           trainable=True, trainable_names=("bias",)))
+
+    def test_full_and_choice_guard_repairs_a_real_logit_conflict_or_refuses_antiparallel(self):
         def losses(m):
             gold, rival, _ = m.forward([2], [1,1], last_only=True).values()
             return math.log1p(math.exp(rival-gold)), m.next_token_score([2], 0)["nll"]
         for tilt in [2., 0.]:
             with self.subTest(tilt=tilt):
-                buf = bytearray(raw)
-                put(buf, "ln_f.weight", [1.] * 4)
-                put(buf, "ln_f.bias", [0.] * 4)
                 # At zero hidden state the readout is uniform. The distractor reverses
                 # the rival gradient's first axis; tilt adds a shared-descent direction.
-                put(buf, "lm_head.weight", [0.,0.,0.,0., 1.,-1.,0.,0., -3.,3.,tilt,-tilt])
-                base = st.NativeCausalLm.from_gpt2(config, st.SafeTensorArchive.from_bytes(bytes(buf)))
-                m = base.with_geometry(artifact(base, path="transformer.h.0", gate=0.,
-                                                trainable=True, trainable_names=("bias",)))
+                m = self._uniform_set_geometry((-3., tilt))
                 full, choice = m.geometry_full_and_declared_gradients(
                     [2,0], [1,2], contrasts=[(1,0,[1])], mix=1.)
                 proposal, _ = m.step_geometry_gradient_at_distance(choice, 1. / 65536)
@@ -1342,6 +1349,92 @@ assert session.predecessor_checkpoint_id == predecessor
                 self.assertGreater(result["candidate_loss_dots"][1], 0.)
                 self.assertTrue(all(d < 0. for d in result["applied_loss_dots"]))
                 self.assertTrue(all(after < before for after, before in zip(losses(safe), start)))
+
+    def test_coverage_can_worsen_while_choice_and_full_improve_and_can_be_protected(self):
+        ids, shape, kw = [2,0], [1,2], dict(contrasts=[(1,0,[1])])
+        def score(m):
+            s = m.declared_set_nll(ids, shape, **kw)
+            gold, rival, outside = map(math.exp, m.forward([2], [1,1], last_only=True).values())
+            self.assertAlmostEqual(s["within_nll"], math.log((gold+rival)/gold), places=12)
+            self.assertAlmostEqual(s["coverage_nll"], math.log1p(outside/(gold+rival)), places=12)
+            self.assertAlmostEqual(s["full_nll"], math.log((gold+rival+outside)/gold), places=12)
+            return s
+        for tilt in (2., 0.):
+            with self.subTest(tilt=tilt):
+                m = self._uniform_set_geometry((0., tilt))
+                within, coverage, start = m.geometry_declared_set_gradients(ids, shape, **kw)
+                self.assertEqual(start, score(m))
+                full, _ = m.geometry_full_and_declared_gradients(ids, shape, mix=1., **kw)
+                step, _ = m.step_geometry_gradient_at_distance(within, 1./65536)
+                passed, old = m.guard_geometry_step(step, [[within], [full]])
+                self.assertEqual(old["mix"], 0.)
+                self.assertIsNone(old["feasible_mix"])
+                self.assertEqual(passed.geometry_artifact_id, step.geometry_artifact_id)
+                plain = score(step)
+                self.assertLess(plain["full_nll"], start["full_nll"])
+                self.assertLess(plain["within_nll"], start["within_nll"])
+                self.assertGreater(plain["coverage_nll"], start["coverage_nll"])
+                if not tilt:
+                    with self.assertRaisesRegex(ValueError, "feasible interval"):
+                        m.guard_geometry_step(step, [[within], [coverage]])
+                    with self.assertRaisesRegex(ValueError, "feasible interval"):
+                        m.step_declared_set_geometry_at_distance(ids, shape, target_l2=1./65536, **kw)
+                else:
+                    guarded, r = m.guard_geometry_step(step, [[within], [coverage]])
+                    self.assertGreater(r["candidate_loss_dots"][1], 0.)
+                    self.assertTrue(all(d < 0 for d in r["applied_loss_dots"]))
+                    self.assertAlmostEqual(r["applied_l2"]/r["candidate_l2"], 1., places=4)
+                    final = score(guarded)
+                    for k in ("within_nll","coverage_nll","full_nll"):
+                        self.assertLess(final[k], start[k])
+                    actual, receipt = m.step_declared_set_geometry_at_distance(ids, shape, target_l2=1./65536, **kw)
+                    self.assertTrue(receipt["accepted"])
+                    self.assertEqual(actual.geometry_artifact_id, guarded.geometry_artifact_id)
+                    self.assertEqual(receipt["proposed"], final)
+                    with self.assertRaises(ValueError):
+                        guarded.step_geometry_gradient_at_distance(coverage, 1./65536)
+                self.assertEqual(score(m), start)
+
+    def test_declared_set_checks_foreign_sequences_before_copying_windows(self):
+        class Unread:
+            def __len__(self):
+                raise AssertionError("unexpected input copy")
+        with self.assertRaises(ValueError):
+            self.model.declared_set_nll(Unread(), [1,2], contrasts=[(0,1,[0])])
+        with self.assertRaises(ValueError):
+            self.model.geometry_declared_set_gradients(Unread(), [1,2], contrasts=[])
+        score = self.model.declared_set_nll([1,2], [1,2], contrasts=[])
+        self.assertEqual(score["coverage_nll"], 0.)
+        self.assertEqual(score["within_nll"], score["full_nll"])
+        m = self._uniform_set_geometry((0.,2.))
+        for distance in (0., -1., float("nan"), True):
+            with self.assertRaises((TypeError, ValueError)):
+                m.step_declared_set_geometry_at_distance(Unread(), [1,2], contrasts=[(1,0,[1])], target_l2=distance)
+        with self.assertRaisesRegex(ValueError, "proper subset"):
+            m.step_declared_set_geometry_at_distance(Unread(), [1,2], contrasts=[(1,0,[1,2])], target_l2=.1)
+
+    def test_finite_declared_set_step_returns_origin_on_overshoot_despite_two_descent_slopes(self):
+        # The mean of the two outsiders favors the small move, but the -4 axis
+        # outsider eventually dominates their log-sum-exp. No line search.
+        m = self._uniform_set_geometry((-4.,0.), (6.,0.))
+        ids, shape, kw = [2,0], [1,2], dict(contrasts=[(1,0,[1])])
+        origin = m.geometry_artifact_id
+        within, _, initial = m.geometry_declared_set_gradients(ids, shape, **kw)
+        for length, accept in [(1./65536, True), (1./128, False)]:
+            returned, r = m.step_declared_set_geometry_at_distance(ids, shape, target_l2=length, **kw)
+            direct, _ = m.step_geometry_gradient_at_distance(within, length)
+            checked = direct.declared_set_nll(ids, shape, **kw)
+            self.assertEqual(r["before"], initial)
+            self.assertEqual(r["proposed"], checked)
+            self.assertEqual(r["proposal_guard"]["mix"], 0.)
+            self.assertTrue(all(v < 0 for v in r["proposal_guard"]["applied_loss_dots"]))
+            self.assertLess(checked["within_nll"], initial["within_nll"])
+            self.assertEqual(checked["coverage_nll"] < initial["coverage_nll"], accept)
+            self.assertEqual(r["accepted"], accept)
+            self.assertEqual(r["result_geometry_id"], returned.geometry_artifact_id)
+            self.assertEqual(returned.geometry_artifact_id, direct.geometry_artifact_id if accept else origin)
+            self.assertEqual(returned.declared_set_nll(ids, shape, **kw), checked if accept else initial)
+            self.assertEqual(m.geometry_artifact_id, origin)
 
     def test_mixture_probe_pins_forward_and_exports_native_boundary_bytes(self):
         site = "transformer.h.1.attn"

@@ -17,6 +17,7 @@ mod common_geometry;
 mod competition_pair;
 mod context;
 mod context_preference;
+mod declared_set_step;
 mod decoder;
 mod evaluation;
 mod generation;
@@ -52,6 +53,7 @@ pub use common_geometry::{
 };
 pub use competition_pair::{CausalLmGeometryCompetitionPair, CausalLmGeometryCompetitionStep};
 pub use context::NativeCausalLmContext;
+pub use declared_set_step::CausalLmDeclaredSetStep;
 pub use evaluation::{
     CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
     CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmLabeledAnswerCorpus,
@@ -133,8 +135,9 @@ pub use session::{
     CausalLmTrainingSessionStep, NativeCausalLmTrainingPrefixCache, NativeCausalLmTrainingSession,
 };
 pub use st_tensor::classification::{
-    ContextTokenPreference, DeclaredRivalReport, DeclaredRivalRow, RivalCrossEntropy,
-    RivalCrossEntropyReport, TargetClassScore, MAX_DECLARED_RIVAL_IDS, MAX_RIVAL_CLASSES,
+    ContextTokenPreference, DeclaredRivalReport, DeclaredRivalRow, DeclaredSetNll,
+    RivalCrossEntropy, RivalCrossEntropyReport, TargetClassScore, MAX_DECLARED_RIVAL_IDS,
+    MAX_RIVAL_CLASSES,
 };
 use st_tensor::classification::{RivalCoverageGuard, RivalCoverageReference};
 pub use training::{

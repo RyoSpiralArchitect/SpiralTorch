@@ -341,36 +341,11 @@ impl NativeCausalLm {
         let count = self.geometry_gradient_pair_input_count(shape, labels.is_some())?;
         let (prepared, rows) =
             self.prepare_declared_rows(windows, shape, labels, plan, mix, count)?;
-        let (first, site) = self.first_geometry_site()?;
-        let hidden = self.embed(&prepared.input, prepared.shape)?;
-        let learning::TrainingPrimal {
-            checkpoints,
-            hidden_rows,
-            selected,
-            logits,
-        } = self.training_primal(&prepared, hidden, 0, first, None)?;
-        let (report, declared_seed, full_normalized) = logits
-            .declared_rival_cross_entropy_capture_full(&prepared.labels, &rows, mix, |seed| {
+        let (report, [full, declared]) = self.geometry_pair_pullbacks(&prepared, |logits| {
+            logits.declared_rival_cross_entropy_capture_full(&prepared.labels, &rows, mix, |seed| {
                 self.vocabulary_head_pullback(seed)
-            })?;
-        drop(logits);
-        let d_normalized = self.vocabulary_head_pullback(&declared_seed)?;
-        drop(declared_seed);
-        let norm_vjp = |d| {
-            selected.layer_norm_input_backward(&self.final_norm.gamma, d, self.config.norm_epsilon)
-        };
-        let adjoints = [norm_vjp(&full_normalized)?, norm_vjp(&d_normalized)?];
-        drop((selected, full_normalized, d_normalized));
-        let [full, declared] = self.decoder_pullback_lanes_from_selected(
-            checkpoints,
-            hidden_rows,
-            prepared.shape,
-            prepared.selected_rows.as_deref(),
-            adjoints,
-            first,
-            learning::DecoderTarget::GeometryFrom(&site),
-            None,
-        )?;
+            })
+        })?;
         let mode = CausalLmAdaptationMode::Geometry;
         Ok((
             self.seal_adaptation_gradients(&prepared, mode, report.full_ce, None, full, None)?,
@@ -383,6 +358,101 @@ impl NativeCausalLm {
                 None,
             )?,
         ))
+    }
+
+    /// Score -log P(target | set) and -log P(set) with no backward pass or adapter requirement.
+    pub fn declared_set_nll(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        plan: &[DeclaredRivalRow],
+    ) -> CausalLmResult<DeclaredSetNll> {
+        let count = self.loss_objective_input_count(shape, labels.is_some())?;
+        let (prepared, rows) =
+            self.prepare_declared_rows(windows, shape, labels, plan, 1., count)?;
+        let hidden = self.decode_hidden(&prepared.input, prepared.shape)?;
+        Ok(self
+            .causal_logits(hidden, &prepared)?
+            .declared_set_nll(&prepared.labels, &rows)?)
+    }
+
+    /// Return (within-set gradient, set-coverage gradient, scores) on the same snapshot.
+    /// Both handles can be used with the ordinary geometry optimizers or common-descent guard.
+    pub fn geometry_declared_set_gradients(
+        &self,
+        windows: &[usize],
+        shape: [usize; 2],
+        labels: Option<&[i64]>,
+        plan: &[DeclaredRivalRow],
+    ) -> CausalLmResult<(
+        NativeCausalLmAdaptationGradients,
+        NativeCausalLmAdaptationGradients,
+        DeclaredSetNll,
+    )> {
+        let count = self.geometry_gradient_pair_input_count(shape, labels.is_some())?;
+        let (prepared, rows) =
+            self.prepare_declared_rows(windows, shape, labels, plan, 1., count)?;
+        let (scores, [within, coverage]) = self.geometry_pair_pullbacks(&prepared, |logits| {
+            logits.declared_set_nll_capture_within(&prepared.labels, &rows, |seed| {
+                self.vocabulary_head_pullback(seed)
+            })
+        })?;
+        let mode = CausalLmAdaptationMode::Geometry;
+        Ok((
+            self.seal_adaptation_gradients(
+                &prepared,
+                mode,
+                scores.within_nll as f32,
+                None,
+                within,
+                None,
+            )?,
+            self.seal_adaptation_gradients(
+                &prepared,
+                mode,
+                scores.coverage_nll as f32,
+                None,
+                coverage,
+                None,
+            )?,
+            scores,
+        ))
+    }
+
+    fn geometry_pair_pullbacks<R>(
+        &self,
+        prepared: &PreparedCausalWindow,
+        seeds: impl FnOnce(&Tensor) -> CausalLmResult<(R, Tensor, Tensor)>,
+    ) -> CausalLmResult<(R, [crate::geometry_runtime::ParameterGradients; 2])> {
+        let (first, site) = self.first_geometry_site()?;
+        let hidden = self.embed(&prepared.input, prepared.shape)?;
+        let learning::TrainingPrimal {
+            checkpoints,
+            hidden_rows,
+            selected,
+            logits,
+        } = self.training_primal(prepared, hidden, 0, first, None)?;
+        let (report, second_seed, first_normalized) = seeds(&logits)?;
+        drop(logits);
+        let second_normalized = self.vocabulary_head_pullback(&second_seed)?;
+        drop(second_seed);
+        let norm_vjp = |d| {
+            selected.layer_norm_input_backward(&self.final_norm.gamma, d, self.config.norm_epsilon)
+        };
+        let adjoints = [norm_vjp(&first_normalized)?, norm_vjp(&second_normalized)?];
+        drop((selected, first_normalized, second_normalized));
+        let parameters = self.decoder_pullback_lanes_from_selected(
+            checkpoints,
+            hidden_rows,
+            prepared.shape,
+            prepared.selected_rows.as_deref(),
+            adjoints,
+            first,
+            learning::DecoderTarget::GeometryFrom(&site),
+            None,
+        )?;
+        Ok((report, parameters))
     }
 
     pub(super) fn geometry_gradients_for_competition(

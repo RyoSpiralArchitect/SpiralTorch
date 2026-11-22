@@ -875,6 +875,136 @@ fn gradient_alignment_allows_different_inputs_not_different_weights_or_coordinat
 }
 
 #[test]
+fn declared_set_components_share_decoder_work_and_reconstruct_ordinary_geometry_gradient() {
+    let ids = [1, 2, 3, 4, 5, 6, 7, 8];
+    let labels = [-100, -100, -100, 4, -100, -100, 7, -100];
+    let plan = [DeclaredRivalRow {
+        position: 6,
+        target: 7,
+        rivals: vec![1, 4],
+    }];
+    let shape = [2, 4];
+    for policy in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F32WideBackward,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let m = model(1, policy);
+        let scores = m
+            .declared_set_nll(&ids, shape, Some(&labels), &plan)
+            .unwrap();
+        decoder::work_counts::take();
+        let (a, b, s) = m
+            .geometry_declared_set_gradients(&ids, shape, Some(&labels), &plan)
+            .unwrap();
+        assert_eq!(decoder::work_counts::take(), [2, 1, 1]);
+        assert_eq!(scores, s);
+        assert_eq!((s.target_tokens, s.contrasted_tokens), (2, 1));
+        let (f, c) = m
+            .geometry_full_and_declared_gradients(&ids, shape, Some(&labels), &plan, 1.)
+            .unwrap();
+        assert_eq!(s.full_nll as f32, f.loss());
+        assert_eq!(
+            (a.loss(), b.loss()),
+            (s.within_nll as f32, s.coverage_nll as f32)
+        );
+        assert_eq!(a.parameters(), c.parameters());
+        for g in [&a, &b] {
+            assert_eq!(g.geometry_artifact_id(), m.geometry_artifact_id());
+            assert_eq!(g.lora_artifact_id(), m.lora_artifact_id());
+            assert_eq!(g.readout_accumulator(), policy);
+        }
+        let mut diff = 0.;
+        let mut norm = 0.;
+        for (p, tensors) in f.parameters() {
+            for (name, v) in tensors {
+                for ((&full, &within), &mass) in v
+                    .iter()
+                    .zip(&a.parameters()[p][name])
+                    .zip(&b.parameters()[p][name])
+                {
+                    diff += (f64::from(full) - f64::from(within) - f64::from(mass)).powi(2);
+                    norm += f64::from(full).powi(2);
+                }
+            }
+        }
+        assert!(
+            norm > 0. && (diff / norm).sqrt() < 1e-4,
+            "gradient closure: {diff} / {norm}"
+        );
+        let (new, _) = m.step_geometry_gradient_at_distance(&b, 1. / 256.).unwrap();
+        assert_eq!(new.lora_artifact_id(), m.lora_artifact_id());
+        assert!(new
+            .step_geometry_gradient_at_distance(&a, 1. / 256.)
+            .is_err());
+    }
+    let bare = load();
+    assert!(bare
+        .declared_set_nll(&ids, shape, Some(&labels), &plan)
+        .is_ok());
+    assert!(bare
+        .geometry_declared_set_gradients(&ids, shape, Some(&labels), &plan)
+        .is_err());
+    let m = model(1, CausalLmReadoutAccumulator::F32);
+    decoder::work_counts::take();
+    for (position, target) in [(0, 1), (1, 2), (6, 8)] {
+        let bad = [DeclaredRivalRow {
+            position,
+            target,
+            rivals: vec![0],
+        }];
+        assert!(m
+            .declared_set_nll(&ids, shape, Some(&labels), &bad)
+            .is_err());
+        assert!(m
+            .geometry_declared_set_gradients(&ids, shape, Some(&labels), &bad)
+            .is_err());
+    }
+    assert_eq!(decoder::work_counts::take(), [0; 3]);
+}
+
+#[test]
+fn finite_declared_set_step_checks_one_candidate_and_never_advances_another_owner() {
+    let m = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let (ids, shape) = ([1, 2, 3, 4], [1, 4]);
+    let labels = [-100, -100, -100, 4];
+    let plan = [DeclaredRivalRow {
+        position: 3,
+        target: 4,
+        rivals: vec![2],
+    }];
+    decoder::work_counts::take();
+    assert!(m
+        .step_declared_set_geometry_at_distance(&ids, shape, Some(&labels), &plan, 0.)
+        .is_err());
+    assert!(m
+        .step_declared_set_geometry_at_distance(&ids, shape, Some(&labels), &[], 0.01)
+        .is_err());
+    assert_eq!(decoder::work_counts::take(), [0; 3]);
+    let (next, r) = m
+        .step_declared_set_geometry_at_distance(&ids, shape, Some(&labels), &plan, 1. / 256.)
+        .unwrap();
+    assert_eq!(decoder::work_counts::take(), [4, 1, 2]);
+    assert_eq!(
+        r.accepted,
+        r.proposed.within_nll < r.before.within_nll
+            && r.proposed.coverage_nll < r.before.coverage_nll
+    );
+    assert_eq!(r.result_geometry_id, next.geometry_artifact_id().unwrap());
+    assert_eq!(m.lora_artifact_id(), next.lora_artifact_id());
+    assert_eq!(
+        m.declared_set_nll(&ids, shape, Some(&labels), &plan)
+            .unwrap(),
+        r.before
+    );
+    assert_eq!(
+        next.declared_set_nll(&ids, shape, Some(&labels), &plan)
+            .unwrap(),
+        if r.accepted { r.proposed } else { r.before }
+    );
+}
+
+#[test]
 fn full_and_declared_share_each_primal_and_keep_independent_sealed_vjps() {
     use decoder::work_counts;
     use CausalLmReadoutAccumulator::{F32WideBackward, F32, F64};

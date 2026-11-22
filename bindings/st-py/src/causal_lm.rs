@@ -712,8 +712,15 @@ impl PyNativeCausalLm {
         mix: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
-        let w =
-            declared::Window::extract(&self.inner, windows, shape, contrasts, mix, labels, false)?;
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            Some(mix),
+            labels,
+            declared::Work::Gradient,
+        )?;
         py.detach(|| {
             self.inner.geometry_declared_rival_gradients(
                 &w.ids,
@@ -741,8 +748,15 @@ impl PyNativeCausalLm {
         PyNativeCausalLmAdaptationGradients,
         PyNativeCausalLmAdaptationGradients,
     )> {
-        let w =
-            declared::Window::extract(&self.inner, windows, shape, contrasts, mix, labels, true)?;
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            Some(mix),
+            labels,
+            declared::Work::Pair,
+        )?;
         let (full, declared) = py
             .detach(|| {
                 self.inner.geometry_full_and_declared_gradients(
@@ -757,6 +771,113 @@ impl PyNativeCausalLm {
         Ok((
             PyNativeCausalLmAdaptationGradients { inner: full },
             PyNativeCausalLmAdaptationGradients { inner: declared },
+        ))
+    }
+
+    /// Forward-only within-set and set-coverage NLL; no adapter required.
+    #[pyo3(signature=(windows, shape, *, contrasts, labels=None))]
+    fn declared_set_nll(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            None,
+            labels,
+            declared::Work::Score,
+        )?;
+        let scores = py
+            .detach(|| {
+                self.inner
+                    .declared_set_nll(&w.ids, w.shape, w.labels.as_deref(), &w.plan)
+            })
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(scores).map_err(error)?)
+    }
+
+    /// Return (within-set gradient, set-coverage gradient, scores); same snapshot and decoder forward.
+    #[pyo3(signature=(windows, shape, *, contrasts, labels=None))]
+    fn geometry_declared_set_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(
+        PyNativeCausalLmAdaptationGradients,
+        PyNativeCausalLmAdaptationGradients,
+        Py<PyAny>,
+    )> {
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            None,
+            labels,
+            declared::Work::Pair,
+        )?;
+        let (within, coverage, scores) = py
+            .detach(|| {
+                self.inner.geometry_declared_set_gradients(
+                    &w.ids,
+                    w.shape,
+                    w.labels.as_deref(),
+                    &w.plan,
+                )
+            })
+            .map_err(error)?;
+        Ok((
+            PyNativeCausalLmAdaptationGradients { inner: within },
+            PyNativeCausalLmAdaptationGradients { inner: coverage },
+            crate::json::json_to_py(py, &serde_json::to_value(scores).map_err(error)?)?,
+        ))
+    }
+
+    /// One proposal and at most one finite check. A tie/regression returns the original snapshot.
+    #[pyo3(signature=(windows, shape, *, contrasts, target_l2, labels=None))]
+    fn step_declared_set_geometry_at_distance(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        target_l2: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        reject_bool(target_l2)?;
+        let distance = target_l2.extract::<f64>()?;
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            None,
+            labels,
+            declared::Work::CheckedStep(distance),
+        )?;
+        let (inner, report) = py
+            .detach(|| {
+                self.inner.step_declared_set_geometry_at_distance(
+                    &w.ids,
+                    w.shape,
+                    w.labels.as_deref(),
+                    &w.plan,
+                    distance,
+                )
+            })
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)?,
         ))
     }
 

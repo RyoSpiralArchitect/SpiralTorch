@@ -9,29 +9,49 @@ pub(super) struct Window {
     pub mix: f64,
 }
 
+pub(super) enum Work {
+    Score,
+    Gradient,
+    Pair,
+    CheckedStep(f64),
+}
+
 impl Window {
     pub(super) fn extract(
         model: &NativeCausalLm,
         windows: &Bound<'_, PyAny>,
         dims: &Bound<'_, PyAny>,
         contrasts: &Bound<'_, PyAny>,
-        mix: &Bound<'_, PyAny>,
+        mix: Option<&Bound<'_, PyAny>>,
         labels: Option<&Bound<'_, PyAny>>,
-        paired: bool,
+        work: Work,
     ) -> PyResult<Self> {
         let shape = shape(dims)?;
-        reject_bool(mix)?;
-        let mix = mix.extract::<f64>()?;
-        let count = if paired {
-            model.geometry_gradient_pair_input_count(shape, labels.is_some())
+        let mix = if let Some(value) = mix {
+            reject_bool(value)?;
+            value.extract::<f64>()?
         } else {
-            model
-                .validate_adaptation_mode(st_nn::causal_lm::CausalLmAdaptationMode::Geometry)
-                .map_err(error)?;
-            model.adaptation_labeled_input_count(shape, labels.is_some())
+            1.
+        };
+        let count = match work {
+            Work::Score => model.loss_objective_input_count(shape, labels.is_some()),
+            Work::Pair | Work::CheckedStep(_) => {
+                model.geometry_gradient_pair_input_count(shape, labels.is_some())
+            }
+            Work::Gradient => {
+                model
+                    .validate_adaptation_mode(st_nn::causal_lm::CausalLmAdaptationMode::Geometry)
+                    .map_err(error)?;
+                model.adaptation_labeled_input_count(shape, labels.is_some())
+            }
         }
         .map_err(error)?;
         let plan = extract(contrasts, shape, count, model.config().vocabulary, mix)?;
+        if let Work::CheckedStep(distance) = work {
+            model
+                .validate_declared_set_step(&plan, distance)
+                .map_err(error)?;
+        }
         Ok(Self {
             ids: tokens(windows, count)?,
             labels: loss_labels(labels, count)?,

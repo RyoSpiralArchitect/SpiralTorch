@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! One-sided coverage loss on the reference-selected target plus strongest incorrect classes.
 use super::*;
+mod declared_set;
+pub use declared_set::DeclaredSetNll;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RivalCoverageGuard(f64);
