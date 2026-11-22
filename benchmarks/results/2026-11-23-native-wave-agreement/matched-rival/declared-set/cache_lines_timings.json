@@ -1,0 +1,195 @@
+{
+  "schema": "spiraltorch.artificial_cached_lines_timing.v1",
+  "model": "WaveGate, CPU, 4 layers x 48, 4 heads, vocab 512",
+  "prompt": 32,
+  "lines": 4,
+  "content_per_line": 6,
+  "results": [
+    {
+      "menu": "shared",
+      "work": {
+        "cached_prompt_tokens": 32,
+        "decoded_content_tokens": 9,
+        "decoder_chunks": 5,
+        "peak_fork_cache_values": 28800
+      },
+      "trials": [
+        {
+          "order": [
+            "padded",
+            "inc_prefill",
+            "reused"
+          ],
+          "ms": {
+            "padded": 2.322458,
+            "inc_prefill": 0.901792,
+            "reused": 0.412542
+          }
+        },
+        {
+          "order": [
+            "padded",
+            "reused",
+            "inc_prefill"
+          ],
+          "ms": {
+            "padded": 2.300959,
+            "reused": 0.447292,
+            "inc_prefill": 0.912834
+          }
+        },
+        {
+          "order": [
+            "inc_prefill",
+            "padded",
+            "reused"
+          ],
+          "ms": {
+            "inc_prefill": 0.898875,
+            "padded": 2.350541,
+            "reused": 0.435834
+          }
+        },
+        {
+          "order": [
+            "inc_prefill",
+            "reused",
+            "padded"
+          ],
+          "ms": {
+            "inc_prefill": 0.894667,
+            "reused": 0.42575,
+            "padded": 2.364334
+          }
+        },
+        {
+          "order": [
+            "reused",
+            "padded",
+            "inc_prefill"
+          ],
+          "ms": {
+            "reused": 0.437625,
+            "padded": 2.359084,
+            "inc_prefill": 0.935167
+          }
+        },
+        {
+          "order": [
+            "reused",
+            "inc_prefill",
+            "padded"
+          ],
+          "ms": {
+            "reused": 0.408666,
+            "inc_prefill": 0.954375,
+            "padded": 2.439459
+          }
+        }
+      ],
+      "max_abs_error": 0.0,
+      "median_ms": {
+        "padded": 2.3548125000000004,
+        "inc_prefill": 0.907313,
+        "reused": 0.430792
+      },
+      "median_paired_speedup": {
+        "inc_prefill": 2.5657305881486425,
+        "reused": 5.473270635837203
+      }
+    },
+    {
+      "menu": "disjoint",
+      "work": {
+        "cached_prompt_tokens": 32,
+        "decoded_content_tokens": 24,
+        "decoder_chunks": 4,
+        "peak_fork_cache_values": 14592
+      },
+      "trials": [
+        {
+          "order": [
+            "padded",
+            "inc_prefill",
+            "reused"
+          ],
+          "ms": {
+            "padded": 2.386,
+            "inc_prefill": 1.402333,
+            "reused": 0.887125
+          }
+        },
+        {
+          "order": [
+            "padded",
+            "reused",
+            "inc_prefill"
+          ],
+          "ms": {
+            "padded": 2.401708,
+            "reused": 0.897792,
+            "inc_prefill": 1.438458
+          }
+        },
+        {
+          "order": [
+            "inc_prefill",
+            "padded",
+            "reused"
+          ],
+          "ms": {
+            "inc_prefill": 1.433666,
+            "padded": 2.400208,
+            "reused": 0.950333
+          }
+        },
+        {
+          "order": [
+            "inc_prefill",
+            "reused",
+            "padded"
+          ],
+          "ms": {
+            "inc_prefill": 1.421667,
+            "reused": 0.9475,
+            "padded": 2.398084
+          }
+        },
+        {
+          "order": [
+            "reused",
+            "padded",
+            "inc_prefill"
+          ],
+          "ms": {
+            "reused": 0.907042,
+            "padded": 2.364292,
+            "inc_prefill": 1.344917
+          }
+        },
+        {
+          "order": [
+            "reused",
+            "inc_prefill",
+            "padded"
+          ],
+          "ms": {
+            "reused": 0.891834,
+            "inc_prefill": 1.397375,
+            "padded": 2.424208
+          }
+        }
+      ],
+      "max_abs_error": 0.0,
+      "median_ms": {
+        "padded": 2.399146,
+        "inc_prefill": 1.412,
+        "reused": 0.902417
+      },
+      "median_paired_speedup": {
+        "inc_prefill": 1.6941308483034212,
+        "reused": 2.6408616848334736
+      }
+    }
+  ]
+}

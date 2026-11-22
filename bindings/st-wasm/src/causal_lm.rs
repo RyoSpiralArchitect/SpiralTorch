@@ -5,7 +5,8 @@ use js_sys::{JsString, Uint32Array, Uint8Array};
 use serde::Deserialize;
 use st_nn::causal_lm::{
     CausalLmDeclaredSetStep, CausalLmLimits, DeclaredRivalRow, NativeCausalLm as Decoder,
-    NativeCausalLmContext as CoreContext, MAX_DECLARED_RIVAL_IDS,
+    NativeCausalLmContext as CoreContext, MAX_DECLARED_RIVAL_IDS, MAX_LINE_MENU_CANDIDATES,
+    MAX_LINE_MENU_TARGETS,
 };
 use st_nn::weights::{SafeTensorArchive, WeightLoadLimits};
 use wasm_bindgen::prelude::*;
@@ -191,7 +192,7 @@ impl NativeCausalLm {
     pub fn prefill(
         &self,
         prompt: &Uint32Array,
-        max_cache_values: &JsValue,
+        #[wasm_bindgen(unchecked_param_type = "number")] max_cache_values: &JsValue,
     ) -> Result<NativeCausalLmContext, JsValue> {
         let budget = js_u32(max_cache_values, "cache value limit")? as usize;
         if !(1..=CACHE_VALUES).contains(&budget) {
@@ -245,6 +246,39 @@ pub struct NativeCausalLmContext {
 
 #[wasm_bindgen]
 impl NativeCausalLmContext {
+    /// Score a sorted menu of packed content IDs and lengths, plus one separate stop per line.
+    #[wasm_bindgen(js_name = scoreLinesJson)]
+    pub fn score_lines_json(
+        &self,
+        content: &Uint32Array,
+        lengths: &Uint32Array,
+        #[wasm_bindgen(unchecked_param_type = "number")] stop_id: &JsValue,
+    ) -> Result<String, JsValue> {
+        let stop = js_u32(stop_id, "stop ID")? as usize;
+        let lens = admitted_ids(lengths, id_count(lengths, MAX_LINE_MENU_CANDIDATES)?)?;
+        self.inner
+            .admit_line_lengths(&lens, stop)
+            .map_err(js_error)?;
+        let n = id_count(content, MAX_LINE_MENU_TARGETS)?;
+        if n != lens.iter().sum::<usize>() {
+            return Err(JsValue::from_str(
+                "packed content does not match candidate lengths",
+            ));
+        }
+        let flat = admitted_ids(content, n)?;
+        let mut remaining = flat.as_slice();
+        let lines: Vec<_> = lens
+            .into_iter()
+            .map(|len| {
+                let (line, tail) = remaining.split_at(len);
+                remaining = tail;
+                line.to_vec()
+            })
+            .collect();
+        let r = self.inner.score_lines(&lines, stop).map_err(js_error)?;
+        serde_json::to_string(&r).map_err(js_error)
+    }
+
     /// Fork the prefix. No JS KV, hidden re-prefill or intermediate vocabulary readouts.
     #[wasm_bindgen(js_name = withSuffix)]
     pub fn with_suffix(&self, suffix: &Uint32Array) -> Result<Self, JsValue> {

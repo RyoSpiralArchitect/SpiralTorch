@@ -128,7 +128,7 @@ impl NativeCausalLm {
         self.cached_query_count(steps, 1, max_cache_values)
     }
 
-    fn cached_query_count(
+    pub(super) fn cached_query_count(
         &self,
         steps: usize,
         added: usize,
@@ -299,6 +299,10 @@ impl NativeCausalLmContext {
         self.logits.data()
     }
 
+    pub(super) fn decoder(&self) -> &NativeCausalLm {
+        &self.model
+    }
+
     /// Admit suffix work before a client extracts IDs. This is rectangular cached attention,
     /// not full-prefix admission and not a promise that many one-token calls fit as one chunk.
     pub fn suffix_input_count(&self, added: usize) -> CausalLmResult<usize> {
@@ -395,6 +399,34 @@ impl NativeCausalLmContext {
         suffix: &[usize],
         edit: Option<(usize, usize, &[f32])>,
     ) -> CausalLmResult<Self> {
+        let (blocks, hidden) = self.suffix_hidden(suffix, edit)?;
+        let last = if suffix.len() == 1 {
+            hidden
+        } else {
+            hidden.gather_rows(&[suffix.len() - 1])?
+        };
+        self.finish_suffix(suffix, blocks, self.model.context_readout(&last)?)
+    }
+
+    /// As opposed to with_suffix, every content row here predicts another token or a stop.
+    pub(super) fn scored_suffix(&self, suffix: &[usize]) -> CausalLmResult<(Self, Tensor)> {
+        self.model.logit_count(suffix.len())?;
+        let (blocks, hidden) = self.suffix_hidden(suffix, None)?;
+        let rows = self.model.context_readout(&hidden)?;
+        let rows = if rows.layout() == st_tensor::Layout::RowMajor {
+            rows
+        } else {
+            rows.to_layout(st_tensor::Layout::RowMajor)?
+        };
+        let last = rows.gather_rows(&[suffix.len() - 1])?;
+        Ok((self.finish_suffix(suffix, blocks, last)?, rows))
+    }
+
+    fn suffix_hidden(
+        &self,
+        suffix: &[usize],
+        edit: Option<(usize, usize, &[f32])>,
+    ) -> CausalLmResult<(Vec<Arc<InferenceBlockCache>>, Tensor)> {
         let model = &self.model;
         let c = &model.config;
         let added = self.suffix_input_count(suffix.len())?;
@@ -471,18 +503,21 @@ impl NativeCausalLmContext {
                 history: [attention_history, mlp_history, block_history],
             }));
         }
-        let last = if added == 1 {
-            hidden
-        } else {
-            hidden.gather_rows(&[added - 1])?
-        };
-        let logits = model.context_readout(&last)?;
+        Ok((blocks, hidden))
+    }
+
+    fn finish_suffix(
+        &self,
+        suffix: &[usize],
+        blocks: Vec<Arc<InferenceBlockCache>>,
+        logits: Tensor,
+    ) -> CausalLmResult<Self> {
         let mut tokens = Vec::new();
-        tokens.try_reserve_exact(steps)?;
+        tokens.try_reserve_exact(self.tokens.len() + suffix.len())?;
         tokens.extend_from_slice(&self.tokens);
         tokens.extend_from_slice(suffix);
         Ok(Self {
-            model: model.clone(),
+            model: self.model.clone(),
             max_cache_values: self.max_cache_values,
             tokens,
             blocks,

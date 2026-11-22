@@ -56,6 +56,18 @@ impl NativeCausalLm {
         content_lengths: &[usize],
         stop_id: usize,
     ) -> CausalLmResult<([usize; 2], usize)> {
+        let (width, targets) = self.terminated_lengths(prompt_len, content_lengths, stop_id)?;
+        let shape = [content_lengths.len(), width];
+        product(&shape, MAX_PADDED_IDS, "padded complete-line IDs")?;
+        Ok((shape, targets))
+    }
+
+    pub(super) fn terminated_lengths(
+        &self,
+        prompt_len: usize,
+        content_lengths: &[usize],
+        stop_id: usize,
+    ) -> CausalLmResult<(usize, usize)> {
         let n = content_lengths.len();
         if !(1..=MAX_LINE_MENU_CANDIDATES).contains(&n)
             || prompt_len == 0
@@ -77,9 +89,7 @@ impl NativeCausalLm {
             .checked_add(*content_lengths.iter().max().unwrap())
             .and_then(|v| v.checked_add(1))
             .ok_or("padded line width overflow")?;
-        let shape = [n, width];
-        product(&shape, MAX_PADDED_IDS, "padded complete-line IDs")?;
-        Ok((shape, targets))
+        Ok((width, targets))
     }
 
     pub(super) fn admit_terminated_work(

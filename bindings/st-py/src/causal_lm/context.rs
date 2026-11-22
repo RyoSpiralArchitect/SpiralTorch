@@ -54,6 +54,25 @@ impl PyNativeCausalLmContext {
             .map(|inner| Self { inner })
             .map_err(error)
     }
+    /// Full-vocabulary scores for lexicographically sorted content lines plus one stop each.
+    #[pyo3(signature=(candidates, *, stop_id))]
+    fn score_lines(
+        &self,
+        py: Python<'_>,
+        candidates: &Bound<'_, PyAny>,
+        stop_id: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let stop = dimension(stop_id)?;
+        let items = super::line_menu::LineItems::new(candidates, 1)?;
+        self.inner
+            .admit_line_lengths(&items.lengths, stop)
+            .map_err(error)?;
+        let lines = items.into_ids()?;
+        let report = py
+            .detach(|| self.inner.score_lines(&lines, stop))
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)
+    }
     fn logits(&self, py: Python<'_>) -> PyResult<PyNdTensor> {
         py.detach(|| self.inner.logits())
             .map(|inner| PyNdTensor { inner })

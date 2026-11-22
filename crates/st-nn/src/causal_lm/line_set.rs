@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 mod partition;
 mod scores;
 pub use scores::CausalLmLineScores;
+mod cached;
+pub use cached::CausalLmCachedLineScores;
 mod subset;
 pub use subset::CausalLmLineSubsetReport;
 pub(super) use subset::LineSubset;

@@ -6,6 +6,7 @@ pub struct CausalLmLineScores {
     pub stop_id: usize,
     pub target_counts: Vec<usize>,
     pub prefix_nodes: usize,
+    /// Number of maximal content paths; only the full-prefix executor pads these into lanes.
     pub decoder_lanes: usize,
     pub shared_content_tokens: usize,
     /// First in input order on an exact tie. Compared before rounding away a shared cost.
@@ -19,7 +20,11 @@ pub struct CausalLmLineScores {
 }
 
 impl LineSet {
-    fn scores(&self, lines: &[Vec<usize>], logits: &Tensor) -> CausalLmResult<CausalLmLineScores> {
+    pub(super) fn scores(
+        &self,
+        lines: &[Vec<usize>],
+        logits: &Tensor,
+    ) -> CausalLmResult<CausalLmLineScores> {
         let pass = readout::PrefixPass::new(self, logits, true)?;
         let (shared, paths) = ranking::paths(self, lines);
         let mut tokens: Vec<_> = self

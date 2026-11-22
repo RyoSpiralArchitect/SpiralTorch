@@ -40,6 +40,8 @@ declare module "spiraltorch-wasm" {
         readonly geometryArtifactId: string | undefined;
         nextLogits(): Float32Array;
         withSuffix(suffixIds: Uint32Array): NativeCausalLmContext;
+        /** Full-vocabulary NLLs including one stop per sorted line; IDs packed by candidate. */
+        scoreLinesJson(content: Uint32Array, lengths: Uint32Array, stopId: number): string;
         free(): void;
     }
     export class GeometryAdapterArtifact {

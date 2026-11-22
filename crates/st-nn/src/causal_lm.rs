@@ -71,7 +71,9 @@ pub use gradient_alignment::{CausalLmGradientAlignment, CausalLmGradientPairStat
 pub use key_lag::CausalLmKeyLag;
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use line_menu::{CausalLmLineMenuReport, MAX_LINE_MENU_CANDIDATES, MAX_LINE_MENU_TARGETS};
-pub use line_set::{CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport};
+pub use line_set::{
+    CausalLmCachedLineScores, CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport,
+};
 pub use lora::NativeCausalLmLoraGradients;
 pub use mixture_probe::{
     CausalLmMixtureObjectiveTrace, CausalLmMixturePath, CausalLmMixtureProbe,

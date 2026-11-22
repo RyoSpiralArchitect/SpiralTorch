@@ -12,12 +12,14 @@ export function update(config: string, weights: Uint8Array, geometry: string, id
         try {
             const ctx: NativeCausalLmContext = result.prefill(Uint32Array.of(2), 1024);
             let logits: Float32Array;
+            let scores: string;
             try {
+                scores = ctx.scoreLinesJson(Uint32Array.of(1, 1, 2), Uint32Array.of(1, 2), 0);
                 const child = ctx.withSuffix(Uint32Array.of(1, 0));
                 try { logits = child.nextLogits(); } finally { child.free(); }
             } finally { ctx.free(); }
             const saved: GeometryAdapterArtifact | undefined = result.geometryArtifact();
-            try { return {receipt, logits, artifact: saved?.toJson()}; }
+            try { return {receipt, logits, scores, artifact: saved?.toJson()}; }
             finally { saved?.free(); }
         } finally { result.free(); }
     } finally { batch.free(); model.free(); art.free(); base.free(); }

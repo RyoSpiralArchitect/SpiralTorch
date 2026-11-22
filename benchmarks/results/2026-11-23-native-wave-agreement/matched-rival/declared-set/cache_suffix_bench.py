@@ -8,7 +8,7 @@ import sys
 import time
 
 
-def run():
+def artificial_model():
     def native_only(event, args):
         if event == "import" and args[0].split(".")[0] in {"numpy", "torch", "transformers", "safetensors", "accelerate"}:
             raise AssertionError("unexpected ML import: " + args[0])
@@ -25,7 +25,12 @@ def run():
                            "kernel": {"curvature": -1., "saturation": 1., "porosity": .05, "max_values": 32768}}
     for tensor in placement["tensors"]:
         tensor.update(shape=[width], values=[((i % 7)-3)*.03 for i in range(width)])
-    model = base.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+    return st, base.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(state)))
+
+
+def run():
+    st, model = artificial_model()
+    width, layers = 48, 4
     ids = [(i*31+7) % 512 for i in range(56)]
     prefix, results = ids[:24], []
     for length in (1, 8, 32):

@@ -37,6 +37,25 @@ def pair(kind=None, path="transformer.h.0.attn", **limits):
 
 
 class NativeCausalLmContextTests(unittest.TestCase):
+    def test_cached_line_lengths_precede_token_reads_and_refusals_preserve_root(self):
+        _, model = pair("wave")
+        ctx = st.NativeCausalLmContext(model, [1, 2], max_cache_values=1024)
+        start = ctx.logits().values()
+        class Oversize:
+            def __len__(self):
+                return 4096
+            def __getitem__(self, i):
+                raise AssertionError("unadmitted tokens must not be accessed")
+        for lines, stop in [([Oversize()], 0), ([[1], [1]], 0), ([[1, True]], 0), ([[1]], False), ([[0]], 0)]:
+            with self.assertRaises((ValueError, TypeError)):
+                ctx.score_lines(lines, stop_id=stop)
+        report = ctx.score_lines([[1], [1, 2]], stop_id=0)
+        self.assertEqual(report["scores"]["target_counts"], [2, 3])
+        self.assertEqual(report["decoded_content_tokens"], 2)
+        self.assertEqual(report["decoder_chunks"], 1)
+        self.assertEqual(ctx.token_ids, [1, 2])
+        self.assertEqual(ctx.logits().values(), start)
+
     def close(self, left, right):
         self.assertEqual(len(left), len(right))
         for a, b in zip(left, right):

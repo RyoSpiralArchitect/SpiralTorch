@@ -9,6 +9,9 @@ geometry replays its retained site inputs once for the extended prefix.
 This is not a cache for training gradients, teacher-forced sequence scoring,
 or parallel generation of unknown tokens.
 
+For teacher-forced likelihoods of multiple terminated alternatives instead,
+see [cached full-answer scoring and matched timings](CACHED_LINES.md).
+
 ## Numerical checks
 
 The native tests cover every split of a two-head prompt, immutable branches,

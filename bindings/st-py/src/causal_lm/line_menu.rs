@@ -7,6 +7,33 @@ pub(super) struct Inputs {
     pub stop: usize,
 }
 
+pub(super) struct LineItems<'py> {
+    items: Vec<Bound<'py, PyAny>>,
+    pub lengths: Vec<usize>,
+}
+
+impl<'py> LineItems<'py> {
+    pub fn new(choices: &Bound<'py, PyAny>, minimum: usize) -> PyResult<Self> {
+        let n = choices.len()?;
+        if !(minimum..=MAX_LINE_MENU_CANDIDATES).contains(&n) {
+            return Err(error("invalid complete-line candidate count"));
+        }
+        let items: Vec<_> = (0..n)
+            .map(|i| choices.get_item(i))
+            .collect::<PyResult<_>>()?;
+        let lengths = items.iter().map(|p| p.len()).collect::<PyResult<_>>()?;
+        Ok(Self { items, lengths })
+    }
+
+    pub fn into_ids(self) -> PyResult<Vec<Vec<usize>>> {
+        self.items
+            .iter()
+            .zip(self.lengths)
+            .map(|(p, n)| tokens(p, n))
+            .collect()
+    }
+}
+
 pub(super) fn subset(
     model: &NativeCausalLm,
     prompt: &Bound<'_, PyAny>,
@@ -58,26 +85,16 @@ pub(super) fn collect(
             .map_err(error)?;
     }
     let stop = dimension(stop)?;
-    let n = choices.len()?;
-    if !((if menu.is_some() { 2 } else { 1 })..=MAX_LINE_MENU_CANDIDATES).contains(&n) {
-        return Err(error("invalid complete-line candidate count"));
-    }
+    let items = LineItems::new(choices, if menu.is_some() { 2 } else { 1 })?;
     let prompt_len = prompt.len()?;
-    let items: Vec<_> = (0..n)
-        .map(|i| choices.get_item(i))
-        .collect::<PyResult<_>>()?;
-    let sizes: Vec<_> = items.iter().map(|p| p.len()).collect::<PyResult<_>>()?;
+    let sizes = &items.lengths;
     match menu {
-        Some((gold, mix)) => model.line_menu_shape(prompt_len, &sizes, gold, stop, mix, training),
-        None => model.line_set_shape(prompt_len, &sizes, stop, training),
+        Some((gold, mix)) => model.line_menu_shape(prompt_len, sizes, gold, stop, mix, training),
+        None => model.line_set_shape(prompt_len, sizes, stop, training),
     }
     .map_err(error)?;
     let prompt = tokens(prompt, prompt_len)?;
-    let lines = items
-        .iter()
-        .zip(sizes)
-        .map(|(p, n)| tokens(p, n))
-        .collect::<PyResult<_>>()?;
+    let lines = items.into_ids()?;
     Ok(Inputs {
         prompt,
         lines,

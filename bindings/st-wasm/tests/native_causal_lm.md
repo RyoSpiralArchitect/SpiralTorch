@@ -42,6 +42,45 @@ and key-lag attention; bare, trained WaveGate and trained fractional history).
 Their fixture was generated with the original full-prefix and one-token Python
 interfaces using `native_causal_lm_fixture.py --cache OUTPUT`.
 
+## Score complete answers
+
+To compare answers after the same prompt, score their content **and the stop**
+instead of reading just the last logits of a fork:
+
+```js
+const ctx = model.prefill(Uint32Array.of(1, 2), 1024);
+try {
+  // Two contents [1] and [1, 2], packed without the common stop ID (0).
+  const r = JSON.parse(ctx.scoreLinesJson(Uint32Array.of(1, 1, 2), Uint32Array.of(1, 2), 0));
+  console.log(r.scores.winner_index, r.scores.token_nlls, r.decoded_content_tokens);
+} finally { ctx.free(); }
+```
+
+Rust: `ctx.score_lines(&[vec![1], vec![1, 2]], 0)?`. Python:
+`ctx.score_lines([[1], [1, 2]], stop_id=0)`. The nested `scores` uses the
+same scoring rules as the native decoder's padded `score_lines`: per-token
+full-vocabulary NLLs, line totals, menu-conditional NLLs, accepted-set NLL,
+and first winner on an exact tie. This is teacher forcing, not free generation.
+Pass 1 to 32 distinct, nonempty, lexicographically sorted contents without
+the stop ID. All contents plus their individual stops may total at most 4096
+targets. Earlier positions already in the prompt are not scored.
+
+Each distinct content prefix is decoded once; a single continuing branch
+can read out many positions together. The root's retained row predicts the
+first token. The stop is predicted, never fed. `decoded_content_tokens` and
+`decoder_chunks` count physical content rows and suffix calls;
+`scores.decoder_lanes` describes maximal candidate paths, not cached calls.
+The bounded vocabulary matrix has one row per trie node (root included).
+`max_cache_values` also limits all simultaneously live child K/V and geometry
+histories in a depth-first walk. `peak_fork_cache_values` excludes the supplied
+root, frozen weights, token IDs, logits, and temporaries; it is not an RSS measure.
+A rejected request does not fall back to padded execution or modify the root.
+
+The same six synthetic models are checked against every token cost from a
+separately built native padded scorer and from individual full-prefix calls.
+Use `native_cached_lines_fixture.py generate NEW_OUTPUT` with the reference
+wheel, or `verify native_cached_lines_fixture.json` with the new development wheel.
+
 ## Finite-checked learning
 
 ```js

@@ -213,6 +213,121 @@ fn numerical_failure_after_cached_appends_preserves_continuation() {
     );
 }
 
+fn branching_lines() -> Vec<Vec<usize>> {
+    vec![
+        vec![1],
+        vec![1, 2, 3],
+        vec![1, 2, 4],
+        vec![1, 5],
+        vec![7, 8],
+    ]
+}
+
+#[test]
+fn cached_lines_share_prefixes_and_charge_each_stop_at_its_own_position() {
+    let m = load();
+    let lines = branching_lines();
+    let prompt = [1, 2];
+    let root = NativeCausalLmContext::new(m.clone(), prompt.to_vec(), 192).unwrap();
+    let full = m.score_lines(&prompt, &lines, 0).unwrap();
+    decoder::work_counts::take();
+    let r = root.score_lines(&lines, 0).unwrap();
+    assert_eq!(decoder::work_counts::take(), [0, 0, 6]);
+    assert_eq!(
+        (
+            r.cached_prompt_tokens,
+            r.decoded_content_tokens,
+            r.decoder_chunks,
+            r.peak_fork_cache_values
+        ),
+        (2, 7, 6, 192)
+    );
+    let s = r.scores;
+    assert_eq!((s.prefix_nodes, s.decoder_lanes, s.stop_id), (8, 4, 0));
+    assert_eq!(s.winner_index, full.winner_index);
+    assert_eq!(s.shared_content_tokens, full.shared_content_tokens);
+    let near = |a: f64, b: f64| assert!((a - b).abs() < 2e-6, "{a} vs {b}");
+    near(s.menu_set_nll, full.menu_set_nll);
+    for (i, line) in lines.iter().enumerate() {
+        assert_eq!(s.target_counts[i], line.len() + 1);
+        near(s.line_nlls[i], full.line_nlls[i]);
+        near(s.conditional_nlls[i], full.conditional_nlls[i]);
+        let mut prefix = prompt.to_vec();
+        let mut total = 0.;
+        for (j, id) in line.iter().copied().chain([0]).enumerate() {
+            let logits = m.next_token_logits(&prefix).unwrap();
+            let v = logits.data();
+            let max = f64::from(v.iter().copied().fold(f32::NEG_INFINITY, f32::max));
+            let cost = v
+                .iter()
+                .map(|&x| (f64::from(x) - max).exp())
+                .sum::<f64>()
+                .ln()
+                + max
+                - f64::from(v[id]);
+            near(s.token_nlls[i][j], cost);
+            total += cost;
+            prefix.push(id);
+        }
+        near(s.line_nlls[i], total);
+    }
+    assert_eq!(root.token_ids(), &prompt);
+}
+
+#[test]
+fn cached_lines_preflight_every_branch_and_bound_persistent_fork_workspace() {
+    let lines = branching_lines();
+    for (cache, pairs, logits) in [(191, 32, 88), (192, 31, 88), (192, 32, 87), (192, 32, 88)] {
+        let mut m = load();
+        m.limits.max_attention_pairs = pairs;
+        m.limits.max_logit_elements = logits;
+        let root = NativeCausalLmContext::new(m.clone(), vec![1, 2], cache).unwrap();
+        let before = root.logit_values().to_vec();
+        decoder::work_counts::take();
+        let r = root.score_lines(&lines, 0);
+        if (cache, pairs, logits) == (192, 32, 88) {
+            assert!(r.is_ok(), "{r:?}");
+            assert_eq!(decoder::work_counts::take(), [0, 0, 6]);
+            assert!(m.score_lines(&[1, 2], &lines, 0).is_err());
+        } else {
+            assert!(r.is_err());
+            assert_eq!(decoder::work_counts::take(), [0; 3]);
+        }
+        assert_eq!(root.logit_values(), before);
+        assert_eq!(root.token_ids(), [1, 2]);
+    }
+}
+
+#[test]
+fn cached_lines_validate_support_and_do_not_feed_a_stop_past_position_capacity() {
+    let root = NativeCausalLmContext::new(load(), vec![1; 7], 128).unwrap();
+    for bad in [
+        vec![],
+        vec![vec![]],
+        vec![vec![0]],
+        vec![vec![11]],
+        vec![vec![1], vec![1]],
+        vec![vec![2], vec![1]],
+        vec![vec![1, 2]],
+        vec![vec![1]; 33],
+    ] {
+        assert!(root.score_lines(&bad, 0).is_err());
+    }
+    for len in [0, 4096, usize::MAX] {
+        assert!(root.admit_line_lengths(&[len], 0).is_err());
+    }
+    assert!(root.score_lines(&[vec![1]], 11).is_err());
+    let r = root.score_lines(&[vec![1]], 0).unwrap();
+    assert_eq!(r.scores.target_counts, [2]);
+    // The scalar path sum and the trie's reverse reduction may round one ULP apart.
+    assert!(
+        (r.scores.line_nlls[0] - r.scores.menu_set_nll).abs()
+            <= 2. * f64::EPSILON * r.scores.menu_set_nll
+    );
+    assert_eq!(r.scores.conditional_nlls, [0.]);
+    assert_eq!(root.token_ids().len(), 7);
+}
+
 #[test]
 fn cached_generation_restores_original_prefill_chronology_and_v1_default_stays_unchanged() {
     let model = load();
