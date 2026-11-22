@@ -523,7 +523,7 @@ impl PyNativeCausalLm {
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
     }
 
-    #[pyo3(signature=(prompt_ids, candidates, *, gold_index, stop_id, mix))]
+    #[pyo3(signature=(prompt_ids, candidates, *, gold_index, stop_id, mix, max_tile_values=None))]
     #[allow(clippy::too_many_arguments)]
     fn geometry_line_menu_gradients(
         &self,
@@ -533,7 +533,10 @@ impl PyNativeCausalLm {
         gold_index: &Bound<'_, PyAny>,
         stop_id: &Bound<'_, PyAny>,
         mix: &Bound<'_, PyAny>,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
         let (b, gold, mix) = line_menu::extract(
             &self.inner,
             prompt_ids,
@@ -544,8 +547,9 @@ impl PyNativeCausalLm {
             true,
         )?;
         py.detach(|| {
-            self.inner
-                .geometry_line_menu_gradients(&b.prompt, &b.lines, gold, b.stop, mix)
+            self.inner.geometry_line_menu_gradients_with_tile_limit(
+                &b.prompt, &b.lines, gold, b.stop, mix, cap,
+            )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
@@ -632,18 +636,21 @@ impl PyNativeCausalLm {
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
     }
 
-    #[pyo3(signature=(prompt_ids, candidates, *, stop_id))]
+    #[pyo3(signature=(prompt_ids, candidates, *, stop_id, max_tile_values=None))]
     fn geometry_line_set_gradients(
         &self,
         py: Python<'_>,
         prompt_ids: &Bound<'_, PyAny>,
         candidates: &Bound<'_, PyAny>,
         stop_id: &Bound<'_, PyAny>,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
         let b = line_menu::collect(&self.inner, prompt_ids, candidates, stop_id, None, true)?;
         py.detach(|| {
             self.inner
-                .geometry_line_set_gradients(&b.prompt, &b.lines, b.stop)
+                .geometry_line_set_gradients_with_tile_limit(&b.prompt, &b.lines, b.stop, cap)
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
@@ -676,7 +683,7 @@ impl PyNativeCausalLm {
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
     }
 
-    #[pyo3(signature=(prompt_ids, candidates, *, accepted_indices, stop_id))]
+    #[pyo3(signature=(prompt_ids, candidates, *, accepted_indices, stop_id, max_tile_values=None))]
     fn geometry_line_subset_gradients(
         &self,
         py: Python<'_>,
@@ -684,7 +691,10 @@ impl PyNativeCausalLm {
         candidates: &Bound<'_, PyAny>,
         accepted_indices: &Bound<'_, PyAny>,
         stop_id: &Bound<'_, PyAny>,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
         let (b, ids) = line_menu::subset(
             &self.inner,
             prompt_ids,
@@ -694,8 +704,9 @@ impl PyNativeCausalLm {
             true,
         )?;
         py.detach(|| {
-            self.inner
-                .geometry_line_subset_gradients(&b.prompt, &b.lines, &ids, b.stop)
+            self.inner.geometry_line_subset_gradients_with_tile_limit(
+                &b.prompt, &b.lines, &ids, b.stop, cap,
+            )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)

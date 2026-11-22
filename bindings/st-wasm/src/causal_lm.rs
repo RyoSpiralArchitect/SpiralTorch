@@ -62,6 +62,38 @@ fn admitted_ids(ids: &Uint32Array, admitted: usize) -> Result<Vec<usize>, JsValu
         .collect())
 }
 
+#[path = "causal_lm_lines.rs"]
+mod lines;
+pub use lines::CausalLmLineGradients;
+
+fn tile_limit(value: &JsValue) -> Result<Option<usize>, JsValue> {
+    if value.is_undefined() {
+        Ok(None)
+    } else {
+        Ok(Some(js_u32(value, "readout tile budget")? as usize))
+    }
+}
+
+// Call after admitting the length vector (including its sum).
+fn packed_lines(content: &Uint32Array, lens: Vec<usize>) -> Result<Vec<Vec<usize>>, JsValue> {
+    let n = id_count(content, MAX_LINE_MENU_TARGETS)?;
+    if n != lens.iter().sum::<usize>() {
+        return Err(JsValue::from_str(
+            "packed content does not match candidate lengths",
+        ));
+    }
+    let flat = admitted_ids(content, n)?;
+    let mut remaining = flat.as_slice();
+    Ok(lens
+        .into_iter()
+        .map(|len| {
+            let (line, tail) = remaining.split_at(len);
+            remaining = tail;
+            line.to_vec()
+        })
+        .collect())
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BatchWire {
@@ -256,32 +288,13 @@ impl NativeCausalLmContext {
         #[wasm_bindgen(unchecked_optional_param_type = "number")] max_tile_values: &JsValue,
     ) -> Result<String, JsValue> {
         let stop = js_u32(stop_id, "stop ID")? as usize;
-        let cap = if max_tile_values.is_undefined() {
-            None
-        } else {
-            Some(js_u32(max_tile_values, "readout tile budget")? as usize)
-        };
+        let cap = tile_limit(max_tile_values)?;
         self.inner.line_readout_tile_rows(cap).map_err(js_error)?;
         let lens = admitted_ids(lengths, id_count(lengths, MAX_LINE_MENU_CANDIDATES)?)?;
         self.inner
             .admit_line_lengths(&lens, stop)
             .map_err(js_error)?;
-        let n = id_count(content, MAX_LINE_MENU_TARGETS)?;
-        if n != lens.iter().sum::<usize>() {
-            return Err(JsValue::from_str(
-                "packed content does not match candidate lengths",
-            ));
-        }
-        let flat = admitted_ids(content, n)?;
-        let mut remaining = flat.as_slice();
-        let lines: Vec<_> = lens
-            .into_iter()
-            .map(|len| {
-                let (line, tail) = remaining.split_at(len);
-                remaining = tail;
-                line.to_vec()
-            })
-            .collect();
+        let lines = packed_lines(content, lens)?;
         let r = self
             .inner
             .score_lines_with_tile_limit(&lines, stop, cap)

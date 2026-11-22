@@ -28,6 +28,9 @@ declare module "spiraltorch-wasm" {
         geometryArtifact(): GeometryAdapterArtifact | undefined;
         nextLogits(promptJson: string): Float32Array;
         prefill(promptIds: Uint32Array, maxCacheValues: number): NativeCausalLmContext;
+        /** Geometry-only full-vocabulary VJP. Objective JSON kind: set, menu (gold_index, mix), or subset (accepted_indices). */
+        geometryLineGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, maxTileValues?: number): CausalLmLineGradients;
+        stepLineGeometrySgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
         declaredSetNllJson(batch: CausalLmDeclaredBatch): string;
         stepDeclaredSetGeometryAtDistance(batch: CausalLmDeclaredBatch, distance: number): CausalLmDeclaredStep;
         free(): void;
@@ -54,6 +57,13 @@ declare module "spiraltorch-wasm" {
         toJson(): string;
         stateJson(): string;
         anchorWaveProjection(path: string): GeometryAdapterArtifact;
+        free(): void;
+    }
+    export class CausalLmLineGradients {
+        private constructor();
+        reportJson(): string;
+        trainingWorkJson(): string;
+        parameterGradientsJson(): string;
         free(): void;
     }
     export class CausalLmDeclaredBatch {

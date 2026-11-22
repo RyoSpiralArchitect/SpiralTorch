@@ -14,7 +14,9 @@ mod ranking;
 pub(super) use ranking::LineMenu;
 mod readout;
 mod stream;
+mod training;
 use partition::{Group, Outcome, Term};
+pub use training::CausalLmLineTrainingWork;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CausalLmLineSetReport {
@@ -91,13 +93,18 @@ impl LineSet {
         gradient: Option<&mut [f32]>,
     ) -> CausalLmResult<CausalLmLineSetReport> {
         let pass = readout::PrefixPass::new(self, logits, gradient.is_some())?;
-        let set_nll = -pass.outcomes[0].yes.rounded();
+        let report = self.report(pass.outcomes[0])?;
+        if let Some(dst) = gradient {
+            pass.seed(self, None, dst);
+        }
+        Ok(report)
+    }
+
+    fn report(&self, root: Outcome) -> CausalLmResult<CausalLmLineSetReport> {
+        let set_nll = -root.yes.rounded();
         let loss = set_nll as f32;
         if !loss.is_finite() {
             return Err("terminated-set objective exceeds finite f32 loss".into());
-        }
-        if let Some(dst) = gradient {
-            pass.seed(self, None, dst);
         }
         Ok(CausalLmLineSetReport {
             stop_id: self.stop,
@@ -203,9 +210,21 @@ impl NativeCausalLm {
         candidates: &[Vec<usize>],
         stop_id: usize,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.geometry_line_set_gradients_with_tile_limit(prompt, candidates, stop_id, None)
+    }
+
+    /// Limit each projected vocabulary tile without changing the admitted logical batch.
+    pub fn geometry_line_set_gradients_with_tile_limit(
+        &self,
+        prompt: &[usize],
+        candidates: &[Vec<usize>],
+        stop_id: usize,
+        max_tile_values: Option<usize>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        let tile_rows = self.line_readout_tile_rows(max_tile_values)?;
         let (mut batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, true)?;
         batch.competition = Some(objective::PreparedCompetition::LineSet(plan));
-        self.geometry_gradients_for_competition(&batch)
+        self.geometry_line_training(&batch, tile_rows)
     }
 }
 

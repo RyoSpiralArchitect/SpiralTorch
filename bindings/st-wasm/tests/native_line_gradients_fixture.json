@@ -1,0 +1,602 @@
+[
+  {
+    "geometry_id": "sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31",
+    "host": "ordinary/wave",
+    "kind": "menu",
+    "loss": 2.3771350383758545,
+    "nonzero": 6,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "bias": [
+          0.021045638248324394,
+          -0.00009292818867834285,
+          -0.0001036324756569229
+        ],
+        "gate": [
+          6.339066658256343e-7,
+          -0.000009682938980404288,
+          9.731550107971998e-7
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "gold_index": 1,
+      "gold_mean_nll": 2.331553125868204,
+      "line_nlls": [
+        4.728585935714218,
+        6.994659377604612,
+        7.448807381812179
+      ],
+      "loss": 2.3771350383758545,
+      "menu_nll": 2.4227171320110705,
+      "menu_probabilities": [
+        0.8550086525794003,
+        0.08868033363455932,
+        0.05631101378604035
+      ],
+      "mix": 0.5,
+      "prefix_nodes": 5,
+      "rival_mass": 0.9113196663654406,
+      "shared_content_tokens": 0,
+      "stop_id": 0,
+      "suffix_nlls": [
+        4.728585935714218,
+        6.994659377604612,
+        7.448807381812179
+      ],
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31",
+    "host": "ordinary/wave",
+    "kind": "set",
+    "loss": 4.571942329406738,
+    "nonzero": 6,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "bias": [
+          -0.042303066700696945,
+          0.0008815532783046365,
+          -0.0000871713855303824
+        ],
+        "gate": [
+          -0.0000012023640465486096,
+          0.0001242683210875839,
+          3.410957560845418e-7
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "loss": 4.571942329406738,
+      "prefix_nodes": 5,
+      "set_nll": 4.571942245593542,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ]
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31",
+    "host": "ordinary/wave",
+    "kind": "subset",
+    "loss": 0.09286154806613922,
+    "nonzero": 6,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "bias": [
+          -0.0041010454297065735,
+          0.00003501018727547489,
+          0.000013006029803364072
+        ],
+        "gate": [
+          -1.217784415530332e-7,
+          0.000004436500603333116,
+          -1.337484007990497e-7
+        ]
+      }
+    },
+    "report": {
+      "accepted_indices": [
+        0,
+        2
+      ],
+      "accepted_set_nll": 4.664803792745233,
+      "conditional_nll": 0.09286154715169191,
+      "decoder_lanes": 2,
+      "line_nlls": [
+        4.728585935714218,
+        6.994659377604612,
+        7.448807381812179
+      ],
+      "loss": 0.09286154806613922,
+      "menu_probabilities": [
+        0.8550086525794003,
+        0.08868033363455932,
+        0.05631101378604035
+      ],
+      "menu_set_nll": 4.571942245593542,
+      "prefix_nodes": 5,
+      "rejected_probability_given_menu": 0.08868033363455932,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:22c111d008461af04a9eefb6e2d5a06137493e10603edf579e8ae57b1b2fbec1",
+    "host": "ordinary/history_gain",
+    "kind": "menu",
+    "loss": 2.3990840911865234,
+    "nonzero": 8,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "gate": [
+          0.0006190463318489492,
+          -0.014597163535654545,
+          0.004453988280147314
+        ],
+        "local_gate": [
+          -0.0045628328807652,
+          0.02819523774087429,
+          -0.00021182242198847234
+        ],
+        "log_alpha": [
+          -0.015488612465560436
+        ],
+        "log_gain": [
+          0.037445068359375
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "gold_index": 1,
+      "gold_mean_nll": 2.326151882545487,
+      "line_nlls": [
+        4.645377816007979,
+        6.978455647636461,
+        7.600804690709651
+      ],
+      "loss": 2.3990840911865234,
+      "menu_nll": 2.472016114707293,
+      "menu_probabilities": [
+        0.8702817379102736,
+        0.08441449801466874,
+        0.04530376407505764
+      ],
+      "mix": 0.5,
+      "prefix_nodes": 5,
+      "rival_mass": 0.9155855019853313,
+      "shared_content_tokens": 0,
+      "stop_id": 0,
+      "suffix_nlls": [
+        4.645377816007979,
+        6.978455647636461,
+        7.600804690709651
+      ],
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:22c111d008461af04a9eefb6e2d5a06137493e10603edf579e8ae57b1b2fbec1",
+    "host": "ordinary/history_gain",
+    "kind": "set",
+    "loss": 4.506439685821533,
+    "nonzero": 8,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "gate": [
+          -0.000386905565392226,
+          0.035143349319696426,
+          0.007713121362030506
+        ],
+        "local_gate": [
+          0.006902534980326891,
+          -0.06820039451122284,
+          -0.004528566729277372
+        ],
+        "log_alpha": [
+          0.009094576351344585
+        ],
+        "log_gain": [
+          -0.06423798203468323
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "loss": 4.506439685821533,
+      "prefix_nodes": 5,
+      "set_nll": 4.506439532929168,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ]
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:22c111d008461af04a9eefb6e2d5a06137493e10603edf579e8ae57b1b2fbec1",
+    "host": "ordinary/history_gain",
+    "kind": "subset",
+    "loss": 0.08819152414798737,
+    "nonzero": 8,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "gate": [
+          -0.00009452950325794518,
+          0.0028287579771131277,
+          -0.00043818671838380396
+        ],
+        "local_gate": [
+          0.0007901198114268482,
+          -0.005471258424222469,
+          -0.00007508608541684225
+        ],
+        "log_alpha": [
+          0.0023516356013715267
+        ],
+        "log_gain": [
+          -0.00665914174169302
+        ]
+      }
+    },
+    "report": {
+      "accepted_indices": [
+        0,
+        2
+      ],
+      "accepted_set_nll": 4.594631058399793,
+      "conditional_nll": 0.08819152547062575,
+      "decoder_lanes": 2,
+      "line_nlls": [
+        4.645377816007979,
+        6.978455647636461,
+        7.600804690709651
+      ],
+      "loss": 0.08819152414798737,
+      "menu_probabilities": [
+        0.8702817379102736,
+        0.08441449801466874,
+        0.04530376407505764
+      ],
+      "menu_set_nll": 4.506439532929168,
+      "prefix_nodes": 5,
+      "rejected_probability_given_menu": 0.08441449801466874,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:83919fa79548a9c5b4b28c7d624cfcddfd9a5787455205fc774471dda584765e",
+    "host": "lag/wave",
+    "kind": "menu",
+    "loss": 2.376288890838623,
+    "nonzero": 6,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "bias": [
+          0.02088000252842903,
+          -0.00008857604552758858,
+          -0.00010461781494086608
+        ],
+        "gate": [
+          6.246809789445251e-7,
+          -0.00000913344592845533,
+          9.66757625064929e-7
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "gold_index": 1,
+      "gold_mean_nll": 2.331463218083225,
+      "line_nlls": [
+        4.730477891277941,
+        6.994389654249675,
+        7.444196585775872
+      ],
+      "loss": 2.376288890838623,
+      "menu_nll": 2.4211145722058793,
+      "menu_probabilities": [
+        0.854530734518573,
+        0.08882256310793213,
+        0.05664670237349495
+      ],
+      "mix": 0.5,
+      "prefix_nodes": 5,
+      "rival_mass": 0.911177436892068,
+      "shared_content_tokens": 0,
+      "stop_id": 0,
+      "suffix_nlls": [
+        4.730477891277941,
+        6.994389654249675,
+        7.444196585775872
+      ],
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:83919fa79548a9c5b4b28c7d624cfcddfd9a5787455205fc774471dda584765e",
+    "host": "lag/wave",
+    "kind": "set",
+    "loss": 4.573275089263916,
+    "nonzero": 6,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "bias": [
+          -0.042014241218566895,
+          0.0008928686147555709,
+          -0.00008431250898865983
+        ],
+        "gate": [
+          -0.000001181042307507596,
+          0.000126078914036043,
+          2.390801228102646e-7
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "loss": 4.573275089263916,
+      "prefix_nodes": 5,
+      "set_nll": 4.573275082043795,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ]
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:83919fa79548a9c5b4b28c7d624cfcddfd9a5787455205fc774471dda584765e",
+    "host": "lag/wave",
+    "kind": "subset",
+    "loss": 0.09301763027906418,
+    "nonzero": 6,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "bias": [
+          -0.004077005200088024,
+          0.00003471117452136241,
+          0.000013242666682344861
+        ],
+        "gate": [
+          -1.201241417447818e-7,
+          0.000004408082077134168,
+          -1.3553432154367329e-7
+        ]
+      }
+    },
+    "report": {
+      "accepted_indices": [
+        0,
+        2
+      ],
+      "accepted_set_nll": 4.666292711170494,
+      "conditional_nll": 0.09301762912670003,
+      "decoder_lanes": 2,
+      "line_nlls": [
+        4.730477891277941,
+        6.994389654249675,
+        7.444196585775872
+      ],
+      "loss": 0.09301763027906418,
+      "menu_probabilities": [
+        0.854530734518573,
+        0.08882256310793213,
+        0.05664670237349495
+      ],
+      "menu_set_nll": 4.573275082043795,
+      "prefix_nodes": 5,
+      "rejected_probability_given_menu": 0.08882256310793213,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:ff7a5994ea66e7fd14465c1aaa6ff8786605bfdf6bad95012d995f62ce780b95",
+    "host": "lag/history_gain",
+    "kind": "menu",
+    "loss": 2.3977174758911133,
+    "nonzero": 8,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "gate": [
+          0.0006191942375153303,
+          -0.014338010922074318,
+          0.004575261380523443
+        ],
+        "local_gate": [
+          -0.0045725624077022076,
+          0.027918770909309387,
+          -0.0002659088058862835
+        ],
+        "log_alpha": [
+          -0.0153785590082407
+        ],
+        "log_gain": [
+          0.0370476171374321
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "gold_index": 1,
+      "gold_mean_nll": 2.3256938174349444,
+      "line_nlls": [
+        4.646788766732456,
+        6.977081452304834,
+        7.596161730848747
+      ],
+      "loss": 2.3977174758911133,
+      "menu_nll": 2.4697413695905417,
+      "menu_probabilities": [
+        0.8698376586326242,
+        0.0846067380474536,
+        0.045555603319922214
+      ],
+      "mix": 0.5,
+      "prefix_nodes": 5,
+      "rival_mass": 0.9153932619525464,
+      "shared_content_tokens": 0,
+      "stop_id": 0,
+      "suffix_nlls": [
+        4.646788766732456,
+        6.977081452304834,
+        7.596161730848747
+      ],
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:ff7a5994ea66e7fd14465c1aaa6ff8786605bfdf6bad95012d995f62ce780b95",
+    "host": "lag/history_gain",
+    "kind": "set",
+    "loss": 4.507339954376221,
+    "nonzero": 8,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "gate": [
+          -0.000391033390769735,
+          0.03533095866441727,
+          0.007704625371843576
+        ],
+        "local_gate": [
+          0.007001836784183979,
+          -0.06884709000587463,
+          -0.00449593598023057
+        ],
+        "log_alpha": [
+          0.00903696846216917
+        ],
+        "log_gain": [
+          -0.0646323710680008
+        ]
+      }
+    },
+    "report": {
+      "decoder_lanes": 2,
+      "loss": 4.507339954376221,
+      "prefix_nodes": 5,
+      "set_nll": 4.507340082714293,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ]
+    },
+    "targets": 8
+  },
+  {
+    "geometry_id": "sha256:ff7a5994ea66e7fd14465c1aaa6ff8786605bfdf6bad95012d995f62ce780b95",
+    "host": "lag/history_gain",
+    "kind": "subset",
+    "loss": 0.08840151131153107,
+    "nonzero": 8,
+    "parameters": {
+      "transformer.h.0.attn": {
+        "gate": [
+          -0.00009488054638495669,
+          0.0028042022604495287,
+          -0.0004562859539873898
+        ],
+        "local_gate": [
+          0.0007957291672937572,
+          -0.0054614851251244545,
+          -0.00006702050450257957
+        ],
+        "log_alpha": [
+          0.0023408974520862103
+        ],
+        "log_gain": [
+          -0.006629719864577055
+        ]
+      }
+    },
+    "report": {
+      "accepted_indices": [
+        0,
+        2
+      ],
+      "accepted_set_nll": 4.595741594272445,
+      "conditional_nll": 0.08840151155815176,
+      "decoder_lanes": 2,
+      "line_nlls": [
+        4.646788766732456,
+        6.977081452304834,
+        7.596161730848747
+      ],
+      "loss": 0.08840151131153107,
+      "menu_probabilities": [
+        0.8698376586326242,
+        0.0846067380474536,
+        0.045555603319922214
+      ],
+      "menu_set_nll": 4.507340082714293,
+      "prefix_nodes": 5,
+      "rejected_probability_given_menu": 0.0846067380474536,
+      "stop_id": 0,
+      "target_counts": [
+        2,
+        3,
+        3
+      ],
+      "winner_index": 0
+    },
+    "targets": 8
+  }
+]

@@ -130,17 +130,22 @@ impl Chunk {
     }
 }
 
-impl NativeCausalLmContext {
+impl NativeCausalLm {
     /// A tile budget may lower peak projection size, never raise the model's cumulative work limit.
     pub fn line_readout_tile_rows(&self, max_tile_values: Option<usize>) -> CausalLmResult<usize> {
-        let m = self.decoder();
-        let vocab = m.config.vocabulary;
-        let limit = m.limits.max_logit_elements;
+        let vocab = self.config.vocabulary;
+        let limit = self.limits.max_logit_elements;
         let cap = max_tile_values.unwrap_or_else(|| (256 * 1024).max(vocab).min(limit));
         if !(vocab..=limit).contains(&cap) {
             return Err("complete-line tile budget must fit one vocabulary row and not exceed the model logit limit".into());
         }
         Ok(cap / vocab)
+    }
+}
+
+impl NativeCausalLmContext {
+    pub fn line_readout_tile_rows(&self, max_tile_values: Option<usize>) -> CausalLmResult<usize> {
+        self.decoder().line_readout_tile_rows(max_tile_values)
     }
 
     /// Length-only admission, before extracting foreign token arrays. No padded prompt lanes.

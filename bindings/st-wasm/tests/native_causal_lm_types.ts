@@ -6,6 +6,14 @@ export function update(config: string, weights: Uint8Array, geometry: string, id
     const model = base.withGeometry(art);
     const batch = CausalLmDeclaredBatch.fromJson(wire);
     try {
+        const g = model.geometryLineGradients(Uint32Array.of(2),Uint32Array.of(1,3),Uint32Array.of(1,1),0,'{"kind":"set"}', 256);
+        try {
+            const work: string = g.trainingWorkJson();
+            const named: string = g.parameterGradientsJson();
+            const loss: string = g.reportJson();
+            void [work,named,loss];
+            model.stepLineGeometrySgd(g, 0.01).free();
+        } finally { g.free(); }
         const step = model.stepDeclaredSetGeometryAtDistance(batch, 1/65536);
         const receipt: string = step.reportJson();
         const result = step.intoModel();

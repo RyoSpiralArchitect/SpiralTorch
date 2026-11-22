@@ -21,7 +21,7 @@ pub struct CausalLmLineSubsetReport {
 }
 
 pub(in crate::causal_lm) struct LineSubset {
-    support: LineSet,
+    pub(super) support: LineSet,
     paths: Vec<Path>,
     shared: usize,
     accepted: Vec<usize>,
@@ -52,9 +52,9 @@ impl LineSubset {
         }
     }
 
-    fn summarize(
+    pub(super) fn summarize(
         &self,
-        pass: &PrefixPass<'_>,
+        pass: &impl readout::PrefixStats,
     ) -> CausalLmResult<(CausalLmLineSubsetReport, Vec<Term>)> {
         let costs = costs(&self.support, &self.paths, self.shared, pass);
         let (mut yes, mut no) = (Group::default(), Group::default());
@@ -86,8 +86,8 @@ impl LineSubset {
                     .iter()
                     .map(|t| (-t.rounded()).exp())
                     .collect(),
-                menu_set_nll: -pass.outcomes[0].yes.rounded(),
-                accepted_set_nll: -pass.outcomes[0].yes.plus(event.yes).rounded(),
+                menu_set_nll: -pass.outcomes()[0].yes.rounded(),
+                accepted_set_nll: -pass.outcomes()[0].yes.plus(event.yes).rounded(),
                 rejected_probability_given_menu: event.no.expect("proper subset").rounded().exp(),
                 conditional_nll,
                 loss,
@@ -111,6 +111,16 @@ impl LineSubset {
     ) -> CausalLmResult<(CausalLmLineSubsetReport, Tensor)> {
         let pass = PrefixPass::new(&self.support, logits, true)?;
         let (report, scores) = self.summarize(&pass)?;
+        let recipe = self.recipe(&scores, report.rejected_probability_given_menu);
+        let (rows, cols) = logits.shape();
+        let mut seed = vec![0.; rows * cols];
+        for (i, dst) in seed.chunks_exact_mut(cols).enumerate() {
+            recipe.write(i, pass.row(i), dst);
+        }
+        Ok((report, Tensor::from_vec(rows, cols, seed)?))
+    }
+
+    pub(super) fn recipe(&self, scores: &[Term], rejected: f64) -> SubsetSeed {
         let negatives: Vec<_> = (0..scores.len())
             .filter(|i| self.accepted.binary_search(i).is_err())
             .collect();
@@ -149,20 +159,24 @@ impl LineSubset {
                 }
             }
         }
-        let scale = report.rejected_probability_given_menu / den.rounded();
-        let (rows, cols) = logits.shape();
-        let mut seed = vec![0.; rows * cols];
-        for (i, terms) in signed.iter().enumerate() {
-            if !terms.is_empty() && scale != 0. {
-                seed_row(
-                    pass.row(i),
-                    terms,
-                    scale,
-                    &mut seed[i * cols..(i + 1) * cols],
-                );
-            }
+        SubsetSeed {
+            signed,
+            scale: rejected / den.rounded(),
         }
-        Ok((report, Tensor::from_vec(rows, cols, seed)?))
+    }
+}
+
+pub(super) struct SubsetSeed {
+    signed: Vec<BTreeMap<usize, Coeff>>,
+    scale: f64,
+}
+
+impl SubsetSeed {
+    pub(super) fn write(&self, i: usize, z: &[f32], dst: &mut [f32]) {
+        let terms = &self.signed[i];
+        if !terms.is_empty() && self.scale != 0. {
+            seed_row(z, terms, self.scale, dst);
+        }
     }
 }
 
@@ -258,10 +272,29 @@ impl NativeCausalLm {
         accepted_indices: &[usize],
         stop_id: usize,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.geometry_line_subset_gradients_with_tile_limit(
+            prompt,
+            candidates,
+            accepted_indices,
+            stop_id,
+            None,
+        )
+    }
+
+    /// Limit each projected vocabulary tile without changing the admitted logical batch.
+    pub fn geometry_line_subset_gradients_with_tile_limit(
+        &self,
+        prompt: &[usize],
+        candidates: &[Vec<usize>],
+        accepted_indices: &[usize],
+        stop_id: usize,
+        max_tile_values: Option<usize>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        let tile_rows = self.line_readout_tile_rows(max_tile_values)?;
         let (mut batch, plan) =
             self.prepare_line_subset(prompt, candidates, accepted_indices, stop_id, true)?;
         batch.competition = Some(objective::PreparedCompetition::LineSubset(plan));
-        self.geometry_gradients_for_competition(&batch)
+        self.geometry_line_training(&batch, tile_rows)
     }
 }
 

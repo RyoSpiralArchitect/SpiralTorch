@@ -435,6 +435,82 @@ fn terminated_unequal_lines_match_independent_prefixes_and_parameter_derivatives
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn tiled_complete_line_gradients_preserve_decoder_work_reports_and_frozen_lora() {
+    let lines = vec![vec![1], vec![1, 2], vec![3, 4]];
+    for precision in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F32WideBackward,
+        CausalLmReadoutAccumulator::F64,
+    ] {
+        let m = model(1, precision);
+        for kind in 0..3 {
+            let grad = |cap| match kind {
+                0 => m.geometry_line_menu_gradients_with_tile_limit(&[5], &lines, 0, 0, 0.65, cap),
+                1 => m.geometry_line_set_gradients_with_tile_limit(&[5], &lines, 0, cap),
+                _ => {
+                    m.geometry_line_subset_gradients_with_tile_limit(&[5], &lines, &[0, 2], 0, cap)
+                }
+            };
+            let report = |g: &NativeCausalLmAdaptationGradients| {
+                serde_json::to_vec(&(
+                    g.line_menu_report(),
+                    g.line_set_report(),
+                    g.line_subset_report(),
+                ))
+                .unwrap()
+            };
+            decoder::work_counts::take();
+            let dense = grad(None).unwrap();
+            let [fwd, bwd, heads] = decoder::work_counts::take();
+            assert_eq!(heads, 1);
+            assert_eq!(
+                dense.line_training_work().unwrap().peak_extra_seed_values,
+                55
+            );
+            for tile in [1, 2, 4] {
+                let g = grad(Some(11 * tile)).unwrap();
+                let work = g.line_training_work().unwrap();
+                let tiles = 5usize.div_ceil(tile);
+                assert_eq!(decoder::work_counts::take(), [fwd, bwd, 2 * tiles - 1]);
+                assert_eq!(
+                    (
+                        work.forward_head_calls,
+                        work.backward_head_calls,
+                        work.replayed_head_rows
+                    ),
+                    (2 * tiles - 1, tiles, 5 - tile)
+                );
+                assert_eq!(
+                    (work.peak_logit_values, work.peak_extra_seed_values),
+                    (tile * 11, 11)
+                );
+                assert_eq!(report(&g), report(&dense));
+                assert_eq!(g.parameters(), dense.parameters());
+                assert_eq!(g.loss().to_bits(), dense.loss().to_bits());
+                let next = m
+                    .step_adaptation_sgd(&g, CausalLmAdaptationMode::Geometry, 0.01)
+                    .unwrap();
+                assert_eq!(next.lora_to_json().unwrap(), m.lora_to_json().unwrap());
+                assert_ne!(next.geometry_artifact_id(), m.geometry_artifact_id());
+                assert!(next
+                    .step_adaptation_sgd(&g, CausalLmAdaptationMode::Geometry, 0.01)
+                    .is_err());
+            }
+            assert!(grad(Some(10)).is_err());
+            assert!(grad(Some(usize::MAX)).is_err());
+            assert_eq!(decoder::work_counts::take(), [0; 3]);
+        }
+        let mut limited = m;
+        limited.limits.max_logit_elements = 54;
+        assert!(limited
+            .geometry_line_set_gradients_with_tile_limit(&[5], &lines, 0, Some(11))
+            .is_err());
+        assert_eq!(decoder::work_counts::take(), [0; 3]);
+    }
+}
+
+#[test]
 fn rejects_invalid_support_and_work_before_allocating_padded_windows() {
     let m = model(1, CausalLmReadoutAccumulator::F32);
     let good = vec![vec![1], vec![1, 2]];

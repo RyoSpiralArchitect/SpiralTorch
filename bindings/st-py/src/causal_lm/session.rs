@@ -59,6 +59,13 @@ impl PyNativeCausalLmAdaptationGradients {
             .transpose()
     }
 
+    fn line_training_work(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .line_training_work()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
     fn line_menu_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.inner
             .line_menu_report()

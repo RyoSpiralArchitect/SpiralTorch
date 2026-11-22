@@ -72,8 +72,8 @@ def verify(src):
                           max_abs_old_padded=maxima[0], max_abs_tiled_padded=maxima[1])))
 
 
-def gradients(dest):
-    """Check dense training stayed unchanged; same frozen artificial models, no update."""
+def gradients(dest, cap=None):
+    """Check both training routes on the same frozen artificial models, without updates."""
     lines = [[1], [1,2], [3,4]]
     records = []
     for name, model, prompt in models():
@@ -82,7 +82,11 @@ def gradients(dest):
         for kind, extra in (("menu",dict(gold_index=1,mix=0.5)),("set",{}),("subset",dict(accepted_indices=[0,2]))):
             kw = dict(extra, stop_id=STOP)
             report = getattr(model,"line_"+kind+"_loss")(prompt,lines,**kw)
-            g = getattr(model,"geometry_line_"+kind+"_gradients")(prompt,lines,**kw)
+            g = getattr(model,"geometry_line_"+kind+"_gradients")(prompt,lines,**kw,**({} if cap is None else {"max_tile_values":cap}))
+            if cap is not None:
+                work = g.line_training_work()
+                assert (work["forward_head_calls"],work["backward_head_calls"],work["replayed_head_rows"],
+                        work["peak_logit_values"],work["peak_extra_seed_values"]) == (9,5,4,11,11)
             assert getattr(g,"line_"+kind+"_report")() == report and g.target_tokens == 8
             values = g.parameter_gradients()
             flat = [v for tensors in values.values() for block in tensors.values() for v in block]
@@ -96,7 +100,7 @@ def gradients(dest):
 
 
 if __name__ == "__main__":
-    modes = {"verify": verify, "generate": generate, "gradients": gradients}
+    modes = {"verify": verify, "generate": generate, "gradients": gradients, "tiled-gradients": lambda path: gradients(path,11)}
     if len(sys.argv) != 3 or sys.argv[1] not in modes:
         sys.exit("usage: generate|verify|gradients PATH")
     modes[sys.argv[1]](Path(sys.argv[2]))

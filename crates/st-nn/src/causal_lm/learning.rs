@@ -422,14 +422,14 @@ impl NativeCausalLm {
         Ok((hidden, checkpoints))
     }
 
-    pub(super) fn training_primal(
+    pub(super) fn training_selected(
         &self,
         prepared: &PreparedCausalWindow,
         hidden: Tensor,
         start_layer: usize,
         first_trainable: usize,
         observations: Option<&mut observation::ResidualSums>,
-    ) -> CausalLmResult<TrainingPrimal> {
+    ) -> CausalLmResult<(Vec<Tensor>, usize, Tensor)> {
         let (hidden, checkpoints) = self.checkpointed_hidden(
             hidden,
             prepared.shape,
@@ -442,6 +442,19 @@ impl NativeCausalLm {
             Some(rows) => hidden.gather_rows(rows)?,
             None => hidden,
         };
+        Ok((checkpoints, hidden_rows, selected))
+    }
+
+    pub(super) fn training_primal(
+        &self,
+        prepared: &PreparedCausalWindow,
+        hidden: Tensor,
+        start_layer: usize,
+        first_trainable: usize,
+        observations: Option<&mut observation::ResidualSums>,
+    ) -> CausalLmResult<TrainingPrimal> {
+        let (checkpoints, hidden_rows, selected) =
+            self.training_selected(prepared, hidden, start_layer, first_trainable, observations)?;
         let normalized = self
             .final_norm
             .forward(&selected, self.config.norm_epsilon)?;

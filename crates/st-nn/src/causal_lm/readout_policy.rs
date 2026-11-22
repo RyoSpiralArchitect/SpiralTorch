@@ -69,18 +69,33 @@ impl NativeCausalLm {
     }
 
     pub(super) fn project_readout(&self, lhs: &Tensor) -> CausalLmResult<Tensor> {
+        self.project_readout_rows(
+            lhs,
+            lhs.shape().0,
+            self.backward_head.get().and_then(|r| r.as_ref().ok()),
+        )
+    }
+
+    // Freeze the traversal policy across tiled forward and replay, even when
+    // the first pullback initializes the shared training pack between them.
+    pub(super) fn project_readout_rows(
+        &self,
+        lhs: &Tensor,
+        rows: usize,
+        pack: Option<&TrainingHeadPack>,
+    ) -> CausalLmResult<Tensor> {
         #[cfg(all(test, not(target_arch = "wasm32")))]
         decoder::work_counts::head();
-        let (rows, width) = lhs.shape();
+        let width = lhs.shape().1;
         let precision = self.readout_accumulator.forward_precision();
         if precision == CausalLmHeadPrecision::F32
             && self.forward_storage != CausalLmForwardStorage::OriginalPacked
         {
-            match self.backward_head.get() {
-                Some(Ok(TrainingHeadPack::Panels(p))) if (1..=3).contains(&rows) => {
+            match pack {
+                Some(TrainingHeadPack::Panels(p)) if (1..=3).contains(&rows) => {
                     return Ok(p.forward(lhs)?)
                 }
-                Some(Ok(TrainingHeadPack::Transpose(tr)))
+                Some(TrainingHeadPack::Transpose(tr))
                     if self.forward_storage.borrows_existing_transpose(
                         rows,
                         width,
@@ -101,6 +116,15 @@ impl NativeCausalLm {
         seed: &Tensor,
         precision: CausalLmHeadPrecision,
     ) -> CausalLmResult<Tensor> {
+        self.vocabulary_head_pullback_rows(seed, precision, seed.shape().0)
+    }
+
+    pub(super) fn vocabulary_head_pullback_rows(
+        &self,
+        seed: &Tensor,
+        precision: CausalLmHeadPrecision,
+        logical_rows: usize,
+    ) -> CausalLmResult<Tensor> {
         if seed.shape().1 != self.head.cols() {
             return Err(st_tensor::TensorError::ShapeMismatch {
                 left: seed.shape(),
@@ -119,7 +143,7 @@ impl NativeCausalLm {
         let cache = self
             .backward_head
             .get_or_init(|| {
-                let few_rows = (1..=3).contains(&seed.shape().0);
+                let few_rows = (1..=3).contains(&logical_rows);
                 let large_head = self.head.inner() >= 8
                     && self.head.cols() >= 8
                     && self.head.as_slice().len() >= 16 * 1024;
@@ -415,6 +439,55 @@ mod tests {
                     &prec.multiply(&seed, &tr).unwrap(),
                 );
             }
+        }
+    }
+
+    #[test]
+    fn tile_size_does_not_select_a_new_training_pack_or_change_its_arithmetic() {
+        use CausalLmHeadPrecision::F32;
+        for warm_panels in [false, true] {
+            let model = head_fixture()
+                .with_forward_readout_storage(CausalLmForwardStorage::PreferCachedTranspose);
+            if warm_panels {
+                model
+                    .vocabulary_head_pullback_as(&matrix(1, 1031, 7), F32)
+                    .unwrap();
+            }
+            let x = matrix(5, 16, 11);
+            let seed = matrix(5, 1031, 3);
+            let pack = model.backward_head.get().and_then(|r| r.as_ref().ok());
+            let forward = model.project_readout(&x).unwrap();
+            let backward = F32
+                .multiply(&seed, &model.head.transposed().unwrap())
+                .unwrap();
+            for i in 0..5 {
+                let one = x.gather_rows(&[i]).unwrap();
+                same(
+                    model.project_readout_rows(&one, 5, pack).unwrap(),
+                    &forward.gather_rows(&[i]).unwrap(),
+                );
+                same(
+                    model
+                        .vocabulary_head_pullback_rows(&seed.gather_rows(&[i]).unwrap(), F32, 5)
+                        .unwrap(),
+                    &backward.gather_rows(&[i]).unwrap(),
+                );
+            }
+            assert_eq!(
+                matches!(
+                    model.backward_head.get(),
+                    Some(Ok(TrainingHeadPack::Panels(_)))
+                ),
+                warm_panels
+            );
+            let warm = model.project_readout(&x).unwrap();
+            let now = model.backward_head.get().unwrap().as_ref().unwrap();
+            same(
+                model
+                    .project_readout_rows(&x.gather_rows(&[3]).unwrap(), 5, Some(now))
+                    .unwrap(),
+                &warm.gather_rows(&[3]).unwrap(),
+            );
         }
     }
 

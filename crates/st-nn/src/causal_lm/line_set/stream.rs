@@ -8,6 +8,28 @@ pub(super) struct EdgeRows<'a> {
     outside: Vec<Option<Group>>,
 }
 
+pub(super) struct ReducedEdges {
+    offsets: Vec<usize>,
+    edges: Vec<(usize, f32)>,
+    outcomes: Vec<Outcome>,
+    rows: Vec<readout::Row>,
+}
+
+impl readout::PrefixStats for ReducedEdges {
+    fn outcomes(&self) -> &[Outcome] {
+        &self.outcomes
+    }
+    fn rows(&self) -> &[readout::Row] {
+        &self.rows
+    }
+    fn edge(&self, i: usize, k: usize) -> f32 {
+        let e = &self.edges[self.offsets[i]..self.offsets[i + 1]];
+        e[e.binary_search_by_key(&k, |x| x.0)
+            .expect("admitted line edge")]
+        .1
+    }
+}
+
 impl<'a> EdgeRows<'a> {
     pub fn new(set: &'a LineSet) -> Self {
         let mut offsets = Vec::with_capacity(set.nodes.len() + 1);
@@ -40,7 +62,7 @@ impl<'a> EdgeRows<'a> {
         Ok(())
     }
 
-    pub fn finish(self, lines: &[Vec<usize>]) -> CausalLmResult<CausalLmLineScores> {
+    pub fn reduce(self) -> CausalLmResult<ReducedEdges> {
         let set = self.set;
         let edges = |i: usize| &self.edges[self.offsets[i]..self.offsets[i + 1]];
         let mut outcomes = vec![Outcome::STOP; set.nodes.len()];
@@ -52,12 +74,23 @@ impl<'a> EdgeRows<'a> {
             outcomes[i] = outcome;
             rows[i] = row;
         }
-        Ok(set.scores_from_rows(lines, &outcomes, &rows, |i, k| {
-            let e = edges(i);
-            e[e.binary_search_by_key(&k, |x| x.0)
-                .expect("admitted line edge")]
-            .1
-        }))
+        Ok(ReducedEdges {
+            offsets: self.offsets,
+            edges: self.edges,
+            outcomes,
+            rows,
+        })
+    }
+
+    pub fn finish(self, lines: &[Vec<usize>]) -> CausalLmResult<CausalLmLineScores> {
+        use readout::PrefixStats;
+        let set = self.set;
+        let stats = self.reduce()?;
+        Ok(
+            set.scores_from_rows(lines, stats.outcomes(), stats.rows(), |i, k| {
+                stats.edge(i, k)
+            }),
+        )
     }
 }
 

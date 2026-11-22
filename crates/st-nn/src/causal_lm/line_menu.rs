@@ -164,9 +164,25 @@ impl NativeCausalLm {
         stop_id: usize,
         mix: f64,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        self.geometry_line_menu_gradients_with_tile_limit(
+            prompt, candidates, gold_index, stop_id, mix, None,
+        )
+    }
+
+    /// Limit each projected vocabulary tile without changing the admitted logical batch.
+    pub fn geometry_line_menu_gradients_with_tile_limit(
+        &self,
+        prompt: &[usize],
+        candidates: &[Vec<usize>],
+        gold_index: usize,
+        stop_id: usize,
+        mix: f64,
+        max_tile_values: Option<usize>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        let tile_rows = self.line_readout_tile_rows(max_tile_values)?;
         let (mut batch, plan) =
             self.prepare_line_menu(prompt, candidates, gold_index, stop_id, mix, true)?;
         batch.competition = Some(objective::PreparedCompetition::LineMenu(plan));
-        self.geometry_gradients_for_competition(&batch)
+        self.geometry_line_training(&batch, tile_rows)
     }
 }

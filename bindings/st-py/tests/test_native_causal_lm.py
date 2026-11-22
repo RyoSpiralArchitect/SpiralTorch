@@ -1881,6 +1881,23 @@ assert session.predecessor_checkpoint_id == predecessor
         with self.assertRaises(ValueError):
             self.model.geometry_line_set_gradients(Unread(), [[2]], stop_id=0)
 
+    def test_line_training_tile_admission_precedes_foreign_token_access(self):
+        class Unread:
+            def __len__(self):
+                raise AssertionError("read input before tile admission")
+        m = self.model.with_geometry(artifact(self.model, trainable=True))
+        for kind, extra in (("menu", dict(gold_index=1,mix=0.5)),("set", {}),("subset", dict(accepted_indices=[0]))):
+            compute = getattr(m,"geometry_line_"+kind+"_gradients")
+            for bad in (True, 0, -1, 10, 11.5, "11", 1 << 63):
+                with self.assertRaises((ValueError, TypeError, OverflowError)):
+                    compute(Unread(),Unread(),stop_id=0,max_tile_values=bad,**extra)
+            dense = compute([1],[[2],[3]],stop_id=0,**extra)
+            tiled = compute([1],[[2],[3]],stop_id=0,max_tile_values=11,**extra)
+            self.assertEqual(tiled.parameter_gradients(), dense.parameter_gradients())
+            self.assertEqual(getattr(tiled,"line_"+kind+"_report")(), getattr(dense,"line_"+kind+"_report")())
+            self.assertEqual(tiled.line_training_work()["backward_head_calls"], 3)
+            self.assertEqual(dense.line_training_work()["forward_head_calls"], 1)
+
     def test_line_set_admits_prefix_sharing_before_readout_but_not_unbounded_ids(self):
         class Unread:
             def __len__(self):

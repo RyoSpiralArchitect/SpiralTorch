@@ -97,6 +97,38 @@ separately built native padded scorer and from individual full-prefix calls.
 Use `native_cached_lines_fixture.py generate NEW_OUTPUT` with the reference
 wheel, or `verify native_cached_lines_fixture.json` with the new development wheel.
 
+## Train on complete answers
+
+Give the decoder a trainable geometry artifact using `withGeometry` /
+`with_geometry`. The following uses plain SGD on geometry only; it freezes the
+base and any LoRA. The source model remains unchanged. In WASM:
+
+```js
+const g = model.geometryLineGradients(
+  Uint32Array.of(5), Uint32Array.of(1, 1, 2, 3, 4), Uint32Array.of(1, 2, 2),
+  0, JSON.stringify({kind: 'subset', accepted_indices: [0, 2]})
+);
+try {
+  console.log(JSON.parse(g.reportJson()).loss, JSON.parse(g.trainingWorkJson()));
+  const next = model.stepLineGeometrySgd(g, 0.01);
+  try { console.log(next.nextLogits('[5]')); } finally { next.free(); }
+} finally { g.free(); }
+```
+
+Likewise, with the native Python binding:
+
+```python
+g = model.geometry_line_subset_gradients([5], [[1], [1, 2], [3, 4]],
+                                        accepted_indices=[0, 2], stop_id=0)
+print(g.line_subset_report()["loss"], g.line_training_work())
+```
+
+Use `set` for absolute accepted-set NLL, `menu` with `gold_index` and `mix`
+for the gold/ranking mixture, or `subset` as above. Each objective scores a
+stop after each content line. The last optional WASM argument (Python:
+`max_tile_values=`) is a vocabulary tile budget, not a vocabulary shortlist.
+No held-out check or loss-decrease guarantee is implied by a plain SGD step.
+
 ## Finite-checked learning
 
 ```js

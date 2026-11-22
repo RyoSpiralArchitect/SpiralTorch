@@ -8,6 +8,7 @@
 import {checkNativeCausalLm} from './native_causal_lm.mjs';
 import {checkCachedSuffix} from './native_causal_lm_cache.mjs';
 import {checkCachedLines} from './native_cached_lines.mjs';
+import {checkLineGradients} from './native_line_gradients.mjs';
 const result = document.getElementById('result');
 try {
   const M = await import('../pkg/spiraltorch_wasm.js');
@@ -16,6 +17,7 @@ try {
   const report = checkNativeCausalLm(M, fixture);
   const models = await (await fetch('./native_causal_lm_cache_fixture.json')).json();
   report.cached = checkCachedSuffix(M, models);
+  report.line_gradients = checkLineGradients(M, models, await (await fetch('./native_line_gradients_fixture.json')).json());
   report.lines = checkCachedLines(M, models, await (await fetch('./native_cached_lines_fixture.json')).json());
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = 'passed';

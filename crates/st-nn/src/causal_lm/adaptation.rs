@@ -30,6 +30,7 @@ pub struct NativeCausalLmAdaptationGradients {
     parameters: BTreeMap<String, BTreeMap<String, Vec<f32>>>,
     pub(super) observation: Option<Box<CausalLmAdaptationObservation>>,
     competition: Option<objective::CompetitionReport>,
+    pub(super) line_work: Option<CausalLmLineTrainingWork>,
 }
 
 /// Block input before the earliest attached geometry, never an output of that geometry.
@@ -114,6 +115,10 @@ impl NativeCausalLmAdaptationGradients {
             Some(objective::CompetitionReport::ContextToken(r)) => Some(r),
             _ => None,
         }
+    }
+
+    pub fn line_training_work(&self) -> Option<&CausalLmLineTrainingWork> {
+        self.line_work.as_ref()
     }
 
     pub fn line_subset_report(&self) -> Option<&CausalLmLineSubsetReport> {
@@ -686,7 +691,7 @@ impl NativeCausalLm {
         Ok((gradients, reference))
     }
 
-    fn seal_adaptation_gradients(
+    pub(super) fn seal_adaptation_gradients(
         &self,
         prepared: &PreparedCausalWindow,
         mode: CausalLmAdaptationMode,
@@ -731,6 +736,7 @@ impl NativeCausalLm {
             shape,
             parameters,
             observation: None,
+            line_work: None,
             competition,
         };
         if let Some(trace) = trace {

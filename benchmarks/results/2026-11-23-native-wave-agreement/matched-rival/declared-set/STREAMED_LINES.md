@@ -5,9 +5,9 @@ The prior cached scorer shared decoder work but allocated a full
 row immediately to the sorted outgoing logits and the partition of everything
 outside those edges. The reverse trie pass still uses the **full** vocabulary.
 The original two-part arithmetic, interior stops, conditional costs and tie
-rule are shared with the dense scorer. Dense probabilities are still available
-where training needs them; the inference-only compact representation is not
-used as a substitute for a vocabulary gradient.
+rule are shared with the dense scorer. These measurements cover inference;
+the [training follow-up](STREAMED_GRADIENTS.md) also bounds full-vocabulary
+backpropagation, without using the sparse edges as a substitute for its seed.
 
 ## Memory and latency on one machine
 
