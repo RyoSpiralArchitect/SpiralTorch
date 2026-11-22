@@ -34,6 +34,42 @@ pub(super) struct NativeLoraAdapter {
 }
 
 impl NativeLoraAdapter {
+    pub(super) fn parameter_count(&self) -> usize {
+        self.record.a.len() + self.record.b.len()
+    }
+
+    pub(super) fn admit_ray<'g>(
+        &self,
+        grads: &'g std::collections::BTreeMap<String, Vec<f32>>,
+    ) -> CausalLmResult<[&'g [f32]; 2]> {
+        let a = grads.get("a").ok_or("missing LoRA A gradient")?;
+        let b = grads.get("b").ok_or("missing LoRA B gradient")?;
+        if grads.len() != 2
+            || a.len() != self.record.a.len()
+            || b.len() != self.record.b.len()
+            || a.iter().chain(b).any(|x| !x.is_finite())
+        {
+            return Err("invalid LoRA gradient shape or values".into());
+        }
+        Ok([a, b])
+    }
+
+    pub(super) fn project_ray(
+        &self,
+        model: &NativeCausalLm,
+        gradients: [&[f32]; 2],
+        ray: &crate::geometry_artifact::ParameterRay,
+        motion: &mut crate::geometry_artifact::RayMotion,
+    ) -> CausalLmResult<Self> {
+        let mut r = self.record.clone();
+        for (weights, g) in [&mut r.a, &mut r.b].into_iter().zip(gradients) {
+            for (at, &x) in weights.iter_mut().zip(g) {
+                ray.apply(at, f64::from(x), motion)?;
+            }
+        }
+        Self::create(r, model)
+    }
+
     pub(super) fn same_training_layout(&self, other: &Self) -> bool {
         let (a, b) = (&self.record, &other.record);
         a.layer == b.layer

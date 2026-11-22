@@ -1,6 +1,10 @@
 use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "line_ray_tests.rs"]
+mod line_ray;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "line_owner_tests.rs"]
 mod line_owners;
 

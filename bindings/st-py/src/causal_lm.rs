@@ -1050,6 +1050,30 @@ impl PyNativeCausalLm {
         ))
     }
 
+    /// One Euclidean step budget across all selected parameters, before rounding.
+    #[pyo3(signature=(gradients, *, mode, target_l2))]
+    fn step_adaptation_gradient_at_distance(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmAdaptationGradients,
+        mode: &str,
+        target_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        let mode = session::mode(mode)?;
+        reject_bool(target_l2)?;
+        let target = target_l2.extract::<f64>()?;
+        let (inner, receipt) = py
+            .detach(|| {
+                self.inner
+                    .step_adaptation_gradient_at_distance(&gradients.inner, mode, target)
+            })
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(receipt).map_err(error)?)?,
+        ))
+    }
+
     /// Take a distance-matched step along the sealed gradient before parameter rounding.
     fn step_geometry_gradient_at_distance(
         &self,

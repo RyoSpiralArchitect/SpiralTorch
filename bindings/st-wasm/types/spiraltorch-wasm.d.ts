@@ -35,6 +35,7 @@ declare module "spiraltorch-wasm" {
         /** Geometry-only full-vocabulary VJP. Objective JSON kind: set, menu (gold_index, mix), or subset (accepted_indices). */
         geometryLineGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, maxTileValues?: number): CausalLmLineGradients;
         lineAdaptationGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, mode: "lora" | "geometry" | "joint", maxTileValues?: number): CausalLmLineGradients;
+        stepLineGradientAtDistance(gradients: CausalLmLineGradients, targetL2: number): CausalLmLineRayStep;
         stepLineAdaptationSgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
         stepLineGeometrySgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
         declaredSetNllJson(batch: CausalLmDeclaredBatch): string;
@@ -81,6 +82,13 @@ declare module "spiraltorch-wasm" {
         private constructor();
         readonly payload: string;
         readonly id: string;
+        free(): void;
+    }
+    export class CausalLmLineRayStep {
+        private constructor();
+        reportJson(): string;
+        /** Consumes the step; the original model and sealed gradient remain usable. */
+        intoModel(): NativeCausalLm;
         free(): void;
     }
     export class CausalLmLineGradients {

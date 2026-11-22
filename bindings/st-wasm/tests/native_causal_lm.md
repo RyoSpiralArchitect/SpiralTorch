@@ -206,6 +206,39 @@ updates per mode from the same artificial model and round-trips an intermediate
 checkpoint between CPython and WASM. Its losses are in-sample and measure
 execution, not a pretrained language model's quality. See the [matched losses and numerical checks](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_OWNERS.md).
 
+### Fixed parameter distance instead of a learning rate
+
+For a v3 plan, keep `mode`, change the schema to
+`spiraltorch.native_causal_lm_line_plan.v3`, **remove** the top-level
+`learning_rate` and provide one explicit update policy:
+
+```json
+{"kind":"parameter_gradient_l2","target_l2":0.00390625}
+```
+
+Put this object under the `update` key. For an ordinary baseline the same key
+accepts `{"kind":"sgd","learning_rate":0.125}`. A v3 checkpoint is pinned to
+the particular plan bytes including its update rule; it cannot resume v1/v2,
+another distance, or another rule. A positive unrepresentable step refuses
+without advancing the cursor or replacing weights. Receipts for a distance step
+have a `parameter_ray` with the realized f32 movement and each selected owner's share.
+
+For a single step (no session or schedule):
+
+```python
+next_model, motion = origin.step_adaptation_gradient_at_distance(g, mode="joint", target_l2=1/256)
+print(motion["realized_l2"], motion["lora"]["realized_l2"], motion["geometry"]["realized_l2"])
+```
+
+The same method in Rust returns `(model, receipt)`. In WASM use
+`const step = model.stepLineGradientAtDistance(g, 1/256)`, read
+`step.reportJson()` then consume `step.intoModel()` (or free the unused step).
+The held parameter distance is Euclidean, not a distance on output probabilities.
+The [matched six-arm comparison](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_OWNER_DISTANCE.md) gives
+actual training losses and output changes. To capture its browser return add a
+third output path to `native_line_session_capture.py DOM V1 V2 V3`; in Node
+supply it after the v2 return path.
+
 The demo download contains four artificial step-4 checkpoints from an actual
 Python-to-WASM handoff. Resume the matching case, not an unadapted base or a
 later version of its geometry. [Tests, limits and measured portability](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_SESSION.md).

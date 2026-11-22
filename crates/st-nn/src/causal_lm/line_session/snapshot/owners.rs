@@ -1,6 +1,14 @@
 use super::*;
 
-const V2: &str = "spiraltorch.native_causal_lm_line_checkpoint.v2";
+impl Plan {
+    fn owner_checkpoint_schema(&self) -> &'static str {
+        if self.schema == PLAN_V3 {
+            "spiraltorch.native_causal_lm_line_checkpoint.v3"
+        } else {
+            "spiraltorch.native_causal_lm_line_checkpoint.v2"
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,7 +79,7 @@ impl NativeCausalLmLineTrainingSession {
             return Err("line checkpoint exceeds byte budget".into());
         }
         Self::finish_checkpoint(&State {
-            schema: V2.into(),
+            schema: self.plan.owner_checkpoint_schema().into(),
             plan_id: self.plan_id.clone(),
             base_id: m.base_model_identity().into(),
             mode: self.mode,
@@ -84,7 +92,7 @@ impl NativeCausalLmLineTrainingSession {
 
     pub(super) fn restore_owners(mut self, bytes: &[u8]) -> CausalLmResult<Self> {
         let s: State = serde_json::from_slice(bytes)?;
-        if s.schema != V2
+        if s.schema != self.plan.owner_checkpoint_schema()
             || s.plan_id != self.plan_id
             || s.base_id != self.model.base_model_identity()
             || s.mode != self.mode

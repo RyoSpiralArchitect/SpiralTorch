@@ -103,6 +103,108 @@ fn version_two_roundtrips_each_selected_owner_and_cannot_relabel_or_inject_weigh
 }
 
 #[test]
+fn explicit_update_policy_binds_checkpoint_bytes_and_fails_before_cursor_commit() {
+    let origin = model(1, CausalLmReadoutAccumulator::F64);
+    for mode in ["lora", "geometry", "joint"] {
+        let mut plan = wire();
+        plan["schema"] = json!("spiraltorch.native_causal_lm_line_plan.v3");
+        plan["mode"] = json!(mode);
+        plan.as_object_mut().unwrap().remove("learning_rate");
+        plan["update"] = json!({"kind":"parameter_gradient_l2","target_l2":1./256.});
+        let raw = plan.to_string();
+        let mut s = Session::new(origin.clone(), raw.as_bytes()).unwrap();
+        let mut cuts = vec![s.checkpoint_with_id().unwrap()];
+        let mut reports = vec![];
+        while let Some(r) = s.step_adaptation().unwrap() {
+            let ray = r.parameter_ray.as_ref().unwrap();
+            assert_eq!(ray.mode, mode.parse().unwrap());
+            assert!((ray.realized_l2 * 256. - 1.).abs() < 1e-4);
+            cuts.push(s.checkpoint_with_id().unwrap());
+            reports.push(serde_json::to_vec(&r).unwrap());
+        }
+        for (i, (bytes, id)) in cuts.iter().enumerate() {
+            let mut cut =
+                Session::restore(origin.clone(), raw.as_bytes(), bytes.as_bytes(), id).unwrap();
+            for r in &reports[i..] {
+                assert_eq!(
+                    serde_json::to_vec(&cut.step_adaptation().unwrap().unwrap()).unwrap(),
+                    *r
+                );
+            }
+            assert_eq!(cut.checkpoint_with_id().unwrap(), *cuts.last().unwrap());
+        }
+        let mut other = plan.clone();
+        other["update"] = json!({"kind":"sgd","learning_rate":0.125});
+        assert!(Session::restore(
+            origin.clone(),
+            other.to_string().as_bytes(),
+            cuts[2].0.as_bytes(),
+            &cuts[2].1
+        )
+        .is_err());
+        let mut legacy = wire();
+        legacy["schema"] = json!("spiraltorch.native_causal_lm_line_plan.v2");
+        legacy["mode"] = json!(mode);
+        let mut legacy = Session::new(origin.clone(), legacy.to_string().as_bytes()).unwrap();
+        let mut modern = Session::new(origin.clone(), other.to_string().as_bytes()).unwrap();
+        for _ in 0..6 {
+            let l = legacy.step_adaptation().unwrap().unwrap();
+            let m = modern.step_adaptation().unwrap().unwrap();
+            assert_eq!(
+                (l.loss, l.post_geometry_id, l.post_lora_id),
+                (m.loss, m.post_geometry_id, m.post_lora_id)
+            );
+            assert!(m.parameter_ray.is_none());
+        }
+        let mut rebranded: serde_json::Value = serde_json::from_str(&cuts[2].0).unwrap();
+        rebranded["schema"] = json!("spiraltorch.native_causal_lm_line_checkpoint.v2");
+        let bytes = rebranded.to_string();
+        assert!(Session::restore(
+            origin.clone(),
+            raw.as_bytes(),
+            bytes.as_bytes(),
+            &pin(bytes.as_bytes())
+        )
+        .is_err());
+        decoder::work_counts::take();
+        plan["update"]["target_l2"] = json!(1e100);
+        assert!(Session::new(origin.clone(), plan.to_string().as_bytes()).is_err());
+        assert_eq!(decoder::work_counts::take(), [0; 3]);
+        plan["update"]["target_l2"] = json!(1e-200);
+        let mut fail = Session::new(origin.clone(), plan.to_string().as_bytes()).unwrap();
+        let before = fail.checkpoint_with_id().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        assert!(fail
+            .advance_adaptation_to_checkpoint_new(2, dir.path().join("partial"))
+            .is_err());
+        assert_eq!(fail.checkpoint_with_id().unwrap(), before);
+        assert!(!dir.path().join("partial").exists());
+        for bad in [
+            json!(null),
+            json!({"kind":"parameter_gradient_l2","target_l2":-1}),
+            json!({"kind":"sgd","learning_rate":null}),
+            json!({"kind":"parameter_gradient_l2","target_l2":0.5,"learning_rate":0.1}),
+        ] {
+            plan["update"] = bad;
+            assert!(Session::new(origin.clone(), plan.to_string().as_bytes()).is_err());
+        }
+        plan["update"] = json!({"kind":"parameter_gradient_l2","target_l2":0.});
+        let mut frozen = Session::new(origin.clone(), plan.to_string().as_bytes()).unwrap();
+        frozen.step_adaptation().unwrap().unwrap();
+        assert_eq!(frozen.completed_updates(), 1);
+        assert_eq!(frozen.model().lora_artifact_id(), origin.lora_artifact_id());
+        assert_eq!(
+            frozen.model().geometry_artifact_id(),
+            origin.geometry_artifact_id()
+        );
+        plan["learning_rate"] = json!(0.125);
+        assert!(Session::new(origin.clone(), plan.to_string().as_bytes()).is_err());
+        plan["schema"] = json!("spiraltorch.native_causal_lm_line_plan.v2");
+        assert!(Session::new(origin.clone(), plan.to_string().as_bytes()).is_err());
+    }
+}
+
+#[test]
 fn plan_versions_do_not_implicitly_acquire_or_downgrade_owners() {
     let origin = model(1, CausalLmReadoutAccumulator::F32);
     for (version, mode) in [

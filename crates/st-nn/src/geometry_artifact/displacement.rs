@@ -1,5 +1,6 @@
 //! Euclidean displacement in trainable parameter coordinates, not an intrinsic or output-space distance.
 use super::*;
+pub(crate) mod ray;
 
 pub const MAX_RELATIVE_DELTA_ERROR: f64 = 1e-4;
 
@@ -108,68 +109,67 @@ impl GeometryAdapterArtifact {
         requested_l2: f64,
         method: &'static str,
     ) -> Result<(Self, GeometryGradientStep)> {
-        GeometryDeltaMatch::validate_requested_l2(requested_l2)?;
-        let mut count = 0;
-        let mut norm = Squares::default();
-        for p in &self.record.placements {
-            for t in p.tensors.iter().filter(|t| trainable(t)) {
-                let g = &gradients[&p.path][&t.name];
-                count += g.len();
-                for &x in g {
-                    norm.add(x.into());
-                }
-            }
-        }
-        let gradient_l2 = norm.norm();
-        let (result, realized_l2, relative_vector_error, gradient_dot_step) = if requested_l2 == 0.0
-        {
-            (self.clone(), 0.0, 0.0, 0.0)
-        } else {
-            if gradient_l2 == 0.0 {
-                return Err("cannot assign a positive distance to a zero geometry gradient".into());
-            }
-            check_distance_range(requested_l2, count)?;
-            let mut record = self.record.clone();
-            let (mut actual, mut error) = (Squares::default(), Squares::default());
-            let mut dot = 0.0;
-            for p in &mut record.placements {
-                for t in p.tensors.iter_mut().filter(|t| trainable(t)) {
-                    for (x, &g) in t.values.iter_mut().zip(&gradients[&p.path][&t.name]) {
-                        let g = g.into();
-                        if g == 0.0 {
-                            continue;
-                        }
-                        let origin = f64::from(*x);
-                        let unit = -g / gradient_l2;
-                        let rounded = (origin + requested_l2 * unit) as f32;
-                        if !rounded.is_finite() {
-                            return Err("geometry displacement overflowed f32".into());
-                        }
-                        *x = rounded;
-                        let applied = f64::from(rounded) - origin;
-                        actual.add(applied);
-                        error.add(applied / requested_l2 - unit);
-                        dot += g * applied;
-                    }
-                }
-            }
-            let realized = actual.norm();
-            let relative = error.norm();
-            check_realization(requested_l2, realized, relative)?;
-            (Self::create(record)?, realized, relative, dot)
-        };
+        let size = self.gradient_size(gradients);
+        let ray = ParameterRay::new(requested_l2, size.norm(), size.values)?;
+        let mut motion = RayMotion::default();
+        let result = self.project_gradient_ray(gradients, &ray, &mut motion)?;
+        ray.admit_motion(motion.norm(), motion.relative_error())?;
         let report = GeometryGradientStep {
             method,
             origin_id: self.artifact_id().to_owned(),
             result_id: result.artifact_id().to_owned(),
-            trainable_values: count,
-            gradient_l2,
+            trainable_values: size.values,
+            gradient_l2: size.norm(),
             requested_l2,
-            realized_l2,
-            relative_vector_error,
-            gradient_dot_step,
+            realized_l2: motion.norm(),
+            relative_vector_error: motion.relative_error(),
+            gradient_dot_step: motion.dot,
         };
         Ok((result, report))
+    }
+
+    pub(crate) fn trainable_values(&self) -> usize {
+        self.record
+            .placements
+            .iter()
+            .flat_map(|p| &p.tensors)
+            .filter(|t| trainable(t))
+            .map(|t| t.values.len())
+            .sum()
+    }
+
+    /// Both helpers require complete, validated placement gradients; additional LoRA keys are not read.
+    pub(crate) fn gradient_size<T: Copy + Into<f64>>(
+        &self,
+        gradients: &BTreeMap<String, BTreeMap<String, Vec<T>>>,
+    ) -> GradientSize {
+        let mut size = GradientSize::default();
+        for p in &self.record.placements {
+            for t in p.tensors.iter().filter(|t| trainable(t)) {
+                size.include(&gradients[&p.path][&t.name]);
+            }
+        }
+        size
+    }
+
+    pub(crate) fn project_gradient_ray<T: Copy + Into<f64>>(
+        &self,
+        gradients: &BTreeMap<String, BTreeMap<String, Vec<T>>>,
+        ray: &ParameterRay,
+        motion: &mut RayMotion,
+    ) -> Result<Self> {
+        if ray.target == 0. {
+            return Ok(self.clone());
+        }
+        let mut record = self.record.clone();
+        for p in &mut record.placements {
+            for t in p.tensors.iter_mut().filter(|t| trainable(t)) {
+                for (at, &g) in t.values.iter_mut().zip(&gradients[&p.path][&t.name]) {
+                    ray.apply(at, g.into(), motion)?;
+                }
+            }
+        }
+        Self::create(record)
     }
 
     fn checked_delta(&self, endpoint: &Self) -> Result<(usize, f64)> {

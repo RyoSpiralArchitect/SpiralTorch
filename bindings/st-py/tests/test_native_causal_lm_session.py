@@ -48,6 +48,38 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_global_ray_admission_and_joint_checkpointed_segment(self):
+        base, m = owners()
+        args=([1,2], [[1],[1,2],[3]])
+        spec={"kind":"set"}
+        g=m.line_adaptation_gradients(*args,stop_id=0,mode="joint",objective=json.dumps(spec))
+        with self.assertRaises((TypeError,ValueError)):
+            m.step_adaptation_gradient_at_distance(g,mode="joint",target_l2=True)
+        with self.assertRaises(ValueError):
+            base.step_adaptation_gradient_at_distance(g,mode="joint",target_l2=0)
+        n,r=m.step_adaptation_gradient_at_distance(g,mode="joint",target_l2=1/256)
+        self.assertLessEqual(r["relative_vector_error"],1e-4)
+        self.assertEqual(r["lora"]["result_id"],n.lora_artifact_id)
+        self.assertEqual(r["geometry"]["result_id"],n.geometry_artifact_id)
+        p=dict(schema="spiraltorch.native_causal_lm_line_plan.v3",mode="joint",epochs=2,
+               update={"kind":"parameter_gradient_l2","target_l2":1/256},max_tile_values=11,
+               examples=[dict(prompt_ids=args[0],candidates=args[1],stop_id=0,objective=spec)])
+        S=st.NativeCausalLmLineTrainingSession
+        for policy in (None,{"kind":"parameter_gradient_l2","target_l2":True},
+                       {"kind":"parameter_gradient_l2","target_l2":1e100}):
+            with self.assertRaises(ValueError):
+                S(m,json.dumps(dict(p,update=policy)))
+        raw=json.dumps(p)
+        s=S(m,raw)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"split"
+            reports,ck=s.advance_to_checkpoint_new(1,path)
+            self.assertEqual(reports[0]["parameter_ray"],r)
+            split=S.from_json(m,raw,path.read_bytes(),ck)
+            self.assertEqual(split.step(),s.step())
+            self.assertEqual(split.checkpoint_with_id(),s.checkpoint_with_id())
+            self.assertIsNone(split.step())
+
     def test_complete_line_owner_mode_before_foreign_ids_and_joint_checkpoint(self):
         base, m = owners()
         stop, lines, prompt = 0, [[1], [1, 2], [3]], [1, 2]

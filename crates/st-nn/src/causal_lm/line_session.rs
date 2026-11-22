@@ -7,6 +7,7 @@ mod snapshot;
 
 const PLAN_SCHEMA: &str = "spiraltorch.native_causal_lm_line_plan.v1";
 const PLAN_V2: &str = "spiraltorch.native_causal_lm_line_plan.v2";
+const PLAN_V3: &str = "spiraltorch.native_causal_lm_line_plan.v3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -118,27 +119,74 @@ struct Example {
 #[serde(deny_unknown_fields)]
 struct Plan {
     schema: String,
-    #[serde(default, deserialize_with = "explicit_mode")]
+    #[serde(default, deserialize_with = "present")]
     mode: Option<CausalLmAdaptationMode>,
     examples: Vec<Example>,
     epochs: u32,
-    learning_rate: f32,
+    #[serde(default, deserialize_with = "present")]
+    learning_rate: Option<f32>,
+    #[serde(default, deserialize_with = "present")]
+    update: Option<Update>,
     max_tile_values: Option<usize>,
 }
 
-fn explicit_mode<'de, D: serde::Deserializer<'de>>(
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
-) -> Result<Option<CausalLmAdaptationMode>, D::Error> {
-    CausalLmAdaptationMode::deserialize(d).map(Some)
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Update {
+    Sgd { learning_rate: f32 },
+    ParameterGradientL2 { target_l2: f64 },
 }
 
 impl Plan {
-    fn admitted_mode(&self) -> CausalLmResult<CausalLmAdaptationMode> {
-        match (self.schema.as_str(), self.mode) {
-            (PLAN_SCHEMA, None) => Ok(CausalLmAdaptationMode::Geometry),
-            (PLAN_V2, Some(mode)) => Ok(mode),
-            _ => Err("invalid complete-line plan schema or owner mode".into()),
+    fn contract(
+        &self,
+        origin: &NativeCausalLm,
+    ) -> CausalLmResult<(CausalLmAdaptationMode, Update)> {
+        let (mode, update) = match (
+            self.schema.as_str(),
+            self.mode,
+            self.learning_rate,
+            self.update,
+        ) {
+            (PLAN_SCHEMA, None, Some(learning_rate), None) => (
+                CausalLmAdaptationMode::Geometry,
+                Update::Sgd { learning_rate },
+            ),
+            (PLAN_V2, Some(mode), Some(learning_rate), None) => {
+                (mode, Update::Sgd { learning_rate })
+            }
+            (PLAN_V3, Some(mode), None, Some(policy)) => (mode, policy),
+            _ => {
+                return Err("invalid complete-line plan schema, owner mode or update policy".into())
+            }
+        };
+        origin.validate_adaptation_mode(mode)?;
+        match update {
+            Update::Sgd { learning_rate } if !learning_rate.is_finite() || learning_rate <= 0. => {
+                return Err("invalid line SGD rate".into())
+            }
+            Update::ParameterGradientL2 { target_l2 } => {
+                // An impossible global f32 budget can be refused before any decoder work.
+                let lo = origin
+                    .lora
+                    .as_ref()
+                    .filter(|_| mode != CausalLmAdaptationMode::Geometry)
+                    .map_or(0, |a| a.parameter_count());
+                let geo = origin
+                    .geometry_artifact()
+                    .filter(|_| mode != CausalLmAdaptationMode::Lora)
+                    .map_or(0, GeometryAdapterArtifact::trainable_values);
+                crate::geometry_artifact::ParameterRay::admit_distance(target_l2, lo + geo)?
+            }
+            _ => {}
         }
+        Ok((mode, update))
     }
 }
 
@@ -168,6 +216,8 @@ pub struct CausalLmLineSessionStep {
 #[derive(Debug, Clone, Serialize)]
 pub struct CausalLmLineAdaptationStep {
     pub update: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameter_ray: Option<CausalLmAdaptationRayStep>,
     /// Zero-based epoch and example that produced this one-based update.
     pub epoch: u32,
     pub example_index: usize,
@@ -198,6 +248,7 @@ pub struct NativeCausalLmLineTrainingSession {
     origin_geometry_id: Option<String>,
     origin_lora_id: Option<String>,
     mode: CausalLmAdaptationMode,
+    update_policy: Update,
     updates: u32,
     total: u32,
 }
@@ -209,19 +260,15 @@ impl NativeCausalLmLineTrainingSession {
     pub const MAX_UPDATES: u32 = 1 << 20;
 
     /// The exact UTF-8 plan bytes bind every prompt, ordered candidate, stop,
-    /// objective, learning rate, epoch count and vocabulary tile policy.
+    /// objective, owner selection, step policy, epoch count and vocabulary tile policy.
     pub fn new(origin: NativeCausalLm, bytes: &[u8]) -> CausalLmResult<Self> {
         if bytes.len() > Self::MAX_PLAN_BYTES {
             return Err("line plan exceeds byte budget".into());
         }
         let plan: Plan = serde_json::from_slice(bytes)?;
-        let mode = plan.admitted_mode()?;
-        origin.validate_adaptation_mode(mode)?;
-        if !(1..=Self::MAX_EXAMPLES).contains(&plan.examples.len())
-            || !plan.learning_rate.is_finite()
-            || plan.learning_rate <= 0.
-        {
-            return Err("invalid complete-line plan schema, case count or learning rate".into());
+        let (mode, update_policy) = plan.contract(&origin)?;
+        if !(1..=Self::MAX_EXAMPLES).contains(&plan.examples.len()) {
+            return Err("invalid complete-line plan example count".into());
         }
         let total = (plan.examples.len() as u32)
             .checked_mul(plan.epochs)
@@ -251,6 +298,7 @@ impl NativeCausalLmLineTrainingSession {
             origin_geometry_id: origin.geometry_artifact_id().map(str::to_owned),
             origin_lora_id: origin.lora_artifact_id().map(str::to_owned),
             mode,
+            update_policy,
             model: origin,
             plan: Arc::new(plan),
             plan_id: pin(bytes),
@@ -297,7 +345,7 @@ impl NativeCausalLmLineTrainingSession {
 
     fn require_geometry_plan(&self) -> CausalLmResult<()> {
         if self.plan.mode.is_some() {
-            return Err("use the owner-aware step for a v2 line plan".into());
+            return Err("use the owner-aware step for an explicit-mode line plan".into());
         }
         Ok(())
     }
@@ -325,9 +373,19 @@ impl NativeCausalLmLineTrainingSession {
             self.plan.max_tile_values,
             self.mode,
         )?;
-        let next = self
-            .model
-            .step_adaptation_sgd(&g, self.mode, self.plan.learning_rate)?;
+        let (next, parameter_ray) = match self.update_policy {
+            Update::Sgd { learning_rate } => (
+                self.model
+                    .step_adaptation_sgd(&g, self.mode, learning_rate)?,
+                None,
+            ),
+            Update::ParameterGradientL2 { target_l2 } => {
+                let (next, ray) = self
+                    .model
+                    .step_adaptation_gradient_at_distance(&g, self.mode, target_l2)?;
+                (next, Some(ray))
+            }
+        };
         let objective = match &e.objective {
             CausalLmLineObjective::Set {} => CausalLmLineSessionReport::Set(
                 g.line_set_report().ok_or("missing set report")?.clone(),
@@ -342,6 +400,7 @@ impl NativeCausalLmLineTrainingSession {
             ),
         };
         let report = CausalLmLineAdaptationStep {
+            parameter_ray,
             update: self.updates + 1,
             epoch: self.updates / n as u32,
             example_index: i,

@@ -64,7 +64,7 @@ fn admitted_ids(ids: &Uint32Array, admitted: usize) -> Result<Vec<usize>, JsValu
 
 #[path = "causal_lm_lines.rs"]
 mod lines;
-pub use lines::CausalLmLineGradients;
+pub use lines::{CausalLmLineGradients, CausalLmLineRayStep};
 #[path = "causal_lm_line_session.rs"]
 mod line_session;
 pub use line_session::{CausalLmLineCheckpoint, NativeCausalLmLineTrainingSession};

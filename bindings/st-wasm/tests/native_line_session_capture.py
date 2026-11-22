@@ -15,7 +15,7 @@ class Capture(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a=dict(attrs)
-        if tag=="pre" and a.get("id") in ("line-transfer","owner-transfer","result"):
+        if tag=="pre" and a.get("id") in ("line-transfer","owner-transfer","ray-transfer","result"):
             self.current=a["id"]
             if self.current in self.chunks:
                 raise ValueError("duplicate demo field")
@@ -32,7 +32,7 @@ class Capture(HTMLParser):
             self.chunks[self.current].append(value)
 
 
-def extract(dom, out, owner_out=None):
+def extract(dom, out, owner_out=None, ray_out=None):
     parser=Capture()
     parser.feed(dom.read_text())
     parser.close()
@@ -47,16 +47,22 @@ def extract(dom, out, owner_out=None):
         assert pin(r["payload"].encode())==r["id"] and json.loads(r["payload"])["updates"]==4
     with out.open("xb") as stream:
         stream.write(raw)
+    summary=json.loads("".join(parser.chunks["result"]))
     if owner_out is not None:
-        content="".join(parser.chunks["owner-transfer"]).encode()
+        result={"line_session":result}
+    for field, key, target, version in [("owner-transfer","line_owners",owner_out,"v2"),("ray-transfer","line_ray",ray_out,"v3")]:
+        if target is None:
+            continue
+        content="".join(parser.chunks[field]).encode()
         owners=json.loads(content)
         assert set(owners)=={"lora","geometry","joint"}
         for mode,row in owners.items():
             snap=json.loads(row["payload"])
             assert pin(row["payload"].encode())==row["id"] and snap["mode"]==mode and snap["updates"]==4
-        with owner_out.open("xb") as stream:
+            assert snap["schema"]=="spiraltorch.native_causal_lm_line_checkpoint."+version
+        with target.open("xb") as stream:
             stream.write(content)
-        result={"line_session":result,"line_owners":json.loads("".join(parser.chunks["result"]))["line_owners"]}
+        result[key]=summary[key]
     print(json.dumps(result))
 
 

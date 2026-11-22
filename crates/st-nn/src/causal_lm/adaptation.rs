@@ -767,6 +767,22 @@ impl NativeCausalLm {
         Ok(gradients)
     }
 
+    pub(super) fn validate_adaptation_gradient_owner(
+        &self,
+        g: &NativeCausalLmAdaptationGradients,
+    ) -> CausalLmResult<()> {
+        if g.base_id != self.base_id
+            || g.lora_id.as_deref() != self.lora_artifact_id()
+            || g.geometry_id.as_deref() != self.geometry_artifact_id()
+            || g.readout_accumulator != self.readout_accumulator
+        {
+            return Err(
+                "adaptation gradients belong to a different snapshot or readout policy".into(),
+            );
+        }
+        Ok(())
+    }
+
     /// Construct both updates from the same immutable source, committing only
     /// after every requested group validates. No intermediate model is exposed.
     pub fn step_adaptation_sgd(
@@ -776,14 +792,9 @@ impl NativeCausalLm {
         learning_rate: f32,
     ) -> CausalLmResult<Self> {
         self.validate_adaptation_mode(mode)?;
-        if gradients.base_id != self.base_id
-            || gradients.lora_id.as_deref() != self.lora_artifact_id()
-            || gradients.geometry_id.as_deref() != self.geometry_artifact_id()
-            || gradients.readout_accumulator != self.readout_accumulator
-            || !learning_rate.is_finite()
-            || learning_rate <= 0.
-        {
-            return Err("adaptation gradients belong to a different snapshot/policy or learning rate is invalid".into());
+        self.validate_adaptation_gradient_owner(gradients)?;
+        if !learning_rate.is_finite() || learning_rate <= 0. {
+            return Err("adaptation SGD learning rate must be positive and finite".into());
         }
         let mut next = self.clone();
         if matches!(

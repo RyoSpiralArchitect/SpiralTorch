@@ -28,6 +28,9 @@ There is no uniformly best mode here. In particular the absolute set loss
 increased in two arms. No independence, speed, pretrained efficacy or
 general learning claim follows from these three examples.
 
+For a matched-distance follow-up, see [six equal steps](LINE_OWNER_DISTANCE.md).
+Holding the SGD rate fixed did not hold the movement of the weights fixed.
+
 ## What checks the implementation
 
 - Rust compares joint with the disjoint same-state VJPs on all three losses,

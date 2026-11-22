@@ -1,10 +1,21 @@
 <!doctype html>
+<html lang="en">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>pre {max-width:100%;overflow:auto} #motion {max-width:44rem} #motion table {width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums} #motion th,#motion td {padding:.3rem .4rem;text-align:right;border-bottom:1px solid #aaa} #motion th:first-child,#motion td:first-child {text-align:left} #motion caption {text-align:left;margin:.5rem 0}</style>
 <title>Native causal LM: finite-checked geometry learning</title>
 <h1>Native causal LM: finite-checked geometry learning</h1>
 <p>Four learning controls and six models for cached continuation and terminated answer scoring, using the Rust decoder in WASM host memory. No pretrained model or GPU.</p>
 <p><a id="line-download" download="spiraltorch-line-checkpoints.json" hidden>Download the four artificial checkpoints at update 4 of 6</a></p>
 <p>The complete-answer comparison trains LoRA, geometry, or both from the same tiny model and checks a native checkpoint for each.</p>
+<section id="motion" hidden>
+<h2>Same steps, different predictions</h2>
+<table><caption>Six updates on the same three training examples. Distances below are measured in this browser.</caption>
+<thead><tr><th scope="col">Update / weights</th><th scope="col">Path length</th><th scope="col">Endpoint distance</th><th scope="col">Centered logit RMS</th></tr></thead>
+<tbody></tbody></table>
+<p>Fixed distance gives the selected weights one shared budget per step. Equal parameter distances need not produce equal changes in the model's predictions.</p>
+</section>
+<pre id="ray-transfer" hidden></pre>
 <pre id="owner-transfer" hidden></pre>
 <pre id="line-transfer" hidden></pre>
 <pre id="result" data-status="running">Running...</pre>
@@ -23,8 +34,11 @@ try {
   const report = checkNativeCausalLm(M, fixture);
   const models = await (await fetch('./native_causal_lm_cache_fixture.json')).json();
   report.cached = checkCachedSuffix(M, models);
-  let portable, owners;
-  report.line_owners=checkLineOwners(M,models,await (await fetch('./native_line_owners_bridge.json')).json(), checkpoints=>{owners=checkpoints;});
+  let portable, owners, ray;
+  const ownersRef=await (await fetch('./native_line_owners_bridge.json')).json();
+  const rayRef=await (await fetch('./native_line_ray_bridge.json')).json();
+  report.line_ray=checkLineOwners(M,models,{...ownersRef,...rayRef,expected_measurements:rayRef.measurements.ray}, checkpoints=>{ray=checkpoints;});
+  report.line_owners=checkLineOwners(M,models,{...ownersRef,expected_measurements:rayRef.measurements.sgd}, checkpoints=>{owners=checkpoints;});
   report.line_session=checkLineSession(M,models,await (await fetch('./native_line_session_plan.json')).text(),
     await (await fetch('./native_line_session_bridge.json')).json(), checkpoints => { portable=checkpoints; });
   report.line_gradients = checkLineGradients(M, models, await (await fetch('./native_line_gradients_fixture.json')).json());
@@ -33,9 +47,20 @@ try {
   link.href = URL.createObjectURL(new Blob([JSON.stringify(portable)],{type:'application/json'}));
   link.hidden = false;
   if (new URLSearchParams(location.search).has('capture')) {
+    document.getElementById('ray-transfer').textContent = JSON.stringify(ray);
     document.getElementById('owner-transfer').textContent = JSON.stringify(owners);
     document.getElementById('line-transfer').textContent = await (await fetch(link.href)).text();
   }
+  const motion = document.getElementById('motion');
+  for (const [label,run] of [['SGD',report.line_owners],['Fixed distance',report.line_ray]]) {
+    for (const [mode,m] of Object.entries(run.measurements)) {
+      const tr=motion.querySelector('tbody').insertRow();
+      const name=document.createElement('th');
+      name.scope='row'; name.textContent=label+' / '+mode; tr.append(name);
+      for (const x of [m.path_l2,m.endpoint_l2,m.centered_logit_rms]) tr.insertCell().textContent=x.toFixed(5);
+    }
+  }
+  motion.hidden=false;
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = 'passed';
 } catch (e) {

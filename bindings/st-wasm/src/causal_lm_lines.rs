@@ -10,6 +10,24 @@ pub struct CausalLmLineGradients {
 }
 
 #[wasm_bindgen]
+pub struct CausalLmLineRayStep {
+    model: Decoder,
+    report: st_nn::causal_lm::CausalLmAdaptationRayStep,
+}
+
+#[wasm_bindgen]
+impl CausalLmLineRayStep {
+    #[wasm_bindgen(js_name=reportJson)]
+    pub fn report_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.report).map_err(js_error)
+    }
+    #[wasm_bindgen(js_name=intoModel)]
+    pub fn into_model(self) -> NativeCausalLm {
+        NativeCausalLm { model: self.model }
+    }
+}
+
+#[wasm_bindgen]
 impl CausalLmLineGradients {
     #[wasm_bindgen(js_name = reportJson)]
     pub fn report_json(&self) -> Result<String, JsValue> {
@@ -97,6 +115,21 @@ impl NativeCausalLm {
             return Err(js_error("expected a geometry-only complete-line gradient"));
         }
         self.step_line_adaptation_sgd(gradient, rate)
+    }
+
+    #[wasm_bindgen(js_name=stepLineGradientAtDistance)]
+    pub fn step_line_gradient_at_distance(
+        &self,
+        gradient: &CausalLmLineGradients,
+        #[wasm_bindgen(unchecked_param_type = "number")] target_l2: &JsValue,
+    ) -> Result<CausalLmLineRayStep, JsValue> {
+        let target = target_l2
+            .as_f64()
+            .ok_or_else(|| js_error("parameter distance must be numeric"))?;
+        self.model
+            .step_adaptation_gradient_at_distance(&gradient.gradients, gradient.mode, target)
+            .map(|(model, report)| CausalLmLineRayStep { model, report })
+            .map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = stepLineAdaptationSgd)]

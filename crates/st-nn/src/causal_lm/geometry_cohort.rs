@@ -119,27 +119,11 @@ impl NativeCausalLm {
         Ok(())
     }
 
-    pub(super) fn validate_geometry_gradient_owner(
-        &self,
-        g: &NativeCausalLmAdaptationGradients,
-    ) -> CausalLmResult<()> {
-        if g.base_model_identity() != self.base_model_identity()
-            || g.lora_artifact_id() != self.lora_artifact_id()
-            || g.geometry_artifact_id() != self.geometry_artifact_id()
-            || g.readout_accumulator() != self.readout_accumulator()
-        {
-            return Err(
-                "geometry gradients belong to a different snapshot or readout policy".into(),
-            );
-        }
-        Ok(())
-    }
-
     pub(super) fn validate_full_geometry_gradient(
         &self,
         g: &NativeCausalLmAdaptationGradients,
     ) -> CausalLmResult<()> {
-        self.validate_geometry_gradient_owner(g)?;
+        self.validate_adaptation_gradient_owner(g)?;
         let runtime = self
             .geometry
             .as_ref()

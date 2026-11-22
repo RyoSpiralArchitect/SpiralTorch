@@ -12,6 +12,7 @@ use st_tensor::{
 use std::sync::{Arc, OnceLock};
 
 mod adaptation;
+mod adaptation_ray;
 mod checkpoint;
 mod common_geometry;
 mod competition_pair;
@@ -46,6 +47,7 @@ mod sum;
 mod training;
 mod wave_margin;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
+pub use adaptation_ray::{CausalLmAdaptationRayGroup, CausalLmAdaptationRayStep};
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
 pub use common_geometry::{

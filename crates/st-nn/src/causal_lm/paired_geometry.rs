@@ -183,7 +183,7 @@ impl NativeCausalLm {
             GeometryDeltaMatch::validate_requested_l2(target)?;
         }
         for g in [left, right] {
-            self.validate_geometry_gradient_owner(g)?;
+            self.validate_adaptation_gradient_owner(g)?;
         }
         let runtime = self
             .geometry
