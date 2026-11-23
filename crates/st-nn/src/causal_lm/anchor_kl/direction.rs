@@ -20,6 +20,12 @@ pub enum CausalLmAnchorDirection {
         probe_l2: f64,
         anchor: CausalLmSecantAnchor,
     },
+    /// Measure restricted descent rays on the same bank, then search exactly one.
+    RawThenSensitivityRay {
+        probe_l2: f64,
+        basis: CausalLmSensitivityBasis,
+        select: CausalLmSensitivitySelect,
+    },
 }
 
 impl Default for CausalLmAnchorDirection {
@@ -70,14 +76,17 @@ pub struct CausalLmSecantReport {
 impl CausalLmAnchorDirection {
     fn secant(self) -> Option<(f64, CausalLmSecantAnchor)> {
         match self {
-            Self::LossGradient {} => None,
+            Self::LossGradient {} | Self::RawThenSensitivityRay { .. } => None,
             Self::SecantProjection { probe_l2, anchor }
             | Self::RawThenSecantMidpoint { probe_l2, anchor } => Some((probe_l2, anchor)),
         }
     }
 
     pub(super) fn is_rescue(self) -> bool {
-        matches!(self, Self::RawThenSecantMidpoint { .. })
+        matches!(
+            self,
+            Self::RawThenSecantMidpoint { .. } | Self::RawThenSensitivityRay { .. }
+        )
     }
 
     pub(in crate::causal_lm) fn uses_loss_prompt(self) -> bool {
@@ -120,7 +129,14 @@ impl CausalLmAnchorDirection {
         mode: CausalLmAdaptationMode,
         prompts: &[&[usize]],
         ceiling: f64,
+        criterion: CausalLmAnchorKlCriterion,
     ) -> CausalLmResult<()> {
+        if let Self::RawThenSensitivityRay {
+            probe_l2, basis, ..
+        } = self
+        {
+            return sensitivity::admit(m, mode, prompts.len(), ceiling, criterion, probe_l2, basis);
+        }
         if let Some((probe_l2, _)) = self.secant() {
             if prompts.len() < 2 || !probe_l2.is_finite() || probe_l2 <= 0. || probe_l2 > ceiling {
                 return Err(
@@ -154,15 +170,19 @@ pub(super) struct ResolvedSecant {
     choice: Choice,
 }
 
-fn selected_weights(m: &NativeCausalLm, mode: CausalLmAdaptationMode) -> Blocks<'_> {
-    let mut b = BTreeMap::new();
+pub(super) fn visit_owner_blocks<'a>(
+    m: &'a NativeCausalLm,
+    mode: CausalLmAdaptationMode,
+    mut visit: impl FnMut(&str, &str, &'a [f32], bool),
+) {
     if let Some(l) = m
         .lora
         .as_ref()
         .filter(|_| mode != CausalLmAdaptationMode::Geometry)
     {
+        let path = l.path();
         for (name, values) in l.factor_values() {
-            b.insert((l.path(), name.into()), values);
+            visit(&path, name, values, true);
         }
     }
     if let Some(g) = m
@@ -171,12 +191,21 @@ fn selected_weights(m: &NativeCausalLm, mode: CausalLmAdaptationMode) -> Blocks<
     {
         for p in &g.record().placements {
             for t in &p.tensors {
-                if t.role == GeometryAdapterTensorRole::Parameter && t.requires_grad {
-                    b.insert((p.path.clone(), t.name.clone()), t.values.as_slice());
+                if t.role == GeometryAdapterTensorRole::Parameter {
+                    visit(&p.path, &t.name, &t.values, t.requires_grad);
                 }
             }
         }
     }
+}
+
+fn selected_weights(m: &NativeCausalLm, mode: CausalLmAdaptationMode) -> Blocks<'_> {
+    let mut b = BTreeMap::new();
+    visit_owner_blocks(m, mode, |path, name, v, trainable| {
+        if trainable {
+            b.insert((path.to_owned(), name.to_owned()), v);
+        }
+    });
     b
 }
 

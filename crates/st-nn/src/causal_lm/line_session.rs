@@ -227,7 +227,7 @@ impl Plan {
                         max_parameter_l2: *max_parameter_l2,
                     }
                     .admit(origin, mode, &prompts, *criterion)?;
-                    direction.admit(origin, mode, &prompts, *max_parameter_l2)?;
+                    direction.admit(origin, mode, &prompts, *max_parameter_l2, *criterion)?;
                     if direction.uses_loss_prompt()
                         && !self
                             .examples

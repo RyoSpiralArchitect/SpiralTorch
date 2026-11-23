@@ -5,13 +5,18 @@ mod criterion;
 mod direction;
 mod distribution;
 mod search;
+mod sensitivity;
 pub use criterion::CausalLmAnchorKlCriterion;
 use criterion::Position;
 pub use direction::{
     CausalLmAnchorDirection, CausalLmSecantAnchor, CausalLmSecantMidpoint, CausalLmSecantReport,
 };
 use distribution::Reference;
-use search::{AnchorBank, RaySearch};
+use search::{AnchorBank, RaySearch, SearchRay};
+pub use sensitivity::{
+    CausalLmSensitivityAxis, CausalLmSensitivityBasis, CausalLmSensitivityPrediction,
+    CausalLmSensitivityReport, CausalLmSensitivitySelect,
+};
 
 #[derive(Debug, Copy, Clone, Serialize)]
 pub struct CausalLmAnchorKlPolicy {
@@ -50,6 +55,8 @@ pub struct CausalLmAnchorKlMatch {
     pub method: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<CausalLmSecantReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sensitivity: Option<Box<CausalLmSensitivityReport>>,
     /// Present only if the first bounded loss-gradient search missed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_miss: Option<Box<CausalLmRawRayMiss>>,
@@ -70,6 +77,8 @@ pub struct CausalLmAnchorKlRefusal {
     pub reason: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<CausalLmSecantReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sensitivity: Option<Box<CausalLmSensitivityReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_miss: Option<Box<CausalLmRawRayMiss>>,
     pub policy: CausalLmAnchorKlPolicy,
@@ -182,12 +191,12 @@ impl NativeCausalLm {
     ) -> CausalLmResult<(Self, CausalLmAdaptationRayStep, CausalLmAnchorKlMatch)> {
         policy.admit(self, mode, prompts, criterion)?;
         self.validate_adaptation_gradient_owner(grads)?;
-        direction.admit(self, mode, prompts, policy.max_parameter_l2)?;
+        direction.admit(self, mode, prompts, policy.max_parameter_l2, criterion)?;
         // Missing provenance is an admission error, even if the raw ray might fit.
         let spec = direction.resolve(grads, prompts)?;
         let mut search = RaySearch::new(self, grads.parameters(), mode, prompts, policy, criterion);
         let raw_miss = if !matches!(direction, CausalLmAnchorDirection::SecantProjection { .. }) {
-            match search.run(None, None, None) {
+            match search.run(SearchRay::Raw, None) {
                 Ok(step) => return Ok(step),
                 Err(err) if direction.is_rescue() => {
                     // Only a measured bracket miss is a license to change directions.
@@ -204,6 +213,34 @@ impl NativeCausalLm {
         } else {
             None
         };
+        if let CausalLmAnchorDirection::RawThenSensitivityRay {
+            probe_l2,
+            basis,
+            select,
+        } = direction
+        {
+            let (ray, report) = self.sensitivity_ray(
+                grads.parameters(),
+                mode,
+                &mut search.bank,
+                sensitivity::Settings::new(policy, criterion, probe_l2, basis, select)?,
+            )?;
+            return if let Some(h) = ray {
+                search.run(SearchRay::Sensitivity(&h, Box::new(report)), raw_miss)
+            } else {
+                Err(CausalLmAnchorKlRefusal {
+                    reason: "no measurable sensitivity direction",
+                    direction: None,
+                    sensitivity: Some(Box::new(report)),
+                    raw_miss,
+                    policy,
+                    criterion,
+                    anchor_readouts: search.bank.readouts,
+                    trials: Vec::new(),
+                }
+                .into())
+            };
+        }
         let shaped = self.secant_direction(
             grads.parameters(),
             mode,
@@ -222,6 +259,7 @@ impl NativeCausalLm {
                     criterion,
                     raw_miss,
                     direction: None,
+                    sensitivity: None,
                     anchor_readouts: search.bank.readouts,
                     trials: Vec::new(),
                 }
@@ -229,6 +267,6 @@ impl NativeCausalLm {
             }
             Err(err) => return Err(err),
         };
-        search.run(Some(&h), Some(report), raw_miss)
+        search.run(SearchRay::Secant(&h, report), raw_miss)
     }
 }

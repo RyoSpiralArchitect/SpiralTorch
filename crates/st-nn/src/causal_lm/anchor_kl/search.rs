@@ -42,6 +42,12 @@ pub(super) struct RaySearch<'a> {
     pub(super) bank: AnchorBank<'a>,
 }
 
+pub(super) enum SearchRay<'a> {
+    Raw,
+    Secant(&'a ParameterGradients, CausalLmSecantReport),
+    Sensitivity(&'a ParameterGradients, Box<CausalLmSensitivityReport>),
+}
+
 impl<'a> RaySearch<'a> {
     pub(super) fn new(
         model: &'a NativeCausalLm,
@@ -67,8 +73,7 @@ impl<'a> RaySearch<'a> {
 
     pub(super) fn run(
         &mut self,
-        shaped: Option<&ParameterGradients>,
-        mut guidance: Option<CausalLmSecantReport>,
+        ray: SearchRay<'_>,
         raw_miss: Option<Box<CausalLmRawRayMiss>>,
     ) -> CausalLmResult<(
         NativeCausalLm,
@@ -76,16 +81,19 @@ impl<'a> RaySearch<'a> {
         CausalLmAnchorKlMatch,
     )> {
         let (policy, criterion) = (self.policy, self.criterion);
+        let (gradient, mut guidance, mut sensitivity) = match ray {
+            SearchRay::Raw => (self.source, None, None),
+            SearchRay::Secant(g, report) => (g, Some(report), None),
+            SearchRay::Sensitivity(g, report) => (g, None, Some(report)),
+        };
         let (mut lo, mut hi) = (0., policy.max_parameter_l2);
         let mut distance = hi;
         let mut trials = Vec::new();
         let mut reason = "bounded bracket exhausted";
         for i in 0..CausalLmAnchorKlPolicy::MAX_TRIALS {
-            let (candidate, mut ray) = self.model.step_parameter_ray(
-                shaped.unwrap_or(self.source),
-                self.mode,
-                distance,
-            )?;
+            let (candidate, mut ray) = self
+                .model
+                .step_parameter_ray(gradient, self.mode, distance)?;
             let mut sum = sum::Sum::default();
             let mut per_anchor_kl = Vec::with_capacity(self.bank.prompts.len());
             let mut peak = CausalLmAnchorKlPeak {
@@ -120,12 +128,21 @@ impl<'a> RaySearch<'a> {
                             "selected_parameter_secant_projected_ray_f32.v1"
                         };
                     }
+                    if let Some(info) = sensitivity.as_mut() {
+                        info.source_loss_dot_step = Some(self.model.source_loss_motion(
+                            &candidate,
+                            self.mode,
+                            self.source,
+                        )?);
+                        ray.method = "selected_parameter_sensitivity_ray_f32.v1";
+                    }
                     return Ok((
                         candidate,
                         ray,
                         CausalLmAnchorKlMatch {
                             method: "last_token_anchor_forward_kl.v1",
                             direction: guidance,
+                            sensitivity,
                             raw_miss,
                             policy,
                             criterion,
@@ -151,6 +168,7 @@ impl<'a> RaySearch<'a> {
         Err(CausalLmAnchorKlRefusal {
             reason,
             direction: guidance,
+            sensitivity,
             raw_miss,
             policy,
             criterion,

@@ -12,6 +12,9 @@ mod secant;
 #[path = "anchor_midpoint_tests.rs"]
 mod midpoint;
 
+#[path = "anchor_sensitivity_tests.rs"]
+mod sensitivity;
+
 fn independent(a: &NativeCausalLm, b: &NativeCausalLm) -> Vec<f64> {
     let logs = |m: &NativeCausalLm, p| {
         let row = m.next_token_logits(p).unwrap();

@@ -37,6 +37,9 @@ For the remaining geometry failure, a more informative follow-up is to
 compare the three prompts' directional sensitivities on the same weights
 before trying larger steps or changing the KL envelope.
 
+The [directional sensitivity comparison](LINE_SENSITIVITY.md) takes that
+next step with matched tensor and coordinate probes, without relaxing the cap.
+
 ## Implementation and verification
 
 The opt-in `loss_prompt` selector resolves a sealed complete-line prefix,

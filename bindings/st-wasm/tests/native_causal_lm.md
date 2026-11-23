@@ -373,6 +373,33 @@ selector includes `direction.loss_prompt_id`; `selected_anchor` still names
 the physical bank slot. A raw match keeps its original receipt, with neither
 field. See the [permutation control and limits](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_PROMPT.md).
 
+For **parameter sensitivity** instead of an anchor-normal projection, set:
+
+```json
+{"kind":"raw_then_sensitivity_ray","probe_l2":0.00390625,"basis":"parameter_block","select":"envelope"}
+```
+
+Use this as `update.direction` in a v3 complete-line plan with a capped
+mean KL and at least two anchors. Rust, Python and WASM use the same plan.
+On a raw miss, Rust restricts the loss descent direction to one trainable
+tensor at a time (`parameter_block`) or scalar at a time (`coordinate`).
+It measures the per-prompt KL at one shared parameter distance. The
+`envelope` rule uses a **local quadratic prediction** to choose one ray;
+`gradient_norm` chooses the strongest loss-gradient component after doing
+the same probe work. Neither selects weights until the actual masked update
+satisfies the original bracket, including the positive mean floor.
+
+Look at `anchor_kl.sensitivity` on a shaped match or `refusal.sensitivity`
+on a miss. Each axis has a parameter path, tensor, optional coordinate, loss
+gradient norm and measured KL vector. A null vector means a skipped zero
+gradient; a measured zero vector has no radius prediction. A raw success
+does no probe work and emits no sensitivity record. Probe readouts are
+already in the parent total. Rust bounds a plan to 32 axes, 2^20 selected
+owner parameter values (including frozen scratch blocks), and 2^23 probe
+logit values. A too-wide coordinate plan is rejected up front, never
+silently truncated. Try an explicit block plan for larger adapters.
+See the [matched geometry and LoRA comparison](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_SENSITIVITY.md).
+
 ## Finite-checked learning
 
 ```js

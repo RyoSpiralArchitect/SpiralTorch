@@ -49,6 +49,58 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_unmeasurable_envelope_reports_zero_kl_not_a_second_accepted_ray(self):
+        _, m = owners()  # Fresh LoRA B is exactly zero; a tiny B step is representable.
+        u = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/32,
+                 anchor_examples=[0,1], criterion=dict(kind="mean_with_cap", max_anchor_kl=2e6),
+                 direction=dict(kind="raw_then_sensitivity_ray", probe_l2=2**-40,
+                                basis="parameter_block", select="envelope"))
+        p = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", mode="lora", epochs=1, update=u,
+                 examples=[dict(prompt_ids=ids,candidates=[[1],[2]],stop_id=0,objective=dict(kind="set"))
+                           for ids in ([1,2],[2,1,3])])
+        s = st.NativeCausalLmLineTrainingSession(m,json.dumps(p))
+        before = s.checkpoint_with_id()
+        refusal = s.attempt_step()["refusal"]
+        self.assertEqual((refusal["reason"],refusal["trials"]),("no measurable sensitivity direction",[]))
+        self.assertEqual(s.checkpoint_with_id(),before)
+        report = refusal["sensitivity"]
+        self.assertIsNone(report["selected_axis"])
+        a,b = report["axes"]
+        self.assertEqual((a["tensor"],a["gradient_l2"],a["probe_per_anchor_kl"]),("a",0.,None))
+        self.assertEqual((b["tensor"],b["probe_per_anchor_kl"],b["prediction"]),("b",[0.,0.],None))
+        self.assertGreater(b["gradient_l2"],0.)
+        self.assertEqual(report["probe_readouts"],2)
+        self.assertEqual(refusal["anchor_readouts"],refusal["raw_miss"]["anchor_readouts"]+2)
+
+    def test_sensitivity_axis_receipt_and_plan_are_bound_to_the_checkpoint(self):
+        _, m = owners()
+        update = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/8,
+                      anchor_examples=[0,1], criterion=dict(kind="mean_with_cap", max_anchor_kl=2e6),
+                      direction=dict(kind="raw_then_sensitivity_ray", probe_l2=1/256,
+                                     basis="coordinate", select="envelope"))
+        p = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", mode="geometry", epochs=1,
+                 examples=[dict(prompt_ids=ids, candidates=[[1],[2]], stop_id=0, objective=dict(kind="set"))
+                           for ids in ([1,2], [2,1,3])], update=update)
+        S = st.NativeCausalLmLineTrainingSession
+        text = json.dumps(p)
+        s = S(m,text)
+        cut = s.checkpoint_with_id()
+        refusal = s.attempt_step()["refusal"]
+        report = refusal["sensitivity"]
+        self.assertNotIn("direction",refusal)
+        self.assertEqual(s.checkpoint_with_id(),cut)
+        self.assertNotIn("source_loss_dot_step",report)
+        self.assertEqual(report["probe_readouts"], 2*sum(a["probe_per_anchor_kl"] is not None for a in report["axes"]))
+        self.assertEqual(refusal["anchor_readouts"], refusal["raw_miss"]["anchor_readouts"] +
+                         report["probe_readouts"] + 2*len(refusal["trials"]))
+        self.assertEqual(S.from_json(m,text,*cut).attempt_step()["refusal"],refusal)
+        update["direction"]["basis"]="parameter_block"
+        with self.assertRaises(ValueError):
+            S.from_json(m,json.dumps(p),*cut)
+        update["criterion"]={"kind":"mean"}
+        with self.assertRaisesRegex(ValueError,"capped mean"):
+            S(m,json.dumps(p))
+
     def test_line_prompt_identity_depends_on_tokens_not_loss_tile_or_owner(self):
         _, m = owners()
         for prompt in ([1, 2], [2, 1], [2]):

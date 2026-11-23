@@ -53,6 +53,8 @@ pub use anchor_kl::{
     CausalLmAnchorDirection, CausalLmAnchorKlCriterion, CausalLmAnchorKlMatch,
     CausalLmAnchorKlPeak, CausalLmAnchorKlPolicy, CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
     CausalLmRawRayMiss, CausalLmSecantAnchor, CausalLmSecantMidpoint, CausalLmSecantReport,
+    CausalLmSensitivityAxis, CausalLmSensitivityBasis, CausalLmSensitivityPrediction,
+    CausalLmSensitivityReport, CausalLmSensitivitySelect,
 };
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
