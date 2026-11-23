@@ -115,3 +115,6 @@ python3 -ISB local_capacity.py "$CAPTURE/evidence/formal" \
 | Initial first-order diagnostic | `055d8c565e8f57898a7f8047d1076d2d3bdd5f84139cb3e885cd4e1bf9469cf8` |
 | Development wheel | `2cc87ccddf5db19bffac446cae80e79fc0fb4723048158fa332eb8c6ba40f936` |
 | Private archive (143 verified files) | `a0f48250de7d7dfa869bac02e8f2fc55ed427c3060980d434151d62153c77cf2` |
+
+Follow-up: [reading successive site changes instead of levels](prefix-innovation/RESULTS.md),
+holding the three gates, weakest-lane loss and delivered RMS fixed on fresh synthetic prompts.
