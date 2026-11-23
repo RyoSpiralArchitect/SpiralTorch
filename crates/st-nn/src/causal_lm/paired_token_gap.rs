@@ -7,11 +7,21 @@ use super::*;
 pub enum CausalLmPairedGapObjective {
     Binary,
     Rank,
+    /// Binary CE on the smaller of the two correctly oriented logit margins.
+    /// At an exact tie, split the subgradient equally between the two lanes.
+    WeakestLane,
     /// A caller-declared center in logit units, not a verified checkpoint identity.
     AnchoredRank {
         reference_center: f64,
         stiffness: f64,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct CausalLmWeakestLaneReport {
+    pub signed_margin: f64,
+    /// First and second lane respectively; both are active only at a tie.
+    pub active: [bool; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -24,6 +34,8 @@ pub struct CausalLmPairedGapReport {
     pub half_difference: f64,
     pub center: f64,
     pub center_drift: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weakest_lane: Option<CausalLmWeakestLaneReport>,
     pub binary_loss: f64,
     pub rank_loss: f64,
     pub center_penalty: f64,
@@ -109,9 +121,25 @@ fn score(
     let (l1, p1) = softplus_sigmoid(gaps[1]);
     let binary_loss = (l0 + l1) * 0.5;
     let (rank_loss, w) = softplus_sigmoid(-half_difference);
+    let mut weakest_lane = None;
     let (center_drift, center_penalty, loss, row_derivatives) = match objective {
         CausalLmPairedGapObjective::Binary => (None, 0., binary_loss, [-p0 * 0.5, p1 * 0.5]),
         CausalLmPairedGapObjective::Rank => (None, 0., rank_loss, [-w * 0.5, w * 0.5]),
+        CausalLmPairedGapObjective::WeakestLane => {
+            // 2*C = Dp - (-Dn). Comparing rounded losses or gaps can hide the weaker lane.
+            let (signed_margin, active, loss, seeds) = if center < 0. {
+                (gaps[0], [true, false], l0, [-p0, 0.])
+            } else if center > 0. {
+                (-gaps[1], [false, true], l1, [0., p1])
+            } else {
+                (gaps[0], [true, true], binary_loss, [-p0 * 0.5, p1 * 0.5])
+            };
+            weakest_lane = Some(CausalLmWeakestLaneReport {
+                signed_margin,
+                active,
+            });
+            (None, 0., loss, seeds)
+        }
         CausalLmPairedGapObjective::AnchoredRank {
             reference_center,
             stiffness,
@@ -139,6 +167,7 @@ fn score(
         half_difference,
         center,
         center_drift,
+        weakest_lane,
         binary_loss,
         rank_loss,
         center_penalty,
@@ -231,6 +260,7 @@ mod tests {
         for obj in [
             Binary,
             Rank,
+            WeakestLane,
             AnchoredRank {
                 reference_center: -0.25,
                 stiffness: 1.75,
@@ -244,6 +274,7 @@ mod tests {
                 match obj {
                     Binary => (sp(-a) + sp(b)) / 2.,
                     Rank => sp((b - a) / 2.),
+                    WeakestLane => sp((-a).max(b)),
                     AnchoredRank {
                         reference_center,
                         stiffness,
@@ -271,6 +302,53 @@ mod tests {
                 assert_eq!(g.data(), gc.data());
             }
         }
+    }
+
+    #[test]
+    fn weakest_lane_tracks_the_signed_winner_and_is_symmetric_at_ties() {
+        for (a, n, active) in [
+            (-2., 1., [true, false]),
+            (1., -2., [false, true]),
+            (0.75, 0.75, [true, true]),
+        ] {
+            let z = Tensor::from_vec(2, 2, vec![a, 0., 0., n]).unwrap();
+            let r = score(&z, [0, 1], WeakestLane).unwrap();
+            let q = r.weakest_lane.unwrap();
+            assert_eq!(q.active, active);
+            assert_eq!(q.signed_margin, f64::from(a.min(n)));
+            let s = 1. / (1. + q.signed_margin.exp());
+            let mass = if active[0] == active[1] { 0.5 } else { 1. };
+            let weight = |on: bool| if on { s * mass } else { 0. };
+            for (given, expected) in r
+                .row_derivatives
+                .into_iter()
+                .zip([-weight(active[0]), weight(active[1])])
+            {
+                assert!((given - expected).abs() < 1e-15);
+            }
+            let mirror = Tensor::from_vec(2, 2, vec![0., n, a, 0.]).unwrap();
+            let rev = score(&mirror, [1, 0], WeakestLane).unwrap();
+            assert_eq!(rev.loss, r.loss);
+            assert_eq!(
+                rev.row_derivatives,
+                [-r.row_derivatives[1], -r.row_derivatives[0]]
+            );
+            let legacy = serde_json::to_value(score(&z, [0, 1], Binary).unwrap()).unwrap();
+            assert!(legacy.get("weakest_lane").is_none());
+        }
+    }
+
+    #[test]
+    fn weakest_lane_is_not_selected_from_rounded_losses_or_center_minus_radius() {
+        let z = Tensor::from_vec(2, 2, vec![-f32::MAX, 1., f32::MAX, 0.]).unwrap();
+        let r = score(&z, [0, 1], WeakestLane).unwrap();
+        assert_eq!(r.gaps[0], -r.gaps[1]);
+        assert_eq!(r.weakest_lane.unwrap().active, [true, false]);
+        assert_eq!(r.row_derivatives, [-1., 0.]);
+        let z = Tensor::from_vec(2, 2, vec![f32::MAX, 0., 0., 0.125]).unwrap();
+        let r = score(&z, [0, 1], WeakestLane).unwrap();
+        assert_eq!(r.half_difference - r.center.abs(), 0.);
+        assert_eq!(r.weakest_lane.unwrap().signed_margin, 0.125);
     }
 
     #[test]

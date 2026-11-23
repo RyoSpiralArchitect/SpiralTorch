@@ -23,12 +23,13 @@ pub(super) fn collect(
     let objective = match (name, center, weight) {
         ("binary", None, None) => Objective::Binary,
         ("rank", None, None) => Objective::Rank,
+        ("weakest_lane", None, None) => Objective::WeakestLane,
         ("anchored_rank", Some(c), Some(w)) => {
             reject_bool(c)?;
             reject_bool(w)?;
             Objective::AnchoredRank { reference_center:c.extract()?, stiffness:w.extract()? }
         }
-        _ => return Err(error("expected binary or rank without an anchor, or anchored_rank with reference_center and stiffness")),
+        _ => return Err(error("expected binary, rank or weakest_lane without an anchor, or anchored_rank with reference_center and stiffness")),
     };
     if ids.len()? != 2 {
         return Err(error("expected two competing token IDs"));

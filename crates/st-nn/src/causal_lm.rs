@@ -113,7 +113,9 @@ pub use output_margin::{
 pub use paired_geometry::{
     CausalLmPairDisplacement, CausalLmPairWeighting, CausalLmPairedGeometryStep,
 };
-pub use paired_token_gap::{CausalLmPairedGapObjective, CausalLmPairedGapReport};
+pub use paired_token_gap::{
+    CausalLmPairedGapObjective, CausalLmPairedGapReport, CausalLmWeakestLaneReport,
+};
 pub use prefix_signal::{CausalLmPrefixMarginSignal, MAX_PREFIX_SIGNAL_VALUES};
 pub use projection_probe::{
     CausalLmProjectionBasis, CausalLmProjectionPullback, CausalLmProjectionSite,
