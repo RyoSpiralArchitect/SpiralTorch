@@ -112,3 +112,34 @@ before computing the interaction. It does not import a model or read the
 held-out data. The new JSON retains all per-row values as well as the ranges,
 medians and undefined counts. SHA-256:
 `74f2a56f11cb873cb12bca264f770a74d9c21c9aae32397650ffbbfbb1eb3abc`.
+
+## How much can changing the step length explain?
+
+For each saved row and parameter block, allow the comparison gradient `g`
+its own best nonnegative scale. Report the median remaining relative error,
+`min(a >= 0) ||full - a*g|| / ||full||`. The scale uses the full derivative
+it is approximating: this is a best-case diagnostic, not a proposed learning
+rate. No model was run for this descriptive follow-up.
+
+| Factual host | Block | Affine | Saturation only | Projection only |
+| --- | --- | ---: | ---: | ---: |
+| Affine | gate+bias | 41.37% | 5.22% | 49.16% |
+| WaveGate | gate+bias | 39.87% | 5.19% | 47.85% |
+| Affine | gate | 56.57% | 8.22% | 66.95% |
+| WaveGate | gate | 55.24% | 8.21% | 65.70% |
+| Affine | bias | 3.06% | 2.80% | 3.07% |
+| WaveGate | bias | 3.05% | 2.79% | 3.05% |
+
+Each cell uses the same 24 training prefixes. All bounds were defined;
+full compared with itself gave zero in every cell. The gate-only and bias-only
+bounds allow separate scales, while the joint bound allows **one** scale
+for their concatenation. Projection's proximity before rescaling did not
+make it a directional substitute for the full gate. None of these errors
+is a change in language-model accuracy.
+
+```sh
+python3 -ISB block_readback.py --scalar-bound "$GPT2_CAPTURE"
+```
+
+JSON SHA-256: `9e7c01276d1a9441bbe6ee4ac299425671b3227399a05c5e78315b5df3fa9f72`.
+Omitting the option still produces the original descriptive report byte for byte.
