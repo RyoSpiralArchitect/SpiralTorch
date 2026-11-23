@@ -32,6 +32,11 @@ pub struct PyNativeCausalLmAdaptationGradients {
 }
 #[pymethods]
 impl PyNativeCausalLmAdaptationGradients {
+    #[getter]
+    fn line_prompt_id(&self) -> Option<String> {
+        self.inner.line_prompt_id()
+    }
+
     fn context_token_preference_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.inner
             .context_token_preference_report()

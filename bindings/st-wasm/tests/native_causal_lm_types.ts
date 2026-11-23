@@ -5,6 +5,8 @@ export function jointLine(geometry: NativeCausalLm, prompt: Uint32Array, flat: U
     try {
         const g = m.lineAdaptationGradients(prompt, flat, lengths, 0, '{"kind":"set"}', 'joint');
         try {
+            const promptId: string | undefined = g.linePromptId;
+            void promptId;
             const step = m.stepLineGradientAtDistance(g, 1/256);
             const report: string = step.reportJson();
             void report;

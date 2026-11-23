@@ -1,5 +1,6 @@
 """One Rust-owned training contract, with no optional ML runtime."""
 import importlib.abc
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,6 +49,20 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_line_prompt_identity_depends_on_tokens_not_loss_tile_or_owner(self):
+        _, m = owners()
+        for prompt in ([1, 2], [2, 1], [2]):
+            payload = b"spiraltorch.native_causal_lm.line_prompt.v1\0"
+            payload += b"".join(struct.pack("<Q", n) for n in [len(prompt), *prompt])
+            expected = "sha256:" + hashlib.sha256(payload).hexdigest()
+            for mode, tile, obj in (("joint", 11, {"kind": "set"}),
+                                    ("geometry", None, {"kind": "menu", "gold_index": 0, "mix": .5}),
+                                    ("lora", 22, {"kind": "subset", "accepted_indices": [0]})):
+                g = m.line_adaptation_gradients(prompt, [[1], [2]], stop_id=0, mode=mode,
+                                                objective=json.dumps(obj), max_tile_values=tile)
+                self.assertEqual(g.line_prompt_id, expected)
+        self.assertIsNone(m.adaptation_loss_gradients([1, 2, 3], [1, 3]).line_prompt_id)
+
     def test_raw_first_unresolved_midpoint_keeps_refusal_and_never_publishes(self):
         _, m = owners()
         record = json.loads(m.geometry_artifact().to_json())

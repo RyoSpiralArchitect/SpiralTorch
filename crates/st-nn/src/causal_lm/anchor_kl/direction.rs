@@ -3,6 +3,9 @@ use crate::geometry_artifact::GeometryAdapterTensorRole;
 use crate::geometry_runtime::ParameterGradients;
 use std::collections::BTreeMap;
 
+mod probe;
+use probe::{Choice, ProbeRows};
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CausalLmAnchorDirection {
@@ -30,6 +33,8 @@ impl Default for CausalLmAnchorDirection {
 pub enum CausalLmSecantAnchor {
     Largest,
     Successor,
+    /// The complete-line gradient's own prefix, independent of bank order.
+    LossPrompt,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -45,6 +50,8 @@ pub struct CausalLmSecantReport {
     pub probe_per_anchor_kl: Vec<f64>,
     pub peak_anchor: usize,
     pub selected_anchor: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loss_prompt_id: Option<String>,
     pub source_gradient_l2: f64,
     pub normal_l2: f64,
     pub projected_l2: f64,
@@ -71,6 +78,40 @@ impl CausalLmAnchorDirection {
 
     pub(super) fn is_rescue(self) -> bool {
         matches!(self, Self::RawThenSecantMidpoint { .. })
+    }
+
+    pub(in crate::causal_lm) fn uses_loss_prompt(self) -> bool {
+        matches!(self.secant(), Some((_, CausalLmSecantAnchor::LossPrompt)))
+    }
+
+    pub(super) fn resolve(
+        self,
+        g: &NativeCausalLmAdaptationGradients,
+        prompts: &[&[usize]],
+    ) -> CausalLmResult<Option<ResolvedSecant>> {
+        let Some((probe_l2, anchor)) = self.secant() else {
+            return Ok(None);
+        };
+        let choice = match anchor {
+            CausalLmSecantAnchor::Largest => Choice::Peak,
+            CausalLmSecantAnchor::Successor => Choice::Next,
+            CausalLmSecantAnchor::LossPrompt => {
+                let id = g
+                    .line_prompt
+                    .as_ref()
+                    .ok_or("loss_prompt requires a complete-line gradient")?;
+                let i = prompts
+                    .iter()
+                    .position(|p| line_session::LinePromptId::new(p) == *id)
+                    .ok_or("sealed loss prompt is absent from the anchor bank")?;
+                Choice::At(i)
+            }
+        };
+        Ok(Some(ResolvedSecant {
+            policy: self,
+            probe_l2,
+            choice,
+        }))
     }
 
     pub(in crate::causal_lm) fn admit(
@@ -106,6 +147,12 @@ impl CausalLmAnchorDirection {
 }
 
 type Blocks<'a> = BTreeMap<(String, String), &'a [f32]>;
+
+pub(super) struct ResolvedSecant {
+    policy: CausalLmAnchorDirection,
+    probe_l2: f64,
+    choice: Choice,
+}
 
 fn selected_weights(m: &NativeCausalLm, mode: CausalLmAdaptationMode) -> Blocks<'_> {
     let mut b = BTreeMap::new();
@@ -166,28 +213,25 @@ impl NativeCausalLm {
         &self,
         g: &ParameterGradients,
         mode: CausalLmAdaptationMode,
-        policy: CausalLmAnchorDirection,
+        spec: ResolvedSecant,
         bank: &mut AnchorBank<'_>,
     ) -> CausalLmResult<(ParameterGradients, CausalLmSecantReport)> {
-        let (probe_l2, anchor) = policy.secant().ok_or("expected a secant direction")?;
+        let ResolvedSecant {
+            policy,
+            probe_l2,
+            choice,
+        } = spec;
         let (probe, _) = self.step_parameter_ray(g, mode, probe_l2)?;
         let mut kls = Vec::with_capacity(bank.prompts.len());
-        let mut rows = Vec::with_capacity(bank.prompts.len());
-        let mut peak = 0;
+        let mut rows = ProbeRows::new(choice);
         bank.observe(self, &probe, |i, kl, row| {
             kls.push(kl);
-            if kls[i] > kls[peak] {
-                peak = i;
-            }
-            rows.push(row);
+            rows.observe(i, kl, row);
         })?;
         drop(probe);
-        let selected = match anchor {
-            CausalLmSecantAnchor::Largest => peak,
-            CausalLmSecantAnchor::Successor => (peak + 1) % bank.prompts.len(),
-        };
-        let delta = bank.refs[selected].probability_delta(rows[selected].data())?;
-        drop(rows);
+        let (peak, selected, row) = rows.finish(kls.len())?;
+        let delta = bank.refs[selected].probability_delta(row.data())?;
+        drop(row);
         let mut u = self.anchor_normal(bank.prompts[selected], delta, mode)?;
         let weights = selected_weights(self, mode);
         let (source_gradient_l2, normal_l2, projected_l2, projected_normal_cosine) =
@@ -210,6 +254,9 @@ impl NativeCausalLm {
                 probe_per_anchor_kl: kls,
                 peak_anchor: peak,
                 selected_anchor: selected,
+                loss_prompt_id: policy
+                    .uses_loss_prompt()
+                    .then(|| line_session::LinePromptId::new(bank.prompts[selected]).to_string()),
                 source_gradient_l2,
                 normal_l2,
                 projected_l2,

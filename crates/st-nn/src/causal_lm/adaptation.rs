@@ -53,6 +53,7 @@ pub struct NativeCausalLmAdaptationGradients {
     pub(super) observation: Option<Box<CausalLmAdaptationObservation>>,
     competition: Option<objective::CompetitionReport>,
     pub(super) line_work: Option<CausalLmLineTrainingWork>,
+    pub(super) line_prompt: Option<line_session::LinePromptId>,
 }
 
 /// Block input before the earliest attached geometry, never an output of that geometry.
@@ -141,6 +142,11 @@ impl NativeCausalLmAdaptationGradients {
 
     pub fn line_training_work(&self) -> Option<&CausalLmLineTrainingWork> {
         self.line_work.as_ref()
+    }
+
+    /// Fingerprint of the input prefix of a complete-line objective, not its labels.
+    pub fn line_prompt_id(&self) -> Option<String> {
+        self.line_prompt.as_ref().map(ToString::to_string)
     }
 
     pub fn line_subset_report(&self) -> Option<&CausalLmLineSubsetReport> {
@@ -759,6 +765,7 @@ impl NativeCausalLm {
             parameters,
             observation: None,
             line_work: None,
+            line_prompt: None,
             competition,
         };
         if let Some(trace) = trace {

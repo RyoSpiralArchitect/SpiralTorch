@@ -95,6 +95,7 @@ declare module "spiraltorch-wasm" {
     }
     export class CausalLmLineGradients {
         private constructor();
+        readonly linePromptId: string | undefined;
         reportJson(): string;
         trainingWorkJson(): string;
         parameterGradientsJson(): string;

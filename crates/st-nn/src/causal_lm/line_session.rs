@@ -9,6 +9,27 @@ const PLAN_SCHEMA: &str = "spiraltorch.native_causal_lm_line_plan.v1";
 const PLAN_V2: &str = "spiraltorch.native_causal_lm_line_plan.v2";
 const PLAN_V3: &str = "spiraltorch.native_causal_lm_line_plan.v3";
 
+#[derive(Debug, Eq, PartialEq)]
+pub(super) struct LinePromptId(sha2::digest::Output<Sha256>);
+
+impl LinePromptId {
+    pub(super) fn new(tokens: &[usize]) -> Self {
+        let mut h = Sha256::new();
+        h.update(b"spiraltorch.native_causal_lm.line_prompt.v1\0");
+        h.update((tokens.len() as u64).to_le_bytes());
+        for &id in tokens {
+            h.update((id as u64).to_le_bytes());
+        }
+        Self(h.finalize())
+    }
+}
+
+impl std::fmt::Display for LinePromptId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "sha256:{:x}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CausalLmLineObjective {
@@ -102,7 +123,9 @@ impl CausalLmLineObjective {
                 P::LineSubset(line_set::LineSubset::new(support, lines, accepted_indices))
             }
         });
-        model.line_training(&batch, tile, mode)
+        let mut g = model.line_training(&batch, tile, mode)?;
+        g.line_prompt = Some(LinePromptId::new(prompt));
+        Ok(g)
     }
 }
 
@@ -205,6 +228,16 @@ impl Plan {
                     }
                     .admit(origin, mode, &prompts, *criterion)?;
                     direction.admit(origin, mode, &prompts, *max_parameter_l2)?;
+                    if direction.uses_loss_prompt()
+                        && !self
+                            .examples
+                            .iter()
+                            .all(|e| prompts.contains(&e.prompt_ids.as_slice()))
+                    {
+                        return Err(
+                            "loss_prompt requires every scheduled prompt in the anchor bank".into(),
+                        );
+                    }
                 }
                 (mode, policy.clone())
             }
@@ -320,10 +353,10 @@ impl NativeCausalLmLineTrainingSession {
             return Err("line plan exceeds byte budget".into());
         }
         let plan: Plan = serde_json::from_slice(bytes)?;
-        let (mode, update_policy) = plan.contract(&origin)?;
         if !(1..=Self::MAX_EXAMPLES).contains(&plan.examples.len()) {
             return Err("invalid complete-line plan example count".into());
         }
+        let (mode, update_policy) = plan.contract(&origin)?;
         let total = (plan.examples.len() as u32)
             .checked_mul(plan.epochs)
             .filter(|n| (1..=Self::MAX_UPDATES).contains(n))

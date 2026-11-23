@@ -356,6 +356,23 @@ can borrow it or move out with `*refusal`. Its JSON representation is unchanged.
 Open **Keep the step that works** in the browser demo to [reproduce the six
 generated trajectories](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_MIDPOINT.md).
 
+To choose a prompt by **content rather than position**, set
+`update.direction.anchor = "loss_prompt"` with either secant policy.
+Rust seals the complete-line loss prefix into the gradient. Every scheduled
+prefix must occur in the bank (two examples may share one bank entry); generic
+CE gradients have no such identity. A missing source or bank match is an error
+**before** the first KL readout, not a reason to try another prompt. The bank
+still enforces all its per-prompt limits and the raw-gradient default is unchanged.
+
+Python `gradient.line_prompt_id`, WASM `gradient.linePromptId` and Rust
+`gradient.line_prompt_id()` expose the same fingerprint: SHA-256 of the ASCII
+domain `spiraltorch.native_causal_lm.line_prompt.v1`, a NUL, then the count
+and token IDs as little-endian unsigned 64-bit integers. It binds tokens, not
+labels or tokenizers; it is not anonymization. A shaped receipt using this
+selector includes `direction.loss_prompt_id`; `selected_anchor` still names
+the physical bank slot. A raw match keeps its original receipt, with neither
+field. See the [permutation control and limits](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_PROMPT.md).
+
 ## Finite-checked learning
 
 ```js

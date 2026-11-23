@@ -183,6 +183,8 @@ impl NativeCausalLm {
         policy.admit(self, mode, prompts, criterion)?;
         self.validate_adaptation_gradient_owner(grads)?;
         direction.admit(self, mode, prompts, policy.max_parameter_l2)?;
+        // Missing provenance is an admission error, even if the raw ray might fit.
+        let spec = direction.resolve(grads, prompts)?;
         let mut search = RaySearch::new(self, grads.parameters(), mode, prompts, policy, criterion);
         let raw_miss = if !matches!(direction, CausalLmAnchorDirection::SecantProjection { .. }) {
             match search.run(None, None, None) {
@@ -202,7 +204,12 @@ impl NativeCausalLm {
         } else {
             None
         };
-        let shaped = self.secant_direction(grads.parameters(), mode, direction, &mut search.bank);
+        let shaped = self.secant_direction(
+            grads.parameters(),
+            mode,
+            spec.ok_or("expected a secant direction")?,
+            &mut search.bank,
+        );
         let (h, report) = match shaped {
             Ok(result) => result,
             Err(err) if raw_miss.is_some() => {

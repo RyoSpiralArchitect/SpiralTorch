@@ -1,0 +1,171 @@
+{
+  "alternate_first_tasks": {
+    "geometry/1": {
+      "anchor 0 refused": 1,
+      "anchor 1 refused": 4,
+      "anchor 2 refused": 1
+    },
+    "geometry/2": {
+      "anchor 0 refused": 1,
+      "anchor 1 refused": 2,
+      "anchor 2 refused": 3
+    },
+    "joint/1": {
+      "raw applied": 6
+    },
+    "joint/2": {
+      "raw applied": 6
+    },
+    "lora/1": {
+      "raw applied": 6
+    },
+    "lora/2": {
+      "raw applied": 6
+    }
+  },
+  "counts": {
+    "alternate_first": 36,
+    "applied": 186,
+    "attempts": 225,
+    "canonical_receipts": 21,
+    "distinct_successful_joint_endpoints": 1,
+    "main": 54,
+    "measured_directions": 48,
+    "refused": 39,
+    "tied_probe_peaks": 0
+  },
+  "journal_sha256": "20d430ff3734fb1440bcab0b38163e82112850e9c997b50fc00f52048e9d18bb",
+  "main": {
+    "geometry/largest": {
+      "completed_by_bank": {
+        "012": 0,
+        "021": 0,
+        "102": 0,
+        "120": 0,
+        "201": 0,
+        "210": 0
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {},
+      "trajectories": 1
+    },
+    "geometry/loss_prompt": {
+      "completed_by_bank": {
+        "012": 0,
+        "021": 0,
+        "102": 0,
+        "120": 0,
+        "201": 0,
+        "210": 0
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {},
+      "trajectories": 1
+    },
+    "geometry/successor": {
+      "completed_by_bank": {
+        "012": 0,
+        "021": 0,
+        "102": 0,
+        "120": 0,
+        "201": 0,
+        "210": 0
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {},
+      "trajectories": 2
+    },
+    "joint/largest": {
+      "completed_by_bank": {
+        "012": 0,
+        "021": 0,
+        "102": 0,
+        "120": 0,
+        "201": 0,
+        "210": 0
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {},
+      "trajectories": 1
+    },
+    "joint/loss_prompt": {
+      "completed_by_bank": {
+        "012": 6,
+        "021": 6,
+        "102": 6,
+        "120": 6,
+        "201": 6,
+        "210": 6
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {
+        "0": 6
+      },
+      "trajectories": 1
+    },
+    "joint/successor": {
+      "completed_by_bank": {
+        "012": 6,
+        "021": 0,
+        "102": 0,
+        "120": 6,
+        "201": 6,
+        "210": 0
+      },
+      "endpoint_states": 2,
+      "successful_first_anchors": {
+        "0": 3
+      },
+      "trajectories": 2
+    },
+    "lora/largest": {
+      "completed_by_bank": {
+        "012": 6,
+        "021": 6,
+        "102": 6,
+        "120": 6,
+        "201": 6,
+        "210": 6
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {
+        "raw": 6
+      },
+      "trajectories": 1
+    },
+    "lora/loss_prompt": {
+      "completed_by_bank": {
+        "012": 6,
+        "021": 6,
+        "102": 6,
+        "120": 6,
+        "201": 6,
+        "210": 6
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {
+        "raw": 6
+      },
+      "trajectories": 1
+    },
+    "lora/successor": {
+      "completed_by_bank": {
+        "012": 6,
+        "021": 6,
+        "102": 6,
+        "120": 6,
+        "201": 6,
+        "210": 6
+      },
+      "endpoint_states": 1,
+      "successful_first_anchors": {
+        "raw": 6
+      },
+      "trajectories": 1
+    }
+  },
+  "pretrained_calls": 0,
+  "previous_journal_sha256": "f44d4144ed79d7060295c86e723f58fcd9caa10a31c644f4cc3e8e205e66260a",
+  "schema": "spiraltorch.synthetic_line_prompt_summary.v1",
+  "source_sha256": "ee1ce17f28832ecd3fd01c0c6990d9a6ecb3b6a1d76919fee00ba99b29956561"
+}

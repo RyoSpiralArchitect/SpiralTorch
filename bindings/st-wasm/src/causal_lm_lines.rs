@@ -29,6 +29,11 @@ impl CausalLmLineRayStep {
 
 #[wasm_bindgen]
 impl CausalLmLineGradients {
+    #[wasm_bindgen(getter, js_name = linePromptId)]
+    pub fn line_prompt_id(&self) -> Option<String> {
+        self.gradients.line_prompt_id()
+    }
+
     #[wasm_bindgen(js_name = reportJson)]
     pub fn report_json(&self) -> Result<String, JsValue> {
         let g = &self.gradients;

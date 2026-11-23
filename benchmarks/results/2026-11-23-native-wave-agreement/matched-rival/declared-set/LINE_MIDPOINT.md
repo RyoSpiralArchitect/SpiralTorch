@@ -51,6 +51,10 @@ prompt identity by accident. A useful next control is to permute the bank
 without changing the loss schedule, and distinguish choosing the loss
 example by identity from choosing an adjacent index.
 
+The [subsequent fixed-order control](LINE_PROMPT.md) tests precisely this:
+all six bank permutations preserve the joint result when the gradient's own
+prompt is selected; the cyclic rule alone preserves it in only three.
+
 ## Evidence and reproduction
 
 The [compact results](line_midpoint_results.json) preserve all four triggered
