@@ -116,6 +116,14 @@ pub enum GeometryAdapterRecipe {
         rotation: PrefixRotation,
         output_mix: PrefixChannelMix,
     },
+    /// Transport adjacent site changes; the first source in every document is zero.
+    #[serde(rename = "spiraltorch.prefix_transport_adapter.v3")]
+    DifferencePrefixTransport {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        rotation: PrefixRotation,
+    },
     #[serde(rename = "spiraltorch.channel_affine_adapter.v1")]
     ChannelAffine {
         features: usize,
@@ -239,31 +247,39 @@ pub enum PrefixChannelMix {
 pub(crate) struct PrefixTransportSpec {
     pub rotation: PrefixRotation,
     pub output_mix: Option<PrefixChannelMix>,
+    pub difference: bool,
     pub strength: f32,
     pub max_values: usize,
 }
 
 impl GeometryAdapterRecipe {
     pub(crate) fn prefix_transport(&self) -> Option<PrefixTransportSpec> {
-        let (rotation, output_mix, strength, max_values) = match *self {
+        let (rotation, output_mix, difference, strength, max_values) = match *self {
             Self::PrefixTransport {
                 rotation,
                 strength,
                 max_values,
                 ..
-            } => (rotation, None, strength, max_values),
+            } => (rotation, None, false, strength, max_values),
             Self::MixedPrefixTransport {
                 rotation,
                 output_mix,
                 strength,
                 max_values,
                 ..
-            } => (rotation, Some(output_mix), strength, max_values),
+            } => (rotation, Some(output_mix), false, strength, max_values),
+            Self::DifferencePrefixTransport {
+                rotation,
+                strength,
+                max_values,
+                ..
+            } => (rotation, None, true, strength, max_values),
             _ => return None,
         };
         Some(PrefixTransportSpec {
             rotation,
             output_mix,
+            difference,
             strength: strength as f32,
             max_values,
         })
@@ -543,6 +559,9 @@ impl GeometryAdapterPlacement {
             | MixedPrefixTransport {
                 features, strength, ..
             }
+            | DifferencePrefixTransport {
+                features, strength, ..
+            }
             | ChannelAffine {
                 features, strength, ..
             }
@@ -599,6 +618,7 @@ impl GeometryAdapterPlacement {
         match &self.recipe {
             PrefixTransport { .. }
             | MixedPrefixTransport { .. }
+            | DifferencePrefixTransport { .. }
             | ChannelAffine { .. }
             | Wave { .. }
             | WaveRadius { .. }
@@ -693,7 +713,9 @@ impl GeometryAdapterPlacement {
             MixedPrefixTransport { .. } if features < 3 => {
                 return Err("prefix output mixing requires at least three channels".into());
             }
-            PrefixTransport { max_values, .. } | MixedPrefixTransport { max_values, .. } => {
+            PrefixTransport { max_values, .. }
+            | MixedPrefixTransport { max_values, .. }
+            | DifferencePrefixTransport { max_values, .. } => {
                 if !(features..=GEOMETRY_ADAPTER_MAX_VALUES).contains(max_values) {
                     return Err("prefix transport value budget out of bounds".into());
                 }

@@ -1080,6 +1080,9 @@ impl PyNativeCausalLm {
             "rotation",
             crate::json::json_to_py(py, &serde_json::to_value(s.rotation).map_err(error)?)?,
         )?;
+        if let Some(encoding) = s.source_encoding {
+            out.set_item("source_encoding", encoding)?;
+        }
         if let Some(mix) = s.output_mix {
             out.set_item(
                 "output_mix",

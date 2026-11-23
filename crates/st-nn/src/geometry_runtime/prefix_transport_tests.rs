@@ -56,8 +56,20 @@ fn prefix_transport_oracle_and_all_three_pullbacks_across_two_documents() {
     let dy: Vec<f32> = (0..24).map(|i| ((i * 7 % 13) as f32 - 6.) / 8.).collect();
     let g = [0.25, -0.5, 0.75];
     let b = [-0.125, 0.25, 0.75];
-    for turn in [Identity, QuarterTurn, InverseQuarterTurn] {
-        let m = NativeGeometryRuntime::new(artifact(turn, g, b, 0.5));
+    for (turn, difference) in [Identity, QuarterTurn, InverseQuarterTurn]
+        .into_iter()
+        .flat_map(|turn| [false, true].map(|d| (turn, d)))
+    {
+        let mut rec = artifact(turn, g, b, 0.5).record().clone();
+        if difference {
+            rec.placements[0].recipe = GeometryAdapterRecipe::DifferencePrefixTransport {
+                features: 3,
+                strength: 0.5,
+                max_values: 24,
+                rotation: turn,
+            };
+        }
+        let m = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(rec).unwrap());
         let saved = m.forward_sequence("site", &x, [2, 4]).unwrap();
         assert_eq!(saved.sequence_shape(), Some([2, 4, 3]));
         let vars: Vec<_> = x
@@ -66,7 +78,20 @@ fn prefix_transport_oracle_and_all_three_pullbacks_across_two_documents() {
             .chain(&b)
             .map(|v| f64::from(*v))
             .collect();
-        let reference = |v: &[f64]| direct(&v[..24], &v[24..27], &v[27..], turn, 4);
+        let reference = |v: &[f64]| {
+            if !difference {
+                return direct(&v[..24], &v[24..27], &v[27..], turn, 4);
+            }
+            let dx: Vec<_> = (0..24)
+                .map(|i| if i % 12 < 3 { 0. } else { v[i] - v[i - 3] })
+                .collect();
+            direct(&dx, &v[24..27], &v[27..], turn, 4)
+                .into_iter()
+                .zip(dx)
+                .zip(v)
+                .map(|((y, delta), raw)| raw + (y - delta))
+                .collect()
+        };
         for (a, e) in saved.output().data().iter().zip(reference(&vars)) {
             assert!((f64::from(*a) - e).abs() < 3e-7);
         }
@@ -95,7 +120,7 @@ fn prefix_transport_oracle_and_all_three_pullbacks_across_two_documents() {
             let fd = (loss(&plus) - loss(&minus)) / 0.002;
             assert!(
                 (fd - f64::from(*val)).abs() < 2e-6,
-                "{turn:?}/{j}: {fd} vs {val}"
+                "{turn:?}/{difference}/{j}: {fd} vs {val}"
             );
         }
         assert!(m.forward("site", &x, 8).is_err());
@@ -108,6 +133,38 @@ fn prefix_transport_oracle_and_all_three_pullbacks_across_two_documents() {
             GeometrySequenceDependency::CausalPrefix
         );
     }
+}
+
+#[test]
+fn prefix_transport_adjacent_constants_and_extreme_differences_do_not_cross_documents() {
+    let mut rec = artifact(QuarterTurn, [-0.5; 3], [0.; 3], 1.)
+        .record()
+        .clone();
+    rec.placements[0].recipe = GeometryAdapterRecipe::DifferencePrefixTransport {
+        features: 3,
+        strength: 1.,
+        max_values: 24,
+        rotation: QuarterTurn,
+    };
+    let rt = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(rec).unwrap());
+    let x: Vec<_> = [1., -7., 3.]
+        .repeat(3)
+        .into_iter()
+        .chain([5., 2., -9.].repeat(3))
+        .collect();
+    let run = rt.forward_sequence("site", &x, [2, 3]).unwrap();
+    assert_eq!(run.output().data(), x);
+    assert_eq!(run.vjp_parameters(&[1.; 18]).unwrap()["gate"], [0.; 3]);
+    let huge = [
+        -f32::MAX,
+        -f32::MAX,
+        -f32::MAX,
+        f32::MAX,
+        f32::MAX,
+        f32::MAX,
+    ];
+    let extreme = rt.forward_sequence("site", &huge, [1, 2]).unwrap();
+    assert_eq!(&extreme.output().data()[3..], &[f32::MAX * 0.5; 3]);
 }
 
 #[test]

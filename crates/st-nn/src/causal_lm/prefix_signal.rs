@@ -16,13 +16,15 @@ pub struct CausalLmPrefixMarginSignal {
     pub site: String,
     pub rotation: PrefixRotation,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_encoding: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output_mix: Option<PrefixChannelMix>,
     pub strength: f32,
     pub shape: [usize; 2],
     pub contrast: CausalLmTokenContrast,
     /// Actual input to the residual branch, flattened in [position, channel] order.
     pub site_input: Vec<f32>,
-    /// R^(last-position) x[position] / steps, in row-major order, before f32 mean rounding.
+    /// R^(last-position) source[position] / steps, before f32 rounding. V3 sources are adjacent changes.
     pub source_features: Vec<f64>,
     /// Unit logit-margin derivative at the final site's output, before residual scaling.
     pub upstream: Vec<f32>,
@@ -44,10 +46,22 @@ fn payload(steps: usize, width: usize) -> CausalLmResult<()> {
     Ok(())
 }
 
-fn features(input: &Tensor, turn: PrefixRotation) -> Vec<f64> {
+fn features(input: &Tensor, turn: PrefixRotation, difference: bool) -> Vec<f64> {
     let (steps, width) = input.shape();
     let mut rows: Vec<_> = input.data().iter().copied().map(f64::from).collect();
     for (i, row) in rows.chunks_exact_mut(width).enumerate() {
+        if difference {
+            if i == 0 {
+                row.fill(0.);
+            } else {
+                for (x, prev) in row
+                    .iter_mut()
+                    .zip(&input.data()[(i - 1) * width..i * width])
+                {
+                    *x -= f64::from(*prev);
+                }
+            }
+        }
         // Quarter turns have order four. No prefix is scanned a second time.
         for _ in 0..((steps - 1 - i) % 4) {
             turn.apply(row);
@@ -145,7 +159,11 @@ impl NativeCausalLm {
         dy[(steps - 1) * width..].copy_from_slice(upstream.data());
         let mut grads = batch.vjp_parameters(&dy)?;
         Ok(CausalLmPrefixMarginSignal {
-            schema: "spiraltorch.last_mlp_prefix_margin_signal.v1",
+            schema: if spec.difference {
+                "spiraltorch.last_mlp_prefix_margin_signal.v2"
+            } else {
+                "spiraltorch.last_mlp_prefix_margin_signal.v1"
+            },
             base_model_identity: self.base_id.clone(),
             lora_artifact_id: self.lora_artifact_id().map(str::to_owned),
             frozen_lora_artifact_id: self.frozen_lora_artifact_id().map(str::to_owned),
@@ -153,11 +171,12 @@ impl NativeCausalLm {
             readout_accumulator: self.readout_accumulator,
             site: site.path.clone(),
             rotation,
+            source_encoding: spec.difference.then_some("adjacent_difference"),
             output_mix: spec.output_mix,
             strength: spec.strength,
             shape: [steps, width],
             contrast: Self::contrast_row(logits.data(), steps, target, rival),
-            source_features: features(&input, rotation),
+            source_features: features(&input, rotation, spec.difference),
             site_input: input.data().to_vec(),
             upstream: upstream.data().to_vec(),
             gate_gradient: grads.remove("gate").ok_or("missing gate VJP")?,
@@ -184,12 +203,12 @@ mod tests {
         x[12] = -12.;
         x[2] = 18.;
         let input = Tensor::from_vec(6, 3, x).unwrap();
-        let positive = features(&input, PrefixRotation::QuarterTurn);
+        let positive = features(&input, PrefixRotation::QuarterTurn, false);
         assert_eq!(&positive[3..6], &[1., 0., 0.]);
         assert_eq!(&positive[12..15], &[0., -2., 0.]);
         assert_eq!(&positive[0..3], &[0., 0., 3.]);
         assert_eq!(
-            &features(&input, PrefixRotation::InverseQuarterTurn)[12..15],
+            &features(&input, PrefixRotation::InverseQuarterTurn, false)[12..15],
             &[0., 2., 0.]
         );
     }

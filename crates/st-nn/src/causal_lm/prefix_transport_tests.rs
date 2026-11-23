@@ -165,6 +165,58 @@ fn prefix_signal_factors_real_decoder_gradients_without_changing_model() {
 }
 
 #[test]
+fn prefix_transport_adjacent_changes_share_full_cached_and_attributed_features() {
+    let base = load();
+    let site = "transformer.h.1.mlp";
+    let ids = [2, 4, 6, 5, 7];
+    let mut rec = placed(&base, site, QuarterTurn, 0.25, 64)
+        .geometry_artifact()
+        .unwrap()
+        .record()
+        .clone();
+    rec.placements[0].recipe = GeometryAdapterRecipe::DifferencePrefixTransport {
+        features: 4,
+        strength: 0.5,
+        max_values: 64,
+        rotation: QuarterTurn,
+    };
+    let m = base
+        .with_geometry(GeometryAdapterArtifact::create(rec).unwrap())
+        .unwrap();
+    let trace = m.last_mlp_prefix_margin_signal(&ids, 7, 8).unwrap();
+    assert_eq!(trace.source_encoding, Some("adjacent_difference"));
+    assert_eq!(&trace.source_features[..4], &[0.; 4]);
+    for j in 0..4 {
+        let mean = trace
+            .source_features
+            .chunks_exact(4)
+            .map(|r| r[j])
+            .sum::<f64>();
+        assert!(
+            (mean * f64::from(trace.bias_gradient[j]) - f64::from(trace.gate_gradient[j])).abs()
+                < 2e-6
+        );
+    }
+    let cap = 2 * 2 * 5 * 4 + 3 * 4;
+    assert_eq!(m.context_cache_values(5, cap).unwrap(), cap);
+    assert!(m.context_cache_values(5, cap - 1).is_err());
+    let root = NativeCausalLmContext::new(m.clone(), ids[..1].to_vec(), cap).unwrap();
+    let a = root.with_suffix(&ids[1..]).unwrap();
+    let b = root
+        .with_suffix(&ids[1..3])
+        .unwrap()
+        .with_suffix(&ids[3..])
+        .unwrap();
+    assert_eq!(a.cache_values(), cap);
+    close(
+        a.logit_values(),
+        m.logits(&ids, [1, 5], true).unwrap().data(),
+    );
+    close(a.logit_values(), b.logit_values());
+    assert_eq!(root.token_ids(), &ids[..1]);
+}
+
+#[test]
 fn prefix_transport_cache_still_respects_full_geometry_budget() {
     let m = placed(&load(), "transformer.h.0", QuarterTurn, 0.3, 12);
     let c = NativeCausalLmContext::new(m.clone(), vec![2, 5], 1024)

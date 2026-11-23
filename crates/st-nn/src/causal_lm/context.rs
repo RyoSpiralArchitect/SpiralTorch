@@ -96,7 +96,7 @@ impl NativeCausalLm {
                     .clone(),
                 None,
             )),
-            GeometryCacheKind::Transport => {
+            GeometryCacheKind::Transport { .. } => {
                 let prev = match previous {
                     None => None,
                     Some(GeometryHistory::Transport(s)) => Some(s),
@@ -153,7 +153,7 @@ impl NativeCausalLm {
                 let count = match runtime.cache_kind(&p.path)? {
                     GeometryCacheKind::RowLocal => 0,
                     GeometryCacheKind::Replay => steps,
-                    GeometryCacheKind::Transport => 2,
+                    GeometryCacheKind::Transport { difference } => 2 + usize::from(difference),
                 };
                 n = count
                     .checked_mul(self.config.width)

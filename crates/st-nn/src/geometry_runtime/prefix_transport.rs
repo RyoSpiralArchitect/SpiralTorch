@@ -82,18 +82,20 @@ impl PrefixRotation {
 pub(crate) struct TransportState {
     steps: usize,
     sum: Vec<f64>,
+    previous: Option<Vec<f32>>,
 }
 
 impl TransportState {
-    fn new(width: usize) -> Self {
+    fn new(width: usize, difference: bool) -> Self {
         Self {
             steps: 0,
             sum: vec![0.; width],
+            previous: difference.then(|| vec![0.; width]),
         }
     }
 
     pub(crate) fn cache_values(&self) -> usize {
-        2 * self.sum.len() // cache admission counts f32-sized payload words
+        2 * self.sum.len() + self.previous.as_ref().map_or(0, Vec::len)
     }
 
     fn scan(&mut self, rows: &[f32], turn: PrefixRotation, mut emit: impl FnMut(usize, f32)) {
@@ -102,8 +104,16 @@ impl TransportState {
             turn.apply(&mut self.sum);
             self.steps += 1;
             for (i, (s, &x)) in self.sum.iter_mut().zip(row).enumerate() {
-                *s += f64::from(x);
+                let source = match &self.previous {
+                    None => f64::from(x),
+                    Some(_) if self.steps == 1 => 0.,
+                    Some(prev) => f64::from(x) - f64::from(prev[i]),
+                };
+                *s += source;
                 emit(i, (*s / self.steps as f64) as f32);
+            }
+            if let Some(prev) = &mut self.previous {
+                prev.copy_from_slice(row);
             }
         }
     }
@@ -124,6 +134,7 @@ pub(super) struct TransportBatch {
     gate: Vec<f32>,
     steps: usize,
     turn: PrefixRotation,
+    difference: bool,
     output_mix: Option<PrefixChannelMix>,
 }
 
@@ -149,7 +160,7 @@ impl TransportBatch {
         let mut means = Vec::with_capacity(x.data().len());
         let mut values = Vec::with_capacity(x.data().len());
         for document in x.data().chunks_exact(steps * w) {
-            TransportState::new(w).scan(document, spec.rotation, |i, m| {
+            TransportState::new(w, spec.difference).scan(document, spec.rotation, |i, m| {
                 means.push(m);
                 values.push(gate[i] * m + bias[i]);
             });
@@ -161,6 +172,7 @@ impl TransportBatch {
             gate: gate.to_vec(),
             steps,
             turn: spec.rotation,
+            difference: spec.difference,
             output_mix: spec.output_mix,
         })
     }
@@ -169,6 +181,7 @@ impl TransportBatch {
         let (rows, w) = dy.shape();
         let mut dx = vec![0.; rows * w];
         let mut adj = vec![0.; w];
+        let mut next = self.difference.then(|| vec![0.; w]);
         for (src, dst) in dy
             .data()
             .chunks_exact(self.steps * w)
@@ -182,10 +195,18 @@ impl TransportBatch {
                 .enumerate()
                 .rev()
             {
+                if let Some(next) = &mut next {
+                    next.copy_from_slice(&adj);
+                }
                 self.turn.transpose().apply(&mut adj);
                 branch_adjoint(d, self.output_mix, |i, v| {
                     adj[i] += v * f64::from(self.gate[i]) / (t + 1) as f64;
-                    row[i] = adj[i] as f32;
+                    // d[0] is constant. Later rows enter their own change and the next with opposite signs.
+                    row[i] = match &next {
+                        Some(n) if t == 0 => -n[i],
+                        Some(n) => adj[i] - n[i],
+                        None => adj[i],
+                    } as f32;
                 });
             }
         }
@@ -243,7 +264,12 @@ impl NativeGeometryRuntime {
             .recipe
             .prefix_transport()
             .ok_or("expected prefix transport geometry")?;
-        let mut state = previous.cloned().unwrap_or_else(|| TransportState::new(w));
+        if previous.is_some_and(|s| s.previous.is_some() != spec.difference) {
+            return Err("prefix transport source mismatch".into());
+        }
+        let mut state = previous
+            .cloned()
+            .unwrap_or_else(|| TransportState::new(w, spec.difference));
         let strength = spec.strength;
         if strength == 0. {
             state.scan(x.data(), spec.rotation, |_, _| {});

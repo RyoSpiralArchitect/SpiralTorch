@@ -43,7 +43,7 @@ pub enum GeometrySequenceDependency {
 pub(crate) enum GeometryCacheKind {
     RowLocal,
     Replay,
-    Transport,
+    Transport { difference: bool },
 }
 #[cfg(test)]
 mod anchored_tests;
@@ -153,7 +153,10 @@ impl NativeGeometryRuntime {
         use GeometryCacheKind::{Replay, RowLocal, Transport};
         Ok(match &self.placement(path)?.recipe {
             GeometryAdapterRecipe::PrefixTransport { .. }
-            | GeometryAdapterRecipe::MixedPrefixTransport { .. } => Transport,
+            | GeometryAdapterRecipe::MixedPrefixTransport { .. } => Transport { difference: false },
+            GeometryAdapterRecipe::DifferencePrefixTransport { .. } => {
+                Transport { difference: true }
+            }
             GeometryAdapterRecipe::ChannelAffine { .. }
             | GeometryAdapterRecipe::Wave { .. }
             | GeometryAdapterRecipe::WaveRadius { .. }
@@ -201,6 +204,11 @@ impl NativeGeometryRuntime {
                 ..
             }
             | GeometryAdapterRecipe::MixedPrefixTransport {
+                features,
+                max_values,
+                ..
+            }
+            | GeometryAdapterRecipe::DifferencePrefixTransport {
                 features,
                 max_values,
                 ..
@@ -260,6 +268,7 @@ impl NativeGeometryRuntime {
         let strength = match &placement.recipe {
             GeometryAdapterRecipe::PrefixTransport { strength, .. }
             | GeometryAdapterRecipe::MixedPrefixTransport { strength, .. }
+            | GeometryAdapterRecipe::DifferencePrefixTransport { strength, .. }
             | GeometryAdapterRecipe::EllipticCausal { strength, .. }
             | GeometryAdapterRecipe::EllipticGated { strength, .. }
             | GeometryAdapterRecipe::Fractional { strength, .. }
@@ -280,7 +289,8 @@ impl NativeGeometryRuntime {
         } else {
             match &placement.recipe {
                 GeometryAdapterRecipe::PrefixTransport { .. }
-                | GeometryAdapterRecipe::MixedPrefixTransport { .. } => {
+                | GeometryAdapterRecipe::MixedPrefixTransport { .. }
+                | GeometryAdapterRecipe::DifferencePrefixTransport { .. } => {
                     Pullback::Transport(Box::new(prefix_transport::TransportBatch::forward(
                         placement,
                         placement.recipe.prefix_transport().unwrap(),
