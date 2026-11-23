@@ -95,4 +95,6 @@ cmp "$OUT/per-order.tsv" per-order.tsv
 
 The natural next test is whether training that scores **only the answer
 token**, against a matched complete-line objective, can move the first-token
-decision on a fresh synthetic base. That experiment was not run here.
+decision on fresh synthetic bases. See the [separate three-base
+answer-scope comparison](answer-scope/RESULTS.md); its runs and decision
+criteria are not part of this placement study.

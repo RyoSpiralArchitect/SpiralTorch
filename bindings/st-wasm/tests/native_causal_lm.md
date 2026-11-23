@@ -129,6 +129,35 @@ stop after each content line. The last optional WASM argument (Python:
 `max_tile_values=`) is a vocabulary tile budget, not a vocabulary shortlist.
 No held-out check or loss-decrease guarantee is implied by a plain SGD step.
 
+### Train the answer token, not its terminator
+
+For a single-token choice, use the native token-menu VJP. The sorted menu
+contains **token IDs**, not complete sequences. The prompt provides context;
+only the prediction immediately after it is supervised. No EOS is added.
+
+```python
+g = model.geometry_token_menu_gradients([4, 1, 2], [1, 3, 6], gold_index=1, mix=0.5)
+print(g.declared_rival_report()["loss"], g.target_tokens)  # one target, token 3
+updated, step = model.step_adaptation_gradient_at_distance(g, mode="geometry", target_l2=1/256)
+```
+
+Rust uses the same `geometry_token_menu_gradients` method; WASM exposes
+`model.geometryTokenMenuGradients(prompt, choices, goldIndex, mix)` with
+two `Uint32Array` inputs. Its handle supports `reportJson()`,
+`parameterGradientsJson()` and `stepLineGradientAtDistance()`; release WASM
+handles after use. There is no complete-line work report for a token VJP.
+The base and any LoRA participate in the forward pass but are not updated.
+
+Both objectives mix gold full-vocabulary CE with CE conditional on the
+declared alternatives (`mix=0` and `mix=1` respectively). For token
+menus, use 2 to 32 distinct, increasing in-vocabulary IDs and a zero-based
+gold index. To train **through the terminator** on those same choices, use
+`geometry_line_menu_gradients(prompt, [[1], [3], [6]], gold_index=1,
+stop_id=0, mix=0.5)` instead. It normalizes the full-vocabulary gold
+cost by the complete target length and compares the probability of the
+whole lines, not just their first tokens. Neither API promises a change
+in which token wins.
+
 ### Choose which adapter learns
 
 A composed decoder applies LoRA at the attention output projection and then the
