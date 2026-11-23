@@ -43,6 +43,7 @@ mod qkv_training;
 mod quartet_projection;
 mod readout_policy;
 mod repetition;
+pub mod route_calibration;
 mod scalar_output;
 mod session;
 mod sum;
