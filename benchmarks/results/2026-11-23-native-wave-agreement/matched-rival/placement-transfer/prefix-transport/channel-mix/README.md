@@ -2,6 +2,8 @@
 
 The [completed comparison](RESULTS.md) found changes in verb margins, but no
 decision flips or advantage across bases; the mixing recipe stays opt-in.
+The subsequent [train-only route comparison](selection/RESULTS.md) tested
+whether choosing among these same checkpoints changes that conclusion.
 
 For temporal transport, m[t] is the average of earlier site features after
 rotating each by its lag. The original adapter returns
