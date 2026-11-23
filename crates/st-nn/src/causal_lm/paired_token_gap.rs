@@ -91,15 +91,15 @@ fn score(
     if rows != 2 || !logits.data().iter().all(|x| x.is_finite()) {
         return Err("paired token gap requires exactly two finite logit rows".into());
     }
-    let z = [0, 1].map(|r| {
-        tokens.map(|c| {
-            let i = match logits.layout() {
-                st_tensor::Layout::RowMajor => r * cols + c,
-                st_tensor::Layout::ColMajor => c * rows + r,
-            };
-            logits.data()[i]
-        })
-    });
+    let converted;
+    let logits = if logits.is_contiguous() {
+        logits
+    } else {
+        converted = logits.to_layout(st_tensor::Layout::RowMajor)?;
+        &converted
+    };
+    let (rs, cs) = logits.strides()?;
+    let z = [0, 1].map(|r| tokens.map(|c| logits.data()[r * rs + c * cs]));
     let [[a, b], [c, d]] = z.map(|p| p.map(f64::from));
     let gaps = [a - b, c - d];
     // Do not subtract separately rounded gaps; their common term can dwarf the rank signal.
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn all_objectives_match_independent_differences_and_storage_layouts() {
-        let xs = [0.2f32, -0.4, 1.5, -0.7, 0.3, 0.9];
+        let xs = [0.2f32, -0.4, 1.5, 0.6, -0.7, 0.3, 0.9, -0.1];
         for obj in [
             Binary,
             Rank,
@@ -239,7 +239,7 @@ mod tests {
             let f = |i: usize, h: f64| {
                 let mut v = xs.map(f64::from);
                 v[i] += h;
-                let (a, b) = (v[2] - v[0], v[5] - v[3]);
+                let (a, b) = (v[2] - v[0], v[6] - v[4]);
                 let sp = |x: f64| x.exp().ln_1p();
                 match obj {
                     Binary => (sp(-a) + sp(b)) / 2.,
@@ -253,20 +253,23 @@ mod tests {
                     }
                 }
             };
-            let x = Tensor::from_vec(2, 3, xs.to_vec()).unwrap();
+            let x = Tensor::from_vec(2, 4, xs.to_vec()).unwrap();
             let (r, g) = gradient(&x, [2, 0], obj).unwrap();
             assert!((r.loss - f(0, 0.)).abs() < 1e-12);
             for (i, v) in g.data().iter().enumerate() {
                 assert!((f64::from(*v) - (f(i, 1e-5) - f(i, -1e-5)) / 2e-5).abs() < 1e-7);
             }
-            let (rc, gc) = gradient(
-                &x.to_layout(st_tensor::Layout::ColMajor).unwrap(),
-                [2, 0],
-                obj,
-            )
-            .unwrap();
-            assert_eq!(r, rc);
-            assert_eq!(g.data(), gc.data());
+            for layout in [
+                st_tensor::Layout::ColMajor,
+                st_tensor::Layout::Chimera {
+                    stripes: 2,
+                    tile: 2,
+                },
+            ] {
+                let (rc, gc) = gradient(&x.to_layout(layout).unwrap(), [2, 0], obj).unwrap();
+                assert_eq!(r, rc);
+                assert_eq!(g.data(), gc.data());
+            }
         }
     }
 
