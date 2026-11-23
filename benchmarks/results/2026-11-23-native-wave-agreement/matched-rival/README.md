@@ -66,3 +66,9 @@ Keep the private plan, state blobs, gradient tapes, journals, f32 logits, result
 and completion or first-failure record together. Replaying saved bytes does not
 spend another prediction. Neither success nor failure on this one template and
 four held-out noun pairs establishes general language quality.
+
+Related results with different evidence boundaries: [the 48-call GPT-2
+pullback diagnostic](parameter-vjp/RESULTS.md) used no weight updates.
+The [six-site placement comparison](placement-transfer/RESULTS.md) trained
+on a separate generated decoder and separated answer-token effects from
+termination effects; it did not rescore the English data.
