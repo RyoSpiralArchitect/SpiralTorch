@@ -1,3 +1,4 @@
+import json
 import math
 from pathlib import Path
 import runpy
@@ -8,6 +9,21 @@ kl = probe["kl"]
 
 
 class SignedResponse(unittest.TestCase):
+    def test_archived_origin_checks_typed_id_and_export_bytes_separately(self):
+        fixtures = probe["FIXTURES"]
+        entry, = [r for r in json.loads((fixtures/"native_causal_lm_cache_fixture.json").read_bytes())["cases"]
+                  if r["name"] == "ordinary/wave"]
+        bridge = json.loads((fixtures/"native_line_owners_bridge.json").read_bytes())
+        ids = (entry["base_id"], bridge["lora_id"], entry["geometry_id"])
+        validate = probe["check_origin"]
+        validate(ids, bridge["lora"], entry["geometry"])
+        with self.assertRaisesRegex(ValueError, "artifact IDs"):
+            validate((ids[0], "sha256:"+probe["LORA_JSON_SHA256"], ids[2]), bridge["lora"], entry["geometry"])
+        with self.assertRaisesRegex(ValueError, "LoRA bytes"):
+            validate(ids, bridge["lora"]+" ", entry["geometry"])
+        with self.assertRaisesRegex(ValueError, "geometry bytes"):
+            validate(ids, bridge["lora"], entry["geometry"]+" ")
+
     def test_zero_and_logit_shift(self):
         self.assertEqual(kl([0., 1.], [2., 3.]), 0.)
         self.assertEqual(kl([3.], [4.]), 0.)

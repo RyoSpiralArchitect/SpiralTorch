@@ -14,6 +14,7 @@ OFFSETS = (0., -H, H, -2*H, 2*H)
 PROMPTS = [[1, 2], [2, 4], [2, 1, 3]]
 BASE = "sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5"
 LORA = "sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337"
+LORA_JSON_SHA256 = "172f9919a3dd7b97aef58118bf12ca3fbf73bc17cb823c6bdd1e815f23ce863f"
 GEOMETRY = "sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31"
 EXTENSION = "ca72f2436471f8d754d02057bccb5a13b89383d6ccd64f9c76e88c9cc70f0d5f"
 PREVIOUS = "682daccccc95e7dc01c5f02776210fea52958fd3f58ddf6ac9e3909eee677a49"
@@ -33,6 +34,13 @@ def bias(record):
     need(placement["path"] == SITE, "wrong site")
     tensor, = [t for t in placement["tensors"] if t["name"] == "bias" and t["requires_grad"]]
     return tensor["values"]
+
+
+def check_origin(identities, lora, geometry):
+    need(identities == (BASE, LORA, GEOMETRY), "unexpected composed artifact IDs")
+    # Rust domain-separates the LoRA ID; its canonical JSON has a distinct file digest.
+    need(sha256(lora.encode()).hexdigest() == LORA_JSON_SHA256, "wrong archived LoRA bytes")
+    need(sha256(geometry.encode()).hexdigest() == GEOMETRY[7:], "wrong archived geometry bytes")
 
 
 def kl(reference, candidate):
@@ -71,9 +79,8 @@ def journal(old, out):
     origin, _ = fixture["host"]("ordinary/wave")
     geometry = origin.geometry_artifact().to_json()
     lora = origin.lora_to_json()
-    need((origin.base_model_identity, origin.lora_artifact_id, origin.geometry_artifact_id)
-         == (BASE, LORA, GEOMETRY) and sha256(lora.encode()).hexdigest() == LORA[7:]
-         and sha256(geometry.encode()).hexdigest() == GEOMETRY[7:], "wrong composed origin")
+    check_origin((origin.base_model_identity, origin.lora_artifact_id, origin.geometry_artifact_id),
+                 lora, geometry)
     record = json.loads(geometry)
     before = f32(bias(record)[0])
     with out.open("x") as log:
