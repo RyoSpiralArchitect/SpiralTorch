@@ -112,3 +112,7 @@ cmp opposite-labels.tsv "$OUT/grad.tsv"
 | Opposite-label readback | `acb5d5f520e575c2f94efeecf6c24c418c5e660795e1028ee50b3d068e9fa7fd` |
 | Private archive of attempts | `a11e104fa5ad47552c6760576585d1243f86132a5635eec8d247108fbb67d856` |
 | CPU development wheel | `3870a1306f56fa03415ba383a6d2a857297f329281f357d6fe5cd6cdc0c150a7` |
+
+Follow-up: [pure two-token loss and balanced updates](../conditional-update/RESULTS.md)
+tests whether reversing the local gradient when the label flips is sufficient
+to change the answer selected on held-out symbolic prompts.
