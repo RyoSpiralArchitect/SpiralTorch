@@ -39,6 +39,8 @@ mod output_margin;
 mod paired_geometry;
 mod paired_token_gap;
 mod prefix_signal;
+mod value_read;
+pub use value_read::CausalLmValueReadSignal;
 mod projection_probe;
 mod qkv_training;
 mod quartet_projection;
@@ -417,6 +419,16 @@ impl NativeCausalLm {
                 );
             }
             let (width, _) = runtime.sequence_dimensions(&placement.path, [1, 1])?;
+            if let Some((route, _)) = placement.recipe.value_gate() {
+                if !placement.path.ends_with(".mlp")
+                    || matches!(route,crate::geometry_artifact::AttentionValueRoute::Fixed {position} if position as usize >= self.config.positions)
+                {
+                    return Err(
+                        "attention value gate requires an MLP site and an addressable position"
+                            .into(),
+                    );
+                }
+            }
             if width != self.config.width {
                 return Err("geometry feature width differs from the native model".into());
             }

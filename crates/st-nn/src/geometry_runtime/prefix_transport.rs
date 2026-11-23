@@ -142,6 +142,9 @@ impl NativeGeometryBatch {
     pub(crate) fn single_prefix_last_mean(&self) -> Result<&[f32]> {
         match (&self.pullback, self.sequence_shape) {
             (Pullback::Transport(b), Some([1, _, w])) => Ok(&b.means[b.means.len() - w..]),
+            (Pullback::ValueRead(b, _), Some([1, _, w])) => {
+                Ok(&b.input().data()[b.input().len() - w..])
+            }
             _ => Err("expected one active prefix transport sequence".into()),
         }
     }

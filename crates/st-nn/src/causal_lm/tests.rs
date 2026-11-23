@@ -18,6 +18,8 @@ mod learning;
 mod lora;
 #[path = "prefix_transport_tests.rs"]
 mod prefix_transport;
+#[path = "value_read_tests.rs"]
+mod value_read_gate;
 
 #[path = "key_lag_tests.rs"]
 mod key_lag_cases;

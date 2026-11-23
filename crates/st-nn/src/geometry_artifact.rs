@@ -124,6 +124,14 @@ pub enum GeometryAdapterRecipe {
         max_values: usize,
         rotation: PrefixRotation,
     },
+    /// Gate the decoder's own projected values, leaving the ordinary MLP and attention intact.
+    #[serde(rename = "spiraltorch.attention_value_gate.v1")]
+    AttentionValueGate {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        route: AttentionValueRoute,
+    },
     #[serde(rename = "spiraltorch.channel_affine_adapter.v1")]
     ChannelAffine {
         features: usize,
@@ -253,6 +261,14 @@ pub(crate) struct PrefixTransportSpec {
 }
 
 impl GeometryAdapterRecipe {
+    pub(crate) fn value_gate(&self) -> Option<(AttentionValueRoute, f32)> {
+        match *self {
+            Self::AttentionValueGate {
+                route, strength, ..
+            } => Some((route, strength as f32)),
+            _ => None,
+        }
+    }
     pub(crate) fn prefix_transport(&self) -> Option<PrefixTransportSpec> {
         let (rotation, output_mix, difference, strength, max_values) = match *self {
             Self::PrefixTransport {
@@ -295,6 +311,17 @@ pub struct GeometryAdapterTensor {
     pub values: Vec<f32>,
     pub requires_grad: bool,
     pub role: GeometryAdapterTensorRole,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AttentionValueRoute {
+    Attention,
+    Uniform,
+    /// Zero-based absolute slot. Before this slot exists, read the current one.
+    Fixed {
+        position: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -562,6 +589,9 @@ impl GeometryAdapterPlacement {
             | DifferencePrefixTransport {
                 features, strength, ..
             }
+            | AttentionValueGate {
+                features, strength, ..
+            }
             | ChannelAffine {
                 features, strength, ..
             }
@@ -619,6 +649,7 @@ impl GeometryAdapterPlacement {
             PrefixTransport { .. }
             | MixedPrefixTransport { .. }
             | DifferencePrefixTransport { .. }
+            | AttentionValueGate { .. }
             | ChannelAffine { .. }
             | Wave { .. }
             | WaveRadius { .. }
@@ -715,7 +746,8 @@ impl GeometryAdapterPlacement {
             }
             PrefixTransport { max_values, .. }
             | MixedPrefixTransport { max_values, .. }
-            | DifferencePrefixTransport { max_values, .. } => {
+            | DifferencePrefixTransport { max_values, .. }
+            | AttentionValueGate { max_values, .. } => {
                 if !(features..=GEOMETRY_ADAPTER_MAX_VALUES).contains(max_values) {
                     return Err("prefix transport value budget out of bounds".into());
                 }

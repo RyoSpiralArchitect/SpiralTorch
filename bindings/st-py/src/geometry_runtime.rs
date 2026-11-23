@@ -143,6 +143,22 @@ impl PyNativeGeometryRuntime {
             .map_err(error)
     }
 
+    /// Apply two explicit inputs, without claiming the external value row came from a decoder.
+    fn forward_value_read_sequence(
+        &self,
+        py: Python<'_>,
+        path: &str,
+        input: &Bound<'_, PyAny>,
+        source: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeGeometryBatch> {
+        let (shape, n) = self.context_shape(path, shape)?;
+        let x = sequence(input, n, n)?;
+        let v = sequence(source, n, n)?;
+        py.detach(|| self.inner.forward_value_read_sequence(path, &x, &v, shape))
+            .map(|inner| PyNativeGeometryBatch { inner })
+            .map_err(error)
+    }
     fn forward_sequence_buffer(
         &self,
         py: Python<'_>,
@@ -358,6 +374,12 @@ impl PyNativeGeometryBatch {
             .map_err(error)
     }
 
+    fn vjp_value_source(&self, py: Python<'_>, upstream: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
+        let n = self.inner.output().len();
+        let u = sequence(upstream, n, n)?;
+        py.detach(|| self.inner.vjp_value_source(&u).map(|x| x.data().to_vec()))
+            .map_err(error)
+    }
     fn vjp_input_buffer<'py>(
         &self,
         py: Python<'py>,

@@ -89,6 +89,9 @@ impl NativeCausalLm {
             .checked_sub(added)
             .ok_or("invalid cached geometry suffix")?;
         match runtime.cache_kind(path)? {
+            GeometryCacheKind::DecoderValues => {
+                Err("cached value gate requires decoder values".into())
+            }
             GeometryCacheKind::RowLocal => Ok((
                 runtime
                     .forward_sequence(path, rows.data(), [1, added])?
@@ -151,7 +154,7 @@ impl NativeCausalLm {
         if let Some(runtime) = &self.geometry {
             for p in &runtime.artifact().record().placements {
                 let count = match runtime.cache_kind(&p.path)? {
-                    GeometryCacheKind::RowLocal => 0,
+                    GeometryCacheKind::RowLocal | GeometryCacheKind::DecoderValues => 0,
                     GeometryCacheKind::Replay => steps,
                     GeometryCacheKind::Transport { difference } => 2 + usize::from(difference),
                 };
@@ -540,10 +543,8 @@ impl NativeCausalLmContext {
                 None,
                 model.key_lag_at(index),
             )?;
-            let attention = model.project_attention_output(
-                index,
-                &model.merge_heads([attended.as_slice()], shape)?,
-            )?;
+            let attention_input = model.merge_heads([attended.as_slice()], shape)?;
+            let attention = model.project_attention_output(index, &attention_input)?;
             let path = format!("transformer.h.{index}");
             let (attention, attention_history) = model.incremental_geometry(
                 &format!("{path}.attn"),
@@ -558,12 +559,23 @@ impl NativeCausalLmContext {
             let mlp = block
                 .contract
                 .forward(&block.expand.forward(&norm)?.try_into_gelu()?)?;
-            let (mlp, mlp_history) = model.incremental_geometry(
-                &format!("{path}.mlp"),
-                mlp,
-                previous.history[1].as_ref(),
-                steps,
-            )?;
+            let mlp_path = format!("{path}.mlp");
+            let (mlp, mlp_history) = if let Some(source) =
+                model.mlp_value_source(&mlp_path, &attention_input, &value, shape, steps)?
+            {
+                let rt = model
+                    .runtime_at(&mlp_path)
+                    .ok_or("missing cached value gate")?;
+                rt.sequence_dimensions(&mlp_path, [1, steps])?;
+                (
+                    rt.forward_value_read_sequence(&mlp_path, mlp.data(), source.data(), shape)?
+                        .output()
+                        .clone(),
+                    None,
+                )
+            } else {
+                model.incremental_geometry(&mlp_path, mlp, previous.history[1].as_ref(), steps)?
+            };
             let output = after_attention.add_with_backend(&mlp, TensorUtilBackend::Cpu)?;
             let (output, block_history) =
                 model.incremental_geometry(&path, output, previous.history[2].as_ref(), steps)?;

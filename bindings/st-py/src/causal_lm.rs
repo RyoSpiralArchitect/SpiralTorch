@@ -1047,6 +1047,26 @@ impl PyNativeCausalLm {
         mixture_probe::to_python(py, report)
     }
 
+    /// Factual final-query Q/K/V and the value-gate derivative. No update.
+    fn last_mlp_value_read_signal(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        target_id: &Bound<'_, PyAny>,
+        rival_id: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let (target, rival) = (dimension(target_id)?, dimension(rival_id)?);
+        let n = self
+            .inner
+            .value_read_signal_input_count(prompt_ids.len()?, target, rival)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, n)?;
+        let rec = py
+            .detach(|| self.inner.last_mlp_value_read_signal(&ids, target, rival))
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(rec).map_err(error)?)
+    }
+
     /// Per-position prefix features and the factual raw token-margin gradient; no update.
     fn last_mlp_prefix_margin_signal(
         &self,

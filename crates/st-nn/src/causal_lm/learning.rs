@@ -758,6 +758,21 @@ impl NativeCausalLm {
         else {
             return Ok(None);
         };
+        // This side connection bypasses the MLP and the attention output projection.
+        // A gate-only terminal update must not evaluate its unused source adjoint.
+        let reach_values = index > first_layer
+            || matches!(target, DecoderTarget::QkvWeight(_))
+            || matches!(target,DecoderTarget::Projection(p) if p.site()!=CausalLmProjectionSite::Output);
+        let value_side = if reach_values {
+            cache
+                .mlp_geometry
+                .as_ref()
+                .and_then(|b| b.value_read_route().map(|r| (b, r)))
+                .map(|(b, r)| b.vjp_value_source(residual.data()).map(|g| (r, g)))
+                .transpose()?
+        } else {
+            None
+        };
         let Some(mlp) = geometry_pullback(
             format!("{path}.mlp"),
             &mut cache.mlp_geometry,
@@ -812,8 +827,12 @@ impl NativeCausalLm {
         if let Some(adapter) = self.output_lora_at(index) {
             d_merge = adapter.add_input_vjp(&attention, d_merge)?;
         }
+        if let Some((crate::geometry_artifact::AttentionValueRoute::Attention, extra)) = &value_side
+        {
+            d_merge = d_merge.add_with_backend(extra, TensorUtilBackend::Cpu)?;
+        }
         let [d_heads] = self.split_heads::<1>(&d_merge, shape)?;
-        let d_qkv = attention_key_lag_vjp_reference(
+        let mut d_qkv = attention_key_lag_vjp_reference(
             self.attention_spec(index, shape)?,
             &cache.qkv[0],
             &cache.qkv[1],
@@ -823,6 +842,18 @@ impl NativeCausalLm {
             &d_heads,
             self.key_lag_at(index),
         )?;
+        if let Some((route, extra)) = value_side {
+            if route != crate::geometry_artifact::AttentionValueRoute::Attention {
+                let [adj] = self.split_heads::<1>(&extra, shape)?;
+                value_read::add_control_vjp(
+                    route,
+                    &adj,
+                    &mut d_qkv.value,
+                    shape[1],
+                    c.width / c.heads,
+                )?;
+            }
+        }
         if let DecoderTarget::Projection(probe) = target {
             if index == first_layer {
                 let separated = match probe.site() {

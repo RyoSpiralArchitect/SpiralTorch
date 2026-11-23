@@ -98,8 +98,9 @@ impl NativeCausalLm {
         let strength = p
             .recipe
             .prefix_transport()
-            .ok_or("prefix calibration requires prefix transport")?
-            .strength;
+            .map(|s| s.strength)
+            .or_else(|| p.recipe.value_gate().map(|(_, strength)| strength))
+            .ok_or("calibration requires a prefix or attention value gate")?;
         if p.path != format!("transformer.h.{}.mlp", self.config.layers - 1)
             || strength == 0.
             || self.lora.is_some()

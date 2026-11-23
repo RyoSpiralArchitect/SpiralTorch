@@ -183,10 +183,16 @@ impl NativeCausalLm {
         path: &str,
         input: Tensor,
         shape: [usize; 2],
+        source: Option<&Tensor>,
         pass: &mut BlockPass<'_>,
     ) -> CausalLmResult<(Tensor, Option<NativeGeometryBatch>)> {
         if let Some(runtime) = self.runtime_at(path) {
-            let batch = runtime.forward_sequence(path, input.data(), shape)?;
+            let batch = match source {
+                Some(v) => {
+                    runtime.forward_value_read_sequence(path, input.data(), v.data(), shape)?
+                }
+                None => runtime.forward_sequence(path, input.data(), shape)?,
+            };
             if let BlockPass::CaptureGeometry {
                 path: wanted,
                 snapshot,
@@ -218,8 +224,9 @@ impl NativeCausalLm {
         shape: [usize; 2],
         pass: &mut BlockPass<'_>,
         history: &mut Option<context::GeometryHistory>,
+        source: Option<&Tensor>,
     ) -> CausalLmResult<(Tensor, Option<NativeGeometryBatch>)> {
-        if matches!(pass, BlockPass::Prefill) {
+        if matches!(pass, BlockPass::Prefill) && source.is_none() {
             if shape[0] != 1 {
                 return Err("prefill requires exactly one sequence".into());
             }
@@ -227,7 +234,7 @@ impl NativeCausalLm {
             *history = state;
             return Ok((out, None));
         }
-        self.geometry_output(path, input, shape, pass)
+        self.geometry_output(path, input, shape, source, pass)
     }
 
     pub(super) fn run_block(
@@ -267,8 +274,11 @@ impl NativeCausalLm {
                 attention = d.apply(&attention_input, &attention, 0)?;
             }
         }
-        let attention_input = capture.then_some(attention_input);
         let path = format!("transformer.h.{index}");
+        let mlp_path = format!("{path}.mlp");
+        let value_read =
+            self.mlp_value_source(&mlp_path, &attention_input, &qkv[2], shape, shape[1])?;
+        let attention_input = capture.then_some(attention_input);
         let mut history = std::array::from_fn(|_| None);
         let (attention, attention_geometry) = self.block_geometry_output(
             &format!("{path}.attn"),
@@ -276,6 +286,7 @@ impl NativeCausalLm {
             shape,
             &mut pass,
             &mut history[0],
+            None,
         )?;
         let after_attention = attention.add_with_backend(&input, TensorUtilBackend::Cpu)?;
         let norm = block
@@ -285,15 +296,16 @@ impl NativeCausalLm {
         let pre_gelu = capture.then(|| expanded.clone());
         let mlp = block.contract.forward(&expanded.try_into_gelu()?)?;
         let (mlp, mlp_geometry) = self.block_geometry_output(
-            &format!("{path}.mlp"),
+            &mlp_path,
             mlp,
             shape,
             &mut pass,
             &mut history[1],
+            value_read.as_ref(),
         )?;
         let output = after_attention.add_with_backend(&mlp, TensorUtilBackend::Cpu)?;
         let (output, block_geometry) =
-            self.block_geometry_output(&path, output, shape, &mut pass, &mut history[2])?;
+            self.block_geometry_output(&path, output, shape, &mut pass, &mut history[2], None)?;
         let inference_cache = inference.then(|| InferenceBlockCache {
             key: std::mem::take(&mut qkv[1]),
             value: std::mem::take(&mut qkv[2]),
