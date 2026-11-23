@@ -58,7 +58,9 @@ The next discriminating measurement is the sensitivity of the *verb gap*
 to each token position and gate axis at the frozen decoder site, before any
 update. That distinguishes a weak incoming number signal from a strong one
 that the downstream readout ignores. More orders of the same training
-examples cannot make that distinction.
+examples cannot make that distinction. The subsequent [native margin-signal
+measurement](../prefix-signal/RESULTS.md) traces both factors separately
+on the training prompts and tests finite, per-prompt gate perturbations.
 
 ## Replay without model calls
 

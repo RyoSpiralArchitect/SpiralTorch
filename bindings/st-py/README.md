@@ -87,6 +87,9 @@ The 0.4.33 source exposes `NativeCausalLm`, `NativeCausalLmTrainer` and
 learning, corpus evaluation and generation without Torch or NumPy. Base weights
 remain frozen. The importer is not an arbitrary HF architecture loader or PEFT
 executor, and this CPU path is separate from resident WGPU byte-LM training.
+For a development build with prefix transport on the final MLP, see the
+[position-to-token margin probe](examples/native_prefix_margin_signal.md).
+It reads the actual gate input and vocabulary gradient without updating either.
 For a fixed choice such as two verb forms, the development API can update
 geometry while protecting their combined probability. See [declared-set training](examples/declared_set_geometry.md).
 For the source-only native decoder, see how to [freeze one LoRA and train

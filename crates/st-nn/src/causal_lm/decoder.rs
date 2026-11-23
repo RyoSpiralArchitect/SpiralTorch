@@ -7,6 +7,10 @@ use st_kernel_contracts::attention::{attention_key_lag_reference, AttentionMask,
 pub(super) enum BlockPass<'a> {
     Forward,
     Observe(&'a mut observation::ResidualSums),
+    CaptureGeometry {
+        path: &'a str,
+        snapshot: &'a mut Option<(Tensor, NativeGeometryBatch)>,
+    },
     BackwardReplay,
     Prefill,
     Projection(projection_probe::ProjectionDelta<'a>),
@@ -30,7 +34,9 @@ pub(super) mod work_counts {
 
     pub(crate) fn block(pass: &super::BlockPass<'_>) {
         match pass {
-            super::BlockPass::Forward | super::BlockPass::Observe(_) => bump(0),
+            super::BlockPass::Forward
+            | super::BlockPass::Observe(_)
+            | super::BlockPass::CaptureGeometry { .. } => bump(0),
             super::BlockPass::BackwardReplay => bump(1),
             _ => {}
         }
@@ -181,6 +187,19 @@ impl NativeCausalLm {
     ) -> CausalLmResult<(Tensor, Option<NativeGeometryBatch>)> {
         if let Some(runtime) = self.runtime_at(path) {
             let batch = runtime.forward_sequence(path, input.data(), shape)?;
+            if let BlockPass::CaptureGeometry {
+                path: wanted,
+                snapshot,
+            } = pass
+            {
+                if path == *wanted {
+                    let output = batch.output().clone();
+                    if snapshot.replace((input, batch)).is_some() {
+                        return Err("duplicate geometry capture".into());
+                    }
+                    return Ok((output, None));
+                }
+            }
             if let BlockPass::Observe(sums) = pass {
                 sums.record(path, &input, batch.output())?;
             }

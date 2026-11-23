@@ -100,6 +100,71 @@ fn prefix_transport_learns_restores_and_scores_suffixes_without_growing_geometry
 }
 
 #[test]
+fn prefix_signal_factors_real_decoder_gradients_without_changing_model() {
+    let base = load();
+    let site = "transformer.h.1.mlp";
+    let ids = [2, 4, 6, 5, 7];
+    for turn in [Identity, QuarterTurn, InverseQuarterTurn] {
+        let m = placed(&base, site, turn, 0.25, 64);
+        let before = m.geometry_artifact().unwrap().artifact_id().to_owned();
+        let trace = m.last_mlp_prefix_margin_signal(&ids, 7, 8).unwrap();
+        assert_eq!(trace.contrast, m.next_token_contrast(&ids, 7, 8).unwrap());
+        assert_eq!(trace.geometry_artifact_id, before);
+        assert_eq!(trace.shape, [5, 4]);
+        let gs = [0, 1].map(|gold| {
+            m.geometry_token_menu_gradients(&ids, &[7, 8], gold, 1.)
+                .unwrap()
+        });
+        for j in 0..4 {
+            let reconstructed = trace
+                .source_features
+                .chunks_exact(4)
+                .map(|r| r[j])
+                .sum::<f64>()
+                * f64::from(trace.bias_gradient[j]);
+            let ordinary =
+                gs[1].parameters()[site]["gate"][j] - gs[0].parameters()[site]["gate"][j];
+            assert!((reconstructed - f64::from(trace.gate_gradient[j])).abs() < 2e-6);
+            assert!((ordinary - trace.gate_gradient[j]).abs() < 2e-6);
+            assert_eq!(trace.bias_gradient[j], trace.upstream[j] * trace.strength);
+        }
+        let swapped = m.last_mlp_prefix_margin_signal(&ids, 8, 7).unwrap();
+        assert_eq!(swapped.site_input, trace.site_input);
+        close(
+            &swapped.gate_gradient,
+            &trace.gate_gradient.iter().map(|x| -x).collect::<Vec<_>>(),
+        );
+        assert_eq!(m.geometry_artifact().unwrap().artifact_id(), before);
+        assert!(m.last_mlp_prefix_margin_signal(&ids, 7, 7).is_err());
+        assert!(m
+            .last_mlp_prefix_margin_signal(&[usize::MAX], 7, 8)
+            .is_err());
+        assert!(m.prefix_margin_signal_input_count(0, 7, 8).is_err());
+        assert!(m
+            .prefix_margin_signal_input_count(usize::MAX, 7, 8)
+            .is_err());
+    }
+    assert!(base.prefix_margin_signal_input_count(1, 7, 8).is_err());
+    assert!(placed(&base, "transformer.h.0", Identity, 0., 64)
+        .prefix_margin_signal_input_count(1, 7, 8)
+        .is_err());
+    assert!(placed(&base, site, Identity, 0., 4)
+        .prefix_margin_signal_input_count(2, 7, 8)
+        .is_err());
+    let one = placed(&base, site, Identity, 0., 4)
+        .last_mlp_prefix_margin_signal(&ids[..1], 7, 8)
+        .unwrap();
+    assert_eq!(
+        one.source_features,
+        one.site_input
+            .iter()
+            .copied()
+            .map(f64::from)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn prefix_transport_cache_still_respects_full_geometry_budget() {
     let m = placed(&load(), "transformer.h.0", QuarterTurn, 0.3, 12);
     let c = NativeCausalLmContext::new(m.clone(), vec![2, 5], 1024)

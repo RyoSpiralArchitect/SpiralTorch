@@ -11,7 +11,7 @@ impl PrefixRotation {
         }
     }
 
-    fn apply(self, values: &mut [f64]) {
+    pub(crate) fn apply(self, values: &mut [f64]) {
         if self != Self::Identity {
             for p in values.chunks_exact_mut(2) {
                 (p[0], p[1]) = if self == Self::QuarterTurn {

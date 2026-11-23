@@ -982,6 +982,53 @@ impl PyNativeCausalLm {
         mixture_probe::to_python(py, report)
     }
 
+    /// Per-position prefix features and the factual raw token-margin gradient; no update.
+    fn last_mlp_prefix_margin_signal(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        target_id: &Bound<'_, PyAny>,
+        rival_id: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let target = dimension(target_id)?;
+        let rival = dimension(rival_id)?;
+        let n = self
+            .inner
+            .prefix_margin_signal_input_count(prompt_ids.len()?, target, rival)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, n)?;
+        let s = py
+            .detach(|| {
+                self.inner
+                    .last_mlp_prefix_margin_signal(&ids, target, rival)
+            })
+            .map_err(error)?;
+        let out = pyo3::types::PyDict::new(py);
+        out.set_item("schema", s.schema)?;
+        out.set_item("base_model_identity", s.base_model_identity)?;
+        out.set_item("lora_artifact_id", s.lora_artifact_id)?;
+        out.set_item("frozen_lora_artifact_id", s.frozen_lora_artifact_id)?;
+        out.set_item("geometry_artifact_id", s.geometry_artifact_id)?;
+        out.set_item("readout_accumulator", s.readout_accumulator.as_str())?;
+        out.set_item("site", s.site)?;
+        out.set_item(
+            "rotation",
+            crate::json::json_to_py(py, &serde_json::to_value(s.rotation).map_err(error)?)?,
+        )?;
+        out.set_item("strength", s.strength)?;
+        out.set_item("shape", s.shape.to_vec())?;
+        out.set_item(
+            "contrast",
+            crate::json::json_to_py(py, &serde_json::to_value(s.contrast).map_err(error)?)?,
+        )?;
+        out.set_item("site_input", s.site_input)?;
+        out.set_item("source_features", s.source_features)?;
+        out.set_item("upstream", s.upstream)?;
+        out.set_item("gate_gradient", s.gate_gradient)?;
+        out.set_item("bias_gradient", s.bias_gradient)?;
+        Ok(out.into_any().unbind())
+    }
+
     /// Last-token unit logit-margin VJP: four local gate/bias maps, one factual decoder.
     #[pyo3(signature=(prompt_ids, target_id, rival_id, config))]
     fn last_attention_wave_margin_pullbacks(
