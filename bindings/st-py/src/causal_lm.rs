@@ -24,6 +24,7 @@ mod line_menu;
 mod line_session;
 mod mixture_probe;
 mod output_margin;
+mod paired_gap;
 mod prefix_cache;
 mod prefix_metric;
 mod projection_probe;
@@ -629,6 +630,69 @@ impl PyNativeCausalLm {
         py.detach(|| {
             self.inner
                 .geometry_context_token_preference_gradients(&a, &b, k, m)
+        })
+        .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+        .map_err(error)
+    }
+
+    /// Compare a two-token gap across two causal prefixes. No sampling or update.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(first_ids, second_ids, token_ids, objective, *, reference_center=None, stiffness=None))]
+    fn paired_token_gap(
+        &self,
+        py: Python<'_>,
+        first_ids: &Bound<'_, PyAny>,
+        second_ids: &Bound<'_, PyAny>,
+        token_ids: &Bound<'_, PyAny>,
+        objective: &str,
+        reference_center: Option<&Bound<'_, PyAny>>,
+        stiffness: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let q = paired_gap::collect(
+            &self.inner,
+            first_ids,
+            second_ids,
+            token_ids,
+            objective,
+            reference_center,
+            stiffness,
+            false,
+        )?;
+        let report = py
+            .detach(|| {
+                self.inner
+                    .paired_token_gap(&q.first, &q.second, q.ids, q.objective)
+            })
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)
+    }
+
+    /// Sealed geometry-only contribution of one matched pair, compatible with native cohort steps.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(first_ids, second_ids, token_ids, objective, *, reference_center=None, stiffness=None))]
+    fn geometry_paired_token_gap_gradients(
+        &self,
+        py: Python<'_>,
+        first_ids: &Bound<'_, PyAny>,
+        second_ids: &Bound<'_, PyAny>,
+        token_ids: &Bound<'_, PyAny>,
+        objective: &str,
+        reference_center: Option<&Bound<'_, PyAny>>,
+        stiffness: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let q = paired_gap::collect(
+            &self.inner,
+            first_ids,
+            second_ids,
+            token_ids,
+            objective,
+            reference_center,
+            stiffness,
+            true,
+        )?;
+        py.detach(|| {
+            self.inner
+                .geometry_paired_token_gap_gradients(&q.first, &q.second, q.ids, q.objective)
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)

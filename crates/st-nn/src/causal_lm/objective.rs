@@ -27,6 +27,10 @@ impl CausalLmObjective {
 }
 
 pub(super) enum PreparedCompetition {
+    PairedGap {
+        tokens: [usize; 2],
+        objective: CausalLmPairedGapObjective,
+    },
     ContextToken {
         target: usize,
         margin: f64,
@@ -46,6 +50,7 @@ pub(super) enum PreparedCompetition {
 
 #[derive(Debug)]
 pub(super) enum CompetitionReport {
+    PairedGap(CausalLmPairedGapReport),
     ContextToken(ContextTokenPreference),
     LineMenu(CausalLmLineMenuReport),
     LineSet(CausalLmLineSetReport),

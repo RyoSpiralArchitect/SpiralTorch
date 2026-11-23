@@ -37,6 +37,13 @@ impl PyNativeCausalLmAdaptationGradients {
         self.inner.line_prompt_id()
     }
 
+    fn paired_token_gap_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .paired_token_gap_report()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
     fn context_token_preference_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.inner
             .context_token_preference_report()

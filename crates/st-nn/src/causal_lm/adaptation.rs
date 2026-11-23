@@ -133,6 +133,13 @@ impl DeclaredSetTraining<'_> {
 }
 
 impl NativeCausalLmAdaptationGradients {
+    pub fn paired_token_gap_report(&self) -> Option<&CausalLmPairedGapReport> {
+        match &self.competition {
+            Some(objective::CompetitionReport::PairedGap(r)) => Some(r),
+            _ => None,
+        }
+    }
+
     pub fn context_token_preference_report(&self) -> Option<&ContextTokenPreference> {
         match &self.competition {
             Some(objective::CompetitionReport::ContextToken(r)) => Some(r),

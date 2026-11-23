@@ -484,6 +484,14 @@ impl NativeCausalLm {
         let config = prepared.objective.kernel_config();
         let (loss, d_logits, competition) = if let Some(c) = &prepared.competition {
             match c {
+                objective::PreparedCompetition::PairedGap { tokens, objective } => {
+                    let (report, seed) = paired_token_gap::gradient(&logits, *tokens, *objective)?;
+                    (
+                        report.loss as f32,
+                        seed,
+                        Some(objective::CompetitionReport::PairedGap(report)),
+                    )
+                }
                 objective::PreparedCompetition::ContextToken { target, margin } => {
                     let (report, grad) =
                         logits.context_token_preference_gradient(*target, *margin)?;
