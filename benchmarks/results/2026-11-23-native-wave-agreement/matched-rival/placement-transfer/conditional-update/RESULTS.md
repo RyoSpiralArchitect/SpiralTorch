@@ -75,6 +75,9 @@ is a position-conditioned residual versus a positionless control with equal
 trainable capacity and placement, not another tuning round for these six
 global coordinates. The probe motivates that comparison; it is not its result.
 
+The [subsequent matched prefix-transport study](../prefix-transport/RESULTS.md)
+tests a concrete position-sensitive operator and separates its gate from bias.
+
 ## Verify without model execution
 
 In this directory, set E to the local validation folder

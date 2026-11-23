@@ -47,6 +47,11 @@ Rust owns the same artifact in WASM (`GeometryAdapterArtifact.createJson`,
 per such placement (2 x width f32 cache words), independent of token count,
 in addition to the decoder's K/V. Full sequence limits still apply.
 
+The browser and Node harnesses report `prefix_transport`: for each of the three
+rotations they compare a Python reference gradient, one native SGD update,
+reloaded logits and a bounded cached suffix. Regenerate a reference in a new
+file with `bindings/st-py/tests/test_native_prefix_transport.py --reference OUTPUT`.
+
 For a known sequence (for example, a document suffix or one answer candidate),
 reuse a prefix rather than running the full decoder for every token:
 
