@@ -45,6 +45,7 @@ mod repetition;
 mod scalar_output;
 mod session;
 mod sum;
+mod token_menu;
 mod training;
 mod wave_margin;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};

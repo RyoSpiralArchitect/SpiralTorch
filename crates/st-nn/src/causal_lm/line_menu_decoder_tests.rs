@@ -28,6 +28,59 @@ fn oracle(
 }
 
 #[test]
+fn token_menu_matches_one_masked_target_and_full_vocab_costs() {
+    for precision in [
+        CausalLmReadoutAccumulator::F32,
+        CausalLmReadoutAccumulator::F32WideBackward,
+    ] {
+        let m = model(1, precision);
+        let choices = [1, 3, 6];
+        let prompt = [4, 1, 2];
+        let costs = choices.map(|id| m.next_token_score(&prompt, id).unwrap().nll);
+        for mix in [0., 0.5, 1.] {
+            let g = m
+                .geometry_token_menu_gradients(&prompt, &choices, 1, mix)
+                .unwrap();
+            let expected = (1. - mix) * costs[1]
+                + mix * costs.iter().map(|v| (costs[1] - v).exp()).sum::<f64>().ln();
+            assert!((f64::from(g.loss()) - expected).abs() < 3e-6);
+            let direct = m
+                .geometry_declared_rival_gradients(
+                    &[4, 1, 2, 3],
+                    [1, 4],
+                    Some(&[-100, -100, -100, 3]),
+                    &[DeclaredRivalRow {
+                        position: 3,
+                        target: 3,
+                        rivals: vec![1, 6],
+                    }],
+                    mix,
+                )
+                .unwrap();
+            assert_eq!(g.parameters(), direct.parameters());
+            assert_eq!(g.target_tokens(), 1);
+            assert!(g.line_menu_report().is_none());
+            assert_eq!(g.declared_rival_report().unwrap().rival_ids, 2);
+        }
+        for (p, c, gold, mix) in [
+            (0, 2, 0, 0.),
+            (usize::MAX, 2, 0, 0.),
+            (2, 1, 0, 0.),
+            (2, 3, 3, 0.),
+            (2, 33, 0, 0.),
+            (2, 2, 0, f64::NAN),
+        ] {
+            assert!(m.geometry_token_menu_shape(p, c, gold, mix).is_err());
+        }
+        for c in [[2, 2], [2, 1], [1, usize::MAX]] {
+            assert!(m
+                .geometry_token_menu_gradients(&prompt, &c, 0, 0.5)
+                .is_err());
+        }
+    }
+}
+
+#[test]
 fn context_token_preference_replays_two_unpadded_ces_with_opposite_signs() {
     for precision in [
         CausalLmReadoutAccumulator::F32,

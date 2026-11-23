@@ -49,6 +49,27 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_token_menu_uses_one_label_and_rejects_invalid_input_before_copy(self):
+        base, model = owners()
+        m = model.freeze_lora()
+        g = m.geometry_token_menu_gradients([4, 1, 2], [1, 3, 6], gold_index=1, mix=.5)
+        direct = m.geometry_declared_rival_gradients([4, 1, 2, 3], [1, 4], labels=[-100, -100, -100, 3],
+                                                    contrasts=[(3, 3, [1, 6])], mix=.5)
+        self.assertEqual(g.parameter_gradients(), direct.parameter_gradients())
+        self.assertEqual(g.declared_rival_report(), direct.declared_rival_report())
+        self.assertEqual(g.target_tokens, 1)
+        self.assertIsNone(g.line_menu_report())
+        moved, _ = m.step_adaptation_gradient_at_distance(g, mode="geometry", target_l2=1/256)
+        self.assertEqual(m.frozen_lora_artifact_id, moved.frozen_lora_artifact_id)
+        class Unreadable:
+            def __len__(self):
+                return 3
+            def __getitem__(self, i):
+                raise AssertionError("copied before admission")
+        for owner, index, mix in [(base, 1, .5), (m, 3, .5), (m, 0, float("nan")), (m, True, .5), (m, 0, False)]:
+            with self.assertRaises((TypeError, ValueError)):
+                owner.geometry_token_menu_gradients(Unreadable(), Unreadable(), gold_index=index, mix=mix)
+
     def test_unmeasurable_envelope_reports_zero_kl_not_a_second_accepted_ray(self):
         _, m = owners()  # Fresh LoRA B is exactly zero; a tiny B step is representable.
         u = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/32,

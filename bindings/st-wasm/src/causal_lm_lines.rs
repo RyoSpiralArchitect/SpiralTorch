@@ -43,8 +43,10 @@ impl CausalLmLineGradients {
             serde_json::to_string(r)
         } else if let Some(r) = g.line_subset_report() {
             serde_json::to_string(r)
+        } else if let Some(r) = g.declared_rival_report() {
+            serde_json::to_string(r)
         } else {
-            return Err(js_error("missing complete-line report"));
+            return Err(js_error("missing answer-menu report"));
         }
         .map_err(js_error)
     }
@@ -62,6 +64,39 @@ impl CausalLmLineGradients {
 
 #[wasm_bindgen]
 impl NativeCausalLm {
+    /// Geometry VJP for one next-token choice, with no terminator target.
+    #[wasm_bindgen(js_name = geometryTokenMenuGradients)]
+    pub fn geometry_token_menu_gradients(
+        &self,
+        prompt: &Uint32Array,
+        choices: &Uint32Array,
+        #[wasm_bindgen(unchecked_param_type = "number")] gold_index: &JsValue,
+        #[wasm_bindgen(unchecked_param_type = "number")] mix: &JsValue,
+    ) -> Result<CausalLmLineGradients, JsValue> {
+        let gold = js_u32(gold_index, "gold index")? as usize;
+        let mix = mix
+            .as_f64()
+            .ok_or_else(|| js_error("mix must be numeric"))?;
+        let n = id_count(prompt, WINDOW_IDS)?;
+        let k = id_count(choices, MAX_LINE_MENU_CANDIDATES)?;
+        self.model
+            .geometry_token_menu_shape(n, k, gold, mix)
+            .map_err(js_error)?;
+        let gradients = self
+            .model
+            .geometry_token_menu_gradients(
+                &admitted_ids(prompt, n)?,
+                &admitted_ids(choices, k)?,
+                gold,
+                mix,
+            )
+            .map_err(js_error)?;
+        Ok(CausalLmLineGradients {
+            gradients,
+            mode: CausalLmAdaptationMode::Geometry,
+        })
+    }
+
     /// Geometry VJP only: no optimizer or candidate-vocabulary truncation.
     #[wasm_bindgen(js_name = geometryLineGradients)]
     pub fn geometry_line_gradients(

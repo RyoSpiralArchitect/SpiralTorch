@@ -494,6 +494,34 @@ impl PyNativeCausalLm {
         .map_err(error)
     }
 
+    /// Supervise one next-token decision. No prompt or stop token contributes a loss.
+    #[pyo3(signature=(prompt_ids, choices, *, gold_index, mix))]
+    fn geometry_token_menu_gradients(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        choices: &Bound<'_, PyAny>,
+        gold_index: &Bound<'_, PyAny>,
+        mix: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let gold = dimension(gold_index)?;
+        reject_bool(mix)?;
+        let mix = mix.extract::<f64>()?;
+        let n = prompt_ids.len()?;
+        let k = choices.len()?;
+        self.inner
+            .geometry_token_menu_shape(n, k, gold, mix)
+            .map_err(error)?;
+        let choices = tokens(choices, k)?;
+        let prompt = tokens(prompt_ids, n)?;
+        py.detach(|| {
+            self.inner
+                .geometry_token_menu_gradients(&prompt, &choices, gold, mix)
+        })
+        .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+        .map_err(error)
+    }
+
     /// Forward-only conditional loss over complete, sorted content alternatives plus one stop.
     #[pyo3(signature=(prompt_ids, candidates, *, gold_index, stop_id, mix))]
     #[allow(clippy::too_many_arguments)]

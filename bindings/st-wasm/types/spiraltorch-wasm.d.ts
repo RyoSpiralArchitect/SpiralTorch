@@ -39,6 +39,7 @@ declare module "spiraltorch-wasm" {
         prefill(promptIds: Uint32Array, maxCacheValues: number): NativeCausalLmContext;
         /** Geometry-only full-vocabulary VJP. Objective JSON kind: set, menu (gold_index, mix), or subset (accepted_indices). */
         geometryLineGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, maxTileValues?: number): CausalLmLineGradients;
+        geometryTokenMenuGradients(prompt: Uint32Array, choices: Uint32Array, goldIndex: number, mix: number): CausalLmLineGradients;
         lineAdaptationGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, mode: "lora" | "geometry" | "joint", maxTileValues?: number): CausalLmLineGradients;
         stepLineGradientAtDistance(gradients: CausalLmLineGradients, targetL2: number): CausalLmLineRayStep;
         stepLineAdaptationSgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
