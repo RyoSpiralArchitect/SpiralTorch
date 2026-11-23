@@ -89,6 +89,8 @@ remain frozen. The importer is not an arbitrary HF architecture loader or PEFT
 executor, and this CPU path is separate from resident WGPU byte-LM training.
 For a fixed choice such as two verb forms, the development API can update
 geometry while protecting their combined probability. See [declared-set training](examples/declared_set_geometry.md).
+For the source-only native decoder, see how to [freeze one LoRA and train
+geometry at another layer](../st-wasm/tests/native_causal_lm.md#keep-lora-fixed-across-geometry-placements).
 See the [native/HF execution boundary](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-hf-boundary.md)
 for supported configurations, native learning/generation recipes and remaining
 foreign-model dependencies. These newer APIs are not in the immutable 0.4.32

@@ -5,7 +5,7 @@ use crate::geometry_runtime::{adamw_step, PyNativeGeometryAdamW};
 use crate::weights::{PyNdTensor, PySafeTensorArchive};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyBytesMethods};
+use pyo3::types::{PyBytes, PyBytesMethods, PyString};
 use st_nn::causal_lm::{
     CausalLmForwardStorage, CausalLmLimits, CausalLmObjective, CausalLmReadoutAccumulator,
     NativeCausalLm, NativeCausalLmGradients, NativeCausalLmLoraGradients, TargetClassScore,
@@ -1350,6 +1350,34 @@ impl PyNativeCausalLm {
     #[getter]
     fn lora_artifact_id(&self) -> Option<&str> {
         self.inner.lora_artifact_id()
+    }
+
+    fn freeze_lora(&self, py: Python<'_>) -> PyResult<Self> {
+        py.detach(|| self.inner.freeze_lora())
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+
+    #[getter]
+    fn frozen_lora_artifact_id(&self) -> Option<&str> {
+        self.inner.frozen_lora_artifact_id()
+    }
+
+    fn frozen_lora_to_json(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| self.inner.frozen_lora_to_json())
+            .map_err(error)
+    }
+
+    fn with_single_geometry_at(
+        &self,
+        py: Python<'_>,
+        path: &Bound<'_, PyString>,
+    ) -> PyResult<Self> {
+        let bytes = session_input::text_bytes(path, NativeCausalLm::MAX_GEOMETRY_SITE_BYTES)?;
+        let path = std::str::from_utf8(bytes.as_bytes()).map_err(error)?;
+        py.detach(|| self.inner.with_single_geometry_at(path))
+            .map(|inner| Self { inner })
+            .map_err(error)
     }
 
     fn lora_to_json(&self, py: Python<'_>) -> PyResult<String> {

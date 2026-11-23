@@ -117,6 +117,35 @@ print(json.dumps({'adapter': model.lora_to_json(), 'tokens': generator.token_ids
                     generator.step()
                 self.assertEqual(result["tokens"], generator.token_ids)
 
+    def test_frozen_lora_can_train_another_geometry_without_becoming_an_owner(self):
+        weights = self.step(self.initial)
+        artifact = fixtures["artifact"](self.base, path="transformer.h.0.attn", trainable=True)
+        active = weights.with_geometry(artifact)
+        frozen = active.freeze_lora()
+        self.assertEqual(active.forward(WINDOW, SHAPE).values(), frozen.forward(WINDOW, SHAPE).values())
+        self.assertEqual(frozen.frozen_lora_artifact_id, active.lora_artifact_id)
+        self.assertIsNone(frozen.lora_artifact_id)
+        self.assertEqual(frozen.frozen_lora_to_json(), active.lora_to_json())
+        with self.assertRaises(ValueError):
+            active.with_single_geometry_at("transformer.h.1.mlp")
+        placed = frozen.with_single_geometry_at("transformer.h.1.mlp")
+        self.assertNotEqual(placed.geometry_artifact_id, frozen.geometry_artifact_id)
+        with self.assertRaises(ValueError):
+            placed.with_single_geometry_at("x"*65)
+        with self.assertRaises(TypeError):
+            placed.with_single_geometry_at(b"transformer.h.1")
+        with self.assertRaises(ValueError):
+            placed.with_lora_json(weights.lora_to_json())
+        g = placed.geometry_loss_gradients(WINDOW, SHAPE)
+        trained = placed.step_geometry_sgd(g, .125)
+        self.assertNotEqual(trained.geometry_artifact_id, placed.geometry_artifact_id)
+        rebuilt = self.base.with_lora_json(trained.frozen_lora_to_json(), expected_id=trained.frozen_lora_artifact_id).freeze_lora()
+        with self.assertRaises(ValueError):
+            self.base.with_geometry(trained.geometry_artifact())
+        restored = rebuilt.with_geometry(trained.geometry_artifact())
+        self.assertEqual(trained.base_model_identity, restored.base_model_identity)
+        self.assertEqual(trained.forward(WINDOW, SHAPE).values(), restored.forward(WINDOW, SHAPE).values())
+
     def test_controls_admission_and_joint_geometry_are_rejected(self):
         for args in ((True, 2, 4.), (0, True, 4.), (0, 2, True), (0, 0, 4.), (2, 2, 4.), (0, 2, float("inf"))):
             with self.subTest(args=args), self.assertRaises((TypeError, ValueError)):

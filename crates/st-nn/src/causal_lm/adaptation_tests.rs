@@ -22,6 +22,9 @@ mod line_session;
 #[path = "projection_probe_tests.rs"]
 mod projection_probe;
 
+#[path = "frozen_lora_tests.rs"]
+mod frozen_lora;
+
 #[path = "declared_set_step_tests.rs"]
 mod declared_set_step;
 

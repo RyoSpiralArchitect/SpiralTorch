@@ -801,7 +801,7 @@ impl NativeCausalLm {
             }
         }
         let mut d_merge = block.output.backward_input(&attention)?;
-        if let Some(adapter) = self.lora.as_ref().filter(|a| a.layer() == index) {
+        if let Some(adapter) = self.output_lora_at(index) {
             d_merge = adapter.add_input_vjp(&attention, d_merge)?;
         }
         let [d_heads] = self.split_heads::<1>(&d_merge, shape)?;

@@ -308,6 +308,8 @@ pub struct NativeCausalLm {
     backward_head: Arc<OnceLock<Result<readout_policy::TrainingHeadPack, String>>>,
     geometry: Option<Arc<NativeGeometryRuntime>>,
     lora: Option<Arc<lora::NativeLoraAdapter>>,
+    // Part of base_id, never an optimizer owner or an additional active LoRA.
+    frozen_lora: Option<Arc<lora::NativeLoraAdapter>>,
     readout_accumulator: CausalLmReadoutAccumulator,
     forward_storage: CausalLmForwardStorage,
 }
@@ -361,6 +363,36 @@ impl NativeCausalLm {
         self.geometry.as_ref().map(|runtime| runtime.artifact())
     }
 
+    pub const MAX_GEOMETRY_SITE_BYTES: usize = 64;
+
+    fn supports_geometry_site(&self, path: &str) -> bool {
+        path.len() <= Self::MAX_GEOMETRY_SITE_BYTES
+            && (0..self.config.layers).any(|index| {
+                let block = format!("transformer.h.{index}");
+                matches!(path.strip_prefix(&block), Some("" | ".attn" | ".mlp"))
+            })
+    }
+
+    /// Move the single attached geometry without changing its weights or recipe.
+    /// Multiple placements are never collapsed or implicitly selected.
+    pub fn with_single_geometry_at(&self, path: &str) -> CausalLmResult<Self> {
+        if !self.supports_geometry_site(path) {
+            return Err("unsupported native geometry placement".into());
+        }
+        let artifact = self
+            .geometry_artifact()
+            .ok_or("no attached geometry to move")?;
+        let [placement] = artifact.record().placements.as_slice() else {
+            return Err("moving geometry requires exactly one placement".into());
+        };
+        if placement.path == path {
+            return Ok(self.clone());
+        }
+        let mut record = artifact.record().clone();
+        record.placements[0].path = path.to_owned();
+        self.with_geometry(GeometryAdapterArtifact::create(record)?)
+    }
+
     /// Attach existing native recipes at GPT-2-compatible branch output paths:
     /// transformer.h.N.attn, transformer.h.N.mlp, or transformer.h.N.
     /// No placements are ignored and the frozen checkpoint identity must match.
@@ -370,13 +402,7 @@ impl NativeCausalLm {
         }
         let runtime = NativeGeometryRuntime::new(artifact);
         for placement in &runtime.artifact().record().placements {
-            let valid = (0..self.config.layers).any(|index| {
-                let block = format!("transformer.h.{index}");
-                placement.path == block
-                    || placement.path == format!("{block}.attn")
-                    || placement.path == format!("{block}.mlp")
-            });
-            if !valid {
+            if !self.supports_geometry_site(&placement.path) {
                 return Err(
                     format!("unsupported native geometry placement: {}", placement.path).into(),
                 );

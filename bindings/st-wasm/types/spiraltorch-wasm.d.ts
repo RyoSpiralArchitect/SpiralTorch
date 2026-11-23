@@ -25,6 +25,11 @@ declare module "spiraltorch-wasm" {
         static fromGpt2(config: string, weights: Uint8Array): NativeCausalLm;
         readonly baseModelIdentity: string;
         withLora(layer: number, rank: number, alpha: number): NativeCausalLm;
+        /** Promote the current LoRA to fixed base state without merging or rounding its weights. */
+        freezeLora(): NativeCausalLm;
+        readonly frozenLoraArtifactId: string | undefined;
+        frozenLoraJson(): string;
+        withSingleGeometryAt(path: string): NativeCausalLm;
         readonly loraArtifactId: string | undefined;
         withLoraJson(payload: string, expectedId: string): NativeCausalLm;
         loraJson(): string;

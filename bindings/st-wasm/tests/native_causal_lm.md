@@ -155,6 +155,44 @@ and `model.stepLineAdaptationSgd(g, rate)`; the returned handle binds the mode.
 `withLoraJson(payload, expectedId)` restores the canonical adapter pinned to its
 base; use `model.with_lora_json(payload, expected_id=pin)` in Python.
 
+### Keep LoRA fixed across geometry placements
+
+In a development build, `freeze_lora()` promotes the current adapter into
+the immutable base without adding its factors into a rounded dense matrix.
+Use this when the **same** nonzero LoRA must stay at its original attention
+projection while a WaveGate (or another supported geometry) learns elsewhere.
+The original model still supports its usual colocated joint training.
+
+```python
+# active has a LoRA and a single trainable geometry already attached.
+fixed = active.freeze_lora()
+placed = fixed.with_single_geometry_at("transformer.h.1.mlp")
+g = placed.geometry_loss_gradients([2, 5, 1, 3], [1, 4])
+trained = placed.step_geometry_sgd(g, 0.02)
+assert trained.frozen_lora_artifact_id == active.lora_artifact_id
+
+# Rebuild on the same parent base (and choose the same readout policy).
+rebuilt = parent.with_lora_json(
+    trained.frozen_lora_to_json(), expected_id=trained.frozen_lora_artifact_id,
+).freeze_lora()
+restored = rebuilt.with_geometry(trained.geometry_artifact())
+```
+
+The derived base ID binds the parent and the typed LoRA ID; it does not
+depend on the geometry placement or update. The rebound geometry does get a
+new artifact ID. Keep the parent model and original LoRA bytes for recovery:
+geometry checkpoints do **not** embed those frozen weights. To resume a
+complete-line session, reconstruct its original placement before importing
+the checkpoint. Old gradients/checkpoints, a different frozen LoRA, or a
+second active LoRA are not interchangeable.
+
+The valid sites are `transformer.h.N.attn`, `transformer.h.N.mlp` and
+`transformer.h.N` (the block output). The move accepts exactly one attached
+placement; it does not silently select from a multi-placement artifact. Rust
+uses the same method names as Python. WASM exposes `freezeLora()`,
+`withSingleGeometryAt(path)`, `frozenLoraArtifactId` and `frozenLoraJson()`.
+This is a native CPU / WASM-host path, not dense-weight fusion or a GPU claim.
+
 ## Resume complete-answer training
 
 Use the same original adapted model and the same plan bytes on each

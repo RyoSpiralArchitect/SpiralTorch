@@ -226,6 +226,37 @@ impl NativeCausalLm {
         self.model.lora_artifact_id().map(str::to_owned)
     }
 
+    #[wasm_bindgen(js_name = freezeLora)]
+    pub fn freeze_lora(&self) -> Result<Self, JsValue> {
+        self.model
+            .freeze_lora()
+            .map(|model| Self { model })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(getter, js_name = frozenLoraArtifactId)]
+    pub fn frozen_lora_artifact_id(&self) -> Option<String> {
+        self.model.frozen_lora_artifact_id().map(str::to_owned)
+    }
+
+    #[wasm_bindgen(js_name = frozenLoraJson)]
+    pub fn frozen_lora_json(&self) -> Result<String, JsValue> {
+        self.model.frozen_lora_to_json().map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = withSingleGeometryAt)]
+    pub fn with_single_geometry_at(&self, path: &JsString) -> Result<Self, JsValue> {
+        let path = bounded_json_string_from_js(
+            path,
+            Decoder::MAX_GEOMETRY_SITE_BYTES as u64,
+            "geometry site",
+        )?;
+        self.model
+            .with_single_geometry_at(&path)
+            .map(|model| Self { model })
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = loraJson)]
     pub fn lora_json(&self) -> Result<String, JsValue> {
         self.model.lora_to_json().map_err(js_error)

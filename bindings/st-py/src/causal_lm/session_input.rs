@@ -4,7 +4,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PySlice, PyString};
 use st_nn::causal_lm::NativeCausalLmTrainingSession;
 
-fn text_bytes<'py>(s: &Bound<'py, PyString>, limit: usize) -> PyResult<Bound<'py, PyBytes>> {
+pub(super) fn text_bytes<'py>(
+    s: &Bound<'py, PyString>,
+    limit: usize,
+) -> PyResult<Bound<'py, PyBytes>> {
     let py = s.py();
     let ty = py.get_type::<PyString>();
     // Use the built-in descriptors, not arbitrary overrides on a str subclass.

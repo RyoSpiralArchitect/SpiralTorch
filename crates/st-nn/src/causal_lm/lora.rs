@@ -210,10 +210,55 @@ impl NativeCausalLmLoraGradients {
 
 impl NativeCausalLm {
     pub const MAX_LORA_ARTIFACT_BYTES: usize = MAX_LORA_JSON_BYTES;
+
+    /// Promote the current attention-output LoRA to immutable base state. Keep
+    /// its original two matmuls and scaled addition, including their f32 rounding.
+    /// Replaying the pinned LoRA on the same parent base derives the same identity.
+    pub fn freeze_lora(&self) -> CausalLmResult<Self> {
+        let adapter = self
+            .lora
+            .as_ref()
+            .ok_or("freezing requires an active native LoRA")?;
+        let mut hash = Sha256::new();
+        hash.update(b"spiraltorch.native_causal_lm.frozen_lora.v1\0");
+        hash.update(self.base_id.as_bytes());
+        hash.update(adapter.id.as_bytes());
+        let mut model = self.clone();
+        model.base_id = format!("sha256:{:x}", hash.finalize());
+        model.frozen_lora = model.lora.take();
+        if let Some(geometry) = self.geometry_artifact() {
+            // Only rebind an already-admitted artifact on this exact source.
+            let mut record = geometry.record().clone();
+            record.base_model_identity.clone_from(&model.base_id);
+            model = model.with_geometry(GeometryAdapterArtifact::create(record)?)?;
+        }
+        Ok(model)
+    }
+
+    pub fn frozen_lora_artifact_id(&self) -> Option<&str> {
+        self.frozen_lora.as_ref().map(|a| a.id.as_str())
+    }
+
+    /// Export the original adapter bound to its parent base, not a trainable
+    /// adapter on the derived base. Its typed ID is frozen_lora_artifact_id().
+    pub fn frozen_lora_to_json(&self) -> CausalLmResult<String> {
+        let adapter = self
+            .frozen_lora
+            .as_ref()
+            .ok_or("native LM has no frozen LoRA")?;
+        Ok(serde_json::to_string(&adapter.record)?)
+    }
+
+    pub(super) fn output_lora_at(&self, layer: usize) -> Option<&NativeLoraAdapter> {
+        self.lora
+            .as_deref()
+            .or(self.frozen_lora.as_deref())
+            .filter(|a| a.layer() == layer)
+    }
     /// Initialize one attention output adapter. A is deterministic and B is zero.
     /// An attached geometry must be the same layer's single attention output site.
     pub fn with_lora(&self, layer: usize, rank: usize, alpha: f32) -> CausalLmResult<Self> {
-        if self.lora.is_some() {
+        if self.lora.is_some() || self.frozen_lora.is_some() {
             return Err(
                 "native LoRA initialization requires a model without an existing LoRA adapter"
                     .into(),
@@ -276,6 +321,9 @@ impl NativeCausalLm {
 
     /// Restore or replace an adapter, checking the frozen checkpoint identity.
     pub fn with_lora_json(&self, json: &str) -> CausalLmResult<Self> {
+        if self.frozen_lora.is_some() {
+            return Err("a frozen-LoRA base does not admit a second LoRA".into());
+        }
         if json.len() > MAX_LORA_JSON_BYTES {
             return Err("native LoRA artifact exceeds byte budget".into());
         }
@@ -304,11 +352,7 @@ impl NativeCausalLm {
         input: &Tensor,
     ) -> CausalLmResult<Tensor> {
         let mut output = self.blocks[index].output.forward(input)?;
-        if let Some(adapter) = self
-            .lora
-            .as_ref()
-            .filter(|a| a.record.layer == index && !a.zero_delta)
-        {
+        if let Some(adapter) = self.output_lora_at(index).filter(|a| !a.zero_delta) {
             let delta = low_rank_forward(input, &adapter.a, &adapter.b, MatmulBackend::CpuSimd)?;
             output.add_scaled_with_backend(
                 &delta,

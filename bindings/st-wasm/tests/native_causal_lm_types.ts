@@ -21,6 +21,15 @@ export function tryScheduledStep(s: NativeCausalLmLineTrainingSession): string |
     return s.attemptStepJson();
 }
 
+export function frozenPlacement(m: NativeCausalLm, path: string) {
+    const base = m.freezeLora();
+    try {
+        const id: string | undefined = base.frozenLoraArtifactId;
+        const weights: string = base.frozenLoraJson();
+        return {id, weights, model: base.withSingleGeometryAt(path)};
+    } finally { base.free(); }
+}
+
 export function resumeLine(origin: NativeCausalLm, plan: string, checkpoint: string, pin: string) {
     const s = NativeCausalLmLineTrainingSession.fromJson(origin,plan,checkpoint,pin);
     try {
