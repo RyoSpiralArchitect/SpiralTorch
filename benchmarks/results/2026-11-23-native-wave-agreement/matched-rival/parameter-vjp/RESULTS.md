@@ -72,3 +72,43 @@ from the journal, then computes the block table. Original raw journal SHA-256:
 Original result: `aaf38a614d3189511926fdb961a9dd637afb2074f12ab2ab73458591c1762238`.
 New descriptive report: `57d0766a4ba38e8b290ac632757fc2441d65eab6efe16a78b728d6c22b623989`.
 No new real-model call was made for this read-back.
+
+## Can the two corrections simply be added?
+
+No on this capture. For each fixed input and arriving gradient, the additive
+prediction is `g_saturation + g_projection - g_affine`: subtract the shared
+baseline once. Its error vector relative to `g_full` is the factorial
+interaction, not a new gradient through a different decoder. We report its
+length divided by the full gradient length, and separately the cosine of
+the additive prediction to the full gradient. These are descriptive
+measurements from the original 48 calls, not a new success criterion.
+
+| Factual host | Block | Median relative error of addition | Median cosine (addition, full) |
+| --- | --- | ---: | ---: |
+| Affine | gate | 3.958 | 0.0223 |
+| WaveGate | gate | 3.811 | 0.0236 |
+| Affine | bias | 0.919 | 0.8329 |
+| WaveGate | bias | 0.919 | 0.8419 |
+| Affine | gate+bias | 2.728 | 0.0346 |
+| WaveGate | gate+bias | 2.584 | 0.0367 |
+
+For the combined block, the additive error exceeded the full vector's own
+length on **24/24 rows on each host** (minimum ratios 1.333 and 1.331).
+Gate and bias should not be conflated: on gate the additive prediction
+was nearly orthogonal to the actual pullback, whereas bias retained much
+more directional agreement. Size-only attenuation is not a substitute for
+the composed VJP. This is not evidence that composition improves training,
+accuracy or generalization. The two hosts reuse the same 24 training
+prefixes, and this contrast does not uniquely attribute the interaction to
+one operator.
+
+```sh
+python3 -ISB test_interaction.py
+python3 -ISB interaction.py "$GPT2_CAPTURE" "$OUT/interaction.json"
+```
+
+The reader checks all four original pins and reproduces the primary result
+before computing the interaction. It does not import a model or read the
+held-out data. The new JSON retains all per-row values as well as the ranges,
+medians and undefined counts. SHA-256:
+`74f2a56f11cb873cb12bca264f770a74d9c21c9aae32397650ffbbfbb1eb3abc`.

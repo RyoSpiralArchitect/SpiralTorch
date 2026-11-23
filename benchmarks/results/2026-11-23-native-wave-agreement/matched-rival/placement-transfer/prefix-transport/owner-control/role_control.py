@@ -32,6 +32,13 @@ def check(turn, amp, h, t, output, axes):
         close(output,[0.]*3)
 
 
+def final_row(batch):
+    need(tuple(batch.sequence_shape) == (1,6,3), "unexpected activation shape")
+    values = batch.output
+    need(len(values) == 18, "unexpected activation length")
+    return values[-3:]
+
+
 def run(output_path):
     need(not output_path.exists(), "write-once control")
     st = r.native()
@@ -44,7 +51,7 @@ def run(output_path):
             x = [0.]*18
             x[3],x[12] = h*amp,t*amp
             batch = runtime.forward_sequence(p.s.SITE,x,[1,6])
-            final = batch.output()[-3:]
+            final = final_row(batch)
             axes = []
             for axis in (0,1):
                 upstream = [0.]*18

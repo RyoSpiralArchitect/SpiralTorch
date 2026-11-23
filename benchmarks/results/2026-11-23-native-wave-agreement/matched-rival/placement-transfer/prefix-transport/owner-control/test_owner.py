@@ -10,6 +10,24 @@ p, d = v.p, v.d
 
 
 class OwnerTests(unittest.TestCase):
+    def test_progress_toward_a_strictly_wrong_decision(self):
+        progress = runpy.run_path(str(Path(__file__).with_name("boundary.py")))["progress"]
+        self.assertIsNone(progress(0.,1.,0))
+        self.assertIsNone(progress(-2.,1.,1))
+        self.assertEqual(progress(-2.,-1.,0),.5)
+        self.assertEqual(progress(2.,1.,1),.5)
+        self.assertEqual(progress(-2.,-3.,0),-.5)
+        self.assertEqual(progress(2.,0.,1),1.)
+        self.assertGreater(progress(2.,-.1,1),1.)
+
+    def test_standalone_batch_output_is_a_property(self):
+        role = SimpleNamespace(**runpy.run_path(str(Path(__file__).with_name("role_control.py"))))
+        batch = SimpleNamespace(sequence_shape=(1,6,3),output=list(range(18)))
+        self.assertEqual(role.final_row(batch),[15,16,17])
+        batch.output = []
+        with self.assertRaises(ValueError):
+            role.final_row(batch)
+
     def test_zero_and_mask_are_part_of_the_artifact(self):
         host = {"base":"fixture"}
         r = p.artifact("fixture","identity","gate",[0.,0.,0.,-.125,0.,.25])

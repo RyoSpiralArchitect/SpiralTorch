@@ -57,8 +57,9 @@ absolute magnitudes, interactions, signed effects, and all winner switches.
 **Next test:** freeze bias at zero during learning and compare the three gate
 vectors at equal step length, placement and dimension, with a three-parameter
 bias-only control. This removes the competing route during training rather
-than deleting its result afterwards. Neither this ablation nor transfer to a
-pretrained model has been demonstrated here.
+than deleting its result afterwards. The subsequent [masked training
+comparison](owner-control/RESULTS.md) tested this on the same artificial
+weights; transfer to a pretrained model has not been demonstrated here.
 
 ## Runtime and reproduction
 
