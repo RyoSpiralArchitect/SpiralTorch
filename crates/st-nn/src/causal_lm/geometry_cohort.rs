@@ -6,6 +6,9 @@ use crate::geometry_artifact::{
 };
 use std::collections::BTreeMap;
 
+mod prefix_metric;
+pub use prefix_metric::{CausalLmPrefixResidualMetric, PrefixMetricRule, PrefixResidualStep};
+
 pub const MAX_GEOMETRY_COHORT_MEMBERS: usize = 256;
 pub const MAX_GEOMETRY_COHORT_ELEMENTS: usize = 16_777_216;
 

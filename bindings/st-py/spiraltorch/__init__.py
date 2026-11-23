@@ -9691,7 +9691,7 @@ for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch", "GeometryAd
               "NativeGeometryRuntime", "NativeGeometryBatch", "NativeGeometryAdamW", "SafeTensorArchive",
               "NdTensor", "score_token_logits_f32le", "NativeCausalLm", "NativeCausalLmEvaluation", "NativeCausalLmQkvEvaluation", "NativeCausalLmQkvComparison", "NativeCausalLmQkvAnswerComparison", "NativeCausalLmEvaluationComparison", "NativeCausalLmAnswerComparison", "NativeCausalLmGradients",
               "NativeCausalLmLoraGradients", "NativeCausalLmAccumulator", "NativeCausalLmAdaptationGradients", "NativeCausalLmScalarOutput", "NativeCausalLmQkvAdamW", "NativeCausalLmQkvTrainer", "NativeCausalLmProjectionPrefix",
-              "NativeCausalLmOutputContrastBank", "NativeCausalLmOutputMarginDirection",
+              "NativeCausalLmOutputContrastBank", "NativeCausalLmOutputMarginDirection", "NativePrefixResidualMetric",
               "NativeCausalLmRankOneProjection", "NativeCausalLmConditionalPrefixBank", "NativeCausalLmConditionalRetention",
               "NativeCausalLmConditionalAnswerSession",
               "NativeCausalLmConditionalServingSnapshot",

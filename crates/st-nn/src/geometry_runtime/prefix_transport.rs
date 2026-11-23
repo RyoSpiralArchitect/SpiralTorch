@@ -72,6 +72,15 @@ pub(super) struct TransportBatch {
     turn: PrefixRotation,
 }
 
+impl NativeGeometryBatch {
+    pub(crate) fn single_prefix_last_mean(&self) -> Result<&[f32]> {
+        match (&self.pullback, self.sequence_shape) {
+            (Pullback::Transport(b), Some([1, _, w])) => Ok(&b.means[b.means.len() - w..]),
+            _ => Err("expected one active prefix transport sequence".into()),
+        }
+    }
+}
+
 impl TransportBatch {
     pub(super) fn forward(
         p: &GeometryAdapterPlacement,

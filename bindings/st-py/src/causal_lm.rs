@@ -25,6 +25,7 @@ mod line_session;
 mod mixture_probe;
 mod output_margin;
 mod prefix_cache;
+mod prefix_metric;
 mod projection_probe;
 mod qkv;
 mod qkv_session;
@@ -2028,6 +2029,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<supervision::PyCausalTargetAlignment>()?;
     module.add_class::<supervision::PyCausalCompletion>()?;
     module.add_class::<PyNativeCausalLm>()?;
+    module.add_class::<prefix_metric::PyPrefixResidualMetric>()?;
     module.add_class::<scalar_output::PyScalarOutput>()?;
     output_margin::register(module)?;
     conditional_projection::register(module)?;

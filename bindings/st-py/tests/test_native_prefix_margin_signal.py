@@ -58,6 +58,43 @@ class PrefixMarginSignal(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"downstream block"):
             m.last_mlp_prefix_margin_signal(NoCopy(),7,8)
 
+    def test_train_only_metric_survives_gate_motion_but_not_stale_gradients(self):
+        m = self.model(self.rec)
+        rows = [[3,1,9], [2,6,9]]
+        metric = m.calibrate_prefix_residual_metric(rows)
+        self.assertIsInstance(metric, st.NativePrefixResidualMetric)
+        self.assertNotEqual(metric.report()["id"], m.calibrate_prefix_residual_metric(rows[::-1]).report()["id"])
+        gs = [m.geometry_token_menu_gradients(r,[7,8],gold_index=0,mix=1.) for r in rows]
+        for rule in ("uniform","diagonal","cyclic"):
+            nxt, step = m.step_prefix_residual_rms(metric,gs,rule,target_rms=.0001,max_parameter_l2=16.)
+            self.assertAlmostEqual(step["realized_rms"],.0001,places=8)
+            self.assertLess(sum(step["member_loss_dots"]),0.)
+            self.assertEqual(nxt.calibrate_prefix_residual_metric(rows).report(),metric.report())
+            with self.assertRaises(ValueError):
+                nxt.step_prefix_residual_rms(metric,gs,rule,target_rms=.0001,max_parameter_l2=16.)
+        with self.assertRaises(ValueError):
+            m.step_prefix_residual_rms(metric,gs,"uniform",target_rms=.0001,max_parameter_l2=1e-14)
+        other = m.with_readout_accumulator("f64")
+        with self.assertRaisesRegex(ValueError,"owner mismatch"):
+            other.step_prefix_residual_rms(metric,gs,"uniform",target_rms=.0001,max_parameter_l2=16.)
+        different = copy.deepcopy(self.rec)
+        different["placements"][0]["recipe"]["rotation"] = "identity"
+        with self.assertRaisesRegex(ValueError,"owner mismatch"):
+            self.model(different).step_prefix_residual_rms(metric,gs,"uniform",target_rms=.0001,max_parameter_l2=16.)
+
+    def test_calibration_rejects_non_gate_owners_and_large_batches(self):
+        both = copy.deepcopy(self.rec)
+        for t in both["placements"][0]["tensors"]:
+            t["requires_grad"] = True
+        with self.assertRaises(ValueError):
+            self.model(both).calibrate_prefix_residual_metric([[3]])
+        m = self.model(self.rec)
+        for invalid in ([], [[]], [[1]]*257, [[1000000]]):
+            with self.assertRaises(ValueError):
+                m.calibrate_prefix_residual_metric(invalid)
+        with self.assertRaises(TypeError):
+            st.NativePrefixResidualMetric()
+
 
 if __name__=="__main__":
     unittest.main()
