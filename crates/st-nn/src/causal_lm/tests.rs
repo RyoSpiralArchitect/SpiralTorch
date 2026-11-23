@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 mod adaptation;
 #[path = "context_tests.rs"]
 mod context;
+#[path = "prefix_transport_tests.rs"]
+mod prefix_transport;
 #[path = "evaluation_tests.rs"]
 mod evaluation;
 #[path = "generation_tests.rs"]

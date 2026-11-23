@@ -26,7 +26,9 @@ parent's deterministic complementary pairs, 2/256 displacement per pair
 from the *same* snapshot. All endpoints have 32 steps, 64 training VJPs,
 and a prescribed path of 0.25. No clipping or skipping zero gradients.
 Archive origin and final weights, individual gradients, post-step identities
-and all 11 logits. Score all 48 prompts at nine origins and 54 endpoints.
+and all 11 logits. Score all 48 prompts at nine origins and 54 endpoints;
+also score the three frozen LoRA-only references on these same prompts to
+verify the zero residual (3,024 geometry and 144 reference forwards).
 Formal limit: 1 CPU attempt, 240 seconds, first error stops. Run implementation
 checks on different artificial weights first. No loop to get green measurements.
 

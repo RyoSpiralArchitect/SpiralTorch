@@ -179,25 +179,36 @@ impl NativeCausalLm {
         shape: [usize; 2],
         pass: &mut BlockPass<'_>,
     ) -> CausalLmResult<(Tensor, Option<NativeGeometryBatch>)> {
-        if let Some(runtime) = &self.geometry {
-            if runtime
-                .artifact()
-                .record()
-                .placements
-                .iter()
-                .any(|p| p.path == path)
-            {
-                let batch = runtime.forward_sequence(path, input.data(), shape)?;
-                if let BlockPass::Observe(sums) = pass {
-                    sums.record(path, &input, batch.output())?;
-                }
-                return Ok((
-                    batch.output().clone(),
-                    matches!(pass, BlockPass::BackwardReplay).then_some(batch),
-                ));
+        if let Some(runtime) = self.runtime_at(path) {
+            let batch = runtime.forward_sequence(path, input.data(), shape)?;
+            if let BlockPass::Observe(sums) = pass {
+                sums.record(path, &input, batch.output())?;
             }
+            return Ok((
+                batch.output().clone(),
+                matches!(pass, BlockPass::BackwardReplay).then_some(batch),
+            ));
         }
         Ok((input, None))
+    }
+
+    fn block_geometry_output(
+        &self,
+        path: &str,
+        input: Tensor,
+        shape: [usize; 2],
+        pass: &mut BlockPass<'_>,
+        history: &mut Option<context::GeometryHistory>,
+    ) -> CausalLmResult<(Tensor, Option<NativeGeometryBatch>)> {
+        if matches!(pass, BlockPass::Prefill) {
+            if shape[0] != 1 {
+                return Err("prefill requires exactly one sequence".into());
+            }
+            let (out, state) = self.incremental_geometry(path, input, None, shape[1])?;
+            *history = state;
+            return Ok((out, None));
+        }
+        self.geometry_output(path, input, shape, pass)
     }
 
     pub(super) fn run_block(
@@ -240,11 +251,13 @@ impl NativeCausalLm {
         let attention_input = capture.then_some(attention_input);
         let path = format!("transformer.h.{index}");
         let mut history = std::array::from_fn(|_| None);
-        if inference && self.geometry_needs_history(&format!("{path}.attn"))? {
-            history[0] = Some(attention.clone());
-        }
-        let (attention, attention_geometry) =
-            self.geometry_output(&format!("{path}.attn"), attention, shape, &mut pass)?;
+        let (attention, attention_geometry) = self.block_geometry_output(
+            &format!("{path}.attn"),
+            attention,
+            shape,
+            &mut pass,
+            &mut history[0],
+        )?;
         let after_attention = attention.add_with_backend(&input, TensorUtilBackend::Cpu)?;
         let norm = block
             .second_norm
@@ -252,16 +265,16 @@ impl NativeCausalLm {
         let expanded = block.expand.forward(&norm)?;
         let pre_gelu = capture.then(|| expanded.clone());
         let mlp = block.contract.forward(&expanded.try_into_gelu()?)?;
-        if inference && self.geometry_needs_history(&format!("{path}.mlp"))? {
-            history[1] = Some(mlp.clone());
-        }
-        let (mlp, mlp_geometry) =
-            self.geometry_output(&format!("{path}.mlp"), mlp, shape, &mut pass)?;
+        let (mlp, mlp_geometry) = self.block_geometry_output(
+            &format!("{path}.mlp"),
+            mlp,
+            shape,
+            &mut pass,
+            &mut history[1],
+        )?;
         let output = after_attention.add_with_backend(&mlp, TensorUtilBackend::Cpu)?;
-        if inference && self.geometry_needs_history(&path)? {
-            history[2] = Some(output.clone());
-        }
-        let (output, block_geometry) = self.geometry_output(&path, output, shape, &mut pass)?;
+        let (output, block_geometry) =
+            self.block_geometry_output(&path, output, shape, &mut pass, &mut history[2])?;
         let inference_cache = inference.then(|| InferenceBlockCache {
             key: std::mem::take(&mut qkv[1]),
             value: std::mem::take(&mut qkv[2]),

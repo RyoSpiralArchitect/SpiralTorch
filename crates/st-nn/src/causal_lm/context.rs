@@ -1,14 +1,29 @@
 //! Owned single-sequence KV state. Frozen model and adapters travel with the cache.
 //! Updates are built separately and published only after successful execution.
 use super::*;
-use crate::geometry_runtime::GeometrySequenceDependency;
+use crate::geometry_runtime::{GeometryCacheKind, GeometrySequenceDependency, TransportState};
 use st_kernel_contracts::attention::{attention_key_lag_reference, AttentionMask, AttentionSpec};
 
 #[derive(Clone, Debug)]
 pub(super) struct InferenceBlockCache {
     pub key: Vec<f32>,
     pub value: Vec<f32>,
-    pub history: [Option<Tensor>; 3],
+    pub history: [Option<GeometryHistory>; 3],
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum GeometryHistory {
+    Replay(Tensor),
+    Transport(TransportState),
+}
+
+impl GeometryHistory {
+    fn cache_values(&self) -> usize {
+        match self {
+            Self::Replay(t) => t.data().len(),
+            Self::Transport(s) => s.cache_values(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -34,8 +49,8 @@ impl KvBranch {
 }
 
 /// Non-serializable acceleration state, never an authority for learned weights.
-/// Causal sequence geometry currently replays its retained input prefix; row-local
-/// geometry only evaluates new rows. Old K/V values are not recomputed.
+/// Causal geometry replays its prefix unless its recipe has a compact state.
+/// Row-local geometry only evaluates new rows. Old K/V values are not recomputed.
 #[derive(Clone, Debug)]
 pub struct NativeCausalLmContext {
     model: NativeCausalLm,
@@ -46,62 +61,75 @@ pub struct NativeCausalLmContext {
 }
 
 impl NativeCausalLm {
-    pub(super) fn geometry_needs_history(&self, path: &str) -> CausalLmResult<bool> {
-        let Some(runtime) = &self.geometry else {
-            return Ok(false);
-        };
-        if !runtime
-            .artifact()
-            .record()
-            .placements
-            .iter()
-            .any(|p| p.path == path)
-        {
-            return Ok(false);
-        }
-        Ok(runtime.sequence_dependency(path)? == GeometrySequenceDependency::CausalPrefix)
+    pub(super) fn runtime_at(
+        &self,
+        path: &str,
+    ) -> Option<&crate::geometry_runtime::NativeGeometryRuntime> {
+        self.geometry.as_deref().filter(|r| {
+            r.artifact()
+                .record()
+                .placements
+                .iter()
+                .any(|p| p.path == path)
+        })
     }
 
-    fn incremental_geometry(
+    pub(super) fn incremental_geometry(
         &self,
         path: &str,
         rows: Tensor,
-        previous: Option<&Tensor>,
+        previous: Option<&GeometryHistory>,
         steps: usize,
-    ) -> CausalLmResult<(Tensor, Option<Tensor>)> {
+    ) -> CausalLmResult<(Tensor, Option<GeometryHistory>)> {
         let added = rows.shape().0;
-        if !self.geometry_needs_history(path)? {
-            return Ok((
-                self.geometry_output(path, rows, [1, added], &mut decoder::BlockPass::Forward)?
-                    .0,
+        let Some(runtime) = self.runtime_at(path) else {
+            return Ok((rows, None));
+        };
+        let start = steps
+            .checked_sub(added)
+            .ok_or("invalid cached geometry suffix")?;
+        match runtime.cache_kind(path)? {
+            GeometryCacheKind::RowLocal => Ok((
+                runtime
+                    .forward_sequence(path, rows.data(), [1, added])?
+                    .output()
+                    .clone(),
                 None,
-            ));
+            )),
+            GeometryCacheKind::Transport => {
+                let prev = match previous {
+                    None => None,
+                    Some(GeometryHistory::Transport(s)) => Some(s),
+                    _ => return Err("invalid transport history".into()),
+                };
+                let (out, s) = runtime.extend_transport(path, rows, prev, steps)?;
+                Ok((out, Some(GeometryHistory::Transport(s))))
+            }
+            GeometryCacheKind::Replay => {
+                let input = match previous {
+                    None if start == 0 => rows,
+                    Some(GeometryHistory::Replay(t)) if t.shape() == (start, self.config.width) => {
+                        let mut v = Vec::new();
+                        v.try_reserve_exact(steps * self.config.width)?;
+                        v.extend_from_slice(t.data());
+                        v.extend_from_slice(rows.data());
+                        Tensor::from_vec(steps, self.config.width, v)?
+                    }
+                    _ => return Err("invalid causal geometry history shape".into()),
+                };
+                let b = runtime.forward_sequence(path, input.data(), [1, steps])?;
+                let out = if start == 0 {
+                    b.output().clone()
+                } else {
+                    b.output()
+                        .gather_rows(&(start..steps).collect::<Vec<_>>())?
+                };
+                Ok((out, Some(GeometryHistory::Replay(input))))
+            }
         }
-        let previous = previous.ok_or("missing causal geometry history")?;
-        let start = steps - added;
-        if previous.shape() != (start, self.config.width) {
-            return Err("invalid causal geometry history shape".into());
-        }
-        let mut values = Vec::new();
-        values.try_reserve_exact(steps * self.config.width)?;
-        values.extend_from_slice(previous.data());
-        values.extend_from_slice(rows.data());
-        let input = Tensor::from_vec(steps, self.config.width, values)?;
-        let output = self
-            .geometry_output(
-                path,
-                input.clone(),
-                [1, steps],
-                &mut decoder::BlockPass::Forward,
-            )?
-            .0;
-        Ok((
-            output.gather_rows(&(start..steps).collect::<Vec<_>>())?,
-            Some(input),
-        ))
     }
 
-    /// Persistent f32 K/V and geometry input history, excluding frozen weights,
+    /// Persistent K/V and geometry payload in f32-sized words, excluding frozen weights,
     /// readout and transient old/new transaction buffers. Checked before copying IDs.
     pub fn context_cache_values(
         &self,
@@ -115,29 +143,26 @@ impl NativeCausalLm {
         {
             return Err("invalid cached context length or value budget".into());
         }
-        let histories = if let Some(runtime) = &self.geometry {
-            runtime
-                .artifact()
-                .record()
-                .placements
-                .iter()
-                .try_fold(0usize, |count, p| {
-                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                        count
-                            + usize::from(
-                                runtime.sequence_dependency(&p.path)?
-                                    == GeometrySequenceDependency::CausalPrefix,
-                            ),
-                    )
-                })?
-        } else {
-            0
-        };
-        product(
-            &[2 * self.config.layers + histories, steps, self.config.width],
+        let mut n = product(
+            &[2 * self.config.layers, steps, self.config.width],
             max_cache_values,
             "KV and geometry cache",
-        )
+        )?;
+        if let Some(runtime) = &self.geometry {
+            for p in &runtime.artifact().record().placements {
+                let count = match runtime.cache_kind(&p.path)? {
+                    GeometryCacheKind::RowLocal => 0,
+                    GeometryCacheKind::Replay => steps,
+                    GeometryCacheKind::Transport => 2,
+                };
+                n = count
+                    .checked_mul(self.config.width)
+                    .and_then(|v| n.checked_add(v))
+                    .filter(|&v| v <= max_cache_values)
+                    .ok_or("KV and geometry cache exceeds budget")?;
+            }
+        }
+        Ok(n)
     }
 
     /// One-query cached work, not the old square full-prefix attention budget.
@@ -300,7 +325,7 @@ impl NativeCausalLmContext {
                         .history
                         .iter()
                         .flatten()
-                        .map(|t| t.data().len())
+                        .map(GeometryHistory::cache_values)
                         .sum::<usize>()
             })
             .sum()

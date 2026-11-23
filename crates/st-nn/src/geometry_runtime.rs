@@ -20,6 +20,10 @@ use std::collections::BTreeMap;
 
 mod elliptic;
 mod fractional;
+mod prefix_transport;
+pub(crate) use prefix_transport::TransportState;
+#[cfg(test)]
+mod prefix_transport_tests;
 mod wave_factorial;
 pub use wave_factorial::{
     ChannelParameterVjp, WaveFactorConfig, WaveFactorEnergies, WaveFactorObservation,
@@ -34,6 +38,12 @@ pub use optimizer::{AdamWConfig, AdamWStep, GlobalNormClip, NativeGeometryAdamW}
 pub enum GeometrySequenceDependency {
     RowLocal,
     CausalPrefix,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GeometryCacheKind {
+    RowLocal,
+    Replay,
+    Transport,
 }
 #[cfg(test)]
 mod anchored_tests;
@@ -50,6 +60,7 @@ pub(crate) type ParameterGradients = BTreeMap<String, PlacementGradients>;
 #[derive(Debug)]
 enum Pullback {
     Identity,
+    Transport(Box<prefix_transport::TransportBatch>),
     Affine(Box<ChannelAffineLearningBatch>),
     Wave(Box<WaveGateLearningBatch>),
     WaveRadius(Box<WaveGateLearningBatch>),
@@ -132,8 +143,16 @@ impl NativeGeometryRuntime {
 
     /// Declare whether a placement needs preceding rows during incremental inference.
     pub fn sequence_dependency(&self, path: &str) -> Result<GeometrySequenceDependency> {
-        use GeometrySequenceDependency::{CausalPrefix, RowLocal};
+        Ok(match self.cache_kind(path)? {
+            GeometryCacheKind::RowLocal => GeometrySequenceDependency::RowLocal,
+            _ => GeometrySequenceDependency::CausalPrefix,
+        })
+    }
+
+    pub(crate) fn cache_kind(&self, path: &str) -> Result<GeometryCacheKind> {
+        use GeometryCacheKind::{Replay, RowLocal, Transport};
         Ok(match &self.placement(path)?.recipe {
+            GeometryAdapterRecipe::PrefixTransport { .. } => Transport,
             GeometryAdapterRecipe::ChannelAffine { .. }
             | GeometryAdapterRecipe::Wave { .. }
             | GeometryAdapterRecipe::WaveRadius { .. }
@@ -148,7 +167,7 @@ impl NativeGeometryRuntime {
             | GeometryAdapterRecipe::History { .. }
             | GeometryAdapterRecipe::HistoryL2 { .. }
             | GeometryAdapterRecipe::HistoryGain { .. }
-            | GeometryAdapterRecipe::HistoryAngle { .. } => CausalPrefix,
+            | GeometryAdapterRecipe::HistoryAngle { .. } => Replay,
         })
     }
 
@@ -175,6 +194,17 @@ impl NativeGeometryRuntime {
             .filter(|&n| n > 0)
             .ok_or("native sequence requires nonempty non-overflowing batch and sequence axes")?;
         match &self.placement(path)?.recipe {
+            GeometryAdapterRecipe::PrefixTransport {
+                features,
+                max_values,
+                ..
+            } => {
+                let count = rows
+                    .checked_mul(*features)
+                    .filter(|n| n <= max_values)
+                    .ok_or("prefix transport exceeds sequence value budget")?;
+                Ok((*features, count))
+            }
             GeometryAdapterRecipe::EllipticCausal { features, .. }
             | GeometryAdapterRecipe::EllipticGated { features, .. } => {
                 Ok((*features, elliptic::sequence_values(*features, shape)?))
@@ -222,7 +252,8 @@ impl NativeGeometryRuntime {
         }
         let placement = self.placement(path)?;
         let strength = match &placement.recipe {
-            GeometryAdapterRecipe::EllipticCausal { strength, .. }
+            GeometryAdapterRecipe::PrefixTransport { strength, .. }
+            | GeometryAdapterRecipe::EllipticCausal { strength, .. }
             | GeometryAdapterRecipe::EllipticGated { strength, .. }
             | GeometryAdapterRecipe::Fractional { strength, .. }
             | GeometryAdapterRecipe::History { strength, .. }
@@ -241,6 +272,11 @@ impl NativeGeometryRuntime {
             Pullback::Identity
         } else {
             match &placement.recipe {
+                GeometryAdapterRecipe::PrefixTransport { rotation, .. } => {
+                    Pullback::Transport(Box::new(prefix_transport::TransportBatch::forward(
+                        placement, *rotation, &input, shape,
+                    )?))
+                }
                 GeometryAdapterRecipe::EllipticCausal { warp, .. }
                 | GeometryAdapterRecipe::EllipticGated { warp, .. } => {
                     Pullback::Elliptic(Box::new(elliptic::EllipticRuntimeBatch::forward(
@@ -383,6 +419,7 @@ impl NativeGeometryRuntime {
     ) -> Result<NativeGeometryBatch> {
         let residual = match &pullback {
             Pullback::Identity => None,
+            Pullback::Transport(batch) => Some(&batch.output),
             Pullback::Affine(batch) => Some(batch.output()),
             Pullback::AnchoredWaveProjection(batch) => Some(batch.output()),
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
@@ -400,6 +437,11 @@ impl NativeGeometryRuntime {
         } else {
             input
         };
+        if matches!(pullback, Pullback::Transport(_))
+            && output.data().iter().any(|x| !x.is_finite())
+        {
+            return Err("non-finite prefix transport residual output".into());
+        }
         Ok(NativeGeometryBatch {
             source_id: self.artifact.artifact_id().into(),
             placement: placement.clone(),
@@ -609,6 +651,7 @@ impl NativeGeometryBatch {
         }
         let scaled = direction.scale_with_backend(self.strength, TensorUtilBackend::Cpu)?;
         let branch = match &self.pullback {
+            Pullback::Transport(batch) => batch.input_vjp(&scaled)?,
             Pullback::Affine(batch) => batch.vjp_input(&scaled)?,
             Pullback::AnchoredWaveProjection(batch) => batch.vjp_input(&scaled)?,
             Pullback::Wave(batch) | Pullback::WaveRadius(batch) | Pullback::WaveStage(batch) => {
@@ -619,7 +662,17 @@ impl NativeGeometryBatch {
             Pullback::Elliptic(batch) => batch.vjp_input(&scaled)?,
             Pullback::Identity => unreachable!(),
         };
-        Ok(direction.add_with_backend(&branch, TensorUtilBackend::Cpu)?)
+        self.add_input_adjoint(&direction, &branch)
+    }
+
+    fn add_input_adjoint(&self, direct: &Tensor, branch: &Tensor) -> Result<Tensor> {
+        let dx = direct.add_with_backend(branch, TensorUtilBackend::Cpu)?;
+        if matches!(self.pullback, Pullback::Transport(_))
+            && dx.data().iter().any(|x| !x.is_finite())
+        {
+            return Err("non-finite prefix transport input adjoint".into());
+        }
+        Ok(dx)
     }
 
     fn pullback(&self, upstream: &[f32], need_input: bool) -> Result<NativeGeometryPullback> {
@@ -642,6 +695,7 @@ impl NativeGeometryBatch {
                 let (input, gate, bias) = batch.vjp_requested(scaled.data(), need_input)?;
                 channel_pullback(input, gate, bias, None)
             }
+            Pullback::Transport(batch) => batch.vjp(&scaled, need_input)?,
             Pullback::AnchoredWaveProjection(batch) => {
                 let (input, gate, bias) = batch.vjp(&scaled, need_input)?;
                 channel_pullback(input, gate, bias, None)
@@ -658,7 +712,7 @@ impl NativeGeometryBatch {
             Pullback::Fractional(batch) => batch.vjp(&scaled, need_input)?,
         };
         if let Some(input) = gradient.input.take() {
-            gradient.input = Some(direction.add_with_backend(&input, TensorUtilBackend::Cpu)?);
+            gradient.input = Some(self.add_input_adjoint(&direction, &input)?);
         }
         Ok(gradient)
     }

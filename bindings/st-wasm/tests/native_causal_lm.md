@@ -9,6 +9,44 @@ Both execute the same four artificial controls and compare against native Python
 
 ## Cached continuation
 
+For a trainable, order-sensitive residual at an existing GPT-2 block, attach
+a `spiraltorch.prefix_transport_adapter.v1` placement to a native model.
+It rotates each pair of previous channels by a quarter turn per token, then
+averages the transported history including the current row. An odd final
+channel is averaged without rotation. The matched `identity` rotation uses
+the same gate and bias on the ordinary prefix mean. Neither mode gets a
+grammatical-role label or extra learned position embeddings.
+
+```python
+import json
+import spiraltorch as st
+
+# model is a loaded NativeCausalLm; width is its decoder hidden width.
+def attach_transport(model, width, *, site, rotation="quarter_turn", max_values):
+    placement = {
+        "path": site, "training": True,
+        "recipe": {"schema": "spiraltorch.prefix_transport_adapter.v1",
+                   "features": width, "strength": 0.25, "max_values": max_values,
+                   "rotation": rotation},
+        "tensors": [{"name": k, "shape": [width], "values": [0.0] * width,
+                     "role": "parameter", "requires_grad": True} for k in ("gate", "bias")],
+    }
+    record = {"schema": "spiraltorch.geometry_adapter_artifact.v1", "training": True,
+              "base_model_identity": model.base_model_identity, "policy": "full_prefix_f32_no_cache.v1",
+              "placements": [placement]}
+    return model.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(record)))
+```
+
+Choose `max_values` at least as large as the largest admitted batch x sequence
+x width (up to 1,048,576). The third mode, `inverse_quarter_turn`, reverses
+the rotation. Zero gate and bias leave the decoder unchanged but both remain
+trainable via `geometry_token_menu_gradients`. Apply an update to get a new
+model; create a new context from that model, not from the pre-update weights.
+Rust owns the same artifact in WASM (`GeometryAdapterArtifact.createJson`,
+`model.withGeometry`). Each nonempty context stores one f64 sum per channel
+per such placement (2 x width f32 cache words), independent of token count,
+in addition to the decoder's K/V. Full sequence limits still apply.
+
 For a known sequence (for example, a document suffix or one answer candidate),
 reuse a prefix rather than running the full decoder for every token:
 

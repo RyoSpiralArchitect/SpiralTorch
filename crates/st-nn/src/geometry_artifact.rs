@@ -101,6 +101,13 @@ pub struct FractionalRecipe {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "schema", deny_unknown_fields)]
 pub enum GeometryAdapterRecipe {
+    #[serde(rename = "spiraltorch.prefix_transport_adapter.v1")]
+    PrefixTransport {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        rotation: PrefixRotation,
+    },
     #[serde(rename = "spiraltorch.channel_affine_adapter.v1")]
     ChannelAffine {
         features: usize,
@@ -200,6 +207,15 @@ pub enum GeometryAdapterRecipe {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lag_window: Option<[usize; 2]>,
     },
+}
+
+/// Exact relative-lag rotations on adjacent channel pairs. An odd tail is fixed.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrefixRotation {
+    Identity,
+    QuarterTurn,
+    InverseQuarterTurn,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -469,7 +485,10 @@ impl GeometryAdapterPlacement {
     fn validate(&self) -> Result<usize> {
         use GeometryAdapterRecipe::*;
         let (features, strength) = match &self.recipe {
-            ChannelAffine {
+            PrefixTransport {
+                features, strength, ..
+            }
+            | ChannelAffine {
                 features, strength, ..
             }
             | Wave {
@@ -523,7 +542,11 @@ impl GeometryAdapterPlacement {
         }
         let mut shapes = BTreeMap::new();
         match &self.recipe {
-            ChannelAffine { .. } | Wave { .. } | WaveRadius { .. } | WaveStage { .. } => {
+            PrefixTransport { .. }
+            | ChannelAffine { .. }
+            | Wave { .. }
+            | WaveRadius { .. }
+            | WaveStage { .. } => {
                 shapes.insert("gate", vec![features]);
                 shapes.insert("bias", vec![features]);
             }
@@ -611,6 +634,11 @@ impl GeometryAdapterPlacement {
             return Err("missing geometry tensors".into());
         }
         match &self.recipe {
+            PrefixTransport { max_values, .. } => {
+                if !(features..=GEOMETRY_ADAPTER_MAX_VALUES).contains(max_values) {
+                    return Err("prefix transport value budget out of bounds".into());
+                }
+            }
             AnchoredWaveProjection {
                 curvature,
                 log_radius,
