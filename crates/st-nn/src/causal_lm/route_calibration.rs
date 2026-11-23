@@ -20,7 +20,7 @@ pub struct MatchedRouteSelection<const N: usize> {
     pub selected: usize,
     pub worst_gains: [f64; N],
     pub mean_gains: [f64; N],
-    /// Unlabeled mean of the common origin's logit[0] - logit[1] on all rows.
+    /// Unlabeled mean of the common origin's `logit[0] - logit[1]` on all rows.
     pub origin_mean_margin: f64,
 }
 

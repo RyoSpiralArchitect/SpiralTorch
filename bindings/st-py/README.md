@@ -88,12 +88,12 @@ learning, corpus evaluation and generation without Torch or NumPy. Base weights
 remain frozen. The importer is not an arbitrary HF architecture loader or PEFT
 executor, and this CPU path is separate from resident WGPU byte-LM training.
 For a development build with prefix transport on the final MLP, see the
-[position-to-token margin probe](examples/native_prefix_margin_signal.md).
+[position-to-token margin probe](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/bindings/st-py/examples/native_prefix_margin_signal.md).
 It reads the actual gate input and vocabulary gradient without updating either.
 For a fixed choice such as two verb forms, the development API can update
-geometry while protecting their combined probability. See [declared-set training](examples/declared_set_geometry.md).
+geometry while protecting their combined probability. See [declared-set training](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/bindings/st-py/examples/declared_set_geometry.md).
 For the source-only native decoder, see how to [freeze one LoRA and train
-geometry at another layer](../st-wasm/tests/native_causal_lm.md#keep-lora-fixed-across-geometry-placements).
+geometry at another layer](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/bindings/st-wasm/tests/native_causal_lm.md#keep-lora-fixed-across-geometry-placements).
 See the [native/HF execution boundary](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-hf-boundary.md)
 for supported configurations, native learning/generation recipes and remaining
 foreign-model dependencies. These newer APIs are not in the immutable 0.4.32
@@ -106,7 +106,7 @@ Transformers or NumPy. See
 for saved-state reuse, Rust-owned updates and the still-optional HF boundary.
 
 For a source-only example of training against two contrasting prefixes, see
-[paired verb margins](../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/placement-transfer/prefix-transport/paired-gap/weakest-lane/RESULTS.md#api-and-verification).
+[paired verb margins](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/placement-transfer/prefix-transport/paired-gap/weakest-lane/RESULTS.md#api-and-verification).
 
 ## Optional HF Integration
 

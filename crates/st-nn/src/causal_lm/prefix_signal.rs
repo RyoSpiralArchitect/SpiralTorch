@@ -24,7 +24,7 @@ pub struct CausalLmPrefixMarginSignal {
     pub contrast: CausalLmTokenContrast,
     /// Actual input to the residual branch, flattened in [position, channel] order.
     pub site_input: Vec<f32>,
-    /// R^(last-position) source[position] / steps, before f32 rounding. V3 sources are adjacent changes.
+    /// `R^(last-position) source[position] / steps`, before f32 rounding. V3 sources are adjacent changes.
     pub source_features: Vec<f64>,
     /// Unit logit-margin derivative at the final site's output, before residual scaling.
     pub upstream: Vec<f32>,

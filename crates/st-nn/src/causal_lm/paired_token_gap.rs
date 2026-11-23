@@ -223,7 +223,7 @@ impl NativeCausalLm {
         Ok(p)
     }
 
-    /// First prefix favors tokens[0]; the second favors tokens[1]. No optimizer update.
+    /// First prefix favors `tokens[0]`; the second favors `tokens[1]`. No optimizer update.
     pub fn paired_token_gap(
         &self,
         first: &[usize],
