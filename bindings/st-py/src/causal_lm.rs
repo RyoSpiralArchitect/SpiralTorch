@@ -1203,6 +1203,28 @@ impl PyNativeCausalLm {
         ))
     }
 
+    /// Fit residual second moments on the last row of each unlabeled training prompt.
+    fn calibrate_prefix_residual_metric(
+        &self,
+        py: Python<'_>,
+        prompts: &Bound<'_, PyAny>,
+    ) -> PyResult<prefix_metric::PyPrefixResidualMetric> {
+        self.calibrate_prefix_metric_impl(py, prompts)
+    }
+
+    #[pyo3(signature=(metric, gradients, rule, *, target_rms, max_parameter_l2))]
+    fn step_prefix_residual_rms(
+        &self,
+        py: Python<'_>,
+        metric: &prefix_metric::PyPrefixResidualMetric,
+        gradients: &Bound<'_, PyAny>,
+        rule: &str,
+        target_rms: &Bound<'_, PyAny>,
+        max_parameter_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        self.step_prefix_metric_impl(py, metric, gradients, rule, target_rms, max_parameter_l2)
+    }
+
     /// Normalize the f64 equal-vote mean before rounding the updated geometry to f32.
     fn step_geometry_cohort_gradient_at_distance(
         &self,

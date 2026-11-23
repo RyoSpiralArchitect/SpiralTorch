@@ -16,9 +16,8 @@ impl PyPrefixResidualMetric {
     }
 }
 
-#[pymethods]
 impl PyNativeCausalLm {
-    fn calibrate_prefix_residual_metric(
+    pub(super) fn calibrate_prefix_metric_impl(
         &self,
         py: Python<'_>,
         prompts: &Bound<'_, PyAny>,
@@ -45,8 +44,7 @@ impl PyNativeCausalLm {
         Ok(PyPrefixResidualMetric { inner })
     }
 
-    #[pyo3(signature=(metric, gradients, rule, *, target_rms, max_parameter_l2))]
-    fn step_prefix_residual_rms(
+    pub(super) fn step_prefix_metric_impl(
         &self,
         py: Python<'_>,
         metric: &PyPrefixResidualMetric,

@@ -36,7 +36,7 @@ def plan(kind, parent, signal, ext):
     sources += [repo / n for n in (
         "crates/st-nn/src/geometry_runtime/prefix_transport.rs","crates/st-nn/src/causal_lm/decoder.rs",
         "crates/st-nn/src/causal_lm/geometry_cohort.rs","crates/st-nn/src/causal_lm/geometry_cohort/prefix_metric.rs",
-        "bindings/st-py/src/causal_lm/prefix_metric.rs")]
+        "bindings/st-py/src/causal_lm/prefix_metric.rs","bindings/st-py/src/causal_lm.rs")]
     return dict(schema="spiraltorch.residual_metric_study.v1", kind=kind, parent_spec=p.PARENT[kind][0],
                 parent_manifest=p.PARENT[kind][1], train_signals=SIGNALS[kind], extension=ext,
                 sources={f.relative_to(repo).as_posix():d.digest(f.read_bytes()) for f in sources},
