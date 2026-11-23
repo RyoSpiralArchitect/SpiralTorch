@@ -95,6 +95,33 @@ class PrefixMarginSignal(unittest.TestCase):
         with self.assertRaises(TypeError):
             st.NativePrefixResidualMetric()
 
+    def test_fixed_output_mix_changes_native_pullback_without_changing_gate_capacity(self):
+        ids = [3,1,9,5,2,10]
+        rec = copy.deepcopy(self.rec)
+        for t in rec["placements"][0]["tensors"]:
+            t["values"] = [0.]*3
+        old = self.model(rec)
+        trace = old.last_mlp_prefix_margin_signal(ids,7,8)
+        self.assertNotIn("output_mix", trace)
+        metric = old.calibrate_prefix_residual_metric([ids])
+        q = [[15,-6,10],[10,15,-6],[-6,10,15]]
+        for mode in ("cayley_triples","inverse_cayley_triples"):
+            rec["placements"][0]["recipe"].update(schema="spiraltorch.prefix_transport_adapter.v2", output_mix=mode)
+            model = self.model(rec)
+            t = model.last_mlp_prefix_margin_signal(ids,7,8)
+            self.assertEqual(t["output_mix"],mode)
+            self.assertEqual(t["contrast"],trace["contrast"])
+            for j in range(3):
+                expect = sum((q[i][j] if mode=="cayley_triples" else q[j][i])*trace["bias_gradient"][i] for i in range(3))/19
+                self.assertAlmostEqual(t["bias_gradient"][j],expect,places=6)
+            g = model.geometry_token_menu_gradients(ids,[7,8],gold_index=0,mix=1.)
+            with self.assertRaisesRegex(ValueError,"owner mismatch"):
+                model.step_prefix_residual_rms(metric,[g],"diagonal",target_rms=.001,max_parameter_l2=16.)
+            calibrated = model.calibrate_prefix_residual_metric([ids])
+            self.assertEqual(calibrated.report()["second_moments"],metric.report()["second_moments"])
+            learned, _ = model.step_prefix_residual_rms(calibrated,[g],"diagonal",target_rms=.001,max_parameter_l2=16.)
+            self.assertNotEqual(learned.next_token_contrast(ids,7,8),t["contrast"])
+
 
 if __name__=="__main__":
     unittest.main()

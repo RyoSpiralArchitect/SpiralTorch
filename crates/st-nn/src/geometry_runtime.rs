@@ -152,7 +152,8 @@ impl NativeGeometryRuntime {
     pub(crate) fn cache_kind(&self, path: &str) -> Result<GeometryCacheKind> {
         use GeometryCacheKind::{Replay, RowLocal, Transport};
         Ok(match &self.placement(path)?.recipe {
-            GeometryAdapterRecipe::PrefixTransport { .. } => Transport,
+            GeometryAdapterRecipe::PrefixTransport { .. }
+            | GeometryAdapterRecipe::MixedPrefixTransport { .. } => Transport,
             GeometryAdapterRecipe::ChannelAffine { .. }
             | GeometryAdapterRecipe::Wave { .. }
             | GeometryAdapterRecipe::WaveRadius { .. }
@@ -195,6 +196,11 @@ impl NativeGeometryRuntime {
             .ok_or("native sequence requires nonempty non-overflowing batch and sequence axes")?;
         match &self.placement(path)?.recipe {
             GeometryAdapterRecipe::PrefixTransport {
+                features,
+                max_values,
+                ..
+            }
+            | GeometryAdapterRecipe::MixedPrefixTransport {
                 features,
                 max_values,
                 ..
@@ -253,6 +259,7 @@ impl NativeGeometryRuntime {
         let placement = self.placement(path)?;
         let strength = match &placement.recipe {
             GeometryAdapterRecipe::PrefixTransport { strength, .. }
+            | GeometryAdapterRecipe::MixedPrefixTransport { strength, .. }
             | GeometryAdapterRecipe::EllipticCausal { strength, .. }
             | GeometryAdapterRecipe::EllipticGated { strength, .. }
             | GeometryAdapterRecipe::Fractional { strength, .. }
@@ -272,9 +279,13 @@ impl NativeGeometryRuntime {
             Pullback::Identity
         } else {
             match &placement.recipe {
-                GeometryAdapterRecipe::PrefixTransport { rotation, .. } => {
+                GeometryAdapterRecipe::PrefixTransport { .. }
+                | GeometryAdapterRecipe::MixedPrefixTransport { .. } => {
                     Pullback::Transport(Box::new(prefix_transport::TransportBatch::forward(
-                        placement, *rotation, &input, shape,
+                        placement,
+                        placement.recipe.prefix_transport().unwrap(),
+                        &input,
+                        shape,
                     )?))
                 }
                 GeometryAdapterRecipe::EllipticCausal { warp, .. }

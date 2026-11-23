@@ -202,3 +202,135 @@ fn prefix_transport_parameter_only_does_not_evaluate_overflowing_input_adjoint()
         [f32::MAX; 3]
     );
 }
+
+#[test]
+fn mixed_transport_forward_vjps_and_cache_match_independent_dense_operator() {
+    use crate::geometry_artifact::PrefixChannelMix::*;
+    let q = [[15., -6., 10.], [10., 15., -6.], [-6., 10., 15.]];
+    let x: Vec<f32> = (0..24).map(|i| (i as f32 - 11.) / 7.).collect();
+    let dy: Vec<f32> = (0..24).map(|i| ((i * 5 % 11) as f32 - 4.) / 3.).collect();
+    let (g, b) = ([0.25, -0.5, 0.75], [-0.125, 0.25, 0.75]);
+    for mix in [CayleyTriples, InverseCayleyTriples] {
+        let mut rec = artifact(QuarterTurn, g, b, 0.5).record().clone();
+        rec.placements[0].recipe = GeometryAdapterRecipe::MixedPrefixTransport {
+            features: 3,
+            strength: 0.5,
+            max_values: 24,
+            rotation: QuarterTurn,
+            output_mix: mix,
+        };
+        let rt = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(rec).unwrap());
+        let y = rt.forward_sequence("site", &x, [2, 4]).unwrap();
+        let vars: Vec<_> = x
+            .iter()
+            .chain(&g)
+            .chain(&b)
+            .map(|&v| f64::from(v))
+            .collect();
+        let expected = |v: &[f64]| {
+            let ordinary = direct(&v[..24], &v[24..27], &v[27..], QuarterTurn, 4);
+            let mut mixed = v[..24].to_vec();
+            for t in (0..24).step_by(3) {
+                for i in 0..3 {
+                    mixed[t + i] += (0..3)
+                        .map(|j| {
+                            (ordinary[t + j] - v[t + j])
+                                * if mix == CayleyTriples {
+                                    q[i][j]
+                                } else {
+                                    q[j][i]
+                                }
+                        })
+                        .sum::<f64>()
+                        / 19.;
+                }
+            }
+            mixed
+        };
+        for (&got, want) in y.output().data().iter().zip(expected(&vars)) {
+            assert!((f64::from(got) - want).abs() < 4e-7);
+        }
+        let v = y.vjp(&dy).unwrap();
+        assert_eq!(y.vjp_input(&dy).unwrap().data(), v.input.data());
+        assert_eq!(y.vjp_parameters(&dy).unwrap(), v.parameters);
+        let loss = |vs: &[f64]| {
+            expected(vs)
+                .iter()
+                .zip(&dy)
+                .map(|(a, &b)| a * f64::from(b))
+                .sum::<f64>()
+        };
+        for (j, &val) in v
+            .input
+            .data()
+            .iter()
+            .chain(&v.parameters["gate"])
+            .chain(&v.parameters["bias"])
+            .enumerate()
+        {
+            let (mut plus, mut minus) = (vars.clone(), vars.clone());
+            plus[j] += 0.001;
+            minus[j] -= 0.001;
+            assert!(((loss(&plus) - loss(&minus)) / 0.002 - f64::from(val)).abs() < 2e-6);
+        }
+        for (doc, full) in x.chunks_exact(12).zip(y.output().data().chunks_exact(12)) {
+            let mut state = None;
+            for (t, row) in doc.chunks_exact(3).enumerate() {
+                let (actual, next) = rt
+                    .extend_transport(
+                        "site",
+                        Tensor::from_vec(1, 3, row.to_vec()).unwrap(),
+                        state.as_ref(),
+                        t + 1,
+                    )
+                    .unwrap();
+                assert_eq!(actual.data(), &full[3 * t..3 * t + 3]);
+                assert_eq!(next.cache_values(), 6);
+                state = Some(next);
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_transport_orthogonality_tail_and_schema() {
+    use crate::geometry_artifact::PrefixChannelMix::*;
+    for mix in [CayleyTriples, InverseCayleyTriples] {
+        let x = [2., -3., 4., -8., 7., 0.5, 0.5, 0.5, 5., 6.];
+        let mut rec = artifact(Identity, [1.; 3], [0.; 3], 1.).record().clone();
+        let p = &mut rec.placements[0];
+        p.recipe = GeometryAdapterRecipe::MixedPrefixTransport {
+            features: 5,
+            strength: 1.,
+            max_values: 10,
+            rotation: Identity,
+            output_mix: mix,
+        };
+        for t in &mut p.tensors {
+            t.shape = vec![5];
+            t.values = vec![if t.name == "gate" { 1. } else { 0. }; 5];
+        }
+        let rt = NativeGeometryRuntime::new(GeometryAdapterArtifact::create(rec).unwrap());
+        let y = rt.forward_sequence("site", &x, [2, 1]).unwrap();
+        let branch: Vec<_> = y
+            .output()
+            .data()
+            .iter()
+            .zip(x)
+            .map(|(a, b)| a - b)
+            .collect();
+        assert_eq!(&branch[3..], &x[3..]);
+        let adj = y.vjp_input(&branch).unwrap();
+        for ((&v, &direct), &original) in adj.data().iter().zip(&branch).zip(&x) {
+            assert!((v - direct - original).abs() < 2e-6);
+        }
+    }
+    let a = artifact(Identity, [1.; 3], [0.; 3], 1.);
+    let mut j: serde_json::Value = serde_json::from_str(a.to_json()).unwrap();
+    j["placements"][0]["recipe"]["output_mix"] = json!("cayley_triples");
+    assert!(GeometryAdapterArtifact::create_json(&serde_json::to_vec(&j).unwrap()).is_err());
+    j["placements"][0]["recipe"]["schema"] = json!("spiraltorch.prefix_transport_adapter.v2");
+    assert!(GeometryAdapterArtifact::create_json(&serde_json::to_vec(&j).unwrap()).is_ok());
+    j["placements"][0]["recipe"]["output_mix"] = json!("trainable");
+    assert!(GeometryAdapterArtifact::create_json(&serde_json::to_vec(&j).unwrap()).is_err());
+}

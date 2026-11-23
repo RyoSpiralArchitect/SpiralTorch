@@ -1,6 +1,60 @@
 //! Relative-lag transport with an orthogonal step and no length-squared attention matrix.
 use super::*;
-use crate::geometry_artifact::PrefixRotation;
+use crate::geometry_artifact::{PrefixChannelMix, PrefixRotation, PrefixTransportSpec};
+
+impl PrefixChannelMix {
+    fn transpose(self) -> Self {
+        match self {
+            Self::CayleyTriples => Self::InverseCayleyTriples,
+            Self::InverseCayleyTriples => Self::CayleyTriples,
+        }
+    }
+
+    fn triple(self, [a, b, c]: [f64; 3]) -> [f64; 3] {
+        // Each row sums to 19; row squared lengths are 361 and cross products vanish.
+        let (l, r) = match self {
+            Self::CayleyTriples => (-6., 10.),
+            Self::InverseCayleyTriples => (10., -6.),
+        };
+        [
+            (15. * a + l * b + r * c) / 19.,
+            (r * a + 15. * b + l * c) / 19.,
+            (l * a + r * b + 15. * c) / 19.,
+        ]
+    }
+}
+
+fn finish_branch(values: &mut [f32], w: usize, mix: Option<PrefixChannelMix>) -> Result<()> {
+    if let Some(m) = mix {
+        for row in values.chunks_exact_mut(w) {
+            for p in row.chunks_exact_mut(3) {
+                let out = m.triple([p[0].into(), p[1].into(), p[2].into()]);
+                for (slot, val) in p.iter_mut().zip(out) {
+                    *slot = val as f32;
+                }
+            }
+        }
+    }
+    finite(values)
+}
+
+fn branch_adjoint(row: &[f32], mix: Option<PrefixChannelMix>, mut add: impl FnMut(usize, f64)) {
+    let mut j = 0;
+    if let Some(m) = mix {
+        for p in row.chunks_exact(3) {
+            for val in m
+                .transpose()
+                .triple([p[0].into(), p[1].into(), p[2].into()])
+            {
+                add(j, val);
+                j += 1;
+            }
+        }
+    }
+    for (i, &v) in row[j..].iter().enumerate() {
+        add(j + i, v.into());
+    }
+}
 
 impl PrefixRotation {
     fn transpose(self) -> Self {
@@ -70,6 +124,7 @@ pub(super) struct TransportBatch {
     gate: Vec<f32>,
     steps: usize,
     turn: PrefixRotation,
+    output_mix: Option<PrefixChannelMix>,
 }
 
 impl NativeGeometryBatch {
@@ -84,7 +139,7 @@ impl NativeGeometryBatch {
 impl TransportBatch {
     pub(super) fn forward(
         p: &GeometryAdapterPlacement,
-        turn: PrefixRotation,
+        spec: PrefixTransportSpec,
         x: &Tensor,
         [_, steps]: [usize; 2],
     ) -> Result<Self> {
@@ -94,18 +149,19 @@ impl TransportBatch {
         let mut means = Vec::with_capacity(x.data().len());
         let mut values = Vec::with_capacity(x.data().len());
         for document in x.data().chunks_exact(steps * w) {
-            TransportState::new(w).scan(document, turn, |i, m| {
+            TransportState::new(w).scan(document, spec.rotation, |i, m| {
                 means.push(m);
                 values.push(gate[i] * m + bias[i]);
             });
         }
-        finite(&values)?;
+        finish_branch(&mut values, w, spec.output_mix)?;
         Ok(Self {
             output: Tensor::from_vec(rows, w, values)?,
             means,
             gate: gate.to_vec(),
             steps,
-            turn,
+            turn: spec.rotation,
+            output_mix: spec.output_mix,
         })
     }
 
@@ -127,10 +183,10 @@ impl TransportBatch {
                 .rev()
             {
                 self.turn.transpose().apply(&mut adj);
-                for i in 0..w {
-                    adj[i] += f64::from(d[i]) * f64::from(self.gate[i]) / (t + 1) as f64;
+                branch_adjoint(d, self.output_mix, |i, v| {
+                    adj[i] += v * f64::from(self.gate[i]) / (t + 1) as f64;
                     row[i] = adj[i] as f32;
-                }
+                });
             }
         }
         finite(&dx)?;
@@ -142,10 +198,10 @@ impl TransportBatch {
         let mut g = vec![0f64; w];
         let mut b = vec![0f64; w];
         for (grad, means) in dy.data().chunks_exact(w).zip(self.means.chunks_exact(w)) {
-            for i in 0..w {
-                g[i] += f64::from(grad[i]) * f64::from(means[i]);
-                b[i] += f64::from(grad[i]);
-            }
+            branch_adjoint(grad, self.output_mix, |i, v| {
+                g[i] += v * f64::from(means[i]);
+                b[i] += v;
+            });
         }
         let mut parameters = BTreeMap::new();
         for (name, v) in [("gate", g), ("bias", b)] {
@@ -183,25 +239,23 @@ impl NativeGeometryRuntime {
         }
         finite(x.data())?;
         let p = self.placement(path)?;
-        let GeometryAdapterRecipe::PrefixTransport {
-            rotation, strength, ..
-        } = p.recipe
-        else {
-            return Err("expected prefix transport geometry".into());
-        };
+        let spec = p
+            .recipe
+            .prefix_transport()
+            .ok_or("expected prefix transport geometry")?;
         let mut state = previous.cloned().unwrap_or_else(|| TransportState::new(w));
-        let strength = strength as f32;
+        let strength = spec.strength;
         if strength == 0. {
-            state.scan(x.data(), rotation, |_, _| {});
+            state.scan(x.data(), spec.rotation, |_, _| {});
             return Ok((x, state));
         }
         let gate = tensor(p, "gate");
         let bias = tensor(p, "bias");
         let mut values = Vec::with_capacity(x.data().len());
-        state.scan(x.data(), rotation, |i, m| {
+        state.scan(x.data(), spec.rotation, |i, m| {
             values.push(gate[i] * m + bias[i])
         });
-        finite(&values)?;
+        finish_branch(&mut values, w, spec.output_mix)?;
         let branch = Tensor::from_vec(rows, w, values)?;
         let output = x.add_with_backend(
             &branch.scale_with_backend(strength, TensorUtilBackend::Cpu)?,

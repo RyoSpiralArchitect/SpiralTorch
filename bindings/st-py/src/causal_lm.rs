@@ -1016,6 +1016,12 @@ impl PyNativeCausalLm {
             "rotation",
             crate::json::json_to_py(py, &serde_json::to_value(s.rotation).map_err(error)?)?,
         )?;
+        if let Some(mix) = s.output_mix {
+            out.set_item(
+                "output_mix",
+                crate::json::json_to_py(py, &serde_json::to_value(mix).map_err(error)?)?,
+            )?;
+        }
         out.set_item("strength", s.strength)?;
         out.set_item("shape", s.shape.to_vec())?;
         out.set_item(

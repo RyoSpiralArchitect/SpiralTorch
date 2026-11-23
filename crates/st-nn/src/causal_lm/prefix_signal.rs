@@ -1,6 +1,6 @@
 //! Factor the unit token-margin gate VJP into transported site inputs and the factual readout adjoint.
 use super::*;
-use crate::geometry_artifact::{GeometryAdapterPlacement, GeometryAdapterRecipe, PrefixRotation};
+use crate::geometry_artifact::{GeometryAdapterPlacement, PrefixChannelMix, PrefixRotation};
 
 /// Total numerical payload in the returned vectors, checked before evaluating a token.
 pub const MAX_PREFIX_SIGNAL_VALUES: usize = 1 << 18;
@@ -15,6 +15,8 @@ pub struct CausalLmPrefixMarginSignal {
     pub readout_accumulator: CausalLmReadoutAccumulator,
     pub site: String,
     pub rotation: PrefixRotation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_mix: Option<PrefixChannelMix>,
     pub strength: f32,
     pub shape: [usize; 2],
     pub contrast: CausalLmTokenContrast,
@@ -70,9 +72,7 @@ impl NativeCausalLm {
         let path = format!("{block}.mlp");
         placements
             .iter()
-            .find(|p| {
-                p.path == path && matches!(p.recipe, GeometryAdapterRecipe::PrefixTransport { .. })
-            })
+            .find(|p| p.path == path && p.recipe.prefix_transport().is_some())
             .ok_or_else(|| "prefix signal needs prefix transport on the final MLP".into())
     }
 
@@ -85,9 +85,7 @@ impl NativeCausalLm {
     ) -> CausalLmResult<usize> {
         self.next_token_contrast_input_count(steps, target, rival)?;
         let site = self.signal_site()?;
-        let GeometryAdapterRecipe::PrefixTransport { max_values, .. } = site.recipe else {
-            unreachable!()
-        };
+        let max_values = site.recipe.prefix_transport().unwrap().max_values;
         product(
             &[steps, self.config.width],
             max_values,
@@ -106,12 +104,8 @@ impl NativeCausalLm {
     ) -> CausalLmResult<CausalLmPrefixMarginSignal> {
         let steps = self.prefix_margin_signal_input_count(prompt.len(), target, rival)?;
         let site = self.signal_site()?;
-        let GeometryAdapterRecipe::PrefixTransport {
-            rotation, strength, ..
-        } = site.recipe
-        else {
-            unreachable!()
-        };
+        let spec = site.recipe.prefix_transport().unwrap();
+        let rotation = spec.rotation;
         let shape = [1, steps];
         let layer = self.config.layers - 1;
         let hidden = self.forward_blocks(self.embed(prompt, shape)?, shape, 0..layer)?;
@@ -159,7 +153,8 @@ impl NativeCausalLm {
             readout_accumulator: self.readout_accumulator,
             site: site.path.clone(),
             rotation,
-            strength: strength as f32,
+            output_mix: spec.output_mix,
+            strength: spec.strength,
             shape: [steps, width],
             contrast: Self::contrast_row(logits.data(), steps, target, rival),
             source_features: features(&input, rotation),

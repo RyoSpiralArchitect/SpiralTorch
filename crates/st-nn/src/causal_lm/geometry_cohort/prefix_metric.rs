@@ -1,6 +1,6 @@
 //! Match motion in the calibrated final-row residual branch, not distance in parameter space.
 use super::*;
-use crate::geometry_artifact::{GeometryAdapterPlacement, GeometryAdapterRecipe};
+use crate::geometry_artifact::GeometryAdapterPlacement;
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -94,11 +94,14 @@ impl NativeCausalLm {
         let [p] = artifact.record().placements.as_slice() else {
             return Err("prefix calibration requires a single placement".into());
         };
-        let GeometryAdapterRecipe::PrefixTransport { strength, .. } = p.recipe else {
-            return Err("prefix calibration requires prefix transport".into());
-        };
+        // Orthogonal output routing preserves the squared norm of every gated row.
+        let strength = p
+            .recipe
+            .prefix_transport()
+            .ok_or("prefix calibration requires prefix transport")?
+            .strength;
         if p.path != format!("transformer.h.{}.mlp", self.config.layers - 1)
-            || strength as f32 == 0.
+            || strength == 0.
             || self.lora.is_some()
             || !p.training
             || !p
@@ -113,7 +116,7 @@ impl NativeCausalLm {
                 "prefix calibration needs only a trainable final MLP gate and a frozen host".into(),
             );
         }
-        Ok((p, strength as f32))
+        Ok((p, strength))
     }
 
     fn metric_anchor(&self) -> CausalLmResult<String> {

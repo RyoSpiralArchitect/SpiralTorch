@@ -108,6 +108,14 @@ pub enum GeometryAdapterRecipe {
         max_values: usize,
         rotation: PrefixRotation,
     },
+    #[serde(rename = "spiraltorch.prefix_transport_adapter.v2")]
+    MixedPrefixTransport {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        rotation: PrefixRotation,
+        output_mix: PrefixChannelMix,
+    },
     #[serde(rename = "spiraltorch.channel_affine_adapter.v1")]
     ChannelAffine {
         features: usize,
@@ -216,6 +224,50 @@ pub enum PrefixRotation {
     Identity,
     QuarterTurn,
     InverseQuarterTurn,
+}
+
+/// Fixed orthogonal output mixing on complete channel triples, after the affine gate.
+/// Leftover channels pass through. No learned matrix or additional streaming state.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrefixChannelMix {
+    CayleyTriples,
+    InverseCayleyTriples,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PrefixTransportSpec {
+    pub rotation: PrefixRotation,
+    pub output_mix: Option<PrefixChannelMix>,
+    pub strength: f32,
+    pub max_values: usize,
+}
+
+impl GeometryAdapterRecipe {
+    pub(crate) fn prefix_transport(&self) -> Option<PrefixTransportSpec> {
+        let (rotation, output_mix, strength, max_values) = match *self {
+            Self::PrefixTransport {
+                rotation,
+                strength,
+                max_values,
+                ..
+            } => (rotation, None, strength, max_values),
+            Self::MixedPrefixTransport {
+                rotation,
+                output_mix,
+                strength,
+                max_values,
+                ..
+            } => (rotation, Some(output_mix), strength, max_values),
+            _ => return None,
+        };
+        Some(PrefixTransportSpec {
+            rotation,
+            output_mix,
+            strength: strength as f32,
+            max_values,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -488,6 +540,9 @@ impl GeometryAdapterPlacement {
             PrefixTransport {
                 features, strength, ..
             }
+            | MixedPrefixTransport {
+                features, strength, ..
+            }
             | ChannelAffine {
                 features, strength, ..
             }
@@ -543,6 +598,7 @@ impl GeometryAdapterPlacement {
         let mut shapes = BTreeMap::new();
         match &self.recipe {
             PrefixTransport { .. }
+            | MixedPrefixTransport { .. }
             | ChannelAffine { .. }
             | Wave { .. }
             | WaveRadius { .. }
@@ -634,7 +690,10 @@ impl GeometryAdapterPlacement {
             return Err("missing geometry tensors".into());
         }
         match &self.recipe {
-            PrefixTransport { max_values, .. } => {
+            MixedPrefixTransport { .. } if features < 3 => {
+                return Err("prefix output mixing requires at least three channels".into());
+            }
+            PrefixTransport { max_values, .. } | MixedPrefixTransport { max_values, .. } => {
                 if !(features..=GEOMETRY_ADAPTER_MAX_VALUES).contains(max_values) {
                     return Err("prefix transport value budget out of bounds".into());
                 }

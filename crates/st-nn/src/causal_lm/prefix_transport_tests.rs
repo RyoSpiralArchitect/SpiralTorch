@@ -175,3 +175,76 @@ fn prefix_transport_cache_still_respects_full_geometry_budget() {
     assert!(m.forward(&[2, 5, 1, 4], [1, 4], true).is_err());
     assert_eq!(c.token_ids(), [2, 5, 1]);
 }
+
+#[test]
+fn mixed_transport_preserves_calibration_norm_not_gradient_orientation_or_cache_owners() {
+    use crate::geometry_artifact::PrefixChannelMix::*;
+    let base = load();
+    let site = "transformer.h.1.mlp";
+    let ids = vec![2, 4, 6];
+    let mut rec = placed(&base, site, QuarterTurn, 0., 64)
+        .geometry_artifact()
+        .unwrap()
+        .record()
+        .clone();
+    for t in &mut rec.placements[0].tensors {
+        t.values.fill(0.);
+        t.requires_grad = t.name == "gate";
+    }
+    let legacy = base
+        .with_geometry(GeometryAdapterArtifact::create(rec.clone()).unwrap())
+        .unwrap();
+    let prompts = vec![ids.clone(), vec![4, 2, 5]];
+    let ref_metric = legacy.calibrate_prefix_residual_metric(&prompts).unwrap();
+    let ref_trace = legacy.last_mlp_prefix_margin_signal(&ids, 7, 8).unwrap();
+    let old = serde_json::to_value(&ref_metric).unwrap();
+    for mix in [CayleyTriples, InverseCayleyTriples] {
+        rec.placements[0].recipe = GeometryAdapterRecipe::MixedPrefixTransport {
+            features: 4,
+            strength: 0.5,
+            max_values: 64,
+            rotation: QuarterTurn,
+            output_mix: mix,
+        };
+        let m = base
+            .with_geometry(GeometryAdapterArtifact::create(rec.clone()).unwrap())
+            .unwrap();
+        let trace = m.last_mlp_prefix_margin_signal(&ids, 7, 8).unwrap();
+        assert_eq!(trace.output_mix, Some(mix));
+        assert_eq!(trace.contrast, ref_trace.contrast);
+        assert_eq!(trace.upstream, ref_trace.upstream);
+        let metric = m.calibrate_prefix_residual_metric(&prompts).unwrap();
+        let now = serde_json::to_value(&metric).unwrap();
+        assert_ne!(old["id"], now["id"]);
+        assert_eq!(old["second_moments"], now["second_moments"]);
+        let g = m
+            .geometry_token_menu_gradients(&ids, &[7, 8], 0, 1.)
+            .unwrap();
+        assert!(m
+            .step_prefix_residual_rms(&ref_metric, &[&g], PrefixMetricRule::Diagonal, 0.001, 1000.)
+            .is_err());
+        let (end, r) = m
+            .step_prefix_residual_rms(&metric, &[&g], PrefixMetricRule::Diagonal, 0.001, 1000.)
+            .unwrap();
+        assert!((r.realized_rms - 0.001).abs() < 1e-7);
+        let saved = end.geometry_artifact().unwrap();
+        let restored = base
+            .with_geometry(
+                GeometryAdapterArtifact::from_json(
+                    saved.to_json().as_bytes(),
+                    saved.artifact_id(),
+                    base.base_model_identity(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let ctx = NativeCausalLmContext::new(restored, ids.clone(), 1024).unwrap();
+        close(
+            ctx.with_suffix(&[5, 1]).unwrap().logit_values(),
+            end.logits(&[2, 4, 6, 5, 1], [1, 5], true).unwrap().data(),
+        );
+        assert!(end
+            .step_prefix_residual_rms(&metric, &[&g], PrefixMetricRule::Diagonal, 0.001, 1000.)
+            .is_err());
+    }
+}
