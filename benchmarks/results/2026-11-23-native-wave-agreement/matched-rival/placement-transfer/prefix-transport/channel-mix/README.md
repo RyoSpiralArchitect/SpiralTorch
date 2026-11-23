@@ -1,5 +1,8 @@
 # A fixed rotation after the prefix gate
 
+The [completed comparison](RESULTS.md) found changes in verb margins, but no
+decision flips or advantage across bases; the mixing recipe stays opt-in.
+
 For temporal transport, m[t] is the average of earlier site features after
 rotating each by its lag. The original adapter returns
 `x[t] + strength * (gate * m[t] + bias)`. The optional v2 recipe instead
