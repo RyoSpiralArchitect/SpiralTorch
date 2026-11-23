@@ -5,6 +5,10 @@ The new Rust recipe has a real loss gradient and a compact cache. On this
 These are separate implementation and learning results. No real GPT-2, new
 English test set, GPU run or publication.
 
+The [matched two-context follow-up](paired-gap/RESULTS.md) trains the contrast itself
+with three gate coordinates: some new pairs were ordered correctly without changing
+the verb either context selected.
+
 ## Matched training
 
 The [preregistered comparison](PROTOCOL.md) used three freshly generated
