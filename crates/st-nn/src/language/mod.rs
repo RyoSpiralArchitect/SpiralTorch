@@ -12,6 +12,7 @@ mod gw;
 mod info_geometry;
 mod logbook;
 mod maxwell;
+pub mod paired_offset;
 mod pipeline;
 mod schrodinger;
 mod temperature;
