@@ -105,6 +105,9 @@ Transformers or NumPy. See
 [native geometry training](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/native-geometry-runtime.md)
 for saved-state reuse, Rust-owned updates and the still-optional HF boundary.
 
+For a source-only example of training against two contrasting prefixes, see
+[paired verb margins](../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/placement-transfer/prefix-transport/paired-gap/weakest-lane/RESULTS.md#api-and-verification).
+
 ## Optional HF Integration
 
 Use the optional HF clients when execution should remain in Transformers/Torch.

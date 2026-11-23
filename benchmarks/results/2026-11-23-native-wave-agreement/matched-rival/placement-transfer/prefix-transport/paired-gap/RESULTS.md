@@ -3,6 +3,9 @@
 [Protocol](PROTOCOL.md) | [All 216 template/order cells](orders.tsv) |
 [Rust objective](../../../../../../../crates/st-nn/src/causal_lm/paired_token_gap.rs)
 
+The [weakest-lane follow-up](weakest-lane/RESULTS.md) tested the weaker decision directly
+on new synthetic inputs: the continuous head-margin gate passed, but the both-correct gate did not.
+
 Only synthetic, two-layer CPU decoders were used. With the base and numerical LoRA frozen,
 each condition trained the same three gate coordinates at the last MLP. Two contexts differed
 only in the number marker of the supervised noun. All arms used the same delivered residual

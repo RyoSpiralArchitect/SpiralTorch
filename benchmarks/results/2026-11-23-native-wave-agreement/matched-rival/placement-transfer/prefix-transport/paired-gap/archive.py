@@ -12,7 +12,9 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def pack(root, parent, bank, selector, residual, output):
+def pack(root, parent, bank, selector, residual, output, *, additional_parents=(),
+         evidence_files=("installed.json","rehearsal-succeeded.json","installed.py","paired-decisions.json","orders.tsv"),
+         evidence_dirs=("formal-cpu","rehearsal-cpu","binding-cpu","rust-cpu","rust-layout-cpu","wheel-cpu","wheel")):
     files={}
     def take(name,path):
         if name in files or not path.is_file() or path.is_symlink():
@@ -27,12 +29,13 @@ def pack(root, parent, bank, selector, residual, output):
         sp=json.loads((root/kind/"training.json").read_bytes())
         for rel in ["complete.json","attempt/hosts.json"]+["base-%s.safetensors"%b for b in sp["bases"]]:
             take("parents/base/"+kind+"/"+rel,parent/kind/rel)
-        for label,folder,names in (("bank",bank,("inputs.json","training.json","evaluation.json")),
-                        ("selector",selector,("inputs.json","transfer.json")),("residual",residual,("spec.json",))):
+        ancestors=(("bank",bank,("inputs.json","training.json","evaluation.json")),
+                   ("selector",selector,("inputs.json","transfer.json")),("residual",residual,("spec.json",)))
+        for label,folder,names in ancestors+tuple(additional_parents):
             for n in names:take("parents/"+label+"/"+kind+"/"+n,folder/kind/n)
-    for n in ("installed.json","rehearsal-succeeded.json","installed.py","paired-decisions.json","orders.tsv"):
+    for n in evidence_files:
         take("evidence/"+n,root/n)
-    for n in ("formal-cpu","rehearsal-cpu","binding-cpu","rust-cpu","rust-layout-cpu","wheel-cpu","wheel"):
+    for n in evidence_dirs:
         subtree("evidence/"+n,root/n)
     hashes={}
     def add(t,name,raw):
