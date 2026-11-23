@@ -60,3 +60,5 @@ python3 -ISB readback.py "$CAPTURE/evidence/formal" \
 | Complete table | `17f524666caa90df77eb6203d4b8eb4fa777e85ed46b7185809cd991593a8d0d` |
 | Development CPU wheel | `c5ea0bc509e31db66798f2285352584b13dfbb05f8301413e5f751fac0eb5448` |
 | Private archive (133 verified files) | `c043026593a6125abeb1bf9dc93a6167ee0404713e0ab599bc6d44ba36807669` |
+
+Next matched study: [actual attention, uniform values and a fixed position](../attention-value-read/RESULTS.md).
