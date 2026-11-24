@@ -1,10 +1,32 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "anchor_kl_tests.rs"]
+mod anchor_kl_steps;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "line_ray_tests.rs"]
+mod line_ray;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "line_owner_tests.rs"]
+mod line_owners;
+
 #[path = "line_menu_decoder_tests.rs"]
 mod line_menu_decoder;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "line_session_tests.rs"]
+mod line_session;
+
 #[path = "projection_probe_tests.rs"]
 mod projection_probe;
+
+#[path = "frozen_lora_tests.rs"]
+mod frozen_lora;
+
+#[path = "declared_set_step_tests.rs"]
+mod declared_set_step;
 
 fn geometry(base: &NativeCausalLm, layer: usize, gate: f32) -> GeometryAdapterArtifact {
     let mut record = artifact(base, &format!("transformer.h.{layer}.attn"), gate)
@@ -273,6 +295,86 @@ fn paired_and_archived_distance_steps_reject_incompatible_owners_and_budgets() {
 }
 
 #[test]
+fn gradient_ray_recovers_a_direction_lost_by_the_preliminary_sgd_rounding() {
+    let start = model(1, CausalLmReadoutAccumulator::F32WideBackward);
+    let mut record = start.geometry_artifact().unwrap().record().clone();
+    for t in &mut record.placements[0].tensors {
+        if t.requires_grad {
+            t.values.fill(0.5);
+        }
+    }
+    let start = start
+        .with_geometry(GeometryAdapterArtifact::create(record).unwrap())
+        .unwrap();
+    let ids = [1, 2, 4, 3];
+    let labels = [-100, -100, -100, 3];
+    let mode = CausalLmAdaptationMode::Geometry;
+    let grad = start
+        .adaptation_loss_gradients_with_labels(&ids, [1, 4], Some(&labels), Some(mode))
+        .unwrap();
+    let artifact = start.geometry_artifact().unwrap();
+    let target = 0.02;
+    let rounded = start
+        .step_adaptation_sgd(&grad, mode, f32::MIN_POSITIVE)
+        .unwrap();
+    assert_eq!(rounded.geometry_artifact_id(), start.geometry_artifact_id());
+    let error = start
+        .step_geometry_sgd_at_distance(&grad, f32::MIN_POSITIVE, target)
+        .unwrap_err();
+    assert!(error.to_string().contains("zero geometry direction"));
+    let (next, receipt) = start
+        .step_geometry_gradient_at_distance(&grad, target)
+        .unwrap();
+    assert!(receipt.gradient_l2 > 0. && receipt.gradient_dot_step < 0.);
+    assert_eq!(receipt.method, "gradient_ray_f32.v1");
+    assert_eq!(receipt.origin_id, artifact.artifact_id());
+    assert_eq!(
+        next.geometry_artifact_id(),
+        Some(receipt.result_id.as_str())
+    );
+    assert_eq!(next.lora_artifact_id(), start.lora_artifact_id());
+    assert_eq!(
+        receipt.realized_l2,
+        artifact
+            .trainable_delta_l2(next.geometry_artifact().unwrap())
+            .unwrap()
+    );
+    assert!((receipt.realized_l2 / target - 1.).abs() <= 1e-4);
+    assert!(receipt.relative_vector_error <= 1e-4);
+
+    let (same, zero) = start.step_geometry_gradient_at_distance(&grad, 0.).unwrap();
+    assert_eq!(same.geometry_artifact_id(), start.geometry_artifact_id());
+    assert_eq!((zero.realized_l2, zero.gradient_dot_step), (0., 0.));
+    for loss in [f64::from_bits(1), f64::MAX, -1., f64::NAN] {
+        assert!(start
+            .step_geometry_gradient_at_distance(&grad, loss)
+            .is_err());
+    }
+    assert!(next
+        .step_geometry_gradient_at_distance(&grad, target)
+        .is_err());
+    let other_policy = start.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
+    assert!(other_policy
+        .step_geometry_gradient_at_distance(&grad, 0.)
+        .is_err());
+    let without_lora = load().with_geometry(artifact.clone()).unwrap();
+    assert!(without_lora
+        .step_geometry_gradient_at_distance(&grad, 0.)
+        .is_err());
+    let joint = start
+        .adaptation_loss_gradients_with_labels(
+            &ids,
+            [1, 4],
+            Some(&labels),
+            Some(CausalLmAdaptationMode::Joint),
+        )
+        .unwrap();
+    assert!(start
+        .step_geometry_gradient_at_distance(&joint, target)
+        .is_err());
+}
+
+#[test]
 fn paired_geometry_models_without_lora_have_an_exact_plain_ce_control() {
     let base = load();
     let x = base.with_geometry(geometry(&base, 1, 0.2)).unwrap();
@@ -322,6 +424,13 @@ fn paired_zero_signal_preserves_mixed_owner_and_cannot_invent_a_positive_step() 
         .geometry_competition_gradients(&ids, [1, 3], None, recipe)
         .unwrap();
     assert!(x.step_geometry_sgd_at_distance(&g, 0.5, 1e-4).is_err());
+    assert!(x.step_geometry_gradient_at_distance(&g, 1e-4).is_err());
+    let (still, zero) = x.step_geometry_gradient_at_distance(&g, 0.).unwrap();
+    assert_eq!(still.geometry_artifact_id(), x.geometry_artifact_id());
+    assert_eq!(
+        (zero.gradient_l2, zero.realized_l2, zero.gradient_dot_step),
+        (0., 0., 0.)
+    );
     let (_, m, r) = x
         .geometry_competition_pair(&x, recipe, 0.5)
         .unwrap()
@@ -785,6 +894,113 @@ fn gradient_alignment_allows_different_inputs_not_different_weights_or_coordinat
         .is_err());
     let wide = model.with_readout_accumulator(CausalLmReadoutAccumulator::F64);
     assert!(a.alignment_with(&grad(&wide, &[1, 2, 3], mode)).is_err());
+}
+
+#[test]
+fn full_and_declared_share_each_primal_and_keep_independent_sealed_vjps() {
+    use decoder::work_counts;
+    use CausalLmReadoutAccumulator::{F32WideBackward, F32, F64};
+    let ids = [1, 2, 3, 4, 5, 6, 7, 8];
+    let labels = [-100, -100, -100, 4, -100, -100, 7, -100];
+    let plan = [DeclaredRivalRow {
+        position: 6,
+        target: 7,
+        rivals: vec![1, 4],
+    }];
+    let assert_same = |a: &NativeCausalLmAdaptationGradients,
+                       b: &NativeCausalLmAdaptationGradients| {
+        assert_eq!(a.loss().to_bits(), b.loss().to_bits());
+        assert_eq!(a.base_model_identity(), b.base_model_identity());
+        assert_eq!(a.lora_artifact_id(), b.lora_artifact_id());
+        assert_eq!(a.geometry_artifact_id(), b.geometry_artifact_id());
+        assert_eq!(a.readout_accumulator(), b.readout_accumulator());
+        assert_eq!(
+            (a.window_shape(), a.target_tokens()),
+            (b.window_shape(), b.target_tokens())
+        );
+        assert_eq!(
+            serde_json::to_vec(&a.declared_rival_report()).unwrap(),
+            serde_json::to_vec(&b.declared_rival_report()).unwrap()
+        );
+        assert_eq!(a.parameters(), b.parameters());
+        for (path, p) in a.parameters() {
+            for (name, v) in p {
+                assert!(v
+                    .iter()
+                    .zip(&b.parameters()[path][name])
+                    .all(|(a, b)| a.to_bits() == b.to_bits()));
+            }
+        }
+    };
+    for policy in [F32, F32WideBackward, F64] {
+        let base = load().with_readout_accumulator(policy);
+        let mut r = geometry(&base, 1, 0.25).record().clone();
+        let mut extra = r.placements[0].clone();
+        extra.path = "transformer.h.0.mlp".into();
+        r.placements.push(extra);
+        let multi = base
+            .with_geometry(GeometryAdapterArtifact::create(r).unwrap())
+            .unwrap();
+        for (m, replays) in [(model(1, policy), 1), (multi, 2)] {
+            let m = m.with_forward_readout_storage(CausalLmForwardStorage::OriginalPacked);
+            for (mask, plan, mix) in [
+                (Some(labels.as_slice()), plan.as_slice(), 1.),
+                (None, plan.as_slice(), 0.5),
+                (None, plan.as_slice(), 0.),
+                (None, &[][..], 1.),
+            ] {
+                work_counts::take();
+                let full = m
+                    .adaptation_loss_gradients_with_labels(
+                        &ids,
+                        [2, 4],
+                        mask,
+                        Some(CausalLmAdaptationMode::Geometry),
+                    )
+                    .unwrap();
+                let declared = m
+                    .geometry_declared_rival_gradients(&ids, [2, 4], mask, plan, mix)
+                    .unwrap();
+                assert_eq!(work_counts::take(), [4, 2 * replays, 2]);
+                let (f, d) = m
+                    .geometry_full_and_declared_gradients(&ids, [2, 4], mask, plan, mix)
+                    .unwrap();
+                assert_eq!(work_counts::take(), [2, replays, 1]);
+                assert_same(&f, &full);
+                assert_same(&d, &declared);
+                assert_eq!(
+                    d.declared_rival_report().unwrap().full_ce.to_bits(),
+                    f.loss().to_bits()
+                );
+                if mix == 1. && !plan.is_empty() {
+                    assert_ne!(f.parameters(), d.parameters());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn shared_geometry_objectives_validate_before_the_decoder() {
+    let m = model(0, CausalLmReadoutAccumulator::F32);
+    let ids = [1, 2, 3, 4];
+    let labels = [-100, -100, 3, 4];
+    decoder::work_counts::take();
+    for (position, target, mix) in [(0, 1, 1.), (1, 2, 1.), (2, 4, 1.), (2, 3, f64::NAN)] {
+        let bad = [DeclaredRivalRow {
+            position,
+            target,
+            rivals: vec![0],
+        }];
+        assert!(m
+            .geometry_full_and_declared_gradients(&ids, [1, 4], Some(&labels), &bad, mix)
+            .is_err());
+    }
+    assert!(m.geometry_gradient_pair_input_count([1, 1], false).is_err());
+    assert!(load()
+        .geometry_gradient_pair_input_count([1, 4], false)
+        .is_err());
+    assert_eq!(decoder::work_counts::take(), [0; 3]);
 }
 
 #[test]

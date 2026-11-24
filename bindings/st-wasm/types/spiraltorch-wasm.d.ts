@@ -19,6 +19,106 @@ declare module "spiraltorch-wasm" {
     export function alignCausalTargetsJson(input: string): string;
     /** Requires nn. Bind independently encoded prompt, content and training IDs; optional source offsets. */
     export function prepareCausalCompletionJson(input: string): string;
+    /** Requires nn. One immutable native GPT-2-format decoder in WASM host memory. */
+    export class NativeCausalLm {
+        private constructor();
+        static fromGpt2(config: string, weights: Uint8Array): NativeCausalLm;
+        readonly baseModelIdentity: string;
+        withLora(layer: number, rank: number, alpha: number): NativeCausalLm;
+        /** Promote the current LoRA to fixed base state without merging or rounding its weights. */
+        freezeLora(): NativeCausalLm;
+        readonly frozenLoraArtifactId: string | undefined;
+        frozenLoraJson(): string;
+        withSingleGeometryAt(path: string): NativeCausalLm;
+        readonly loraArtifactId: string | undefined;
+        withLoraJson(payload: string, expectedId: string): NativeCausalLm;
+        loraJson(): string;
+        withGeometry(artifact: GeometryAdapterArtifact): NativeCausalLm;
+        geometryArtifact(): GeometryAdapterArtifact | undefined;
+        nextLogits(promptJson: string): Float32Array;
+        prefill(promptIds: Uint32Array, maxCacheValues: number): NativeCausalLmContext;
+        /** Geometry-only full-vocabulary VJP. Objective JSON kind: set, menu (gold_index, mix), or subset (accepted_indices). */
+        geometryLineGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, maxTileValues?: number): CausalLmLineGradients;
+        geometryTokenMenuGradients(prompt: Uint32Array, choices: Uint32Array, goldIndex: number, mix: number): CausalLmLineGradients;
+        lineAdaptationGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, mode: "lora" | "geometry" | "joint", maxTileValues?: number): CausalLmLineGradients;
+        stepLineGradientAtDistance(gradients: CausalLmLineGradients, targetL2: number): CausalLmLineRayStep;
+        stepLineAdaptationSgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
+        stepLineGeometrySgd(gradients: CausalLmLineGradients, learningRate: number): NativeCausalLm;
+        declaredSetNllJson(batch: CausalLmDeclaredBatch): string;
+        stepDeclaredSetGeometryAtDistance(batch: CausalLmDeclaredBatch, distance: number): CausalLmDeclaredStep;
+        free(): void;
+    }
+    /** Immutable single-sequence Rust KV cache; fork with already known continuation IDs. */
+    export class NativeCausalLmContext {
+        private constructor();
+        readonly cacheValues: number;
+        readonly tokenCount: number;
+        readonly geometryArtifactId: string | undefined;
+        nextLogits(): Float32Array;
+        withSuffix(suffixIds: Uint32Array): NativeCausalLmContext;
+        /** Full-vocabulary NLLs including one stop per sorted line; IDs packed by candidate. */
+        scoreLinesJson(content: Uint32Array, lengths: Uint32Array, stopId: number, maxTileValues?: number): string;
+        free(): void;
+    }
+    export class GeometryAdapterArtifact {
+        private constructor();
+        static createJson(payload: string): GeometryAdapterArtifact;
+        static fromJson(payload: string, expected_id: string, expected_base_model_identity: string): GeometryAdapterArtifact;
+        readonly artifactId: string;
+        readonly layoutId: string;
+        readonly baseModelIdentity: string;
+        toJson(): string;
+        stateJson(): string;
+        anchorWaveProjection(path: string): GeometryAdapterArtifact;
+        free(): void;
+    }
+    export class NativeCausalLmLineTrainingSession {
+        constructor(origin: NativeCausalLm, plan: string);
+        static fromJson(origin: NativeCausalLm, plan: string, payload: string, expectedId: string): NativeCausalLmLineTrainingSession;
+        readonly planId: string;
+        readonly completedUpdates: number;
+        readonly totalUpdates: number;
+        readonly exhausted: boolean;
+        modelSnapshot(): NativeCausalLm;
+        stepJson(): string | undefined;
+        /** Applied, bounded KL refusal (unchanged state), or undefined when exhausted. */
+        attemptStepJson(): string | undefined;
+        checkpoint(): CausalLmLineCheckpoint;
+        free(): void;
+    }
+    export class CausalLmLineCheckpoint {
+        private constructor();
+        readonly payload: string;
+        readonly id: string;
+        free(): void;
+    }
+    export class CausalLmLineRayStep {
+        private constructor();
+        reportJson(): string;
+        /** Consumes the step; the original model and sealed gradient remain usable. */
+        intoModel(): NativeCausalLm;
+        free(): void;
+    }
+    export class CausalLmLineGradients {
+        private constructor();
+        readonly linePromptId: string | undefined;
+        reportJson(): string;
+        trainingWorkJson(): string;
+        parameterGradientsJson(): string;
+        free(): void;
+    }
+    export class CausalLmDeclaredBatch {
+        private constructor();
+        static fromJson(windows: string): CausalLmDeclaredBatch;
+        free(): void;
+    }
+    export class CausalLmDeclaredStep {
+        private constructor();
+        reportJson(): string;
+        /** Consumes this handle. Returns the original weights on a finite rejection. */
+        intoModel(): NativeCausalLm;
+        free(): void;
+    }
     /** Requires nn; GPU methods additionally require webgpu. Rust owns all study semantics. */
     export class ByteCorpusStudy {
         private constructor();

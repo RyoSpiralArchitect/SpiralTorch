@@ -352,6 +352,102 @@ fn cohort_singleton_and_pair_match_existing_sgd_and_rounded_loss_dots() {
 }
 
 #[test]
+fn cohort_ray_resolves_sub_f32_mean_but_never_invents_a_direction() {
+    let m = model();
+    let u = f32::from_bits(1);
+    let d = 1. / 256.;
+    let a = gradient(&m, [1., u, 0., 0.], 1e20);
+    let b = gradient(&m, [-1., 0., 0., 0.], -1e19);
+    assert!(m.step_geometry_cohort_sgd(&[&a, &b], 1., Some(d)).is_err());
+    let (end, r) = m
+        .step_geometry_cohort_gradient_at_distance(&[&a, &b], d)
+        .unwrap();
+    let unit = gradient(&m, [0., 1., 0., 0.], 0.);
+    let (expected, _) = m.step_geometry_gradient_at_distance(&unit, d).unwrap();
+    assert_eq!(end.geometry_artifact_id(), expected.geometry_artifact_id());
+    assert_eq!(end.lora_to_json().unwrap(), m.lora_to_json().unwrap());
+    assert_eq!(r.step.gradient_l2, f64::from(u) / 2.);
+    assert_eq!(r.step.realized_l2, d);
+    assert_eq!(r.member_loss_dots, [-f64::from(u) * d, 0.]);
+    assert_eq!(r.step.gradient_dot_step, r.member_loss_dots[0] / 2.);
+
+    let exact_opposite = gradient(&m, [-1., -u, 0., 0.], 1.);
+    assert!(m
+        .step_geometry_cohort_gradient_at_distance(&[&a, &exact_opposite], d)
+        .is_err());
+    let (zero, z) = m
+        .step_geometry_cohort_gradient_at_distance(&[&a, &exact_opposite], 0.)
+        .unwrap();
+    assert_eq!(zero.geometry_artifact_id(), m.geometry_artifact_id());
+    assert_eq!((z.step.gradient_l2, z.step.realized_l2), (0., 0.));
+    assert_eq!(z.member_loss_dots, [0., 0.]);
+}
+
+#[test]
+fn cohort_ray_preserves_equal_votes_and_reports_individual_conflict() {
+    let m = model();
+    let mut a = gradient(&m, [1e20, 1., 0., 0.], 2.);
+    let mut b = gradient(&m, [1., 1., 0., 0.], 8.);
+    let mut c = gradient(&m, [-1e20, 1., 0., 0.], -9.);
+    (a.target_tokens, b.target_tokens, c.target_tokens) = (1, 20, 3);
+    (a.loss, b.loss, c.loss) = (2., 7., 3.);
+    let d = 1. / 256.;
+    let (end, r) = m
+        .step_geometry_cohort_gradient_at_distance(&[&a, &b, &c], d)
+        .unwrap();
+    assert_eq!(
+        (r.members, r.total_target_tokens, r.mean_input_loss),
+        (3, 24, 4.)
+    );
+    assert_eq!(r.step.method, "cohort_mean_gradient_ray_f64.v1");
+    assert_eq!(r.step.gradient_l2, (1_f64 + (1_f64 / 3.).powi(2)).sqrt());
+    assert!(
+        r.member_loss_dots[0] < 0. && r.member_loss_dots[2] > 0. && r.step.gradient_dot_step < 0.
+    );
+    let (permuted, p) = m
+        .step_geometry_cohort_gradient_at_distance(&[&c, &a, &b], d)
+        .unwrap();
+    assert_eq!(permuted.geometry_artifact_id(), end.geometry_artifact_id());
+    assert_eq!(
+        p.member_loss_dots,
+        [
+            r.member_loss_dots[2],
+            r.member_loss_dots[0],
+            r.member_loss_dots[1]
+        ]
+    );
+    let (single, s) = m.step_geometry_gradient_at_distance(&b, d).unwrap();
+    for votes in [
+        vec![&b],
+        vec![&b, &b],
+        vec![&b; MAX_GEOMETRY_COHORT_MEMBERS],
+    ] {
+        let (duplicate, t) = m
+            .step_geometry_cohort_gradient_at_distance(&votes, d)
+            .unwrap();
+        assert_eq!(
+            duplicate.geometry_artifact_id(),
+            single.geometry_artifact_id()
+        );
+        assert_eq!(s.method, "gradient_ray_f32.v1");
+        assert_eq!(
+            (
+                t.step.realized_l2,
+                t.step.gradient_l2,
+                t.step.relative_vector_error,
+                t.step.gradient_dot_step
+            ),
+            (
+                s.realized_l2,
+                s.gradient_l2,
+                s.relative_vector_error,
+                s.gradient_dot_step
+            )
+        );
+    }
+}
+
+#[test]
 fn cohort_rejects_stale_malformed_or_unrepresentable_inputs_atomically() {
     let m = model();
     let a = gradient(&m, [1.; 4], 0.);
@@ -374,6 +470,20 @@ fn cohort_rejects_stale_malformed_or_unrepresentable_inputs_atomically() {
     let wrong = gradient(&other, [1.; 4], 0.);
     for bad in [&stale, &joint, &nan, &overflow, &wrong] {
         assert!(m.step_geometry_cohort_sgd(&[&a, bad], 0.1, None).is_err());
+        assert!(m
+            .step_geometry_cohort_gradient_at_distance(&[&a, bad], 0.)
+            .is_err());
+    }
+    assert!(m
+        .step_geometry_cohort_gradient_at_distance(&[], 0.)
+        .is_err());
+    assert!(m
+        .step_geometry_cohort_gradient_at_distance(&vec![&a; MAX_GEOMETRY_COHORT_MEMBERS + 1], 0.)
+        .is_err());
+    for d in [-1., f64::NAN, f64::INFINITY, f64::MIN_POSITIVE, f64::MAX] {
+        assert!(m
+            .step_geometry_cohort_gradient_at_distance(&[&a], d)
+            .is_err());
     }
     assert!(m.step_geometry_cohort_sgd(&[], 0.1, None).is_err());
     assert!(m

@@ -1,19 +1,56 @@
 //! Owned single-sequence KV state. Frozen model and adapters travel with the cache.
 //! Updates are built separately and published only after successful execution.
 use super::*;
-use crate::geometry_runtime::GeometrySequenceDependency;
+use crate::geometry_runtime::{GeometryCacheKind, GeometrySequenceDependency, TransportState};
 use st_kernel_contracts::attention::{attention_key_lag_reference, AttentionMask, AttentionSpec};
 
 #[derive(Clone, Debug)]
 pub(super) struct InferenceBlockCache {
     pub key: Vec<f32>,
     pub value: Vec<f32>,
-    pub history: [Option<Tensor>; 3],
+    pub history: [Option<GeometryHistory>; 3],
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum GeometryHistory {
+    Replay(Tensor),
+    Transport(TransportState),
+}
+
+impl GeometryHistory {
+    fn cache_values(&self) -> usize {
+        match self {
+            Self::Replay(t) => t.data().len(),
+            Self::Transport(s) => s.cache_values(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct KvPrefix<'a> {
+    steps: usize,
+    blocks: &'a [Arc<InferenceBlockCache>],
+}
+
+// A scoring branch needs only K/V and causal geometry history, not a new full
+// vocabulary row, copied token history, or a second owner of the model.
+pub(super) struct KvBranch {
+    steps: usize,
+    blocks: Vec<Arc<InferenceBlockCache>>,
+}
+
+impl KvBranch {
+    pub(super) fn prefix(&self) -> KvPrefix<'_> {
+        KvPrefix {
+            steps: self.steps,
+            blocks: &self.blocks,
+        }
+    }
 }
 
 /// Non-serializable acceleration state, never an authority for learned weights.
-/// Causal sequence geometry currently replays its retained input prefix; row-local
-/// geometry only evaluates new rows. Old K/V values are not recomputed.
+/// Causal geometry replays its prefix unless its recipe has a compact state.
+/// Row-local geometry only evaluates new rows. Old K/V values are not recomputed.
 #[derive(Clone, Debug)]
 pub struct NativeCausalLmContext {
     model: NativeCausalLm,
@@ -24,57 +61,78 @@ pub struct NativeCausalLmContext {
 }
 
 impl NativeCausalLm {
-    pub(super) fn geometry_needs_history(&self, path: &str) -> CausalLmResult<bool> {
-        let Some(runtime) = &self.geometry else {
-            return Ok(false);
-        };
-        if !runtime
-            .artifact()
-            .record()
-            .placements
-            .iter()
-            .any(|p| p.path == path)
-        {
-            return Ok(false);
-        }
-        Ok(runtime.sequence_dependency(path)? == GeometrySequenceDependency::CausalPrefix)
-    }
-
-    fn incremental_geometry(
+    pub(super) fn runtime_at(
         &self,
         path: &str,
-        row: Tensor,
-        previous: Option<&Tensor>,
-        steps: usize,
-    ) -> CausalLmResult<(Tensor, Option<Tensor>)> {
-        if !self.geometry_needs_history(path)? {
-            return Ok((
-                self.geometry_output(path, row, [1, 1], &mut decoder::BlockPass::Forward)?
-                    .0,
-                None,
-            ));
-        }
-        let previous = previous.ok_or("missing causal geometry history")?;
-        if previous.shape() != (steps - 1, self.config.width) {
-            return Err("invalid causal geometry history shape".into());
-        }
-        let mut values = Vec::new();
-        values.try_reserve_exact(steps * self.config.width)?;
-        values.extend_from_slice(previous.data());
-        values.extend_from_slice(row.data());
-        let input = Tensor::from_vec(steps, self.config.width, values)?;
-        let output = self
-            .geometry_output(
-                path,
-                input.clone(),
-                [1, steps],
-                &mut decoder::BlockPass::Forward,
-            )?
-            .0;
-        Ok((output.gather_rows(&[steps - 1])?, Some(input)))
+    ) -> Option<&crate::geometry_runtime::NativeGeometryRuntime> {
+        self.geometry.as_deref().filter(|r| {
+            r.artifact()
+                .record()
+                .placements
+                .iter()
+                .any(|p| p.path == path)
+        })
     }
 
-    /// Persistent f32 K/V and geometry input history, excluding frozen weights,
+    pub(super) fn incremental_geometry(
+        &self,
+        path: &str,
+        rows: Tensor,
+        previous: Option<&GeometryHistory>,
+        steps: usize,
+    ) -> CausalLmResult<(Tensor, Option<GeometryHistory>)> {
+        let added = rows.shape().0;
+        let Some(runtime) = self.runtime_at(path) else {
+            return Ok((rows, None));
+        };
+        let start = steps
+            .checked_sub(added)
+            .ok_or("invalid cached geometry suffix")?;
+        match runtime.cache_kind(path)? {
+            GeometryCacheKind::DecoderValues => {
+                Err("cached value gate requires decoder values".into())
+            }
+            GeometryCacheKind::RowLocal => Ok((
+                runtime
+                    .forward_sequence(path, rows.data(), [1, added])?
+                    .output()
+                    .clone(),
+                None,
+            )),
+            GeometryCacheKind::Transport { .. } => {
+                let prev = match previous {
+                    None => None,
+                    Some(GeometryHistory::Transport(s)) => Some(s),
+                    _ => return Err("invalid transport history".into()),
+                };
+                let (out, s) = runtime.extend_transport(path, rows, prev, steps)?;
+                Ok((out, Some(GeometryHistory::Transport(s))))
+            }
+            GeometryCacheKind::Replay => {
+                let input = match previous {
+                    None if start == 0 => rows,
+                    Some(GeometryHistory::Replay(t)) if t.shape() == (start, self.config.width) => {
+                        let mut v = Vec::new();
+                        v.try_reserve_exact(steps * self.config.width)?;
+                        v.extend_from_slice(t.data());
+                        v.extend_from_slice(rows.data());
+                        Tensor::from_vec(steps, self.config.width, v)?
+                    }
+                    _ => return Err("invalid causal geometry history shape".into()),
+                };
+                let b = runtime.forward_sequence(path, input.data(), [1, steps])?;
+                let out = if start == 0 {
+                    b.output().clone()
+                } else {
+                    b.output()
+                        .gather_rows(&(start..steps).collect::<Vec<_>>())?
+                };
+                Ok((out, Some(GeometryHistory::Replay(input))))
+            }
+        }
+    }
+
+    /// Persistent K/V and geometry payload in f32-sized words, excluding frozen weights,
     /// readout and transient old/new transaction buffers. Checked before copying IDs.
     pub fn context_cache_values(
         &self,
@@ -88,29 +146,26 @@ impl NativeCausalLm {
         {
             return Err("invalid cached context length or value budget".into());
         }
-        let histories = if let Some(runtime) = &self.geometry {
-            runtime
-                .artifact()
-                .record()
-                .placements
-                .iter()
-                .try_fold(0usize, |count, p| {
-                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                        count
-                            + usize::from(
-                                runtime.sequence_dependency(&p.path)?
-                                    == GeometrySequenceDependency::CausalPrefix,
-                            ),
-                    )
-                })?
-        } else {
-            0
-        };
-        product(
-            &[2 * self.config.layers + histories, steps, self.config.width],
+        let mut n = product(
+            &[2 * self.config.layers, steps, self.config.width],
             max_cache_values,
             "KV and geometry cache",
-        )
+        )?;
+        if let Some(runtime) = &self.geometry {
+            for p in &runtime.artifact().record().placements {
+                let count = match runtime.cache_kind(&p.path)? {
+                    GeometryCacheKind::RowLocal | GeometryCacheKind::DecoderValues => 0,
+                    GeometryCacheKind::Replay => steps,
+                    GeometryCacheKind::Transport { difference } => 2 + usize::from(difference),
+                };
+                n = count
+                    .checked_mul(self.config.width)
+                    .and_then(|v| n.checked_add(v))
+                    .filter(|&v| v <= max_cache_values)
+                    .ok_or("KV and geometry cache exceeds budget")?;
+            }
+        }
+        Ok(n)
     }
 
     /// One-query cached work, not the old square full-prefix attention budget.
@@ -120,10 +175,19 @@ impl NativeCausalLm {
         steps: usize,
         max_cache_values: usize,
     ) -> CausalLmResult<usize> {
+        self.cached_query_count(steps, 1, max_cache_values)
+    }
+
+    pub(super) fn cached_query_count(
+        &self,
+        steps: usize,
+        added: usize,
+        max_cache_values: usize,
+    ) -> CausalLmResult<usize> {
         self.context_cache_values(steps, max_cache_values)?;
-        self.input_count([1, 1], true)?;
+        self.input_count([1, added], true)?;
         product(
-            &[self.config.layers, self.config.heads, steps],
+            &[self.config.layers, self.config.heads, added, steps],
             self.limits.max_attention_pairs,
             "cached attention pairs",
         )?;
@@ -158,14 +222,14 @@ impl NativeCausalLm {
     }
 }
 
-fn append_head_rows(previous: &[f32], row: &[f32], heads: usize) -> CausalLmResult<Vec<f32>> {
+fn extend_head_rows(previous: &[f32], suffix: &[f32], heads: usize) -> CausalLmResult<Vec<f32>> {
     let mut values = Vec::new();
-    values.try_reserve_exact(previous.len() + row.len())?;
+    values.try_reserve_exact(previous.len() + suffix.len())?;
     let old_stride = previous.len() / heads;
-    let width = row.len() / heads;
+    let added_stride = suffix.len() / heads;
     for h in 0..heads {
         values.extend_from_slice(&previous[h * old_stride..(h + 1) * old_stride]);
-        values.extend_from_slice(&row[h * width..(h + 1) * width]);
+        values.extend_from_slice(&suffix[h * added_stride..(h + 1) * added_stride]);
     }
     Ok(values)
 }
@@ -264,7 +328,7 @@ impl NativeCausalLmContext {
                         .history
                         .iter()
                         .flatten()
-                        .map(|t| t.data().len())
+                        .map(GeometryHistory::cache_values)
                         .sum::<usize>()
             })
             .sum()
@@ -278,6 +342,41 @@ impl NativeCausalLmContext {
     }
     pub(super) fn logits_tensor(&self) -> &Tensor {
         &self.logits
+    }
+
+    /// The already computed host row; borrowing it does not run the decoder or read a device.
+    pub fn logit_values(&self) -> &[f32] {
+        self.logits.data()
+    }
+
+    pub(super) fn decoder(&self) -> &NativeCausalLm {
+        &self.model
+    }
+
+    pub(super) fn kv_prefix(&self) -> KvPrefix<'_> {
+        KvPrefix {
+            steps: self.tokens.len(),
+            blocks: &self.blocks,
+        }
+    }
+
+    /// Admit suffix work before a client extracts IDs. This is rectangular cached attention,
+    /// not full-prefix admission and not a promise that many one-token calls fit as one chunk.
+    pub fn suffix_input_count(&self, added: usize) -> CausalLmResult<usize> {
+        self.suffix_end(self.tokens.len(), added)?;
+        Ok(added)
+    }
+
+    fn suffix_end(&self, start: usize, added: usize) -> CausalLmResult<usize> {
+        let steps = start.checked_add(added).ok_or("context length overflow")?;
+        self.model
+            .cached_query_count(steps, added, self.max_cache_values)
+    }
+
+    /// Fork with a known, nonempty suffix. Only its last position is projected into vocabulary
+    /// space. Neither success nor failure changes the source cache or learned parameters.
+    pub fn with_suffix(&self, ids: &[usize]) -> CausalLmResult<Self> {
+        self.preview_suffix_with_edit(ids, None)
     }
 
     /// Appending a token does not sample. Failed admission/execution leaves this context untouched.
@@ -349,27 +448,72 @@ impl NativeCausalLmContext {
         token: usize,
         edit: Option<(usize, usize, &[f32])>,
     ) -> CausalLmResult<Self> {
+        self.preview_suffix_with_edit(&[token], edit)
+    }
+
+    fn preview_suffix_with_edit(
+        &self,
+        suffix: &[usize],
+        edit: Option<(usize, usize, &[f32])>,
+    ) -> CausalLmResult<Self> {
+        let (branch, hidden) = self.suffix_hidden(self.kv_prefix(), suffix, edit)?;
+        let last = if suffix.len() == 1 {
+            hidden
+        } else {
+            hidden.gather_rows(&[suffix.len() - 1])?
+        };
+        self.finish_suffix(suffix, branch.blocks, self.model.context_readout(&last)?)
+    }
+
+    /// Decode attention once, then consume every teacher-forced vocabulary row in bounded tiles.
+    pub(super) fn visit_scored_suffix(
+        &self,
+        prefix: KvPrefix<'_>,
+        suffix: &[usize],
+        tile_rows: usize,
+        mut visit: impl FnMut(usize, &Tensor) -> CausalLmResult<()>,
+    ) -> CausalLmResult<KvBranch> {
+        let (branch, hidden) = self.suffix_hidden(prefix, suffix, None)?;
+        for start in (0..suffix.len()).step_by(tile_rows) {
+            let n = tile_rows.min(suffix.len() - start);
+            let slice;
+            let input = if n == suffix.len() {
+                &hidden
+            } else {
+                slice = hidden.gather_rows(&(start..start + n).collect::<Vec<_>>())?;
+                &slice
+            };
+            let rows = self.model.context_readout(input)?;
+            if rows.layout() == st_tensor::Layout::RowMajor {
+                visit(start, &rows)?;
+            } else {
+                visit(start, &rows.to_layout(st_tensor::Layout::RowMajor)?)?;
+            }
+        }
+        Ok(branch)
+    }
+
+    fn suffix_hidden(
+        &self,
+        prefix: KvPrefix<'_>,
+        suffix: &[usize],
+        edit: Option<(usize, usize, &[f32])>,
+    ) -> CausalLmResult<(KvBranch, Tensor)> {
         let model = &self.model;
         let c = &model.config;
-        let steps = self
-            .tokens
-            .len()
-            .checked_add(1)
-            .ok_or("context length overflow")?;
-        model.cached_input_count(steps, self.max_cache_values)?;
-        if token >= c.vocabulary {
-            return Err("cached token is outside vocabulary".into());
-        }
-        let mut hidden = model.token.gather_rows(&[token])?.add_with_backend(
-            &model.position.gather_rows(&[steps - 1])?,
-            TensorUtilBackend::Cpu,
-        )?;
+        let added = suffix.len();
+        let start = prefix.steps;
+        let steps = self.suffix_end(start, added)?;
+        let shape = [1, added];
+        let mut hidden = model.embed_at(suffix, shape, start)?;
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        decoder::work_counts::suffix(added);
         let mut blocks = Vec::with_capacity(c.layers);
-        for (index, previous) in self.blocks.iter().enumerate() {
+        for (index, previous) in prefix.blocks.iter().enumerate() {
             let block = &model.blocks[index];
             let norm = block.first_norm.forward(&hidden, c.norm_epsilon)?;
-            let qkv = model.split_heads::<3>(&block.qkv.forward(&norm)?, [1, 1])?;
-            let mut key = append_head_rows(&previous.key, &qkv[1], c.heads)?;
+            let qkv = model.split_heads::<3>(&block.qkv.forward(&norm)?, shape)?;
+            let mut key = extend_head_rows(&previous.key, &qkv[1], c.heads)?;
             if let Some((_, pos, row)) = edit.filter(|(layer, _, _)| *layer == index) {
                 let dim = c.width / c.heads;
                 for (head, replacement) in
@@ -378,16 +522,16 @@ impl NativeCausalLmContext {
                     head[pos * dim..(pos + 1) * dim].copy_from_slice(replacement);
                 }
             }
-            let value = append_head_rows(&previous.value, &qkv[2], c.heads)?;
-            let qshape = [1, c.heads, 1, c.width / c.heads];
+            let value = extend_head_rows(&previous.value, &qkv[2], c.heads)?;
+            let qshape = [1, c.heads, added, c.width / c.heads];
             let kshape = [1, c.heads, steps, c.width / c.heads];
             let spec = AttentionSpec::new(
                 &qshape,
                 &kshape,
                 &kshape,
-                model.attention_spec(index, [1, 1])?.scale(),
+                model.attention_spec(index, shape)?.scale(),
                 AttentionMask::Causal {
-                    query_offset: steps - 1,
+                    query_offset: start,
                 },
             )?;
             let attended = attention_key_lag_reference(
@@ -399,10 +543,8 @@ impl NativeCausalLmContext {
                 None,
                 model.key_lag_at(index),
             )?;
-            let attention = model.project_attention_output(
-                index,
-                &model.merge_heads([attended.as_slice()], [1, 1])?,
-            )?;
+            let attention_input = model.merge_heads([attended.as_slice()], shape)?;
+            let attention = model.project_attention_output(index, &attention_input)?;
             let path = format!("transformer.h.{index}");
             let (attention, attention_history) = model.incremental_geometry(
                 &format!("{path}.attn"),
@@ -417,12 +559,23 @@ impl NativeCausalLmContext {
             let mlp = block
                 .contract
                 .forward(&block.expand.forward(&norm)?.try_into_gelu()?)?;
-            let (mlp, mlp_history) = model.incremental_geometry(
-                &format!("{path}.mlp"),
-                mlp,
-                previous.history[1].as_ref(),
-                steps,
-            )?;
+            let mlp_path = format!("{path}.mlp");
+            let (mlp, mlp_history) = if let Some(source) =
+                model.mlp_value_source(&mlp_path, &attention_input, &value, shape, steps)?
+            {
+                let rt = model
+                    .runtime_at(&mlp_path)
+                    .ok_or("missing cached value gate")?;
+                rt.sequence_dimensions(&mlp_path, [1, steps])?;
+                (
+                    rt.forward_value_read_sequence(&mlp_path, mlp.data(), source.data(), shape)?
+                        .output()
+                        .clone(),
+                    None,
+                )
+            } else {
+                model.incremental_geometry(&mlp_path, mlp, previous.history[1].as_ref(), steps)?
+            };
             let output = after_attention.add_with_backend(&mlp, TensorUtilBackend::Cpu)?;
             let (output, block_history) =
                 model.incremental_geometry(&path, output, previous.history[2].as_ref(), steps)?;
@@ -433,12 +586,21 @@ impl NativeCausalLmContext {
                 history: [attention_history, mlp_history, block_history],
             }));
         }
-        let logits = model.context_readout(&hidden)?;
-        let mut tokens = self.tokens.clone();
-        tokens.try_reserve(1)?;
-        tokens.push(token);
+        Ok((KvBranch { steps, blocks }, hidden))
+    }
+
+    fn finish_suffix(
+        &self,
+        suffix: &[usize],
+        blocks: Vec<Arc<InferenceBlockCache>>,
+        logits: Tensor,
+    ) -> CausalLmResult<Self> {
+        let mut tokens = Vec::new();
+        tokens.try_reserve_exact(self.tokens.len() + suffix.len())?;
+        tokens.extend_from_slice(&self.tokens);
+        tokens.extend_from_slice(suffix);
         Ok(Self {
-            model: model.clone(),
+            model: self.model.clone(),
             max_cache_values: self.max_cache_values,
             tokens,
             blocks,

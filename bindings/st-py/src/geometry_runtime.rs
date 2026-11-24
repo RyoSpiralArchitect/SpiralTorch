@@ -6,7 +6,9 @@ use crate::geometry_artifact::PyGeometryAdapterArtifact;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyDict};
-use st_nn::geometry_runtime::{NativeGeometryBatch, NativeGeometryRuntime};
+use st_nn::geometry_runtime::{
+    NativeGeometryBatch, NativeGeometryRuntime, WaveFactorConfig, WaveParameterMaps,
+};
 use std::collections::BTreeMap;
 
 mod optimizer;
@@ -14,6 +16,28 @@ pub(crate) use optimizer::{adamw_step, PyNativeGeometryAdamW};
 
 fn error(value: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(value.to_string())
+}
+
+pub(crate) fn wave_config(value: &Bound<'_, PyAny>) -> PyResult<WaveFactorConfig> {
+    serde_json::from_value(crate::json::py_to_json_bounded(
+        value,
+        2048,
+        16,
+        3,
+        "wave factorial",
+    )?)
+    .map_err(error)
+}
+
+fn parameter_maps(py: Python<'_>, maps: WaveParameterMaps) -> PyResult<Bound<'_, PyDict>> {
+    let result = PyDict::new(py);
+    for (arm, g) in maps {
+        let values = PyDict::new(py);
+        values.set_item("gate", write_f32(py, g.gate.into_iter())?)?;
+        values.set_item("bias", write_f32(py, g.bias.into_iter())?)?;
+        result.set_item(arm, values)?;
+    }
+    Ok(result)
 }
 
 fn rate(value: &Bound<'_, PyAny>) -> PyResult<f32> {
@@ -119,6 +143,22 @@ impl PyNativeGeometryRuntime {
             .map_err(error)
     }
 
+    /// Apply two explicit inputs, without claiming the external value row came from a decoder.
+    fn forward_value_read_sequence(
+        &self,
+        py: Python<'_>,
+        path: &str,
+        input: &Bound<'_, PyAny>,
+        source: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeGeometryBatch> {
+        let (shape, n) = self.context_shape(path, shape)?;
+        let x = sequence(input, n, n)?;
+        let v = sequence(source, n, n)?;
+        py.detach(|| self.inner.forward_value_read_sequence(path, &x, &v, shape))
+            .map(|inner| PyNativeGeometryBatch { inner })
+            .map_err(error)
+    }
     fn forward_sequence_buffer(
         &self,
         py: Python<'_>,
@@ -334,6 +374,12 @@ impl PyNativeGeometryBatch {
             .map_err(error)
     }
 
+    fn vjp_value_source(&self, py: Python<'_>, upstream: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
+        let n = self.inner.output().len();
+        let u = sequence(upstream, n, n)?;
+        py.detach(|| self.inner.vjp_value_source(&u).map(|x| x.data().to_vec()))
+            .map_err(error)
+    }
     fn vjp_input_buffer<'py>(
         &self,
         py: Python<'py>,
@@ -373,6 +419,31 @@ impl PyNativeGeometryBatch {
             parameters.set_item(name, write_f32(py, values.into_iter())?)?;
         }
         Ok(parameters)
+    }
+
+    /// Compare two native-f32 cotangents at this captured site, without a decoder or an update.
+    /// Returns an owned map of gate/bias buffers per arm for each input, in order.
+    fn wave_parameter_pullback_pair_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        first: &Bound<'_, PyAny>,
+        second: &Bound<'_, PyAny>,
+        config: &Bound<'_, PyAny>,
+    ) -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)> {
+        let config = wave_config(config)?;
+        let n = self
+            .inner
+            .wave_parameter_pair_input_count(config)
+            .map_err(error)?;
+        let first = read_f32(first, n, Some(n))?;
+        let second = read_f32(second, n, Some(n))?;
+        let [a, b] = py
+            .detach(|| {
+                self.inner
+                    .wave_parameter_pullback_pair(config, &first, &second)
+            })
+            .map_err(error)?;
+        Ok((parameter_maps(py, a)?, parameter_maps(py, b)?))
     }
 }
 

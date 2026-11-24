@@ -37,6 +37,46 @@ def pair(kind=None, path="transformer.h.0.attn", **limits):
 
 
 class NativeCausalLmContextTests(unittest.TestCase):
+    def test_cached_line_lengths_precede_token_reads_and_refusals_preserve_root(self):
+        _, model = pair("wave")
+        ctx = st.NativeCausalLmContext(model, [1, 2], max_cache_values=1024)
+        start = ctx.logits().values()
+        class Oversize:
+            def __len__(self):
+                return 4096
+            def __getitem__(self, i):
+                raise AssertionError("unadmitted tokens must not be accessed")
+        for lines, stop in [([Oversize()], 0), ([[1], [1]], 0), ([[1, True]], 0), ([[1]], False), ([[0]], 0)]:
+            with self.assertRaises((ValueError, TypeError)):
+                ctx.score_lines(lines, stop_id=stop)
+        report = ctx.score_lines([[1], [1, 2]], stop_id=0)
+        self.assertEqual(report["scores"]["target_counts"], [2, 3])
+        self.assertEqual(report["decoded_content_tokens"], 2)
+        self.assertEqual(report["decoder_chunks"], 1)
+        self.assertEqual(ctx.token_ids, [1, 2])
+        self.assertEqual(ctx.logits().values(), start)
+
+    def test_line_tiles_validate_before_foreign_tokens_and_match_full_vocabulary(self):
+        _, model = pair("history_gain", max_logit_elements=88)
+        ctx = st.NativeCausalLmContext(model, [1,2], max_cache_values=1024)
+        class Untouchable:
+            def __len__(self):
+                raise AssertionError("invalid tile must be refused before examining menu")
+        for cap in (0, 10, 89, True, 11.5):
+            with self.assertRaises((ValueError, TypeError)):
+                ctx.score_lines(Untouchable(), stop_id=0, max_tile_values=cap)
+        lines = [[1], [1,2,3], [1,2,4], [1,5], [7,8]]
+        a = ctx.score_lines(lines, stop_id=0)
+        b = ctx.score_lines(lines, stop_id=0, max_tile_values=11)
+        self.assertEqual((a["readout_batches"], b["readout_batches"]), (6, 7))
+        self.assertEqual((a["peak_projected_logit_values"], b["peak_projected_logit_values"]), (22, 11))
+        self.assertEqual((b["scanned_logit_values"], b["retained_edge_logits"]), (88,12))
+        self.close(a["scores"]["line_nlls"], b["scores"]["line_nlls"])
+        self.assertEqual(a["scores"]["winner_index"], b["scores"]["winner_index"])
+        with self.assertRaises(ValueError):
+            ctx.score_lines(lines+[[9]], stop_id=0, max_tile_values=11)
+        self.assertEqual(ctx.token_ids,[1,2])
+
     def close(self, left, right):
         self.assertEqual(len(left), len(right))
         for a, b in zip(left, right):
@@ -50,10 +90,19 @@ class NativeCausalLmContextTests(unittest.TestCase):
                     context = st.NativeCausalLmContext(model, [1, 2], max_cache_values=1024)
                     self.assertEqual(context.geometry_artifact_id, model.geometry_artifact_id)
                     self.assertEqual(context.base_model_identity, model.base_model_identity)
+                    fork = context.with_suffix([3, 4, 5])
+                    tail = fork.with_suffix([6, 7])
+                    self.assertEqual(context.token_ids, [1, 2])
+                    self.assertEqual(fork.token_ids, [1, 2, 3, 4, 5])
+                    self.assertEqual(tail.geometry_artifact_id, context.geometry_artifact_id)
                     for token in (3, 4, 5, 6, 7):
                         ids = context.token_ids
                         self.close(context.logits().values(), model.forward(ids, [1, len(ids)], last_only=True).values())
                         result = context.append(token)
+                        if token in (5, 7):
+                            child = fork if token == 5 else tail
+                            self.assertEqual(child.cache_values, context.cache_values)
+                            self.close(result.values(), child.logits().values())
                         self.assertEqual(result.values(), context.logits().values())
                         history = 1 if kind in ("causal", "gated", *geometry["FRACTIONAL_KINDS"]) else 0
                         self.assertEqual(context.cache_values, (4 + history) * len(context.token_ids) * 3)
@@ -106,6 +155,21 @@ class NativeCausalLmContextTests(unittest.TestCase):
         self.close(actual.values(), full.forward([1, 2, 3], [1, 3], last_only=True).values())
         with self.assertRaisesRegex(ValueError, "attention"):
             context.append(4)
+
+    def test_suffix_admission_precedes_extraction_and_failure_keeps_fork_usable(self):
+        _, m = pair(max_attention_pairs=12)
+        root = st.NativeCausalLmContext(m, [1, 2])
+        class Unreadable:
+            def __len__(self): return 2
+            def __getitem__(self, key): raise AssertionError("over-budget suffix read")
+        with self.assertRaisesRegex(ValueError, "attention"):
+            root.with_suffix(Unreadable())
+        for bad in ([], [True], [11]):
+            with self.assertRaises((ValueError, TypeError)):
+                root.with_suffix(bad)
+        fork = root.with_suffix([4])
+        self.assertEqual(fork.token_ids, [1, 2, 4])
+        self.assertEqual(root.token_ids, [1, 2])
 
     def test_every_recipe_cached_generation_resumes_exactly(self):
         for kind in KINDS:

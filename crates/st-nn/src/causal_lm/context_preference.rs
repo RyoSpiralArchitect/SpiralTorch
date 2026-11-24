@@ -45,7 +45,18 @@ impl NativeCausalLm {
             margin,
             training,
         )?;
-        if preferred == other {
+        let mut p = self.prepare_context_pair_window([preferred, other], [target; 2], shape)?;
+        p.competition = Some(objective::PreparedCompetition::ContextToken { target, margin });
+        Ok(p)
+    }
+
+    pub(super) fn prepare_context_pair_window(
+        &self,
+        contexts: [&[usize]; 2],
+        targets: [usize; 2],
+        shape: [usize; 2],
+    ) -> CausalLmResult<PreparedCausalWindow> {
+        if contexts[0] == contexts[1] {
             return Err("context preference needs distinct tokenized prefixes".into());
         }
         let width = shape[1];
@@ -53,18 +64,16 @@ impl NativeCausalLm {
         let mut labels = vec![-100; windows.len()];
         // Right padding is strictly after the last supervised predictor of the shorter lane.
         // Only that lane's own last real prefix position may seed its decision.
-        for ((ids, ys), ctx) in windows
+        for (((ids, ys), ctx), target) in windows
             .chunks_exact_mut(width)
             .zip(labels.chunks_exact_mut(width))
-            .zip([preferred, other])
+            .zip(contexts)
+            .zip(targets)
         {
             ids[..ctx.len()].copy_from_slice(ctx);
             ys[ctx.len()] = target as i64;
         }
-        let mut p =
-            self.prepare_objective(&windows, shape, Some(&labels), CausalLmObjective::default())?;
-        p.competition = Some(objective::PreparedCompetition::ContextToken { target, margin });
-        Ok(p)
+        self.prepare_objective(&windows, shape, Some(&labels), CausalLmObjective::default())
     }
 
     /// softplus(margin - log P(target|preferred) + log P(target|other)), without updating weights.

@@ -12,11 +12,14 @@ use st_tensor::{
 use std::sync::{Arc, OnceLock};
 
 mod adaptation;
+mod adaptation_ray;
+mod anchor_kl;
 mod checkpoint;
 mod common_geometry;
 mod competition_pair;
 mod context;
 mod context_preference;
+mod declared_set_step;
 mod decoder;
 mod evaluation;
 mod generation;
@@ -26,6 +29,7 @@ mod gradient_alignment;
 mod key_lag;
 mod learning;
 mod line_menu;
+mod line_session;
 mod line_set;
 mod lora;
 mod mixture_probe;
@@ -33,16 +37,31 @@ mod objective;
 mod observation;
 mod output_margin;
 mod paired_geometry;
+mod paired_token_gap;
+mod prefix_signal;
+mod value_read;
+pub use value_read::CausalLmValueReadSignal;
 mod projection_probe;
 mod qkv_training;
 mod quartet_projection;
 mod readout_policy;
 mod repetition;
+pub mod route_calibration;
 mod scalar_output;
 mod session;
 mod sum;
+mod token_menu;
 mod training;
+mod wave_margin;
 pub use adaptation::{CausalLmAdaptationMode, NativeCausalLmAdaptationGradients};
+pub use adaptation_ray::{CausalLmAdaptationRayGroup, CausalLmAdaptationRayStep};
+pub use anchor_kl::{
+    CausalLmAnchorDirection, CausalLmAnchorKlCriterion, CausalLmAnchorKlMatch,
+    CausalLmAnchorKlPeak, CausalLmAnchorKlPolicy, CausalLmAnchorKlRefusal, CausalLmAnchorKlTrial,
+    CausalLmRawRayMiss, CausalLmSecantAnchor, CausalLmSecantMidpoint, CausalLmSecantReport,
+    CausalLmSensitivityAxis, CausalLmSensitivityBasis, CausalLmSensitivityPrediction,
+    CausalLmSensitivityReport, CausalLmSensitivitySelect,
+};
 pub use checkpoint::{CausalLmPreparedCheckpointFile, CheckpointPublicationUncertain};
 pub use common_geometry::hull::CommonDirectionRefusal;
 pub use common_geometry::{
@@ -51,6 +70,7 @@ pub use common_geometry::{
 };
 pub use competition_pair::{CausalLmGeometryCompetitionPair, CausalLmGeometryCompetitionStep};
 pub use context::NativeCausalLmContext;
+pub use declared_set_step::CausalLmDeclaredSetStep;
 pub use evaluation::{
     CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
     CausalLmEvaluationComparison, CausalLmEvaluationConfig, CausalLmLabeledAnswerCorpus,
@@ -61,13 +81,22 @@ pub use generation::{
     CausalLmPreparedGenerationInterval, NativeCausalLmGenerator,
 };
 pub use geometry_cohort::{
-    CausalLmGeometryCohortStep, MAX_GEOMETRY_COHORT_ELEMENTS, MAX_GEOMETRY_COHORT_MEMBERS,
+    CausalLmGeometryCohortRayStep, CausalLmGeometryCohortStep, CausalLmPrefixResidualMetric,
+    PrefixMetricRule, PrefixResidualStep, MAX_GEOMETRY_COHORT_ELEMENTS,
+    MAX_GEOMETRY_COHORT_MEMBERS,
 };
 pub use gradient_alignment::{CausalLmGradientAlignment, CausalLmGradientPairStats};
 pub use key_lag::CausalLmKeyLag;
 pub use learning::{NativeCausalLmAccumulator, NativeCausalLmGradients};
 pub use line_menu::{CausalLmLineMenuReport, MAX_LINE_MENU_CANDIDATES, MAX_LINE_MENU_TARGETS};
-pub use line_set::{CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport};
+pub use line_session::{
+    CausalLmLineAdaptationStep, CausalLmLineAttempt, CausalLmLineObjective,
+    CausalLmLineSessionReport, CausalLmLineSessionStep, NativeCausalLmLineTrainingSession,
+};
+pub use line_set::{
+    CausalLmCachedLineScores, CausalLmLineScores, CausalLmLineSetReport, CausalLmLineSubsetReport,
+    CausalLmLineTrainingWork,
+};
 pub use lora::NativeCausalLmLoraGradients;
 pub use mixture_probe::{
     CausalLmMixtureObjectiveTrace, CausalLmMixturePath, CausalLmMixtureProbe,
@@ -86,6 +115,10 @@ pub use output_margin::{
 pub use paired_geometry::{
     CausalLmPairDisplacement, CausalLmPairWeighting, CausalLmPairedGeometryStep,
 };
+pub use paired_token_gap::{
+    CausalLmPairedGapObjective, CausalLmPairedGapReport, CausalLmWeakestLaneReport,
+};
+pub use prefix_signal::{CausalLmPrefixMarginSignal, MAX_PREFIX_SIGNAL_VALUES};
 pub use projection_probe::{
     CausalLmProjectionBasis, CausalLmProjectionPullback, CausalLmProjectionSite,
     CausalLmProjectionSpec,
@@ -116,7 +149,9 @@ pub use quartet_projection::{
     NativeCausalLmConditionalAnswerSession, NativeCausalLmConditionalServingSnapshot,
     NativeCausalLmProjectionPrefix, NativeCausalLmRankOneProjection, MAX_CONDITIONAL_BANK_ROWS,
 };
-pub use readout_policy::{CausalLmHeadPrecision, CausalLmReadoutAccumulator};
+pub use readout_policy::{
+    CausalLmForwardStorage, CausalLmHeadPrecision, CausalLmReadoutAccumulator,
+};
 pub use repetition::CausalLmRepetition;
 pub use scalar_output::{
     CausalLmScalarPairLoss, CausalLmScalarPairStep, CausalLmScalarSearch,
@@ -129,14 +164,16 @@ pub use session::{
     CausalLmTrainingSessionStep, NativeCausalLmTrainingPrefixCache, NativeCausalLmTrainingSession,
 };
 pub use st_tensor::classification::{
-    ContextTokenPreference, DeclaredRivalReport, DeclaredRivalRow, RivalCrossEntropy,
-    RivalCrossEntropyReport, TargetClassScore, MAX_DECLARED_RIVAL_IDS, MAX_RIVAL_CLASSES,
+    ContextTokenPreference, DeclaredRivalReport, DeclaredRivalRow, DeclaredSetNll,
+    RivalCrossEntropy, RivalCrossEntropyReport, TargetClassScore, MAX_DECLARED_RIVAL_IDS,
+    MAX_RIVAL_CLASSES,
 };
 use st_tensor::classification::{RivalCoverageGuard, RivalCoverageReference};
 pub use training::{
     CausalLmObservedCheckpointFiles, CausalLmTrainingConfig, CausalLmTrainingResume,
     CausalLmTrainingStep, NativeCausalLmTrainer,
 };
+pub use wave_margin::CausalLmWaveMarginPullbacks;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
@@ -279,10 +316,13 @@ pub struct NativeCausalLm {
     blocks: Vec<DecoderBlock>,
     final_norm: Norm,
     head: PackedB,
-    backward_head: TransposeCache,
+    backward_head: Arc<OnceLock<Result<readout_policy::TrainingHeadPack, String>>>,
     geometry: Option<Arc<NativeGeometryRuntime>>,
     lora: Option<Arc<lora::NativeLoraAdapter>>,
+    // Part of base_id, never an optimizer owner or an additional active LoRA.
+    frozen_lora: Option<Arc<lora::NativeLoraAdapter>>,
     readout_accumulator: CausalLmReadoutAccumulator,
+    forward_storage: CausalLmForwardStorage,
 }
 
 fn product(values: &[usize], budget: usize, label: &'static str) -> CausalLmResult<usize> {
@@ -320,12 +360,6 @@ impl NativeCausalLm {
         model
     }
 
-    fn project_readout(&self, normalized: &Tensor) -> CausalLmResult<Tensor> {
-        self.readout_accumulator
-            .forward_precision()
-            .multiply(normalized, &self.head)
-    }
-
     pub fn base_model_identity(&self) -> &str {
         &self.base_id
     }
@@ -340,6 +374,36 @@ impl NativeCausalLm {
         self.geometry.as_ref().map(|runtime| runtime.artifact())
     }
 
+    pub const MAX_GEOMETRY_SITE_BYTES: usize = 64;
+
+    fn supports_geometry_site(&self, path: &str) -> bool {
+        path.len() <= Self::MAX_GEOMETRY_SITE_BYTES
+            && (0..self.config.layers).any(|index| {
+                let block = format!("transformer.h.{index}");
+                matches!(path.strip_prefix(&block), Some("" | ".attn" | ".mlp"))
+            })
+    }
+
+    /// Move the single attached geometry without changing its weights or recipe.
+    /// Multiple placements are never collapsed or implicitly selected.
+    pub fn with_single_geometry_at(&self, path: &str) -> CausalLmResult<Self> {
+        if !self.supports_geometry_site(path) {
+            return Err("unsupported native geometry placement".into());
+        }
+        let artifact = self
+            .geometry_artifact()
+            .ok_or("no attached geometry to move")?;
+        let [placement] = artifact.record().placements.as_slice() else {
+            return Err("moving geometry requires exactly one placement".into());
+        };
+        if placement.path == path {
+            return Ok(self.clone());
+        }
+        let mut record = artifact.record().clone();
+        record.placements[0].path = path.to_owned();
+        self.with_geometry(GeometryAdapterArtifact::create(record)?)
+    }
+
     /// Attach existing native recipes at GPT-2-compatible branch output paths:
     /// transformer.h.N.attn, transformer.h.N.mlp, or transformer.h.N.
     /// No placements are ignored and the frozen checkpoint identity must match.
@@ -349,18 +413,22 @@ impl NativeCausalLm {
         }
         let runtime = NativeGeometryRuntime::new(artifact);
         for placement in &runtime.artifact().record().placements {
-            let valid = (0..self.config.layers).any(|index| {
-                let block = format!("transformer.h.{index}");
-                placement.path == block
-                    || placement.path == format!("{block}.attn")
-                    || placement.path == format!("{block}.mlp")
-            });
-            if !valid {
+            if !self.supports_geometry_site(&placement.path) {
                 return Err(
                     format!("unsupported native geometry placement: {}", placement.path).into(),
                 );
             }
             let (width, _) = runtime.sequence_dimensions(&placement.path, [1, 1])?;
+            if let Some((route, _)) = placement.recipe.value_gate() {
+                if !placement.path.ends_with(".mlp")
+                    || matches!(route,crate::geometry_artifact::AttentionValueRoute::Fixed {position} if position as usize >= self.config.positions)
+                {
+                    return Err(
+                        "attention value gate requires an MLP site and an addressable position"
+                            .into(),
+                    );
+                }
+            }
             if width != self.config.width {
                 return Err("geometry feature width differs from the native model".into());
             }
@@ -432,6 +500,11 @@ impl NativeCausalLm {
         ])?)
     }
 
+    /// A [1, vocabulary] host tensor from the last position, without an N-D readback.
+    pub fn next_token_logits(&self, prompt_ids: &[usize]) -> CausalLmResult<Tensor> {
+        self.logits(prompt_ids, [1, prompt_ids.len()], true)
+    }
+
     pub fn next_token_ids(
         &self,
         input_ids: &[usize],
@@ -484,7 +557,7 @@ impl NativeCausalLm {
         target_id: usize,
     ) -> CausalLmResult<TargetClassScore> {
         TargetClassScore::validate_domain(self.config.vocabulary, target_id)?;
-        let logits = self.logits(prompt_ids, [1, prompt_ids.len()], true)?;
+        let logits = self.next_token_logits(prompt_ids)?;
         Ok(TargetClassScore::from_logits(logits.data(), target_id)?)
     }
 
@@ -497,7 +570,7 @@ impl NativeCausalLm {
         alternative_id: usize,
     ) -> CausalLmResult<CausalLmTokenContrast> {
         self.check_contrast_candidates(target_id, alternative_id)?;
-        let logits = self.logits(prompt_ids, [1, prompt_ids.len()], true)?;
+        let logits = self.next_token_logits(prompt_ids)?;
         Ok(Self::contrast_row(
             logits.data(),
             prompt_ids.len(),

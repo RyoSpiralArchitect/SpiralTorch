@@ -37,7 +37,11 @@ impl NativeCausalLm {
         if self.key_lag == Some(policy) {
             return Ok(self.clone());
         }
-        if self.key_lag.is_some() || self.lora.is_some() || self.geometry.is_some() {
+        if self.key_lag.is_some()
+            || self.lora.is_some()
+            || self.frozen_lora.is_some()
+            || self.geometry.is_some()
+        {
             return Err("key lag must be selected on an unadapted ordinary base".into());
         }
         let mut hash = Sha256::new();

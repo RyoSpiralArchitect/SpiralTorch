@@ -80,6 +80,13 @@ pub(super) struct TrainingReadout {
     pub competition: Option<objective::CompetitionReport>,
 }
 
+pub(super) struct TrainingPrimal {
+    pub checkpoints: Vec<Tensor>,
+    pub hidden_rows: usize,
+    pub selected: Tensor,
+    pub logits: Tensor,
+}
+
 pub(super) fn frozen_pullback(
     weight: &PackedB,
     cache: &OnceLock<Result<PackedB, String>>,
@@ -154,20 +161,23 @@ pub(super) enum DecoderTarget<'a> {
 
 fn geometry_pullback(
     path: String,
-    batch: Option<NativeGeometryBatch>,
+    tape: &mut Option<NativeGeometryBatch>,
     upstream: Tensor,
     parameters: &mut Parameters,
     target: &DecoderTarget<'_>,
     trace: Option<&mut observation::AdaptationTrace>,
+    last_lane: bool,
 ) -> CausalLmResult<Option<Tensor>> {
-    if let Some(batch) = batch {
+    // The last cotangent consumes the tape, just as in the single-objective path.
+    let owned = if last_lane { tape.take() } else { None };
+    if let Some(batch) = owned.as_ref().or(tape.as_ref()) {
         if matches!(
             target,
             DecoderTarget::Lora | DecoderTarget::Projection(_) | DecoderTarget::QkvWeight(_)
         ) {
             let input = batch.vjp_input(upstream.data())?;
             if let Some(t) = trace {
-                t.pullback(&path, &batch, &upstream, Some(&input))?;
+                t.pullback(&path, batch, &upstream, Some(&input))?;
             }
             return Ok(Some(input));
         }
@@ -179,7 +189,7 @@ fn geometry_pullback(
             (Some(gradient.input), gradient.parameters)
         };
         if let Some(t) = trace {
-            t.pullback(&path, &batch, &upstream, input.as_ref())?;
+            t.pullback(&path, batch, &upstream, input.as_ref())?;
         }
         if parameters.insert(path, gradient).is_some() {
             return Err("duplicate geometry gradient placement".into());
@@ -191,12 +201,7 @@ fn geometry_pullback(
 
 impl NativeCausalLm {
     pub(super) fn vocabulary_head_pullback(&self, seed: &Tensor) -> CausalLmResult<Tensor> {
-        frozen_pullback(
-            &self.head,
-            &self.backward_head,
-            seed,
-            self.readout_accumulator.backward_precision(),
-        )
+        self.vocabulary_head_pullback_as(seed, self.readout_accumulator.backward_precision())
     }
     pub(super) fn first_geometry_site(&self) -> CausalLmResult<(usize, String)> {
         let runtime = self
@@ -417,14 +422,14 @@ impl NativeCausalLm {
         Ok((hidden, checkpoints))
     }
 
-    pub(super) fn training_readout(
+    pub(super) fn training_selected(
         &self,
         prepared: &PreparedCausalWindow,
         hidden: Tensor,
         start_layer: usize,
         first_trainable: usize,
         observations: Option<&mut observation::ResidualSums>,
-    ) -> CausalLmResult<TrainingReadout> {
+    ) -> CausalLmResult<(Vec<Tensor>, usize, Tensor)> {
         let (hidden, checkpoints) = self.checkpointed_hidden(
             hidden,
             prepared.shape,
@@ -437,13 +442,56 @@ impl NativeCausalLm {
             Some(rows) => hidden.gather_rows(rows)?,
             None => hidden,
         };
+        Ok((checkpoints, hidden_rows, selected))
+    }
+
+    pub(super) fn training_primal(
+        &self,
+        prepared: &PreparedCausalWindow,
+        hidden: Tensor,
+        start_layer: usize,
+        first_trainable: usize,
+        observations: Option<&mut observation::ResidualSums>,
+    ) -> CausalLmResult<TrainingPrimal> {
+        let (checkpoints, hidden_rows, selected) =
+            self.training_selected(prepared, hidden, start_layer, first_trainable, observations)?;
         let normalized = self
             .final_norm
             .forward(&selected, self.config.norm_epsilon)?;
         let logits = self.project_readout(&normalized)?;
+        Ok(TrainingPrimal {
+            checkpoints,
+            hidden_rows,
+            selected,
+            logits,
+        })
+    }
+
+    pub(super) fn training_readout(
+        &self,
+        prepared: &PreparedCausalWindow,
+        hidden: Tensor,
+        start_layer: usize,
+        first_trainable: usize,
+        observations: Option<&mut observation::ResidualSums>,
+    ) -> CausalLmResult<TrainingReadout> {
+        let TrainingPrimal {
+            checkpoints,
+            hidden_rows,
+            selected,
+            logits,
+        } = self.training_primal(prepared, hidden, start_layer, first_trainable, observations)?;
         let config = prepared.objective.kernel_config();
         let (loss, d_logits, competition) = if let Some(c) = &prepared.competition {
             match c {
+                objective::PreparedCompetition::PairedGap { tokens, objective } => {
+                    let (report, seed) = paired_token_gap::gradient(&logits, *tokens, *objective)?;
+                    (
+                        report.loss as f32,
+                        seed,
+                        Some(objective::CompetitionReport::PairedGap(report)),
+                    )
+                }
                 objective::PreparedCompetition::ContextToken { target, margin } => {
                     let (report, grad) =
                         logits.context_token_preference_gradient(*target, *margin)?;
@@ -602,24 +650,54 @@ impl NativeCausalLm {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn decoder_parameter_pullback_from_selected(
         &self,
-        mut checkpoints: Vec<Tensor>,
+        checkpoints: Vec<Tensor>,
         hidden_rows: usize,
         shape: [usize; 2],
         selected_rows: Option<&[usize]>,
         d_selected: Tensor,
         first_layer: usize,
+        target: DecoderTarget<'_>,
+        trace: Option<&mut observation::AdaptationTrace>,
+    ) -> CausalLmResult<Parameters> {
+        let [parameters] = self.decoder_pullback_lanes_from_selected(
+            checkpoints,
+            hidden_rows,
+            shape,
+            selected_rows,
+            [d_selected],
+            first_layer,
+            target,
+            trace,
+        )?;
+        Ok(parameters)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn decoder_pullback_lanes_from_selected<const N: usize>(
+        &self,
+        mut checkpoints: Vec<Tensor>,
+        hidden_rows: usize,
+        shape: [usize; 2],
+        selected_rows: Option<&[usize]>,
+        d_selected: [Tensor; N],
+        first_layer: usize,
         mut target: DecoderTarget<'_>,
         mut trace: Option<&mut observation::AdaptationTrace>,
-    ) -> CausalLmResult<Parameters> {
-        let c = &self.config;
-        let mut gradient = match &selected_rows {
-            Some(rows) => d_selected.scatter_add_rows(rows, hidden_rows)?,
-            None => d_selected,
-        };
-        let mut parameters = BTreeMap::new();
-        for index in (first_layer..c.layers).rev() {
+    ) -> CausalLmResult<[Parameters; N]> {
+        debug_assert!(
+            N == 1
+                || (N == 2 && trace.is_none() && matches!(target, DecoderTarget::GeometryFrom(_)))
+        );
+        let mut gradients = d_selected.map(Some);
+        if let Some(rows) = selected_rows {
+            for g in &mut gradients {
+                *g = Some(g.take().unwrap().scatter_add_rows(rows, hidden_rows)?);
+            }
+        }
+        let mut parameters = std::array::from_fn(|_| BTreeMap::new());
+        for index in (first_layer..self.config.layers).rev() {
             let input = checkpoints.pop().unwrap();
-            let cache = self
+            let mut cache = self
                 .run_block(
                     index,
                     input.clone(),
@@ -628,128 +706,196 @@ impl NativeCausalLm {
                 )?
                 .cache
                 .unwrap();
-            let block = &self.blocks[index];
-            let path = format!("transformer.h.{index}");
-            let Some(residual) = geometry_pullback(
-                path.clone(),
-                cache.block_geometry,
-                gradient,
-                &mut parameters,
-                &target,
-                trace.as_deref_mut(),
-            )?
-            else {
-                break;
-            };
-            let Some(mlp) = geometry_pullback(
-                format!("{path}.mlp"),
-                cache.mlp_geometry,
-                residual.clone(),
-                &mut parameters,
-                &target,
-                trace.as_deref_mut(),
-            )?
-            else {
-                break;
-            };
-            let d_residual = block.mlp_input_pullback(
-                &cache.pre_gelu,
-                &cache.after_attention,
-                &mlp,
-                c.norm_epsilon,
-                |_, _| Ok(()),
-            )?;
-            let residual = residual.add_with_backend(&d_residual, TensorUtilBackend::Cpu)?;
-            let Some(attention) = geometry_pullback(
-                format!("{path}.attn"),
-                cache.attention_geometry,
-                residual.clone(),
-                &mut parameters,
-                &target,
-                trace.as_deref_mut(),
-            )?
-            else {
-                break;
-            };
-            if matches!(target, DecoderTarget::Lora | DecoderTarget::Joint) && index == first_layer
-            {
-                let adapter = self.lora.as_ref().ok_or("missing native LoRA adapter")?;
-                let (a, b) = adapter.vjp_parameters(&cache.attention_input, &attention)?;
-                parameters.insert(
-                    adapter.path(),
-                    BTreeMap::from([
-                        ("a".to_owned(), a.data().to_vec()),
-                        ("b".to_owned(), b.data().to_vec()),
-                    ]),
-                );
-                break;
-            }
-            if let DecoderTarget::Projection(probe) = &mut target {
-                if index == first_layer && probe.site() == CausalLmProjectionSite::Output {
-                    probe.record(&cache.attention_input, &attention)?;
-                    break;
+            for (lane, (g, p)) in gradients.iter_mut().zip(&mut parameters).enumerate() {
+                if let Some(upstream) = g.take() {
+                    *g = self.block_parameter_pullback(
+                        index,
+                        &input,
+                        shape,
+                        &mut cache,
+                        upstream,
+                        first_layer,
+                        &mut target,
+                        p,
+                        trace.as_deref_mut(),
+                        lane + 1 == N,
+                    )?;
                 }
             }
-            let mut d_merge = block.output.backward_input(&attention)?;
-            if let Some(adapter) = self.lora.as_ref().filter(|a| a.layer() == index) {
-                d_merge = adapter.add_input_vjp(&attention, d_merge)?;
+            if gradients.iter().all(Option::is_none) {
+                break;
             }
-            let [d_heads] = self.split_heads::<1>(&d_merge, shape)?;
-            let d_qkv = attention_key_lag_vjp_reference(
-                self.attention_spec(index, shape)?,
-                &cache.qkv[0],
-                &cache.qkv[1],
-                &cache.qkv[2],
-                None,
-                None,
-                &d_heads,
-                self.key_lag_at(index),
-            )?;
-            if let DecoderTarget::Projection(probe) = &mut target {
-                if index == first_layer {
-                    let separated = match probe.site() {
-                        CausalLmProjectionSite::Query => d_qkv.query.as_slice(),
-                        CausalLmProjectionSite::Key => d_qkv.key.as_slice(),
-                        CausalLmProjectionSite::Value => d_qkv.value.as_slice(),
-                        CausalLmProjectionSite::Output => {
-                            unreachable!("output gradient captured before attention")
-                        }
-                    };
-                    let adjoint = self.merge_heads([separated], shape)?;
-                    let source = block.first_norm.forward(&input, c.norm_epsilon)?;
-                    probe.record(&source, &adjoint)?;
-                    break;
-                }
-            }
-            let d_fused = self.merge_heads(
-                [
-                    d_qkv.query.as_slice(),
-                    d_qkv.key.as_slice(),
-                    d_qkv.value.as_slice(),
-                ],
-                shape,
-            )?;
-            if let DecoderTarget::QkvWeight(slot) = &mut target {
-                if index == first_layer {
-                    let source = block.first_norm.forward(&input, c.norm_epsilon)?;
-                    // Directly produce [Q/K/V output channel, input channel], matching PackedB.
-                    **slot = Some(d_fused.matmul_lhs_transpose_scaled_with_backend(
-                        &source,
-                        1.,
-                        MatmulBackend::CpuSimd,
-                    )?);
-                    break;
-                }
-            }
-            let d_norm = block.qkv.backward_input(&d_fused)?;
-            let d_input = input.layer_norm_input_backward(
-                &block.first_norm.gamma,
-                &d_norm,
-                c.norm_epsilon,
-            )?;
-            gradient = residual.add_with_backend(&d_input, TensorUtilBackend::Cpu)?;
         }
         Ok(parameters)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn block_parameter_pullback(
+        &self,
+        index: usize,
+        input: &Tensor,
+        shape: [usize; 2],
+        cache: &mut decoder::BlockCache,
+        gradient: Tensor,
+        first_layer: usize,
+        target: &mut DecoderTarget<'_>,
+        parameters: &mut Parameters,
+        mut trace: Option<&mut observation::AdaptationTrace>,
+        last_lane: bool,
+    ) -> CausalLmResult<Option<Tensor>> {
+        let c = &self.config;
+        let block = &self.blocks[index];
+        let path = format!("transformer.h.{index}");
+        let Some(residual) = geometry_pullback(
+            path.clone(),
+            &mut cache.block_geometry,
+            gradient,
+            parameters,
+            target,
+            trace.as_deref_mut(),
+            last_lane,
+        )?
+        else {
+            return Ok(None);
+        };
+        // This side connection bypasses the MLP and the attention output projection.
+        // A gate-only terminal update must not evaluate its unused source adjoint.
+        let reach_values = index > first_layer
+            || matches!(target, DecoderTarget::QkvWeight(_))
+            || matches!(target,DecoderTarget::Projection(p) if p.site()!=CausalLmProjectionSite::Output);
+        let value_side = if reach_values {
+            cache
+                .mlp_geometry
+                .as_ref()
+                .and_then(|b| b.value_read_route().map(|r| (b, r)))
+                .map(|(b, r)| b.vjp_value_source(residual.data()).map(|g| (r, g)))
+                .transpose()?
+        } else {
+            None
+        };
+        let Some(mlp) = geometry_pullback(
+            format!("{path}.mlp"),
+            &mut cache.mlp_geometry,
+            residual.clone(),
+            parameters,
+            target,
+            trace.as_deref_mut(),
+            last_lane,
+        )?
+        else {
+            return Ok(None);
+        };
+        let d_residual = block.mlp_input_pullback(
+            &cache.pre_gelu,
+            &cache.after_attention,
+            &mlp,
+            c.norm_epsilon,
+            |_, _| Ok(()),
+        )?;
+        let residual = residual.add_with_backend(&d_residual, TensorUtilBackend::Cpu)?;
+        let Some(attention) = geometry_pullback(
+            format!("{path}.attn"),
+            &mut cache.attention_geometry,
+            residual.clone(),
+            parameters,
+            target,
+            trace.as_deref_mut(),
+            last_lane,
+        )?
+        else {
+            return Ok(None);
+        };
+        if matches!(target, DecoderTarget::Lora | DecoderTarget::Joint) && index == first_layer {
+            let adapter = self.lora.as_ref().ok_or("missing native LoRA adapter")?;
+            let (a, b) = adapter.vjp_parameters(&cache.attention_input, &attention)?;
+            parameters.insert(
+                adapter.path(),
+                BTreeMap::from([
+                    ("a".to_owned(), a.data().to_vec()),
+                    ("b".to_owned(), b.data().to_vec()),
+                ]),
+            );
+            return Ok(None);
+        }
+        if let DecoderTarget::Projection(probe) = target {
+            if index == first_layer && probe.site() == CausalLmProjectionSite::Output {
+                probe.record(&cache.attention_input, &attention)?;
+                return Ok(None);
+            }
+        }
+        let mut d_merge = block.output.backward_input(&attention)?;
+        if let Some(adapter) = self.output_lora_at(index) {
+            d_merge = adapter.add_input_vjp(&attention, d_merge)?;
+        }
+        if let Some((crate::geometry_artifact::AttentionValueRoute::Attention, extra)) = &value_side
+        {
+            d_merge = d_merge.add_with_backend(extra, TensorUtilBackend::Cpu)?;
+        }
+        let [d_heads] = self.split_heads::<1>(&d_merge, shape)?;
+        let mut d_qkv = attention_key_lag_vjp_reference(
+            self.attention_spec(index, shape)?,
+            &cache.qkv[0],
+            &cache.qkv[1],
+            &cache.qkv[2],
+            None,
+            None,
+            &d_heads,
+            self.key_lag_at(index),
+        )?;
+        if let Some((route, extra)) = value_side {
+            if route != crate::geometry_artifact::AttentionValueRoute::Attention {
+                let [adj] = self.split_heads::<1>(&extra, shape)?;
+                value_read::add_control_vjp(
+                    route,
+                    &adj,
+                    &mut d_qkv.value,
+                    shape[1],
+                    c.width / c.heads,
+                )?;
+            }
+        }
+        if let DecoderTarget::Projection(probe) = target {
+            if index == first_layer {
+                let separated = match probe.site() {
+                    CausalLmProjectionSite::Query => d_qkv.query.as_slice(),
+                    CausalLmProjectionSite::Key => d_qkv.key.as_slice(),
+                    CausalLmProjectionSite::Value => d_qkv.value.as_slice(),
+                    CausalLmProjectionSite::Output => {
+                        unreachable!("output gradient captured before attention")
+                    }
+                };
+                let adjoint = self.merge_heads([separated], shape)?;
+                let source = block.first_norm.forward(input, c.norm_epsilon)?;
+                probe.record(&source, &adjoint)?;
+                return Ok(None);
+            }
+        }
+        let d_fused = self.merge_heads(
+            [
+                d_qkv.query.as_slice(),
+                d_qkv.key.as_slice(),
+                d_qkv.value.as_slice(),
+            ],
+            shape,
+        )?;
+        if let DecoderTarget::QkvWeight(slot) = target {
+            if index == first_layer {
+                let source = block.first_norm.forward(input, c.norm_epsilon)?;
+                // Directly produce [Q/K/V output channel, input channel], matching PackedB.
+                **slot = Some(d_fused.matmul_lhs_transpose_scaled_with_backend(
+                    &source,
+                    1.,
+                    MatmulBackend::CpuSimd,
+                )?);
+                return Ok(None);
+            }
+        }
+        let d_norm = block.qkv.backward_input(&d_fused)?;
+        let d_input =
+            input.layer_norm_input_backward(&block.first_norm.gamma, &d_norm, c.norm_epsilon)?;
+        Ok(Some(
+            residual.add_with_backend(&d_input, TensorUtilBackend::Cpu)?,
+        ))
     }
 
     /// Atomic stateless SGD across every trainable placement. Return a new

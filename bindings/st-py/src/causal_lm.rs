@@ -5,10 +5,10 @@ use crate::geometry_runtime::{adamw_step, PyNativeGeometryAdamW};
 use crate::weights::{PyNdTensor, PySafeTensorArchive};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyBytesMethods};
+use pyo3::types::{PyBytes, PyBytesMethods, PyString};
 use st_nn::causal_lm::{
-    CausalLmLimits, CausalLmObjective, CausalLmReadoutAccumulator, NativeCausalLm,
-    NativeCausalLmGradients, NativeCausalLmLoraGradients, TargetClassScore,
+    CausalLmForwardStorage, CausalLmLimits, CausalLmObjective, CausalLmReadoutAccumulator,
+    NativeCausalLm, NativeCausalLmGradients, NativeCausalLmLoraGradients, TargetClassScore,
 };
 use std::collections::BTreeMap;
 
@@ -21,9 +21,12 @@ mod evaluation;
 mod generation;
 mod groups;
 mod line_menu;
+mod line_session;
 mod mixture_probe;
 mod output_margin;
+mod paired_gap;
 mod prefix_cache;
+mod prefix_metric;
 mod projection_probe;
 mod qkv;
 mod qkv_session;
@@ -493,6 +496,34 @@ impl PyNativeCausalLm {
         .map_err(error)
     }
 
+    /// Supervise one next-token decision. No prompt or stop token contributes a loss.
+    #[pyo3(signature=(prompt_ids, choices, *, gold_index, mix))]
+    fn geometry_token_menu_gradients(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        choices: &Bound<'_, PyAny>,
+        gold_index: &Bound<'_, PyAny>,
+        mix: &Bound<'_, PyAny>,
+    ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let gold = dimension(gold_index)?;
+        reject_bool(mix)?;
+        let mix = mix.extract::<f64>()?;
+        let n = prompt_ids.len()?;
+        let k = choices.len()?;
+        self.inner
+            .geometry_token_menu_shape(n, k, gold, mix)
+            .map_err(error)?;
+        let choices = tokens(choices, k)?;
+        let prompt = tokens(prompt_ids, n)?;
+        py.detach(|| {
+            self.inner
+                .geometry_token_menu_gradients(&prompt, &choices, gold, mix)
+        })
+        .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+        .map_err(error)
+    }
+
     /// Forward-only conditional loss over complete, sorted content alternatives plus one stop.
     #[pyo3(signature=(prompt_ids, candidates, *, gold_index, stop_id, mix))]
     #[allow(clippy::too_many_arguments)]
@@ -523,7 +554,7 @@ impl PyNativeCausalLm {
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
     }
 
-    #[pyo3(signature=(prompt_ids, candidates, *, gold_index, stop_id, mix))]
+    #[pyo3(signature=(prompt_ids, candidates, *, gold_index, stop_id, mix, max_tile_values=None))]
     #[allow(clippy::too_many_arguments)]
     fn geometry_line_menu_gradients(
         &self,
@@ -533,7 +564,10 @@ impl PyNativeCausalLm {
         gold_index: &Bound<'_, PyAny>,
         stop_id: &Bound<'_, PyAny>,
         mix: &Bound<'_, PyAny>,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
         let (b, gold, mix) = line_menu::extract(
             &self.inner,
             prompt_ids,
@@ -544,8 +578,9 @@ impl PyNativeCausalLm {
             true,
         )?;
         py.detach(|| {
-            self.inner
-                .geometry_line_menu_gradients(&b.prompt, &b.lines, gold, b.stop, mix)
+            self.inner.geometry_line_menu_gradients_with_tile_limit(
+                &b.prompt, &b.lines, gold, b.stop, mix, cap,
+            )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
@@ -600,6 +635,69 @@ impl PyNativeCausalLm {
         .map_err(error)
     }
 
+    /// Compare a two-token gap across two causal prefixes. No sampling or update.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(first_ids, second_ids, token_ids, objective, *, reference_center=None, stiffness=None))]
+    fn paired_token_gap(
+        &self,
+        py: Python<'_>,
+        first_ids: &Bound<'_, PyAny>,
+        second_ids: &Bound<'_, PyAny>,
+        token_ids: &Bound<'_, PyAny>,
+        objective: &str,
+        reference_center: Option<&Bound<'_, PyAny>>,
+        stiffness: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let q = paired_gap::collect(
+            &self.inner,
+            first_ids,
+            second_ids,
+            token_ids,
+            objective,
+            reference_center,
+            stiffness,
+            false,
+        )?;
+        let report = py
+            .detach(|| {
+                self.inner
+                    .paired_token_gap(&q.first, &q.second, q.ids, q.objective)
+            })
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)
+    }
+
+    /// Sealed geometry-only contribution of one matched pair, compatible with native cohort steps.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(first_ids, second_ids, token_ids, objective, *, reference_center=None, stiffness=None))]
+    fn geometry_paired_token_gap_gradients(
+        &self,
+        py: Python<'_>,
+        first_ids: &Bound<'_, PyAny>,
+        second_ids: &Bound<'_, PyAny>,
+        token_ids: &Bound<'_, PyAny>,
+        objective: &str,
+        reference_center: Option<&Bound<'_, PyAny>>,
+        stiffness: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let q = paired_gap::collect(
+            &self.inner,
+            first_ids,
+            second_ids,
+            token_ids,
+            objective,
+            reference_center,
+            stiffness,
+            true,
+        )?;
+        py.detach(|| {
+            self.inner
+                .geometry_paired_token_gap_gradients(&q.first, &q.second, q.ids, q.objective)
+        })
+        .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+        .map_err(error)
+    }
+
     /// Label-free full-line, menu-conditional and per-token NLLs including the stop.
     #[pyo3(signature=(prompt_ids, candidates, *, stop_id))]
     fn score_lines(
@@ -614,6 +712,38 @@ impl PyNativeCausalLm {
             .detach(|| self.inner.score_lines(&b.prompt, &b.lines, b.stop))
             .map_err(error)?;
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
+    }
+
+    /// One Rust pullback for a set, menu or subset of complete answers.
+    #[pyo3(signature=(prompt_ids, candidates, *, stop_id, objective, mode, max_tile_values=None))]
+    fn line_adaptation_gradients(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        candidates: &Bound<'_, PyAny>,
+        stop_id: &Bound<'_, PyAny>,
+        objective: &Bound<'_, PyAny>,
+        mode: &str,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        use st_nn::causal_lm::CausalLmLineObjective;
+        let mode = session::mode(mode)?;
+        self.inner.validate_adaptation_mode(mode).map_err(error)?;
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
+        let spec =
+            session_input::payload_with_limit(objective, CausalLmLineObjective::MAX_SPEC_BYTES)?;
+        let spec: CausalLmLineObjective = serde_json::from_slice(spec.as_bytes()).map_err(error)?;
+        let stop = dimension(stop_id)?;
+        let items = line_menu::LineItems::new(candidates, 1)?;
+        let n = prompt_ids.len()?;
+        spec.training_shape_for(&self.inner, n, &items.lengths, stop, mode)
+            .map_err(error)?;
+        let prompt = tokens(prompt_ids, n)?;
+        let lines = items.into_ids()?;
+        py.detach(|| spec.gradients_for(&self.inner, &prompt, &lines, stop, cap, mode))
+            .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
+            .map_err(error)
     }
 
     /// Absolute probability loss for emitting any one of the terminated alternatives.
@@ -632,18 +762,21 @@ impl PyNativeCausalLm {
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
     }
 
-    #[pyo3(signature=(prompt_ids, candidates, *, stop_id))]
+    #[pyo3(signature=(prompt_ids, candidates, *, stop_id, max_tile_values=None))]
     fn geometry_line_set_gradients(
         &self,
         py: Python<'_>,
         prompt_ids: &Bound<'_, PyAny>,
         candidates: &Bound<'_, PyAny>,
         stop_id: &Bound<'_, PyAny>,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
         let b = line_menu::collect(&self.inner, prompt_ids, candidates, stop_id, None, true)?;
         py.detach(|| {
             self.inner
-                .geometry_line_set_gradients(&b.prompt, &b.lines, b.stop)
+                .geometry_line_set_gradients_with_tile_limit(&b.prompt, &b.lines, b.stop, cap)
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
@@ -676,7 +809,7 @@ impl PyNativeCausalLm {
         crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?)
     }
 
-    #[pyo3(signature=(prompt_ids, candidates, *, accepted_indices, stop_id))]
+    #[pyo3(signature=(prompt_ids, candidates, *, accepted_indices, stop_id, max_tile_values=None))]
     fn geometry_line_subset_gradients(
         &self,
         py: Python<'_>,
@@ -684,7 +817,10 @@ impl PyNativeCausalLm {
         candidates: &Bound<'_, PyAny>,
         accepted_indices: &Bound<'_, PyAny>,
         stop_id: &Bound<'_, PyAny>,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
         let (b, ids) = line_menu::subset(
             &self.inner,
             prompt_ids,
@@ -694,8 +830,9 @@ impl PyNativeCausalLm {
             true,
         )?;
         py.detach(|| {
-            self.inner
-                .geometry_line_subset_gradients(&b.prompt, &b.lines, &ids, b.stop)
+            self.inner.geometry_line_subset_gradients_with_tile_limit(
+                &b.prompt, &b.lines, &ids, b.stop, cap,
+            )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
@@ -712,25 +849,173 @@ impl PyNativeCausalLm {
         mix: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyNativeCausalLmAdaptationGradients> {
-        let shape = self::shape(shape)?;
-        reject_bool(mix)?;
-        let mix = mix.extract::<f64>()?;
-        self.inner
-            .validate_adaptation_mode(st_nn::causal_lm::CausalLmAdaptationMode::Geometry)
-            .map_err(error)?;
-        let count = self
-            .inner
-            .adaptation_labeled_input_count(shape, labels.is_some())
-            .map_err(error)?;
-        let plan = declared::extract(contrasts, shape, count, self.inner.config().vocabulary, mix)?;
-        let ids = tokens(windows, count)?;
-        let labels = loss_labels(labels, count)?;
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            Some(mix),
+            labels,
+            declared::Work::Gradient,
+        )?;
         py.detach(|| {
-            self.inner
-                .geometry_declared_rival_gradients(&ids, shape, labels.as_deref(), &plan, mix)
+            self.inner.geometry_declared_rival_gradients(
+                &w.ids,
+                w.shape,
+                w.labels.as_deref(),
+                &w.plan,
+                w.mix,
+            )
         })
         .map(|inner| PyNativeCausalLmAdaptationGradients { inner })
         .map_err(error)
+    }
+
+    /// Return (full CE, declared mixture) as two geometry handles from one decoder forward.
+    #[pyo3(signature=(windows, shape, *, contrasts, mix, labels=None))]
+    fn geometry_full_and_declared_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        mix: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(
+        PyNativeCausalLmAdaptationGradients,
+        PyNativeCausalLmAdaptationGradients,
+    )> {
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            Some(mix),
+            labels,
+            declared::Work::Pair,
+        )?;
+        let (full, declared) = py
+            .detach(|| {
+                self.inner.geometry_full_and_declared_gradients(
+                    &w.ids,
+                    w.shape,
+                    w.labels.as_deref(),
+                    &w.plan,
+                    w.mix,
+                )
+            })
+            .map_err(error)?;
+        Ok((
+            PyNativeCausalLmAdaptationGradients { inner: full },
+            PyNativeCausalLmAdaptationGradients { inner: declared },
+        ))
+    }
+
+    /// Forward-only within-set and set-coverage NLL; no adapter required.
+    #[pyo3(signature=(windows, shape, *, contrasts, labels=None))]
+    fn declared_set_nll(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            None,
+            labels,
+            declared::Work::Score,
+        )?;
+        let scores = py
+            .detach(|| {
+                self.inner
+                    .declared_set_nll(&w.ids, w.shape, w.labels.as_deref(), &w.plan)
+            })
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(scores).map_err(error)?)
+    }
+
+    /// Return (within-set gradient, set-coverage gradient, scores); same snapshot and decoder forward.
+    #[pyo3(signature=(windows, shape, *, contrasts, labels=None))]
+    fn geometry_declared_set_gradients(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(
+        PyNativeCausalLmAdaptationGradients,
+        PyNativeCausalLmAdaptationGradients,
+        Py<PyAny>,
+    )> {
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            None,
+            labels,
+            declared::Work::Pair,
+        )?;
+        let (within, coverage, scores) = py
+            .detach(|| {
+                self.inner.geometry_declared_set_gradients(
+                    &w.ids,
+                    w.shape,
+                    w.labels.as_deref(),
+                    &w.plan,
+                )
+            })
+            .map_err(error)?;
+        Ok((
+            PyNativeCausalLmAdaptationGradients { inner: within },
+            PyNativeCausalLmAdaptationGradients { inner: coverage },
+            crate::json::json_to_py(py, &serde_json::to_value(scores).map_err(error)?)?,
+        ))
+    }
+
+    /// One proposal and at most one finite check. A tie/regression returns the original snapshot.
+    #[pyo3(signature=(windows, shape, *, contrasts, target_l2, labels=None))]
+    fn step_declared_set_geometry_at_distance(
+        &self,
+        py: Python<'_>,
+        windows: &Bound<'_, PyAny>,
+        shape: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        target_l2: &Bound<'_, PyAny>,
+        labels: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        reject_bool(target_l2)?;
+        let distance = target_l2.extract::<f64>()?;
+        let w = declared::Window::extract(
+            &self.inner,
+            windows,
+            shape,
+            contrasts,
+            None,
+            labels,
+            declared::Work::CheckedStep(distance),
+        )?;
+        let (inner, report) = py
+            .detach(|| {
+                self.inner.step_declared_set_geometry_at_distance(
+                    &w.ids,
+                    w.shape,
+                    w.labels.as_deref(),
+                    &w.plan,
+                    distance,
+                )
+            })
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)?,
+        ))
     }
 
     /// Inspect CE, declared and mixed VJPs after one f32 forward; the second
@@ -762,6 +1047,108 @@ impl PyNativeCausalLm {
         mixture_probe::to_python(py, report)
     }
 
+    /// Factual final-query Q/K/V and the value-gate derivative. No update.
+    fn last_mlp_value_read_signal(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        target_id: &Bound<'_, PyAny>,
+        rival_id: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let (target, rival) = (dimension(target_id)?, dimension(rival_id)?);
+        let n = self
+            .inner
+            .value_read_signal_input_count(prompt_ids.len()?, target, rival)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, n)?;
+        let rec = py
+            .detach(|| self.inner.last_mlp_value_read_signal(&ids, target, rival))
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(rec).map_err(error)?)
+    }
+
+    /// Per-position prefix features and the factual raw token-margin gradient; no update.
+    fn last_mlp_prefix_margin_signal(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        target_id: &Bound<'_, PyAny>,
+        rival_id: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let target = dimension(target_id)?;
+        let rival = dimension(rival_id)?;
+        let n = self
+            .inner
+            .prefix_margin_signal_input_count(prompt_ids.len()?, target, rival)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, n)?;
+        let s = py
+            .detach(|| {
+                self.inner
+                    .last_mlp_prefix_margin_signal(&ids, target, rival)
+            })
+            .map_err(error)?;
+        let out = pyo3::types::PyDict::new(py);
+        out.set_item("schema", s.schema)?;
+        out.set_item("base_model_identity", s.base_model_identity)?;
+        out.set_item("lora_artifact_id", s.lora_artifact_id)?;
+        out.set_item("frozen_lora_artifact_id", s.frozen_lora_artifact_id)?;
+        out.set_item("geometry_artifact_id", s.geometry_artifact_id)?;
+        out.set_item("readout_accumulator", s.readout_accumulator.as_str())?;
+        out.set_item("site", s.site)?;
+        out.set_item(
+            "rotation",
+            crate::json::json_to_py(py, &serde_json::to_value(s.rotation).map_err(error)?)?,
+        )?;
+        if let Some(encoding) = s.source_encoding {
+            out.set_item("source_encoding", encoding)?;
+        }
+        if let Some(mix) = s.output_mix {
+            out.set_item(
+                "output_mix",
+                crate::json::json_to_py(py, &serde_json::to_value(mix).map_err(error)?)?,
+            )?;
+        }
+        out.set_item("strength", s.strength)?;
+        out.set_item("shape", s.shape.to_vec())?;
+        out.set_item(
+            "contrast",
+            crate::json::json_to_py(py, &serde_json::to_value(s.contrast).map_err(error)?)?,
+        )?;
+        out.set_item("site_input", s.site_input)?;
+        out.set_item("source_features", s.source_features)?;
+        out.set_item("upstream", s.upstream)?;
+        out.set_item("gate_gradient", s.gate_gradient)?;
+        out.set_item("bias_gradient", s.bias_gradient)?;
+        Ok(out.into_any().unbind())
+    }
+
+    /// Last-token unit logit-margin VJP: four local gate/bias maps, one factual decoder.
+    #[pyo3(signature=(prompt_ids, target_id, rival_id, config))]
+    fn last_attention_wave_margin_pullbacks(
+        &self,
+        py: Python<'_>,
+        prompt_ids: &Bound<'_, PyAny>,
+        target_id: &Bound<'_, PyAny>,
+        rival_id: &Bound<'_, PyAny>,
+        config: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let target = dimension(target_id)?;
+        let rival = dimension(rival_id)?;
+        let config = crate::geometry_runtime::wave_config(config)?;
+        let count = self
+            .inner
+            .wave_margin_input_count(prompt_ids.len()?, target, rival, config)
+            .map_err(error)?;
+        let ids = tokens(prompt_ids, count)?;
+        py.detach(|| {
+            self.inner
+                .last_attention_wave_margin_pullbacks(&ids, target, rival, config)
+        })
+        .map_err(error)
+        .and_then(|p| mixture_probe::wave_margin(py, p))
+    }
+
     /// Four local channel maps on a single factual decoder forward and CE pullback.
     #[pyo3(signature=(windows, shape, config, *, labels=None))]
     fn wave_factorial_observation_json(
@@ -772,14 +1159,7 @@ impl PyNativeCausalLm {
         config: &Bound<'_, PyAny>,
         labels: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<String> {
-        let config = serde_json::from_value(crate::json::py_to_json_bounded(
-            config,
-            2048,
-            16,
-            3,
-            "wave factorial",
-        )?)
-        .map_err(error)?;
+        let config = crate::geometry_runtime::wave_config(config)?;
         self.inner.admit_wave_factorial(config).map_err(error)?;
         let shape = self::shape(shape)?;
         let count = self
@@ -839,6 +1219,51 @@ impl PyNativeCausalLm {
         ))
     }
 
+    /// One Euclidean step budget across all selected parameters, before rounding.
+    #[pyo3(signature=(gradients, *, mode, target_l2))]
+    fn step_adaptation_gradient_at_distance(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmAdaptationGradients,
+        mode: &str,
+        target_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        let mode = session::mode(mode)?;
+        reject_bool(target_l2)?;
+        let target = target_l2.extract::<f64>()?;
+        let (inner, receipt) = py
+            .detach(|| {
+                self.inner
+                    .step_adaptation_gradient_at_distance(&gradients.inner, mode, target)
+            })
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(receipt).map_err(error)?)?,
+        ))
+    }
+
+    /// Take a distance-matched step along the sealed gradient before parameter rounding.
+    fn step_geometry_gradient_at_distance(
+        &self,
+        py: Python<'_>,
+        gradients: &PyNativeCausalLmAdaptationGradients,
+        target_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        reject_bool(target_l2)?;
+        let distance = target_l2.extract::<f64>()?;
+        let (inner, report) = py
+            .detach(|| {
+                self.inner
+                    .step_geometry_gradient_at_distance(&gradients.inner, distance)
+            })
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)?,
+        ))
+    }
+
     /// Apply one equal-vote mean of sealed geometry gradients from this snapshot.
     #[pyo3(signature=(gradients, learning_rate, *, target_l2=None))]
     fn step_geometry_cohort_sgd(
@@ -860,17 +1285,59 @@ impl PyNativeCausalLm {
         self.inner
             .validate_geometry_cohort(n, rate, target)
             .map_err(error)?;
-        let owners = (0..n)
-            .map(|i| {
-                gradients
-                    .get_item(i)?
-                    .cast_into::<PyNativeCausalLmAdaptationGradients>()
-                    .map_err(Into::into)
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+        let owners = groups::members(gradients, n)?;
         let members: Vec<_> = owners.iter().map(|o| &o.get().inner).collect();
         let (inner, receipt) = py
             .detach(|| self.inner.step_geometry_cohort_sgd(&members, rate, target))
+            .map_err(error)?;
+        Ok((
+            Self { inner },
+            crate::json::json_to_py(py, &serde_json::to_value(receipt).map_err(error)?)?,
+        ))
+    }
+
+    /// Fit residual second moments on the last row of each unlabeled training prompt.
+    fn calibrate_prefix_residual_metric(
+        &self,
+        py: Python<'_>,
+        prompts: &Bound<'_, PyAny>,
+    ) -> PyResult<prefix_metric::PyPrefixResidualMetric> {
+        self.calibrate_prefix_metric_impl(py, prompts)
+    }
+
+    #[pyo3(signature=(metric, gradients, rule, *, target_rms, max_parameter_l2))]
+    fn step_prefix_residual_rms(
+        &self,
+        py: Python<'_>,
+        metric: &prefix_metric::PyPrefixResidualMetric,
+        gradients: &Bound<'_, PyAny>,
+        rule: &str,
+        target_rms: &Bound<'_, PyAny>,
+        max_parameter_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        self.step_prefix_metric_impl(py, metric, gradients, rule, target_rms, max_parameter_l2)
+    }
+
+    /// Normalize the f64 equal-vote mean before rounding the updated geometry to f32.
+    fn step_geometry_cohort_gradient_at_distance(
+        &self,
+        py: Python<'_>,
+        gradients: &Bound<'_, PyAny>,
+        target_l2: &Bound<'_, PyAny>,
+    ) -> PyResult<(Self, Py<PyAny>)> {
+        let n = gradients.len()?;
+        reject_bool(target_l2)?;
+        let distance = target_l2.extract::<f64>()?;
+        self.inner
+            .validate_geometry_cohort_ray(n, distance)
+            .map_err(error)?;
+        let owners = groups::members(gradients, n)?;
+        let members: Vec<_> = owners.iter().map(|o| &o.get().inner).collect();
+        let (inner, receipt) = py
+            .detach(|| {
+                self.inner
+                    .step_geometry_cohort_gradient_at_distance(&members, distance)
+            })
             .map_err(error)?;
         Ok((
             Self { inner },
@@ -1076,14 +1543,55 @@ impl PyNativeCausalLm {
         self.inner.lora_artifact_id()
     }
 
+    fn freeze_lora(&self, py: Python<'_>) -> PyResult<Self> {
+        py.detach(|| self.inner.freeze_lora())
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+
+    #[getter]
+    fn frozen_lora_artifact_id(&self) -> Option<&str> {
+        self.inner.frozen_lora_artifact_id()
+    }
+
+    fn frozen_lora_to_json(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| self.inner.frozen_lora_to_json())
+            .map_err(error)
+    }
+
+    fn with_single_geometry_at(
+        &self,
+        py: Python<'_>,
+        path: &Bound<'_, PyString>,
+    ) -> PyResult<Self> {
+        let bytes = session_input::text_bytes(path, NativeCausalLm::MAX_GEOMETRY_SITE_BYTES)?;
+        let path = std::str::from_utf8(bytes.as_bytes()).map_err(error)?;
+        py.detach(|| self.inner.with_single_geometry_at(path))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+
     fn lora_to_json(&self, py: Python<'_>) -> PyResult<String> {
         py.detach(|| self.inner.lora_to_json()).map_err(error)
     }
 
-    fn with_lora_json(&self, py: Python<'_>, payload: &str) -> PyResult<Self> {
-        py.detach(|| self.inner.with_lora_json(payload))
-            .map(|inner| Self { inner })
-            .map_err(error)
+    #[pyo3(signature=(payload, *, expected_id=None))]
+    fn with_lora_json(
+        &self,
+        py: Python<'_>,
+        payload: &Bound<'_, PyAny>,
+        expected_id: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let id = expected_id.map(session_input::pin).transpose()?;
+        let bytes =
+            session_input::payload_with_limit(payload, NativeCausalLm::MAX_LORA_ARTIFACT_BYTES)?;
+        let raw = std::str::from_utf8(bytes.as_bytes()).map_err(error)?;
+        py.detach(|| match id {
+            Some(id) => self.inner.with_lora_json_pinned(raw, &id),
+            None => self.inner.with_lora_json(raw),
+        })
+        .map(|inner| Self { inner })
+        .map_err(error)
     }
 
     #[pyo3(signature=(windows, shape, *, labels=None))]
@@ -1234,6 +1742,19 @@ impl PyNativeCausalLm {
             .map_err(error)?;
         Ok(Self {
             inner: self.inner.with_readout_accumulator(accumulator),
+        })
+    }
+
+    #[getter]
+    fn forward_readout_storage(&self) -> &'static str {
+        self.inner.forward_readout_storage().as_str()
+    }
+
+    fn with_forward_readout_storage(&self, storage: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: self.inner.with_forward_readout_storage(
+                storage.parse::<CausalLmForwardStorage>().map_err(error)?,
+            ),
         })
     }
 
@@ -1623,6 +2144,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<supervision::PyCausalTargetAlignment>()?;
     module.add_class::<supervision::PyCausalCompletion>()?;
     module.add_class::<PyNativeCausalLm>()?;
+    module.add_class::<prefix_metric::PyPrefixResidualMetric>()?;
     module.add_class::<scalar_output::PyScalarOutput>()?;
     output_margin::register(module)?;
     conditional_projection::register(module)?;
@@ -1632,6 +2154,7 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     evaluation::register(module)?;
     training::register(module)?;
     session::register(module)?;
+    module.add_class::<line_session::PyLineSession>()?;
     generation::register(module)?;
     context::register(module)?;
     Ok(())

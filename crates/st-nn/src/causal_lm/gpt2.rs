@@ -302,7 +302,9 @@ pub(super) fn load(
         backward_head: Arc::new(OnceLock::new()),
         geometry: None,
         lora: None,
+        frozen_lora: None,
         readout_accumulator: CausalLmReadoutAccumulator::F32,
+        forward_storage: CausalLmForwardStorage::Auto,
     };
     match lag {
         Some(p) => model.with_key_lag(p),

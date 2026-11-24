@@ -1,6 +1,6 @@
 //! Geometry-only SGD controls. The base and any attached LoRA remain in both forwards.
 use super::*;
-use crate::geometry_artifact::GeometryDeltaMatch;
+use crate::geometry_artifact::{GeometryDeltaMatch, GeometryGradientStep};
 
 fn geometry(model: &NativeCausalLm) -> CausalLmResult<&GeometryAdapterArtifact> {
     model
@@ -40,6 +40,26 @@ pub struct CausalLmGeometryCompetitionStep {
 }
 
 impl NativeCausalLm {
+    /// Normalize the sealed negative geometry gradient before any parameter rounding.
+    /// This is a different direction contract from scaling an ordinary f32 SGD endpoint.
+    pub fn step_geometry_gradient_at_distance(
+        &self,
+        gradients: &NativeCausalLmAdaptationGradients,
+        target_l2: f64,
+    ) -> CausalLmResult<(Self, GeometryGradientStep)> {
+        self.validate_adaptation_mode(CausalLmAdaptationMode::Geometry)?;
+        self.validate_full_geometry_gradient(gradients)?;
+        let origin = geometry(self)?;
+        let (artifact, report) =
+            origin.match_validated_gradient_ray(gradients.parameters(), target_l2)?;
+        let next = if report.result_id == report.origin_id {
+            self.clone()
+        } else {
+            self.with_geometry(artifact)?
+        };
+        Ok((next, report))
+    }
+
     /// Apply a sealed geometry gradient at a specified global distance. First form the same
     /// rounded proposal as ordinary SGD; do not normalize the unrounded gradient instead.
     pub fn step_geometry_sgd_at_distance(

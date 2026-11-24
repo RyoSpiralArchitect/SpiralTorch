@@ -1,5 +1,6 @@
 """One Rust-owned training contract, with no optional ML runtime."""
 import importlib.abc
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,6 +49,330 @@ def finish(trainer):
 
 
 class NativeCausalLmSessionTests(unittest.TestCase):
+    def test_token_menu_uses_one_label_and_rejects_invalid_input_before_copy(self):
+        base, model = owners()
+        m = model.freeze_lora()
+        g = m.geometry_token_menu_gradients([4, 1, 2], [1, 3, 6], gold_index=1, mix=.5)
+        direct = m.geometry_declared_rival_gradients([4, 1, 2, 3], [1, 4], labels=[-100, -100, -100, 3],
+                                                    contrasts=[(3, 3, [1, 6])], mix=.5)
+        self.assertEqual(g.parameter_gradients(), direct.parameter_gradients())
+        self.assertEqual(g.declared_rival_report(), direct.declared_rival_report())
+        self.assertEqual(g.target_tokens, 1)
+        self.assertIsNone(g.line_menu_report())
+        moved, _ = m.step_adaptation_gradient_at_distance(g, mode="geometry", target_l2=1/256)
+        self.assertEqual(m.frozen_lora_artifact_id, moved.frozen_lora_artifact_id)
+        class Unreadable:
+            def __len__(self):
+                return 3
+            def __getitem__(self, i):
+                raise AssertionError("copied before admission")
+        for owner, index, mix in [(base, 1, .5), (m, 3, .5), (m, 0, float("nan")), (m, True, .5), (m, 0, False)]:
+            with self.assertRaises((TypeError, ValueError)):
+                owner.geometry_token_menu_gradients(Unreadable(), Unreadable(), gold_index=index, mix=mix)
+
+    def test_unmeasurable_envelope_reports_zero_kl_not_a_second_accepted_ray(self):
+        _, m = owners()  # Fresh LoRA B is exactly zero; a tiny B step is representable.
+        u = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/32,
+                 anchor_examples=[0,1], criterion=dict(kind="mean_with_cap", max_anchor_kl=2e6),
+                 direction=dict(kind="raw_then_sensitivity_ray", probe_l2=2**-40,
+                                basis="parameter_block", select="envelope"))
+        p = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", mode="lora", epochs=1, update=u,
+                 examples=[dict(prompt_ids=ids,candidates=[[1],[2]],stop_id=0,objective=dict(kind="set"))
+                           for ids in ([1,2],[2,1,3])])
+        s = st.NativeCausalLmLineTrainingSession(m,json.dumps(p))
+        before = s.checkpoint_with_id()
+        refusal = s.attempt_step()["refusal"]
+        self.assertEqual((refusal["reason"],refusal["trials"]),("no measurable sensitivity direction",[]))
+        self.assertEqual(s.checkpoint_with_id(),before)
+        report = refusal["sensitivity"]
+        self.assertIsNone(report["selected_axis"])
+        a,b = report["axes"]
+        self.assertEqual((a["tensor"],a["gradient_l2"],a["probe_per_anchor_kl"]),("a",0.,None))
+        self.assertEqual((b["tensor"],b["probe_per_anchor_kl"],b["prediction"]),("b",[0.,0.],None))
+        self.assertGreater(b["gradient_l2"],0.)
+        self.assertEqual(report["probe_readouts"],2)
+        self.assertEqual(refusal["anchor_readouts"],refusal["raw_miss"]["anchor_readouts"]+2)
+
+    def test_sensitivity_axis_receipt_and_plan_are_bound_to_the_checkpoint(self):
+        _, m = owners()
+        update = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/8,
+                      anchor_examples=[0,1], criterion=dict(kind="mean_with_cap", max_anchor_kl=2e6),
+                      direction=dict(kind="raw_then_sensitivity_ray", probe_l2=1/256,
+                                     basis="coordinate", select="envelope"))
+        p = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", mode="geometry", epochs=1,
+                 examples=[dict(prompt_ids=ids, candidates=[[1],[2]], stop_id=0, objective=dict(kind="set"))
+                           for ids in ([1,2], [2,1,3])], update=update)
+        S = st.NativeCausalLmLineTrainingSession
+        text = json.dumps(p)
+        s = S(m,text)
+        cut = s.checkpoint_with_id()
+        refusal = s.attempt_step()["refusal"]
+        report = refusal["sensitivity"]
+        self.assertNotIn("direction",refusal)
+        self.assertEqual(s.checkpoint_with_id(),cut)
+        self.assertNotIn("source_loss_dot_step",report)
+        self.assertEqual(report["probe_readouts"], 2*sum(a["probe_per_anchor_kl"] is not None for a in report["axes"]))
+        self.assertEqual(refusal["anchor_readouts"], refusal["raw_miss"]["anchor_readouts"] +
+                         report["probe_readouts"] + 2*len(refusal["trials"]))
+        self.assertEqual(S.from_json(m,text,*cut).attempt_step()["refusal"],refusal)
+        update["direction"]["basis"]="parameter_block"
+        with self.assertRaises(ValueError):
+            S.from_json(m,json.dumps(p),*cut)
+        update["criterion"]={"kind":"mean"}
+        with self.assertRaisesRegex(ValueError,"capped mean"):
+            S(m,json.dumps(p))
+
+    def test_line_prompt_identity_depends_on_tokens_not_loss_tile_or_owner(self):
+        _, m = owners()
+        for prompt in ([1, 2], [2, 1], [2]):
+            payload = b"spiraltorch.native_causal_lm.line_prompt.v1\0"
+            payload += b"".join(struct.pack("<Q", n) for n in [len(prompt), *prompt])
+            expected = "sha256:" + hashlib.sha256(payload).hexdigest()
+            for mode, tile, obj in (("joint", 11, {"kind": "set"}),
+                                    ("geometry", None, {"kind": "menu", "gold_index": 0, "mix": .5}),
+                                    ("lora", 22, {"kind": "subset", "accepted_indices": [0]})):
+                g = m.line_adaptation_gradients(prompt, [[1], [2]], stop_id=0, mode=mode,
+                                                objective=json.dumps(obj), max_tile_values=tile)
+                self.assertEqual(g.line_prompt_id, expected)
+        self.assertIsNone(m.adaptation_loss_gradients([1, 2, 3], [1, 3]).line_prompt_id)
+
+    def test_raw_first_unresolved_midpoint_keeps_refusal_and_never_publishes(self):
+        _, m = owners()
+        record = json.loads(m.geometry_artifact().to_json())
+        placement = record["placements"][0]
+        placement["recipe"] = dict(schema="spiraltorch.wave_gate_adapter.v2", features=4, strength=.5,
+                                   kernel=dict(curvature=-1., saturation=1., porosity=.05, max_values=1024),
+                                   learnable_radius=True)
+        for t in placement["tensors"]:
+            t["requires_grad"] = False
+        placement["tensors"].append(dict(name="log_radius", shape=[], values=[-2.], role="parameter",
+                                         requires_grad=True))
+        # The single trainable coordinate has no nonzero orthogonal residual.
+        m = m.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(record)))
+        update = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/16, anchor_examples=[0,1],
+                      direction=dict(kind="raw_then_secant_midpoint", probe_l2=1/256, anchor="largest"))
+        plan = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="geometry", update=update,
+                    examples=[dict(prompt_ids=p, candidates=[[1],[2]], stop_id=0, objective={"kind":"set"})
+                              for p in ([1,2], [3,4,2])])
+        S = st.NativeCausalLmLineTrainingSession
+        s = S(m,json.dumps(plan))
+        before = s.checkpoint_with_id()
+        failure = s.attempt_step()["refusal"]
+        self.assertEqual(failure["raw_miss"]["reason"], "ceiling below matching interval")
+        self.assertEqual(failure["raw_miss"]["anchor_readouts"], 4)
+        self.assertEqual(failure["raw_miss"]["rescue_policy"], update["direction"])
+        self.assertIn(failure["reason"], ("secant projection retains less than 0.001 of the source norm",
+                                         "unresolved secant normal or source gradient"))
+        self.assertEqual((failure["anchor_readouts"],failure["trials"]),(6,[]))
+        self.assertEqual(s.checkpoint_with_id(), before)
+        self.assertEqual(s.completed_updates, 0)
+        cold = S.from_json(m,json.dumps(plan),*before)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"must-not-exist.json"
+            with self.assertRaisesRegex(ValueError, "anchor KL not matched"):
+                cold.advance_to_checkpoint_new(1,path)
+            self.assertFalse(path.exists())
+        self.assertEqual(cold.checkpoint_with_id(), before)
+
+    def test_secant_plan_is_strict_resumable_and_reports_source_descent(self):
+        _, model = owners("f32_wide_backward")
+        create = st.NativeCausalLmLineTrainingSession
+        examples = [dict(prompt_ids=p, candidates=[[1], [2]], stop_id=0, objective={"kind": "set"})
+                    for p in ([1, 2], [3, 4, 2])]
+        update = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/32,
+                      anchor_examples=[0, 1])
+        plan = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="joint",
+                    examples=examples, update=update)
+        for bad in (None, {"kind": "loss_gradient", "probe_l2": 1/256},
+                    {"kind": "secant_projection", "anchor": "largest", "probe_l2": 1}):
+            update["direction"] = bad
+            with self.assertRaises(ValueError):
+                create(model, json.dumps(plan))
+        update["direction"] = dict(kind="secant_projection", anchor="largest", probe_l2=1/256)
+        measured = create(model, json.dumps(plan)).attempt_step()["refusal"]
+        self.assertNotIn("source_loss_dot_step", measured["direction"])
+        # One reachable mean on this unit fixture, not the frozen comparison's target.
+        update["target_kl"] = measured["trials"][0]["mean_kl"] * 1.005
+        plan_text = json.dumps(plan)
+        live = create(model, plan_text)
+        raw, pin = live.checkpoint_with_id()
+        cold = create.from_json(model, plan_text, raw, pin)
+        update["direction"]["anchor"] = "successor"
+        with self.assertRaises(ValueError):
+            create.from_json(model, json.dumps(plan), raw, pin)
+        step = live.step()
+        self.assertEqual(cold.step(), step)
+        self.assertEqual(cold.checkpoint_with_id(), live.checkpoint_with_id())
+        self.assertEqual(step["anchor_kl"]["anchor_readouts"], 6)
+        self.assertLess(step["anchor_kl"]["direction"]["source_loss_dot_step"], 0)
+        self.assertEqual(step["parameter_ray"]["method"], "selected_parameter_secant_projected_ray_f32.v1")
+
+    def test_unmatched_anchor_kl_does_not_publish_or_advance(self):
+        _, model = owners()
+        update = dict(kind="anchor_forward_kl", target_kl=1e6,
+                      max_parameter_l2=1/16, anchor_examples=[0])
+        plan = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="joint",
+                    update=update, examples=[dict(prompt_ids=[1, 2], candidates=[[1], [2]],
+                                                  stop_id=0, objective={"kind":"set"})])
+        session = st.NativeCausalLmLineTrainingSession(model, json.dumps(plan))
+        before = session.checkpoint_with_id()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"unmatched.json"
+            with self.assertRaisesRegex(ValueError, "anchor KL not matched"):
+                session.advance_to_checkpoint_new(1, path)
+            self.assertFalse(path.exists())
+        self.assertEqual(session.completed_updates, 0)
+        self.assertEqual(session.checkpoint_with_id(), before)
+
+        structured = st.NativeCausalLmLineTrainingSession(model, json.dumps(plan))
+        attempt = structured.attempt_step()
+        self.assertEqual((attempt["status"], attempt["next_update"], attempt["example_index"]),
+                         ("unmatched", 1, 0))
+        self.assertEqual(attempt["refusal"]["anchor_readouts"], 2)
+        self.assertEqual(structured.checkpoint_with_id(), before)
+
+    def test_peak_rule_and_legacy_plan_do_not_share_checkpoint_pins(self):
+        _, model = owners()
+        examples = [dict(prompt_ids=[1,2], candidates=[[1],[2]], stop_id=0, objective={"kind":"set"})]
+        opt = dict(kind="anchor_forward_kl", target_kl=1e6, max_parameter_l2=1/16, anchor_examples=[0])
+        p = dict(schema="spiraltorch.native_causal_lm_line_plan.v3", epochs=1, mode="joint",
+                 update=opt, examples=examples)
+        S = st.NativeCausalLmLineTrainingSession
+        legacy = S(model,json.dumps(p))
+        raw,pin = legacy.checkpoint_with_id()
+        opt["criterion"] = {"kind":"peak"}
+        with self.assertRaises(ValueError):
+            S.from_json(model,json.dumps(p),raw,pin)
+        peak = S(model,json.dumps(p))
+        r = peak.attempt_step()["refusal"]
+        self.assertEqual(r["criterion"], {"kind":"peak"})
+        self.assertEqual(r["trials"][0]["peak"], {"anchor_index":0,"kl":r["trials"][0]["mean_kl"]})
+        self.assertEqual(peak.completed_updates,0)
+        for wrong in (None, {"kind":"peak","max_anchor_kl":2e6}, {"kind":"mean_with_cap","max_anchor_kl":1}):
+            opt["criterion"]=wrong
+            with self.assertRaises(ValueError):
+                S(model,json.dumps(p))
+
+    def test_global_ray_admission_and_joint_checkpointed_segment(self):
+        base, m = owners()
+        args=([1,2], [[1],[1,2],[3]])
+        spec={"kind":"set"}
+        g=m.line_adaptation_gradients(*args,stop_id=0,mode="joint",objective=json.dumps(spec))
+        with self.assertRaises((TypeError,ValueError)):
+            m.step_adaptation_gradient_at_distance(g,mode="joint",target_l2=True)
+        with self.assertRaises(ValueError):
+            base.step_adaptation_gradient_at_distance(g,mode="joint",target_l2=0)
+        n,r=m.step_adaptation_gradient_at_distance(g,mode="joint",target_l2=1/256)
+        self.assertLessEqual(r["relative_vector_error"],1e-4)
+        self.assertEqual(r["lora"]["result_id"],n.lora_artifact_id)
+        self.assertEqual(r["geometry"]["result_id"],n.geometry_artifact_id)
+        p=dict(schema="spiraltorch.native_causal_lm_line_plan.v3",mode="joint",epochs=2,
+               update={"kind":"parameter_gradient_l2","target_l2":1/256},max_tile_values=11,
+               examples=[dict(prompt_ids=args[0],candidates=args[1],stop_id=0,objective=spec)])
+        S=st.NativeCausalLmLineTrainingSession
+        for policy in (None,{"kind":"parameter_gradient_l2","target_l2":True},
+                       {"kind":"parameter_gradient_l2","target_l2":1e100}):
+            with self.assertRaises(ValueError):
+                S(m,json.dumps(dict(p,update=policy)))
+        raw=json.dumps(p)
+        s=S(m,raw)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"split"
+            reports,ck=s.advance_to_checkpoint_new(1,path)
+            self.assertEqual(reports[0]["parameter_ray"],r)
+            split=S.from_json(m,raw,path.read_bytes(),ck)
+            self.assertEqual(split.step(),s.step())
+            self.assertEqual(split.checkpoint_with_id(),s.checkpoint_with_id())
+            self.assertIsNone(split.step())
+
+    def test_complete_line_owner_mode_before_foreign_ids_and_joint_checkpoint(self):
+        base, m = owners()
+        stop, lines, prompt = 0, [[1], [1, 2], [3]], [1, 2]
+        spec = {"kind": "subset", "accepted_indices": [0, 2]}
+        kw = dict(stop_id=stop, objective=json.dumps(spec).encode(), mode="joint", max_tile_values=11)
+        class Unreadable:
+            def __len__(self):
+                return 2
+            def __getitem__(self, i):
+                raise AssertionError("token copied before admission")
+        for bad in [dict(mode="unspecified"), dict(objective=" " * 4097),
+                    dict(objective='{"kind":"subset","accepted_indices":[4]}'), dict(max_tile_values=10)]:
+            with self.assertRaises(ValueError):
+                m.line_adaptation_gradients(Unreadable(), lines, **dict(kw, **bad))
+        with self.assertRaises(ValueError):
+            base.line_adaptation_gradients(Unreadable(), lines, **kw)
+        with self.assertRaises(ValueError):
+            m.with_lora_json(m.lora_to_json().encode(), expected_id="sha256:" + "0" * 64)
+
+        gradient = m.line_adaptation_gradients(prompt, lines, **kw)
+        selection = {}
+        for mode in ("lora", "geometry"):
+            group = m.line_adaptation_gradients(prompt, lines, **dict(kw, mode=mode))
+            self.assertEqual(group.loss, gradient.loss)
+            self.assertTrue(selection.keys().isdisjoint(group.parameter_gradients()))
+            selection.update(group.parameter_gradients())
+        self.assertEqual(selection, gradient.parameter_gradients())
+        plan = json.dumps({"schema":"spiraltorch.native_causal_lm_line_plan.v2", "mode":"joint",
+                           "epochs":2, "learning_rate":0.125, "max_tile_values":11,
+                           "examples":[dict(prompt_ids=prompt,candidates=lines,stop_id=stop,objective=spec)]})
+        session = st.NativeCausalLmLineTrainingSession(m, plan)
+        manual = m.step_adaptation_sgd(gradient, mode="joint", learning_rate=0.125)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "one.json"
+            reports, ck = session.advance_to_checkpoint_new(1, path)
+            self.assertEqual(reports[0]["post_lora_id"], manual.lora_artifact_id)
+            self.assertEqual(reports[0]["post_geometry_id"], manual.geometry_artifact_id)
+            restored = st.NativeCausalLmLineTrainingSession.from_json(m, plan, path.read_bytes(), ck)
+            before = session.checkpoint_with_id()
+            with self.assertRaises(OSError):
+                session.advance_to_checkpoint_new(2, path)
+            self.assertEqual(before, session.checkpoint_with_id())
+            self.assertEqual(session.step(), restored.step())
+            self.assertEqual(session.checkpoint_with_id(), restored.checkpoint_with_id())
+
+    def test_complete_line_session_exact_partition_and_no_clobber(self):
+        import hashlib
+        base, origin = owners("f32_wide_backward")
+        plan = json.dumps({"schema":"spiraltorch.native_causal_lm_line_plan.v1","epochs":2,
+            "learning_rate":0.125,"max_tile_values":11,"examples":[
+                {"prompt_ids":[1,2],"candidates":[[1],[1,3]],"stop_id":0,"objective":{"kind":"set"}},
+                {"prompt_ids":[1,3],"candidates":[[2],[3]],"stop_id":0,"objective":{"kind":"menu","gold_index":1,"mix":0.5}}
+            ]}).encode()
+        S = st.NativeCausalLmLineTrainingSession
+        uninterrupted, split = S(origin, plan), S(origin, plan.decode())
+        expected = [uninterrupted.step() for _ in range(4)]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/"step.json"
+            initial = split.checkpoint_with_id()
+            for bad in (True,0,-1,5):
+                with self.assertRaises((ValueError,TypeError,OverflowError)):
+                    split.advance_to_checkpoint_new(bad,path)
+                self.assertFalse(path.exists())
+                self.assertEqual(split.checkpoint_with_id(),initial)
+            receipts, pin = split.advance_to_checkpoint_new(2,path)
+            self.assertEqual(receipts,expected[:2])
+            payload = path.read_bytes()
+            self.assertEqual(pin,"sha256:"+hashlib.sha256(payload).hexdigest())
+            before = split.checkpoint_with_id()
+            with self.assertRaises(FileExistsError):
+                split.advance_to_checkpoint_new(3,path)
+            self.assertEqual(payload,path.read_bytes())
+            self.assertEqual(split.checkpoint_with_id(),before)
+            for owner, data, ck, identity in [(base,plan,payload,pin),(origin,plan+b" ",payload,pin),
+                    (origin,plan,payload+b" ",pin),(split.model,plan,payload,pin),(origin,plan,payload,"sha256:bad")]:
+                with self.assertRaises(ValueError):
+                    S.from_json(owner,data,ck,identity)
+            resumed = S.from_json(origin,plan,payload,pin)
+            self.assertEqual(resumed.checkpoint_with_id(),before)
+            self.assertEqual([resumed.step(),resumed.step()],expected[2:])
+            self.assertIsNone(resumed.step())
+            self.assertTrue(resumed.exhausted)
+            self.assertEqual(resumed.checkpoint_with_id(),uninterrupted.checkpoint_with_id())
+            self.assertEqual(resumed.model.lora_to_json(),origin.lora_to_json())
+            self.assertEqual(resumed.model.geometry_artifact().to_json(),uninterrupted.model.geometry_artifact().to_json())
+            self.assertNotIn("examples",json.loads(payload))
+            self.assertNotIn("lora_json",json.loads(payload))
+
     def test_multi_site_observation_preserves_early_stop_and_non_wave_pullbacks(self):
         geo = runpy.run_path(str(Path(__file__).with_name("test_native_geometry_runtime.py")))
         config, weights = fixtures["fixture"](width=3, heads=1)

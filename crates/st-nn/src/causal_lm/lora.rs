@@ -34,6 +34,54 @@ pub(super) struct NativeLoraAdapter {
 }
 
 impl NativeLoraAdapter {
+    pub(super) fn factor_values(&self) -> [(&'static str, &[f32]); 2] {
+        [("a", &self.record.a), ("b", &self.record.b)]
+    }
+
+    pub(super) fn parameter_count(&self) -> usize {
+        self.record.a.len() + self.record.b.len()
+    }
+
+    pub(super) fn admit_ray<'g>(
+        &self,
+        grads: &'g std::collections::BTreeMap<String, Vec<f32>>,
+    ) -> CausalLmResult<[&'g [f32]; 2]> {
+        let a = grads.get("a").ok_or("missing LoRA A gradient")?;
+        let b = grads.get("b").ok_or("missing LoRA B gradient")?;
+        if grads.len() != 2
+            || a.len() != self.record.a.len()
+            || b.len() != self.record.b.len()
+            || a.iter().chain(b).any(|x| !x.is_finite())
+        {
+            return Err("invalid LoRA gradient shape or values".into());
+        }
+        Ok([a, b])
+    }
+
+    pub(super) fn project_ray(
+        &self,
+        model: &NativeCausalLm,
+        gradients: [&[f32]; 2],
+        ray: &crate::geometry_artifact::ParameterRay,
+        motion: &mut crate::geometry_artifact::RayMotion,
+    ) -> CausalLmResult<Self> {
+        let mut r = self.record.clone();
+        for (weights, g) in [&mut r.a, &mut r.b].into_iter().zip(gradients) {
+            for (at, &x) in weights.iter_mut().zip(g) {
+                ray.apply(at, f64::from(x), motion)?;
+            }
+        }
+        Self::create(r, model)
+    }
+
+    pub(super) fn same_training_layout(&self, other: &Self) -> bool {
+        let (a, b) = (&self.record, &other.record);
+        a.layer == b.layer
+            && a.width == b.width
+            && a.rank == b.rank
+            && a.alpha.to_bits() == b.alpha.to_bits()
+    }
+
     fn create(record: LoraRecord, model: &NativeCausalLm) -> CausalLmResult<Self> {
         if record.schema != "spiraltorch.native_lora.attention_output.v1"
             || record.base_model_identity != model.base_id
@@ -161,10 +209,56 @@ impl NativeCausalLmLoraGradients {
 }
 
 impl NativeCausalLm {
+    pub const MAX_LORA_ARTIFACT_BYTES: usize = MAX_LORA_JSON_BYTES;
+
+    /// Promote the current attention-output LoRA to immutable base state. Keep
+    /// its original two matmuls and scaled addition, including their f32 rounding.
+    /// Replaying the pinned LoRA on the same parent base derives the same identity.
+    pub fn freeze_lora(&self) -> CausalLmResult<Self> {
+        let adapter = self
+            .lora
+            .as_ref()
+            .ok_or("freezing requires an active native LoRA")?;
+        let mut hash = Sha256::new();
+        hash.update(b"spiraltorch.native_causal_lm.frozen_lora.v1\0");
+        hash.update(self.base_id.as_bytes());
+        hash.update(adapter.id.as_bytes());
+        let mut model = self.clone();
+        model.base_id = format!("sha256:{:x}", hash.finalize());
+        model.frozen_lora = model.lora.take();
+        if let Some(geometry) = self.geometry_artifact() {
+            // Only rebind an already-admitted artifact on this exact source.
+            let mut record = geometry.record().clone();
+            record.base_model_identity.clone_from(&model.base_id);
+            model = model.with_geometry(GeometryAdapterArtifact::create(record)?)?;
+        }
+        Ok(model)
+    }
+
+    pub fn frozen_lora_artifact_id(&self) -> Option<&str> {
+        self.frozen_lora.as_ref().map(|a| a.id.as_str())
+    }
+
+    /// Export the original adapter bound to its parent base, not a trainable
+    /// adapter on the derived base. Its typed ID is frozen_lora_artifact_id().
+    pub fn frozen_lora_to_json(&self) -> CausalLmResult<String> {
+        let adapter = self
+            .frozen_lora
+            .as_ref()
+            .ok_or("native LM has no frozen LoRA")?;
+        Ok(serde_json::to_string(&adapter.record)?)
+    }
+
+    pub(super) fn output_lora_at(&self, layer: usize) -> Option<&NativeLoraAdapter> {
+        self.lora
+            .as_deref()
+            .or(self.frozen_lora.as_deref())
+            .filter(|a| a.layer() == layer)
+    }
     /// Initialize one attention output adapter. A is deterministic and B is zero.
     /// An attached geometry must be the same layer's single attention output site.
     pub fn with_lora(&self, layer: usize, rank: usize, alpha: f32) -> CausalLmResult<Self> {
-        if self.lora.is_some() {
+        if self.lora.is_some() || self.frozen_lora.is_some() {
             return Err(
                 "native LoRA initialization requires a model without an existing LoRA adapter"
                     .into(),
@@ -227,6 +321,9 @@ impl NativeCausalLm {
 
     /// Restore or replace an adapter, checking the frozen checkpoint identity.
     pub fn with_lora_json(&self, json: &str) -> CausalLmResult<Self> {
+        if self.frozen_lora.is_some() {
+            return Err("a frozen-LoRA base does not admit a second LoRA".into());
+        }
         if json.len() > MAX_LORA_JSON_BYTES {
             return Err("native LoRA artifact exceeds byte budget".into());
         }
@@ -237,17 +334,25 @@ impl NativeCausalLm {
         Ok(next)
     }
 
+    /// Attach only the expected canonical adapter to this frozen base.
+    pub fn with_lora_json_pinned(&self, json: &str, expected_id: &str) -> CausalLmResult<Self> {
+        if !crate::geometry_artifact::is_sha256_id(expected_id) {
+            return Err("invalid native LoRA artifact pin".into());
+        }
+        let model = self.with_lora_json(json)?;
+        if model.lora_artifact_id() != Some(expected_id) {
+            return Err("native LoRA artifact pin mismatch".into());
+        }
+        Ok(model)
+    }
+
     pub(super) fn project_attention_output(
         &self,
         index: usize,
         input: &Tensor,
     ) -> CausalLmResult<Tensor> {
         let mut output = self.blocks[index].output.forward(input)?;
-        if let Some(adapter) = self
-            .lora
-            .as_ref()
-            .filter(|a| a.record.layer == index && !a.zero_delta)
-        {
+        if let Some(adapter) = self.output_lora_at(index).filter(|a| !a.zero_delta) {
             let delta = low_rank_forward(input, &adapter.a, &adapter.b, MatmulBackend::CpuSimd)?;
             output.add_scaled_with_backend(
                 &delta,

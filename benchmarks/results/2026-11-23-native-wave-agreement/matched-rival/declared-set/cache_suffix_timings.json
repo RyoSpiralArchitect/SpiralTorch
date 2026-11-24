@@ -1,0 +1,134 @@
+{
+  "heads": 4,
+  "layers": 4,
+  "prefix": 24,
+  "results": [
+    {
+      "known_tokens": 1,
+      "max_abs_full": 0.0,
+      "median_chunk_ms": 0.045979,
+      "median_paired_ratio": 1.0754531422131555,
+      "median_serial_ms": 0.0496455,
+      "pairs_ms": [
+        {
+          "chunk": 0.046166,
+          "serial": 0.067375
+        },
+        {
+          "chunk": 0.045791,
+          "serial": 0.046541
+        },
+        {
+          "chunk": 0.045541,
+          "serial": 0.046042
+        },
+        {
+          "chunk": 0.045541,
+          "serial": 0.056166
+        },
+        {
+          "chunk": 0.046334,
+          "serial": 0.048458
+        },
+        {
+          "chunk": 0.046,
+          "serial": 0.050833
+        },
+        {
+          "chunk": 0.045958,
+          "serial": 0.050917
+        },
+        {
+          "chunk": 0.049458,
+          "serial": 0.046125
+        }
+      ]
+    },
+    {
+      "known_tokens": 8,
+      "max_abs_full": 0.0,
+      "median_chunk_ms": 0.179208,
+      "median_paired_ratio": 2.1372562513382967,
+      "median_serial_ms": 0.385042,
+      "pairs_ms": [
+        {
+          "chunk": 0.197042,
+          "serial": 0.403541
+        },
+        {
+          "chunk": 0.160792,
+          "serial": 0.369334
+        },
+        {
+          "chunk": 0.185625,
+          "serial": 0.384292
+        },
+        {
+          "chunk": 0.181958,
+          "serial": 0.362042
+        },
+        {
+          "chunk": 0.185583,
+          "serial": 0.366834
+        },
+        {
+          "chunk": 0.176458,
+          "serial": 0.388958
+        },
+        {
+          "chunk": 0.16175,
+          "serial": 0.385792
+        },
+        {
+          "chunk": 0.176,
+          "serial": 0.406958
+        }
+      ]
+    },
+    {
+      "known_tokens": 32,
+      "max_abs_full": 0.0,
+      "median_chunk_ms": 0.7273955,
+      "median_paired_ratio": 2.290640740257044,
+      "median_serial_ms": 1.6526874999999999,
+      "pairs_ms": [
+        {
+          "chunk": 0.7045,
+          "serial": 1.634125
+        },
+        {
+          "chunk": 0.710542,
+          "serial": 1.583875
+        },
+        {
+          "chunk": 0.743458,
+          "serial": 1.621916
+        },
+        {
+          "chunk": 0.732208,
+          "serial": 1.686458
+        },
+        {
+          "chunk": 0.740916,
+          "serial": 1.620458
+        },
+        {
+          "chunk": 0.718666,
+          "serial": 1.708667
+        },
+        {
+          "chunk": 0.722583,
+          "serial": 1.67125
+        },
+        {
+          "chunk": 0.736125,
+          "serial": 1.676916
+        }
+      ]
+    }
+  ],
+  "schema": "spiraltorch.cached_suffix_artificial_bench.v1",
+  "vocab": 512,
+  "warmups_per_arm": 1,
+  "width": 48
+}

@@ -11,6 +11,42 @@ fn f32le<'py>(py: Python<'py>, values: &[f32]) -> PyResult<Bound<'py, PyBytes>> 
     })
 }
 
+pub(super) fn wave_margin(
+    py: Python<'_>,
+    probe: st_nn::causal_lm::CausalLmWaveMarginPullbacks,
+) -> PyResult<Py<PyAny>> {
+    let r = PyDict::new(py);
+    r.set_item("schema", "spiraltorch.wave_margin_parameter_pullbacks.v1")?;
+    r.set_item("encoding", "little_endian_f32")?;
+    r.set_item("objective", "target_logit_minus_alternative_logit")?;
+    r.set_item("base_model_identity", probe.base_model_identity)?;
+    r.set_item("geometry_artifact_id", probe.geometry_artifact_id)?;
+    r.set_item("lora_artifact_id", probe.lora_artifact_id)?;
+    r.set_item("site", probe.site)?;
+    r.set_item("factual", probe.factual)?;
+    r.set_item("strength", probe.strength)?;
+    r.set_item(
+        "config",
+        crate::json::json_to_py(py, &serde_json::to_value(probe.config).map_err(error)?)?,
+    )?;
+    r.set_item("readout_accumulator", probe.readout_accumulator.as_str())?;
+    r.set_item(
+        "contrast",
+        crate::json::json_to_py(py, &serde_json::to_value(probe.contrast).map_err(error)?)?,
+    )?;
+    r.set_item("site_input", f32le(py, &probe.site_input)?)?;
+    r.set_item("upstream", f32le(py, &probe.upstream)?)?;
+    let arms = PyDict::new(py);
+    for (name, g) in probe.arms {
+        let p = PyDict::new(py);
+        p.set_item("gate", f32le(py, &g.gate)?)?;
+        p.set_item("bias", f32le(py, &g.bias)?)?;
+        arms.set_item(name, p)?;
+    }
+    r.set_item("arms", arms)?;
+    Ok(r.into_any().unbind())
+}
+
 pub(super) fn to_python(py: Python<'_>, probe: CausalLmMixtureProbe) -> PyResult<Py<PyAny>> {
     let report = PyDict::new(py);
     report.set_item("base_model_identity", probe.base_model_identity)?;

@@ -43,6 +43,39 @@ impl PyNativeCausalLmContext {
             .map(|inner| PyNdTensor { inner })
             .map_err(error)
     }
+    /// Fork the cache for a known suffix, projecting only its final position.
+    fn with_suffix(&self, py: Python<'_>, suffix_ids: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let count = self
+            .inner
+            .suffix_input_count(suffix_ids.len()?)
+            .map_err(error)?;
+        let ids = tokens(suffix_ids, count)?;
+        py.detach(|| self.inner.with_suffix(&ids))
+            .map(|inner| Self { inner })
+            .map_err(error)
+    }
+    /// Full-vocabulary scores for lexicographically sorted content lines plus one stop each.
+    #[pyo3(signature=(candidates, *, stop_id, max_tile_values=None))]
+    fn score_lines(
+        &self,
+        py: Python<'_>,
+        candidates: &Bound<'_, PyAny>,
+        stop_id: &Bound<'_, PyAny>,
+        max_tile_values: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let stop = dimension(stop_id)?;
+        let cap = max_tile_values.map(dimension).transpose()?;
+        self.inner.line_readout_tile_rows(cap).map_err(error)?;
+        let items = super::line_menu::LineItems::new(candidates, 1)?;
+        self.inner
+            .admit_line_lengths(&items.lengths, stop)
+            .map_err(error)?;
+        let lines = items.into_ids()?;
+        let report = py
+            .detach(|| self.inner.score_lines_with_tile_limit(&lines, stop, cap))
+            .map_err(error)?;
+        crate::json::json_to_py(py, &serde_json::to_value(report).map_err(error)?)
+    }
     fn logits(&self, py: Python<'_>) -> PyResult<PyNdTensor> {
         py.detach(|| self.inner.logits())
             .map(|inner| PyNdTensor { inner })

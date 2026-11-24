@@ -1,0 +1,10 @@
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {checkPrefixTransport} from './native_prefix_transport.mjs';
+const glue = pathToFileURL(resolve(process.argv[2]));
+const M = await import(glue);
+await M.default({module_or_path: readFileSync(new URL(glue.href.replace(/\.js$/, '_bg.wasm')))});
+const fixture = JSON.parse(readFileSync(new URL('./native_causal_lm_cache_fixture.json', import.meta.url)));
+const reference = JSON.parse(readFileSync(process.argv[3] ?? new URL('./native_prefix_transport_fixture.json', import.meta.url)));
+console.log(JSON.stringify(checkPrefixTransport(M, fixture, reference)));

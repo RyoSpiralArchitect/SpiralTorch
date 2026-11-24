@@ -20,6 +20,64 @@ pub struct WaveFactorEnergies {
     pub correction_sq: f64,
 }
 
+#[derive(Debug)]
+pub struct ChannelParameterVjp {
+    pub gate: Vec<f32>,
+    pub bias: Vec<f32>,
+}
+
+pub type WaveParameterMaps = BTreeMap<&'static str, ChannelParameterVjp>;
+
+fn pair_input_count(elements: usize, width: usize) -> Result<usize> {
+    // Two site cotangents plus four gate/bias results per cotangent (not a peak RSS bound).
+    let budget = 4 * crate::geometry_artifact::GEOMETRY_ADAPTER_MAX_VALUES;
+    let values = width
+        .checked_mul(16)
+        .and_then(|maps| elements.checked_mul(2)?.checked_add(maps));
+    match values {
+        Some(n) if n <= budget => Ok(elements),
+        _ => Err("paired wave parameter pullbacks exceed the value budget".into()),
+    }
+}
+
+enum LocalMap {
+    Affine(ChannelAffineLearningBatch),
+    Wave(WaveGateLearningBatch),
+}
+
+impl LocalMap {
+    fn output(&self) -> &Tensor {
+        match self {
+            Self::Affine(b) => b.output(),
+            Self::Wave(b) => b.output(),
+        }
+    }
+
+    fn input_vjp(&self, seed: &Tensor) -> Result<Tensor> {
+        Ok(match self {
+            Self::Affine(b) => b.vjp_input(seed)?,
+            Self::Wave(b) => b.vjp_input(seed)?,
+        })
+    }
+
+    fn parameters(&self, seed: &Tensor) -> Result<ChannelParameterVjp> {
+        let (g, b) = match self {
+            Self::Affine(batch) => {
+                let (_, g, b) = batch.vjp_requested(seed.data(), false)?;
+                (g, b)
+            }
+            Self::Wave(batch) => {
+                let (p, _) = batch.vjp_requested(seed.data(), false, false)?;
+                (p.grad_gate, p.grad_bias)
+            }
+        };
+        Ok(ChannelParameterVjp {
+            gate: g.data().to_vec(),
+            bias: b.data().to_vec(),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct WaveFactorObservation {
     pub schema: &'static str,
@@ -42,6 +100,48 @@ pub struct WaveFactorObservation {
 }
 
 impl WaveFactorConfig {
+    fn local_map(
+        &self,
+        kind: &str,
+        x: &Tensor,
+        placement: &GeometryAdapterPlacement,
+        max: usize,
+    ) -> Result<LocalMap> {
+        #[cfg(test)]
+        tests::MAP_BUILDS.with(|n| n.set(n.get() + 1));
+        let gate = tensor(placement, "gate");
+        let bias = tensor(placement, "bias");
+        let (rows, cols) = x.shape();
+        Ok(match kind {
+            "affine" => LocalMap::Affine(ChannelAffineKernel::new(max)?.forward(
+                x.data(),
+                gate,
+                bias,
+                rows,
+                cols,
+            )?),
+            "saturation" => LocalMap::Wave(
+                WaveStageRecipe::Saturation {
+                    saturation: self.saturation,
+                    porosity: self.porosity,
+                }
+                .forward(x.data(), gate, bias, [rows, cols], max)?,
+            ),
+            "projection" => LocalMap::Wave(
+                WaveStageRecipe::Projection {
+                    curvature: self.curvature,
+                    log_radius: self.log_radius,
+                }
+                .forward(x.data(), gate, bias, [rows, cols], max)?,
+            ),
+            "both" => LocalMap::Wave(
+                WaveGateKernel::new(self.curvature, self.saturation, self.porosity, max)?
+                    .forward_with_log_radius(x.data(), gate, bias, rows, cols, self.log_radius)?,
+            ),
+            _ => return Err("unknown local channel map".into()),
+        })
+    }
+
     pub(crate) fn admit(&self, p: &GeometryAdapterPlacement) -> Result<(&'static str, usize)> {
         use GeometryAdapterRecipe::*;
         let (kind, max, strength) = match &p.recipe {
@@ -107,6 +207,87 @@ impl WaveFactorConfig {
 }
 
 impl NativeGeometryBatch {
+    pub(crate) fn wave_factor_input(&self) -> Result<&Tensor> {
+        match &self.pullback {
+            Pullback::Affine(b) => Ok(b.input()),
+            Pullback::WaveRadius(b) | Pullback::WaveStage(b) => Ok(b.input()),
+            _ => Err("wave factorial requires an active channel map".into()),
+        }
+    }
+
+    /// Parameter pullbacks at one captured input. No optimizer, decoder rerun, or
+    /// radius update; the factual arm reuses its actual forward snapshot.
+    pub fn wave_parameter_pullbacks(
+        &self,
+        config: WaveFactorConfig,
+        upstream: &[f32],
+    ) -> Result<WaveParameterMaps> {
+        let [maps] = self.wave_parameter_lanes(config, [upstream])?;
+        Ok(maps)
+    }
+
+    /// Admit two directions on the captured site before a binding copies foreign buffers.
+    pub fn wave_parameter_pair_input_count(&self, config: WaveFactorConfig) -> Result<usize> {
+        config.admit(&self.placement)?;
+        let x = self.wave_factor_input()?;
+        pair_input_count(x.data().len(), x.shape().1)
+    }
+
+    /// Two independent gate/bias VJPs per map. Each counterfactual map is built
+    /// once, used for both directions, and released before constructing the next.
+    /// These are local derivatives, not sealed decoder training gradients.
+    pub fn wave_parameter_pullback_pair(
+        &self,
+        config: WaveFactorConfig,
+        first: &[f32],
+        second: &[f32],
+    ) -> Result<[WaveParameterMaps; 2]> {
+        pair_input_count(self.output.data().len(), self.output.shape().1)?;
+        self.wave_parameter_lanes(config, [first, second])
+    }
+
+    fn wave_parameter_lanes<const N: usize>(
+        &self,
+        config: WaveFactorConfig,
+        upstream: [&[f32]; N],
+    ) -> Result<[WaveParameterMaps; N]> {
+        let (factual, max) = config.admit(&self.placement)?;
+        let x = self.wave_factor_input()?;
+        let seeds = upstream
+            .iter()
+            .map(|u| {
+                Ok(self
+                    .direction(u)?
+                    .scale_with_backend(self.strength, TensorUtilBackend::Cpu)?)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut out = std::array::from_fn(|_| BTreeMap::new());
+        for kind in ["affine", "saturation", "projection", "both"] {
+            let alternative = (kind != factual)
+                .then(|| config.local_map(kind, x, &self.placement, max))
+                .transpose()?;
+            for i in 0..N {
+                let vjp = if let Some(map) = &alternative {
+                    map.parameters(&seeds[i])?
+                } else {
+                    let mut p = self.vjp_parameters(upstream[i])?;
+                    ChannelParameterVjp {
+                        gate: p.remove("gate").ok_or("missing factual gate")?,
+                        bias: p.remove("bias").ok_or("missing factual bias")?,
+                    }
+                };
+                if vjp.gate.len() != x.shape().1
+                    || vjp.bias.len() != x.shape().1
+                    || vjp.gate.iter().chain(&vjp.bias).any(|v| !v.is_finite())
+                {
+                    return Err("invalid local channel parameter pullback".into());
+                }
+                out[i].insert(kind, vjp);
+            }
+        }
+        Ok(out)
+    }
+
     pub(crate) fn wave_factorial(
         &self,
         config: WaveFactorConfig,
@@ -114,15 +295,11 @@ impl NativeGeometryBatch {
         factual_dx: &Tensor,
     ) -> Result<WaveFactorObservation> {
         let (factual, max) = config.admit(&self.placement)?;
-        let x = match &self.pullback {
-            Pullback::Affine(b) => b.input(),
-            Pullback::WaveRadius(b) | Pullback::WaveStage(b) => b.input(),
-            _ => return Err("wave factorial requires an active channel map".into()),
-        };
+        let x = self.wave_factor_input()?;
         if x.shape() != dy.shape() || x.shape() != factual_dx.shape() {
             return Err("wave factorial adjoint shape differs".into());
         }
-        let (rows, cols) = x.shape();
+        let (_, cols) = x.shape();
         let gate = tensor(&self.placement, "gate");
         let bias = tensor(&self.placement, "bias");
         let wave = WaveGateKernel::new(config.curvature, config.saturation, config.porosity, max)?;
@@ -134,33 +311,9 @@ impl NativeGeometryBatch {
         let mut count = 0;
         let (mut max_y, mut max_dx) = (0f64, 0f64);
         let mut run = |kind: &str| -> Result<WaveFactorEnergies> {
-            let (map, vjp) = if kind == "affine" {
-                let b = ChannelAffineKernel::new(max)?.forward(x.data(), gate, bias, rows, cols)?;
-                (b.output().clone(), b.vjp_input(&seed)?)
-            } else {
-                let b = match kind {
-                    "saturation" => WaveStageRecipe::Saturation {
-                        saturation: config.saturation,
-                        porosity: config.porosity,
-                    }
-                    .forward(x.data(), gate, bias, [rows, cols], max)?,
-                    "projection" => WaveStageRecipe::Projection {
-                        curvature: config.curvature,
-                        log_radius: config.log_radius,
-                    }
-                    .forward(x.data(), gate, bias, [rows, cols], max)?,
-                    "both" => wave.forward_with_log_radius(
-                        x.data(),
-                        gate,
-                        bias,
-                        rows,
-                        cols,
-                        config.log_radius,
-                    )?,
-                    _ => unreachable!(),
-                };
-                (b.output().clone(), b.vjp_input(&seed)?)
-            };
+            let local = config.local_map(kind, x, &self.placement, max)?;
+            let map = local.output();
+            let vjp = local.input_vjp(&seed)?;
             let y =
                 x.add_with_backend(&map.scale_with_backend(self.strength, backend)?, backend)?;
             let dx = dy.add_with_backend(&vjp, backend)?;
@@ -226,6 +379,7 @@ impl NativeGeometryBatch {
 mod tests {
     use super::*;
     use serde_json::json;
+    thread_local! { pub(super) static MAP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
     fn cfg() -> WaveFactorConfig {
         WaveFactorConfig {
             curvature: -0.75,
@@ -265,6 +419,81 @@ mod tests {
         GeometryAdapterArtifact::create_json(&serde_json::to_vec(&json!({"schema":"spiraltorch.geometry_adapter_artifact.v1",
             "base_model_identity":format!("sha256:{}","a".repeat(64)),"policy":"full_prefix_f32_no_cache.v1","training":true,
             "placements":[{"path":"site","training":true,"recipe":recipe,"tensors":tensors}]})).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn paired_seeds_reuse_maps_and_match_all_independent_vjps() {
+        let x = [1.8, -0.2, 0.7, -0.6, 1.4, 0.3];
+        let dirs = [
+            [0.3, -0.6, 0.7, 0.2, 0.8, -0.2],
+            [-0.1, 0.7, -0.2, 0.5, -0.6, 0.9],
+        ];
+        for factual in ["affine", "saturation", "projection", "both"] {
+            let rt = NativeGeometryRuntime::new(artifact(
+                factual,
+                &[1.27, -0.9, 0.5],
+                &[0.2, 0.03, -0.1],
+            ));
+            let batch = rt.forward("site", &x, 2).unwrap();
+            assert_eq!(
+                batch.wave_parameter_pair_input_count(cfg()).unwrap(),
+                x.len()
+            );
+            MAP_BUILDS.with(|c| c.set(0));
+            let paired = batch
+                .wave_parameter_pullback_pair(cfg(), &dirs[0], &dirs[1])
+                .unwrap();
+            assert_eq!(MAP_BUILDS.with(|c| c.replace(0)), 3);
+            for (lane, d) in paired.iter().zip(&dirs) {
+                let single = batch.wave_parameter_pullbacks(cfg(), d).unwrap();
+                assert_eq!(single.len(), 4);
+                for (name, g) in single {
+                    let a = &lane[name];
+                    for (v, w) in [(&a.gate, &g.gate), (&a.bias, &g.bias)] {
+                        assert_eq!(v.len(), w.len());
+                        assert!(v.iter().zip(w).all(|(v, w)| v.to_bits() == w.to_bits()));
+                    }
+                }
+            }
+            assert_eq!(MAP_BUILDS.with(|c| c.replace(0)), 6);
+            for bad in [&dirs[0][..2], &[f32::NAN; 6][..]] {
+                assert!(batch
+                    .wave_parameter_pullback_pair(cfg(), &dirs[0], bad)
+                    .is_err());
+            }
+            assert_eq!(MAP_BUILDS.with(|c| c.get()), 0);
+        }
+        let limit = 4 * crate::geometry_artifact::GEOMETRY_ADAPTER_MAX_VALUES;
+        assert_eq!(
+            pair_input_count((limit - 16) / 2, 1).unwrap(),
+            (limit - 16) / 2
+        );
+        assert!(pair_input_count((limit - 16) / 2 + 1, 1).is_err());
+        assert!(pair_input_count(usize::MAX, usize::MAX).is_err());
+    }
+
+    #[test]
+    fn fixed_input_parameter_maps_recover_independent_native_arms() {
+        let x = [1.8, -0.2, 0.7, -0.6, 1.4, 0.3];
+        let dy = [0.3, -0.6, 0.7, 0.2, 0.8, -0.2];
+        let batch = |kind| {
+            NativeGeometryRuntime::new(artifact(kind, &[1.27, -0.9, 0.5], &[0.2, 0.03, -0.1]))
+                .forward("site", &x, 2)
+                .unwrap()
+        };
+        for factual in ["affine", "saturation", "projection", "both"] {
+            let saved = batch(factual);
+            let maps = saved.wave_parameter_pullbacks(cfg(), &dy).unwrap();
+            assert_eq!(maps.len(), 4);
+            for (kind, result) in maps {
+                let expected = batch(kind).vjp_parameters(&dy).unwrap();
+                assert_eq!(result.gate, expected["gate"], "{factual}/{kind}");
+                assert_eq!(result.bias, expected["bias"], "{factual}/{kind}");
+            }
+            assert!(saved
+                .wave_parameter_pullbacks(cfg(), &[f32::NAN; 6])
+                .is_err());
+        }
     }
 
     #[test]

@@ -1,0 +1,17 @@
+features	teacher	test_n	test_ties	test_wins	train_n	train_ties	train_wins
+503-affine	attractor	16	0	7	32	0	13
+503-affine	head	16	0	7	32	0	17
+503-wave	attractor	16	0	10	32	0	19
+503-wave	head	16	0	8	32	0	17
+509-affine	attractor	16	0	12	32	0	20
+509-affine	head	16	0	12	32	0	20
+509-wave	attractor	16	0	11	32	0	19
+509-wave	head	16	0	11	32	0	19
+521-affine	attractor	16	0	13	32	0	22
+521-affine	head	16	0	9	32	0	16
+521-wave	attractor	16	0	11	32	0	22
+521-wave	head	16	0	8	32	0	18
+bag	attractor	16	0	12	32	0	24
+bag	head	16	0	12	32	0	24
+position	attractor	16	0	16	32	0	32
+position	head	16	0	16	32	0	32

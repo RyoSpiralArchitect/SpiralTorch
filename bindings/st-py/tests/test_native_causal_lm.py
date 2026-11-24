@@ -66,13 +66,33 @@ def fixture(*, width=4, heads=2, positions=8, layers=2, vocabulary=11, raw_weigh
     return json.dumps(config), bytes(weights) if raw_weights else st.SafeTensorArchive.from_bytes(weights)
 
 
-def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False):
+def uniform_set_fixture(*outside_rows):
+    """Portable artificial readout: zero hidden input, trainable downstream bias."""
+    vocab = 2 + len(outside_rows)
+    config, raw = fixture(vocabulary=vocab, layers=1, constant_logits=[0.] * vocab, raw_weights=True)
+    size, = struct.unpack_from("<Q", raw)
+    header = json.loads(raw[8:8+size])
+    buf = bytearray(raw)
+    def put(key, values):
+        a, b = header[key]["data_offsets"]
+        assert b-a == 4 * len(values)
+        struct.pack_into(f"<{len(values)}f", buf, 8 + size + a, *values)
+    put("ln_f.weight", [1.] * 4)
+    put("ln_f.bias", [0.] * 4)
+    head = [0., 0., 0., 0., 1., -1., 0., 0.]
+    for axis, tilt in outside_rows:
+        head.extend([axis, -axis, tilt, -tilt])
+    put("lm_head.weight", head)
+    return config, bytes(buf)
+
+
+def artifact(model, *, path="transformer.h.0.mlp", gate=.5, trainable=False, trainable_names=("gate",)):
     return st.GeometryAdapterArtifact.create_json(json.dumps({
         "schema": "spiraltorch.geometry_adapter_artifact.v1", "base_model_identity": model.base_model_identity,
         "policy": "full_prefix_f32_no_cache.v1", "training": trainable, "placements": [{
             "path": path, "training": trainable,
             "recipe": {"schema": "spiraltorch.channel_affine_adapter.v1", "features": 4, "strength": .5, "max_values": 1024},
-            "tensors": [{"name": name, "shape": [4], "values": values, "requires_grad": trainable and name == "gate", "role": "parameter"}
+            "tensors": [{"name": name, "shape": [4], "values": values, "requires_grad": trainable and name in trainable_names, "role": "parameter"}
                         for name, values in [("gate", [gate, 0., -gate, gate]), ("bias", [0.] * 4)]],
         }],
     }))
@@ -121,6 +141,26 @@ class NativeCausalLmTests(unittest.TestCase):
     def setUp(self):
         self.config, self.weights = fixture()
         self.model = st.NativeCausalLm.from_gpt2(self.config, self.weights)
+
+    def test_forward_storage_hint_is_local_and_checkpoint_neutral(self):
+        base = self.model.with_readout_accumulator("f32_wide_backward")
+        model = base.with_lora(1, 2, 4.)
+        docs = [[1, 3, 2, 6], [2, 5, 3, 1]]
+        self.assertEqual(model.forward_readout_storage, "auto")
+        with self.assertRaisesRegex(ValueError, "forward readout storage"):
+            model.with_forward_readout_storage("force_repack")
+        checkpoints = []
+        for hint in ("original_packed", "prefer_cached_transpose"):
+            session = st.NativeCausalLmTrainingSession(model.with_forward_readout_storage(hint),
+                docs, 4, learning_rate=.025, mode="lora", epochs=1)
+            session.step()
+            checkpoints.append(session.checkpoint_with_id())
+            restored = st.NativeCausalLmTrainingSession.from_json(base, docs, *checkpoints[-1])
+            self.assertEqual(session.model.forward_readout_storage, hint)
+            self.assertEqual(restored.model.forward_readout_storage, "auto")
+            self.assertEqual(session.step().to_json(), restored.step().to_json())
+            self.assertEqual(session.checkpoint_with_id(), restored.checkpoint_with_id())
+        self.assertEqual(checkpoints[0], checkpoints[1])
 
     def test_rank_one_indexed_updates_match_and_serve_the_trained_snapshot(self):
         axis = struct.pack("<4d", 0., .6, -.8, 0.)
@@ -1246,6 +1286,162 @@ assert session.predecessor_checkpoint_id == predecessor
         for bad in [[(5, 2, [1])], [(2, 3, [1])]]:
             with self.assertRaises(ValueError): grad(bad, .5)
 
+    def test_full_and_declared_return_separate_guards_on_one_snapshot(self):
+        site = "transformer.h.1.attn"
+        m = self.model.with_lora(1, 2, 3.).with_geometry(
+            artifact(self.model, path=site, trainable=True)
+        ).with_forward_readout_storage("original_packed")
+        ids, shape = [1, 3, 5, 7], [1, 4]
+        labels, plan = [-100, -100, -100, 7], [(3, 7, [4])]
+        kw = dict(contrasts=plan, mix=1., labels=labels)
+        full, choice = m.geometry_full_and_declared_gradients(ids, shape, **kw)
+        full_ref = m.adaptation_loss_gradients(ids, shape, mode="geometry", labels=labels)
+        choice_ref = m.geometry_declared_rival_gradients(ids, shape, **kw)
+        for g, ref in [(full, full_ref), (choice, choice_ref)]:
+            self.assertEqual(g.loss, ref.loss)
+            self.assertEqual(g.declared_rival_report(), ref.declared_rival_report())
+            self.assertEqual((g.target_tokens, g.window_shape), (1, shape))
+            self.assertEqual((g.geometry_artifact_id, g.lora_artifact_id),
+                             (m.geometry_artifact_id, m.lora_artifact_id))
+            self.assertEqual(g.parameter_gradients(), ref.parameter_gradients())
+        self.assertIsNone(full.declared_rival_report())
+        self.assertEqual(choice.declared_rival_report()["full_ce"], full.loss)
+        self.assertNotEqual(choice.parameter_gradients(), full.parameter_gradients())
+        def guard(f, c):
+            candidate, _ = m.step_geometry_gradient_at_distance(c, 1. / 256)
+            return m.guard_geometry_step(candidate, [[c], [f]])
+        nxt, receipt = guard(full, choice)
+        expected, old_receipt = guard(full_ref, choice_ref)
+        self.assertEqual((nxt.geometry_artifact_id, receipt), (expected.geometry_artifact_id, old_receipt))
+        self.assertEqual(nxt.lora_to_json(), m.lora_to_json())
+        self.assertTrue(all(d < 0 for d in receipt["applied_loss_dots"]))
+        with self.assertRaises(ValueError):
+            nxt.step_geometry_gradient_at_distance(full, 1. / 256)
+        class Unread:
+            def __len__(self): raise AssertionError("extracted tokens before plan admission")
+        with self.assertRaises((ValueError, TypeError)):
+            m.geometry_full_and_declared_gradients(Unread(), shape, contrasts=plan, mix=True)
+        with self.assertRaises(ValueError):
+            self.model.geometry_full_and_declared_gradients(Unread(), shape, **kw)
+
+    def _uniform_set_geometry(self, *outside_rows):
+        config, raw = uniform_set_fixture(*outside_rows)
+        base = st.NativeCausalLm.from_gpt2(config, st.SafeTensorArchive.from_bytes(raw))
+        return base.with_geometry(artifact(base, path="transformer.h.0", gate=0.,
+                                           trainable=True, trainable_names=("bias",)))
+
+    def test_full_and_choice_guard_repairs_a_real_logit_conflict_or_refuses_antiparallel(self):
+        def losses(m):
+            gold, rival, _ = m.forward([2], [1,1], last_only=True).values()
+            return math.log1p(math.exp(rival-gold)), m.next_token_score([2], 0)["nll"]
+        for tilt in [2., 0.]:
+            with self.subTest(tilt=tilt):
+                # At zero hidden state the readout is uniform. The distractor reverses
+                # the rival gradient's first axis; tilt adds a shared-descent direction.
+                m = self._uniform_set_geometry((-3., tilt))
+                full, choice = m.geometry_full_and_declared_gradients(
+                    [2,0], [1,2], contrasts=[(1,0,[1])], mix=1.)
+                proposal, _ = m.step_geometry_gradient_at_distance(choice, 1. / 65536)
+                start, unsafe = losses(m), losses(proposal)
+                self.assertLess(unsafe[0], start[0])
+                self.assertGreater(unsafe[1], start[1])
+                if not tilt:
+                    with self.assertRaisesRegex(ValueError, "feasible interval"):
+                        m.guard_geometry_step(proposal, [[choice], [full]])
+                    self.assertEqual(losses(m), start)
+                    continue
+                safe, result = m.guard_geometry_step(proposal, [[choice], [full]])
+                self.assertGreater(result["mix"], 0.)
+                self.assertGreater(result["candidate_loss_dots"][1], 0.)
+                self.assertTrue(all(d < 0. for d in result["applied_loss_dots"]))
+                self.assertTrue(all(after < before for after, before in zip(losses(safe), start)))
+
+    def test_coverage_can_worsen_while_choice_and_full_improve_and_can_be_protected(self):
+        ids, shape, kw = [2,0], [1,2], dict(contrasts=[(1,0,[1])])
+        def score(m):
+            s = m.declared_set_nll(ids, shape, **kw)
+            gold, rival, outside = map(math.exp, m.forward([2], [1,1], last_only=True).values())
+            self.assertAlmostEqual(s["within_nll"], math.log((gold+rival)/gold), places=12)
+            self.assertAlmostEqual(s["coverage_nll"], math.log1p(outside/(gold+rival)), places=12)
+            self.assertAlmostEqual(s["full_nll"], math.log((gold+rival+outside)/gold), places=12)
+            return s
+        for tilt in (2., 0.):
+            with self.subTest(tilt=tilt):
+                m = self._uniform_set_geometry((0., tilt))
+                within, coverage, start = m.geometry_declared_set_gradients(ids, shape, **kw)
+                self.assertEqual(start, score(m))
+                full, _ = m.geometry_full_and_declared_gradients(ids, shape, mix=1., **kw)
+                step, _ = m.step_geometry_gradient_at_distance(within, 1./65536)
+                passed, old = m.guard_geometry_step(step, [[within], [full]])
+                self.assertEqual(old["mix"], 0.)
+                self.assertIsNone(old["feasible_mix"])
+                self.assertEqual(passed.geometry_artifact_id, step.geometry_artifact_id)
+                plain = score(step)
+                self.assertLess(plain["full_nll"], start["full_nll"])
+                self.assertLess(plain["within_nll"], start["within_nll"])
+                self.assertGreater(plain["coverage_nll"], start["coverage_nll"])
+                if not tilt:
+                    with self.assertRaisesRegex(ValueError, "feasible interval"):
+                        m.guard_geometry_step(step, [[within], [coverage]])
+                    with self.assertRaisesRegex(ValueError, "feasible interval"):
+                        m.step_declared_set_geometry_at_distance(ids, shape, target_l2=1./65536, **kw)
+                else:
+                    guarded, r = m.guard_geometry_step(step, [[within], [coverage]])
+                    self.assertGreater(r["candidate_loss_dots"][1], 0.)
+                    self.assertTrue(all(d < 0 for d in r["applied_loss_dots"]))
+                    self.assertAlmostEqual(r["applied_l2"]/r["candidate_l2"], 1., places=4)
+                    final = score(guarded)
+                    for k in ("within_nll","coverage_nll","full_nll"):
+                        self.assertLess(final[k], start[k])
+                    actual, receipt = m.step_declared_set_geometry_at_distance(ids, shape, target_l2=1./65536, **kw)
+                    self.assertTrue(receipt["accepted"])
+                    self.assertEqual(actual.geometry_artifact_id, guarded.geometry_artifact_id)
+                    self.assertEqual(receipt["proposed"], final)
+                    with self.assertRaises(ValueError):
+                        guarded.step_geometry_gradient_at_distance(coverage, 1./65536)
+                self.assertEqual(score(m), start)
+
+    def test_declared_set_checks_foreign_sequences_before_copying_windows(self):
+        class Unread:
+            def __len__(self):
+                raise AssertionError("unexpected input copy")
+        with self.assertRaises(ValueError):
+            self.model.declared_set_nll(Unread(), [1,2], contrasts=[(0,1,[0])])
+        with self.assertRaises(ValueError):
+            self.model.geometry_declared_set_gradients(Unread(), [1,2], contrasts=[])
+        score = self.model.declared_set_nll([1,2], [1,2], contrasts=[])
+        self.assertEqual(score["coverage_nll"], 0.)
+        self.assertEqual(score["within_nll"], score["full_nll"])
+        m = self._uniform_set_geometry((0.,2.))
+        for distance in (0., -1., float("nan"), True):
+            with self.assertRaises((TypeError, ValueError)):
+                m.step_declared_set_geometry_at_distance(Unread(), [1,2], contrasts=[(1,0,[1])], target_l2=distance)
+        with self.assertRaisesRegex(ValueError, "proper subset"):
+            m.step_declared_set_geometry_at_distance(Unread(), [1,2], contrasts=[(1,0,[1,2])], target_l2=.1)
+
+    def test_finite_declared_set_step_returns_origin_on_overshoot_despite_two_descent_slopes(self):
+        # The mean of the two outsiders favors the small move, but the -4 axis
+        # outsider eventually dominates their log-sum-exp. No line search.
+        m = self._uniform_set_geometry((-4.,0.), (6.,0.))
+        ids, shape, kw = [2,0], [1,2], dict(contrasts=[(1,0,[1])])
+        origin = m.geometry_artifact_id
+        within, _, initial = m.geometry_declared_set_gradients(ids, shape, **kw)
+        for length, accept in [(1./65536, True), (1./128, False)]:
+            returned, r = m.step_declared_set_geometry_at_distance(ids, shape, target_l2=length, **kw)
+            direct, _ = m.step_geometry_gradient_at_distance(within, length)
+            checked = direct.declared_set_nll(ids, shape, **kw)
+            self.assertEqual(r["before"], initial)
+            self.assertEqual(r["proposed"], checked)
+            self.assertEqual(r["proposal_guard"]["mix"], 0.)
+            self.assertTrue(all(v < 0 for v in r["proposal_guard"]["applied_loss_dots"]))
+            self.assertLess(checked["within_nll"], initial["within_nll"])
+            self.assertEqual(checked["coverage_nll"] < initial["coverage_nll"], accept)
+            self.assertEqual(r["accepted"], accept)
+            self.assertEqual(r["result_geometry_id"], returned.geometry_artifact_id)
+            self.assertEqual(returned.geometry_artifact_id, direct.geometry_artifact_id if accept else origin)
+            self.assertEqual(returned.declared_set_nll(ids, shape, **kw), checked if accept else initial)
+            self.assertEqual(m.geometry_artifact_id, origin)
+
     def test_mixture_probe_pins_forward_and_exports_native_boundary_bytes(self):
         site = "transformer.h.1.attn"
         m = self.model.with_lora(1, 2, 3.).with_geometry(artifact(self.model, path=site, trainable=True))
@@ -1457,6 +1653,37 @@ assert session.predecessor_checkpoint_id == predecessor
         two,_=m.step_geometry_cohort_sgd([a,b],.125)
         self.assertEqual(pair.geometry_artifact_id,two.geometry_artifact_id)
 
+    def test_cohort_gradient_ray_matches_singletons_and_admits_before_extraction(self):
+        m = self.model.with_lora(1, 2, 3.).with_geometry(
+            artifact(self.model, path="transformer.h.1.attn", trainable=True))
+        g = m.geometry_line_set_gradients([1], [[2]], stop_id=0)
+        single, step = m.step_geometry_gradient_at_distance(g, 1 / 256)
+        end, cohort = m.step_geometry_cohort_gradient_at_distance([g, g], 1 / 256)
+        self.assertEqual(single.geometry_artifact().to_json(), end.geometry_artifact().to_json())
+        self.assertEqual(cohort["step"], {**step, "method": "cohort_mean_gradient_ray_f64.v1"})
+        self.assertEqual((cohort["members"], cohort["total_target_tokens"]), (2, 2 * g.target_tokens))
+        self.assertEqual(end.lora_to_json(), m.lora_to_json())
+        for dot in cohort["member_loss_dots"]:
+            self.assertAlmostEqual(dot, step["gradient_dot_step"], places=14)
+        with self.assertRaises(ValueError):
+            end.step_geometry_cohort_gradient_at_distance([g], 0.)
+
+        class Unread:
+            def __init__(self, size):
+                self.size = size
+            def __len__(self):
+                return self.size
+            def __getitem__(self, i):
+                raise AssertionError("item read before admission")
+
+        for size, distance in [(0, 0.), (257, 0.), (1, -1.), (1, float("nan"))]:
+            with self.assertRaises(ValueError):
+                m.step_geometry_cohort_gradient_at_distance(Unread(size), distance)
+        with self.assertRaises((TypeError, ValueError)):
+            m.step_geometry_cohort_gradient_at_distance(Unread(1), True)
+        with self.assertRaises(TypeError):
+            m.step_geometry_cohort_gradient_at_distance([object()], 0.)
+
     def test_common_geometry_admits_groups_and_checks_post_rounding_descent(self):
         m=self.model.with_lora(1,2,3.).with_geometry(artifact(self.model,path="transformer.h.1.attn",trainable=True))
         a=m.geometry_line_set_gradients([1],[[2]],stop_id=0)
@@ -1654,6 +1881,23 @@ assert session.predecessor_checkpoint_id == predecessor
         with self.assertRaises(ValueError):
             self.model.geometry_line_set_gradients(Unread(), [[2]], stop_id=0)
 
+    def test_line_training_tile_admission_precedes_foreign_token_access(self):
+        class Unread:
+            def __len__(self):
+                raise AssertionError("read input before tile admission")
+        m = self.model.with_geometry(artifact(self.model, trainable=True))
+        for kind, extra in (("menu", dict(gold_index=1,mix=0.5)),("set", {}),("subset", dict(accepted_indices=[0]))):
+            compute = getattr(m,"geometry_line_"+kind+"_gradients")
+            for bad in (True, 0, -1, 10, 11.5, "11", 1 << 63):
+                with self.assertRaises((ValueError, TypeError, OverflowError)):
+                    compute(Unread(),Unread(),stop_id=0,max_tile_values=bad,**extra)
+            dense = compute([1],[[2],[3]],stop_id=0,**extra)
+            tiled = compute([1],[[2],[3]],stop_id=0,max_tile_values=11,**extra)
+            self.assertEqual(tiled.parameter_gradients(), dense.parameter_gradients())
+            self.assertEqual(getattr(tiled,"line_"+kind+"_report")(), getattr(dense,"line_"+kind+"_report")())
+            self.assertEqual(tiled.line_training_work()["backward_head_calls"], 3)
+            self.assertEqual(dense.line_training_work()["forward_head_calls"], 1)
+
     def test_line_set_admits_prefix_sharing_before_readout_but_not_unbounded_ids(self):
         class Unread:
             def __len__(self):
@@ -1778,6 +2022,63 @@ assert session.predecessor_checkpoint_id == predecessor
         updated = ce.step_adaptation_sgd(grad, "geometry", .75)
         with self.assertRaises(ValueError):
             updated.step_geometry_sgd_at_distance(grad, .75, 0.)
+
+    def test_gradient_ray_updates_only_trainables_at_the_requested_distance(self):
+        path = "transformer.h.1.attn"
+        start = self.model.with_geometry(artifact(self.model, path=path, trainable=True))
+        grad = start.adaptation_loss_gradients([1, 2, 3], [1, 3], mode="geometry")
+        target = 1 / 256
+        next_model, report = start.step_geometry_gradient_at_distance(grad, target_l2=target)
+        def values(model):
+            ts = json.loads(model.geometry_artifact().to_json())["placements"][0]["tensors"]
+            return {t["name"]: struct.pack("<4f", *t["values"]) for t in ts}
+        before, after = values(start), values(next_model)
+        self.assertEqual(before["bias"], after["bias"])
+        gs = grad.parameter_gradients()[path]["gate"]
+        gnorm = math.sqrt(math.fsum(g*g for g in gs))
+        want = struct.pack("<4f", *(v - target*(g/gnorm) for v,g in zip(struct.unpack("<4f", before["gate"]), gs)))
+        self.assertEqual(after["gate"], want)
+        self.assertEqual(report["method"], "gradient_ray_f32.v1")
+        self.assertEqual(report["trainable_values"], 4)
+        self.assertEqual(report["origin_id"], start.geometry_artifact_id)
+        self.assertEqual(report["result_id"], next_model.geometry_artifact_id)
+        self.assertAlmostEqual(report["gradient_l2"], gnorm)
+        self.assertLess(report["gradient_dot_step"], 0.)
+        self.assertLessEqual(report["relative_vector_error"], 1e-4)
+        self.assertEqual(report["realized_l2"], start.geometry_artifact().trainable_delta_l2(next_model.geometry_artifact()))
+        for bad in (True, -1., float("inf"), float("nan")):
+            with self.assertRaises((TypeError, ValueError)):
+                start.step_geometry_gradient_at_distance(grad, bad)
+        with self.assertRaises(ValueError):
+            next_model.step_geometry_gradient_at_distance(grad, 0.)
+
+    def test_gradient_ray_uses_one_norm_across_geometry_placements(self):
+        paths = ("transformer.h.0.attn", "transformer.h.1.mlp")
+        left, right = [json.loads(artifact(self.model, path=p, trainable=True).to_json()) for p in paths]
+        left["placements"].extend(right["placements"])
+        origin = self.model.with_geometry(st.GeometryAdapterArtifact.create_json(json.dumps(left)))
+        g = origin.geometry_declared_rival_gradients(
+            [1, 2, 4], [1, 3], contrasts=[(2, 4, [3])], mix=1., labels=[-100, -100, 4],
+        )
+        steps = g.parameter_gradients()
+        norms = [math.fsum(x*x for x in steps[path]["gate"]) for path in paths]
+        self.assertGreater(min(norms), 0.)
+        norm = math.sqrt(math.fsum(norms))
+        trial, receipt = origin.step_geometry_gradient_at_distance(g, .015625)
+        self.assertEqual(receipt["trainable_values"], 8)
+        self.assertAlmostEqual(receipt["gradient_l2"], norm, places=12)
+        result = json.loads(trial.geometry_artifact().to_json())["placements"]
+        before = json.loads(origin.geometry_artifact().to_json())["placements"]
+        for p, q in zip(before, result):
+            self.assertEqual(p["path"], q["path"])
+            gate = steps[p["path"]]["gate"]
+            for t, u in zip(p["tensors"], q["tensors"]):
+                if not t["requires_grad"]:
+                    self.assertEqual(t, u)
+                    continue
+                old = struct.unpack("<4f", struct.pack("<4f", *t["values"]))
+                expected = struct.pack("<4f", *(v - .015625*(d/norm) for v,d in zip(old, gate)))
+                self.assertEqual(struct.pack("<4f", *u["values"]), expected)
 
     def test_coverage_guard_is_opt_in_and_uses_reference_members(self):
         reference = self.model.with_geometry(artifact(self.model, path="transformer.h.1.attn", trainable=True))

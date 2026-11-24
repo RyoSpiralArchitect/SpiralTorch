@@ -42,7 +42,11 @@ impl NativeCausalLm {
         self.line_set_shape(prompt_len, content_lengths, stop_id, geometry_gradients)
     }
 
-    fn validate_ranking(count: usize, gold_index: usize, mix: f64) -> CausalLmResult<()> {
+    pub(super) fn validate_ranking(
+        count: usize,
+        gold_index: usize,
+        mix: f64,
+    ) -> CausalLmResult<()> {
         if count < 2 || gold_index >= count || !(0.0..=1.0).contains(&mix) {
             return Err("invalid complete-line menu size, gold, stop, prompt or mix".into());
         }
@@ -56,6 +60,18 @@ impl NativeCausalLm {
         content_lengths: &[usize],
         stop_id: usize,
     ) -> CausalLmResult<([usize; 2], usize)> {
+        let (width, targets) = self.terminated_lengths(prompt_len, content_lengths, stop_id)?;
+        let shape = [content_lengths.len(), width];
+        product(&shape, MAX_PADDED_IDS, "padded complete-line IDs")?;
+        Ok((shape, targets))
+    }
+
+    pub(super) fn terminated_lengths(
+        &self,
+        prompt_len: usize,
+        content_lengths: &[usize],
+        stop_id: usize,
+    ) -> CausalLmResult<(usize, usize)> {
         let n = content_lengths.len();
         if !(1..=MAX_LINE_MENU_CANDIDATES).contains(&n)
             || prompt_len == 0
@@ -77,19 +93,17 @@ impl NativeCausalLm {
             .checked_add(*content_lengths.iter().max().unwrap())
             .and_then(|v| v.checked_add(1))
             .ok_or("padded line width overflow")?;
-        let shape = [n, width];
-        product(&shape, MAX_PADDED_IDS, "padded complete-line IDs")?;
-        Ok((shape, targets))
+        Ok((width, targets))
     }
 
     pub(super) fn admit_terminated_work(
         &self,
         shape: [usize; 2],
         readout_rows: usize,
-        geometry_gradients: bool,
+        mode: Option<CausalLmAdaptationMode>,
     ) -> CausalLmResult<()> {
-        if geometry_gradients {
-            self.validate_adaptation_mode(CausalLmAdaptationMode::Geometry)?;
+        if let Some(mode) = mode {
+            self.validate_adaptation_mode(mode)?;
             self.adaptation_labeled_input_count(shape, true)?;
         } else {
             self.loss_objective_input_count(shape, true)?;
@@ -105,10 +119,9 @@ impl NativeCausalLm {
         gold: usize,
         stop: usize,
         mix: f64,
-        training: bool,
     ) -> CausalLmResult<(PreparedCausalWindow, LineMenu)> {
         Self::validate_ranking(candidates.len(), gold, mix)?;
-        let (batch, support) = self.prepare_line_set(prompt, candidates, stop, training)?;
+        let (batch, support) = self.prepare_line_set(prompt, candidates, stop, None)?;
         Ok((batch, LineMenu::new(support, candidates, gold, mix)))
     }
 
@@ -139,8 +152,7 @@ impl NativeCausalLm {
         stop_id: usize,
         mix: f64,
     ) -> CausalLmResult<CausalLmLineMenuReport> {
-        let (batch, plan) =
-            self.prepare_line_menu(prompt, candidates, gold_index, stop_id, mix, false)?;
+        let (batch, plan) = self.prepare_line_menu(prompt, candidates, gold_index, stop_id, mix)?;
         let hidden = self.decode_hidden(&batch.input, batch.shape)?;
         plan.score(&self.causal_logits(hidden, &batch)?)
     }
@@ -154,9 +166,27 @@ impl NativeCausalLm {
         stop_id: usize,
         mix: f64,
     ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
-        let (mut batch, plan) =
-            self.prepare_line_menu(prompt, candidates, gold_index, stop_id, mix, true)?;
-        batch.competition = Some(objective::PreparedCompetition::LineMenu(plan));
-        self.geometry_gradients_for_competition(&batch)
+        self.geometry_line_menu_gradients_with_tile_limit(
+            prompt, candidates, gold_index, stop_id, mix, None,
+        )
+    }
+
+    /// Limit each projected vocabulary tile without changing the admitted logical batch.
+    pub fn geometry_line_menu_gradients_with_tile_limit(
+        &self,
+        prompt: &[usize],
+        candidates: &[Vec<usize>],
+        gold_index: usize,
+        stop_id: usize,
+        mix: f64,
+        max_tile_values: Option<usize>,
+    ) -> CausalLmResult<NativeCausalLmAdaptationGradients> {
+        CausalLmLineObjective::Menu { gold_index, mix }.gradients(
+            self,
+            prompt,
+            candidates,
+            stop_id,
+            max_tile_values,
+        )
     }
 }

@@ -1,6 +1,67 @@
 use super::*;
 use st_nn::causal_lm::{DeclaredRivalRow, MAX_DECLARED_RIVAL_IDS, MAX_RIVAL_CLASSES};
 
+pub(super) struct Window {
+    pub ids: Vec<usize>,
+    pub shape: [usize; 2],
+    pub labels: Option<Vec<i64>>,
+    pub plan: Vec<DeclaredRivalRow>,
+    pub mix: f64,
+}
+
+pub(super) enum Work {
+    Score,
+    Gradient,
+    Pair,
+    CheckedStep(f64),
+}
+
+impl Window {
+    pub(super) fn extract(
+        model: &NativeCausalLm,
+        windows: &Bound<'_, PyAny>,
+        dims: &Bound<'_, PyAny>,
+        contrasts: &Bound<'_, PyAny>,
+        mix: Option<&Bound<'_, PyAny>>,
+        labels: Option<&Bound<'_, PyAny>>,
+        work: Work,
+    ) -> PyResult<Self> {
+        let shape = shape(dims)?;
+        let mix = if let Some(value) = mix {
+            reject_bool(value)?;
+            value.extract::<f64>()?
+        } else {
+            1.
+        };
+        let count = match work {
+            Work::Score => model.loss_objective_input_count(shape, labels.is_some()),
+            Work::Pair | Work::CheckedStep(_) => {
+                model.geometry_gradient_pair_input_count(shape, labels.is_some())
+            }
+            Work::Gradient => {
+                model
+                    .validate_adaptation_mode(st_nn::causal_lm::CausalLmAdaptationMode::Geometry)
+                    .map_err(error)?;
+                model.adaptation_labeled_input_count(shape, labels.is_some())
+            }
+        }
+        .map_err(error)?;
+        let plan = extract(contrasts, shape, count, model.config().vocabulary, mix)?;
+        if let Work::CheckedStep(distance) = work {
+            model
+                .validate_declared_set_step(&plan, distance)
+                .map_err(error)?;
+        }
+        Ok(Self {
+            ids: tokens(windows, count)?,
+            labels: loss_labels(labels, count)?,
+            shape,
+            plan,
+            mix,
+        })
+    }
+}
+
 pub(super) fn extract(
     value: &Bound<'_, PyAny>,
     shape: [usize; 2],

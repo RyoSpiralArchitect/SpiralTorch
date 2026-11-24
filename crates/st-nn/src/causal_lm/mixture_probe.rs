@@ -44,7 +44,7 @@ fn result_count(v: usize, w: usize, i: usize, params: u128) -> CausalLmResult<()
     Ok(())
 }
 
-fn active_row(t: &Tensor, rows: usize) -> CausalLmResult<Vec<f32>> {
+pub(super) fn active_row(t: &Tensor, rows: usize) -> CausalLmResult<Vec<f32>> {
     let (n, cols) = t.shape();
     if n != rows || rows == 0 || cols == 0 {
         return Err("unexpected mixture probe boundary shape".into());
@@ -56,7 +56,68 @@ fn active_row(t: &Tensor, rows: usize) -> CausalLmResult<Vec<f32>> {
     Ok(last.to_vec())
 }
 
+pub(super) struct LastAttentionPrimal {
+    pub cache: decoder::BlockCache,
+    pub logits: Tensor,
+    selected: Tensor,
+}
+
 impl NativeCausalLm {
+    pub(super) fn capture_last_attention(
+        &self,
+        prompt: &[usize],
+    ) -> CausalLmResult<LastAttentionPrimal> {
+        let steps = prompt.len();
+        let shape = [1, steps];
+        let index = self.config.layers - 1;
+        let hidden = self.forward_blocks(self.embed(prompt, shape)?, shape, 0..index)?;
+        let block = self.run_block(index, hidden, shape, decoder::BlockPass::BackwardReplay)?;
+        let cache = block
+            .cache
+            .ok_or("probe block did not retain its forward")?;
+        let selected = block.output.gather_rows(&[steps - 1])?;
+        let normalized = self
+            .final_norm
+            .forward(&selected, self.config.norm_epsilon)?;
+        Ok(LastAttentionPrimal {
+            cache,
+            logits: self.project_readout(&normalized)?,
+            selected,
+        })
+    }
+
+    pub(super) fn last_attention_upstream(
+        &self,
+        primal: &LastAttentionPrimal,
+        seed: &Tensor,
+        policy: CausalLmReadoutAccumulator,
+        mut visit: impl FnMut(&'static str, &Tensor) -> CausalLmResult<()>,
+    ) -> CausalLmResult<Tensor> {
+        let cache = &primal.cache;
+        let steps = cache.after_attention.shape().0;
+        let head = self.vocabulary_head_pullback_as(seed, policy.backward_precision())?;
+        let last = primal.selected.layer_norm_input_backward(
+            &self.final_norm.gamma,
+            &head,
+            self.config.norm_epsilon,
+        )?;
+        visit("head_input", &head)?;
+        visit("final_norm_input", &last)?;
+        let gradient = if steps == 1 {
+            last
+        } else {
+            last.scatter_add_rows(&[steps - 1], steps)?
+        };
+        let mlp = self.blocks[self.config.layers - 1].mlp_input_pullback(
+            &cache.pre_gelu,
+            &cache.after_attention,
+            &gradient,
+            self.config.norm_epsilon,
+            visit,
+        )?;
+        Ok(gradient.add_with_backend(&mlp, TensorUtilBackend::Cpu)?)
+    }
+
     /// Admit owner, context and aggregate result sizes before a binding copies IDs.
     pub fn mixture_probe_input_count(
         &self,
@@ -109,22 +170,13 @@ impl NativeCausalLm {
         mix: f64,
     ) -> CausalLmResult<CausalLmMixtureProbe> {
         let steps = self.mixture_probe_input_count(prompt.len(), target, rival, mix)?;
-        let shape = [1, steps];
-        let index = self.config.layers - 1;
-        let hidden = self.forward_blocks(self.embed(prompt, shape)?, shape, 0..index)?;
-        let block = self.run_block(index, hidden, shape, decoder::BlockPass::BackwardReplay)?;
-        let cache = block
+        let primal = self.capture_last_attention(prompt)?;
+        let geom = primal
             .cache
-            .ok_or("probe block did not retain its forward")?;
-        let geom = cache
             .attention_geometry
             .as_ref()
             .ok_or("missing cached probe geometry")?;
-        let selected = block.output.gather_rows(&[steps - 1])?;
-        let normalized = self
-            .final_norm
-            .forward(&selected, self.config.norm_epsilon)?;
-        let logits = self.project_readout(&normalized)?;
+        let logits = &primal.logits;
         let plan = [DeclaredRivalRow {
             position: 0,
             target,
@@ -135,7 +187,7 @@ impl NativeCausalLm {
         for (objective, weight) in [("ce", None), ("declared", Some(1.)), ("mixed", Some(mix))] {
             let (loss, seed) = match weight {
                 None => {
-                    learning::ordinary_loss_seed(&logits, &labels, CrossEntropyConfig::default())?
+                    learning::ordinary_loss_seed(logits, &labels, CrossEntropyConfig::default())?
                 }
                 Some(w) => {
                     let (r, g) =
@@ -148,37 +200,16 @@ impl NativeCausalLm {
                 CausalLmReadoutAccumulator::F32,
                 CausalLmReadoutAccumulator::F64,
             ] {
-                let head = learning::frozen_pullback(
-                    &self.head,
-                    &self.backward_head,
+                let mut boundaries = Vec::new();
+                let incoming = self.last_attention_upstream(
+                    &primal,
                     &seed,
-                    head_backward.backward_precision(),
-                )?;
-                let final_input = selected.layer_norm_input_backward(
-                    &self.final_norm.gamma,
-                    &head,
-                    self.config.norm_epsilon,
-                )?;
-                let gradient = if steps == 1 {
-                    final_input.clone()
-                } else {
-                    final_input.scatter_add_rows(&[steps - 1], steps)?
-                };
-                let mut boundaries = vec![
-                    ("head_input", active_row(&head, 1)?),
-                    ("final_norm_input", active_row(&final_input, 1)?),
-                ];
-                let mlp_branch = self.blocks[index].mlp_input_pullback(
-                    &cache.pre_gelu,
-                    &cache.after_attention,
-                    &gradient,
-                    self.config.norm_epsilon,
+                    head_backward,
                     |name, adjoint| {
-                        boundaries.push((name, active_row(adjoint, steps)?));
+                        boundaries.push((name, active_row(adjoint, adjoint.shape().0)?));
                         Ok(())
                     },
                 )?;
-                let incoming = gradient.add_with_backend(&mlp_branch, TensorUtilBackend::Cpu)?;
                 boundaries.push(("attention_output_upstream", active_row(&incoming, steps)?));
                 let parameters = geom.vjp_parameters(incoming.data())?;
                 paths.push(CausalLmMixturePath {

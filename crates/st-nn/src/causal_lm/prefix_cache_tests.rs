@@ -166,6 +166,54 @@ fn capped_working_set_keeps_hot_entries_and_clear_drops_data_and_counters() {
 }
 
 #[test]
+fn cached_prefix_includes_promoted_lora_and_window_resume_requires_that_base() {
+    let base = load();
+    let init = base.with_lora(0, 2, 3.).unwrap();
+    let docs = vec![vec![2, 5, 1, 3]];
+    let g = init.lora_loss_gradients(&docs[0], [1, 4]).unwrap();
+    let active = init.step_lora_sgd(&g, 0.2).unwrap();
+    let fixed = active.freeze_lora().unwrap();
+    let late = fixed
+        .with_geometry(geometry(&fixed))
+        .unwrap()
+        .with_single_geometry_at("transformer.h.1.mlp")
+        .unwrap();
+    assert_eq!(
+        NativeCausalLm::comparison_prefix_layers(&[&fixed, &late]).unwrap(),
+        1
+    );
+    assert!(NativeCausalLm::comparison_prefix_layers(&[&base, &late]).is_err());
+    let mut s = Session::new(
+        late,
+        docs.clone(),
+        session_config(CausalLmAdaptationMode::Geometry),
+    )
+    .unwrap();
+    let mut c = Cache::new(&fixed, 256, 4).unwrap();
+    let foreign = init.freeze_lora().unwrap();
+    let mut bad_cache = Cache::new(&foreign, 256, 4).unwrap();
+    let start = s.checkpoint_with_id().unwrap();
+    assert!(s.step_with_prefix_cache(&mut bad_cache, false).is_err());
+    assert_eq!(s.checkpoint_with_id().unwrap(), start);
+    assert_eq!(bad_cache.stats().entries, 0);
+    check_one(&mut s, &mut c, Inserted);
+    let (raw, id) = s.checkpoint_with_id().unwrap();
+    assert!(Session::from_json(foreign, docs.clone(), raw.as_bytes(), &id).is_err());
+    let mut resumed = Session::from_json(fixed, docs, raw.as_bytes(), &id).unwrap();
+    check_one(&mut resumed, &mut c, Hit);
+    check_one(&mut s, &mut c, Hit);
+    assert_eq!(
+        s.checkpoint_with_id().unwrap(),
+        resumed.checkpoint_with_id().unwrap()
+    );
+    assert_eq!(
+        s.model().frozen_lora_artifact_id(),
+        active.lora_artifact_id()
+    );
+    assert_eq!(c.stats().skipped_block_calls, 2);
+}
+
+#[test]
 fn earliest_attached_site_keys_the_depth_even_when_another_arm_trains_later() {
     let mut config = config();
     config["n_layer"] = json!(3);

@@ -1,0 +1,2 @@
+# The checkpoint fixture binds this plan's exact UTF-8 bytes.
+native_line_session_plan.json text eol=lf

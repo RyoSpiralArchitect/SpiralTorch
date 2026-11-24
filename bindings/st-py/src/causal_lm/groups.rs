@@ -2,6 +2,20 @@
 use super::*;
 use st_nn::causal_lm::{CausalLmResult, NativeCausalLmAdaptationGradients};
 
+pub(super) fn members<'py>(
+    group: &Bound<'py, PyAny>,
+    n: usize,
+) -> PyResult<Vec<Bound<'py, PyNativeCausalLmAdaptationGradients>>> {
+    (0..n)
+        .map(|i| {
+            group
+                .get_item(i)?
+                .cast_into::<PyNativeCausalLmAdaptationGradients>()
+                .map_err(Into::into)
+        })
+        .collect()
+}
+
 pub(super) fn apply<'py, R: serde::Serialize + Send>(
     py: Python<'py>,
     groups: &Bound<'py, PyAny>,
@@ -25,15 +39,7 @@ pub(super) fn apply<'py, R: serde::Serialize + Send>(
     let owners = lists
         .iter()
         .zip(sizes)
-        .map(|(l, n)| {
-            (0..n)
-                .map(|i| {
-                    l.get_item(i)?
-                        .cast_into::<PyNativeCausalLmAdaptationGradients>()
-                        .map_err(Into::into)
-                })
-                .collect::<PyResult<Vec<_>>>()
-        })
+        .map(|(l, n)| members(l, n))
         .collect::<PyResult<Vec<_>>>()?;
     let refs: Vec<Vec<_>> = owners
         .iter()

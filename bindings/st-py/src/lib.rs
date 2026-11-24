@@ -15,15 +15,13 @@ mod compat;
 mod dataset;
 mod elliptic;
 mod export;
-mod frac;
 mod f32_buffer;
+mod frac;
 mod fractional_learning;
 #[cfg(feature = "nn")]
 mod geometry_artifact;
 #[cfg(feature = "nn")]
 mod geometry_runtime;
-#[cfg(feature = "nn")]
-mod weights;
 mod hpo;
 mod inference;
 mod introspect;
@@ -57,14 +55,16 @@ mod tensor;
 mod text;
 mod theory;
 mod topos_resonator;
-#[cfg(feature = "nn")]
-mod wave_gate_learning;
 mod trainer;
 mod vision;
+#[cfg(feature = "nn")]
+mod wave_gate_learning;
+#[cfg(feature = "nn")]
+mod weights;
 mod wgpu;
+mod wgpu_rank;
 mod wgpu_resident;
 mod wgpu_tensor;
-mod wgpu_rank;
 mod zpulse;
 mod zspace;
 mod zspace_generation_evidence;
@@ -548,6 +548,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "NativeCausalLmAdaptationGradients",
         "NativeCausalLmTrainingPrefixCache",
         "NativeCausalLmTrainingSession",
+        "NativeCausalLmLineTrainingSession",
         "NativeCausalLmTrainingSessionStep",
         "NativeCausalLmTrainer",
         "NativeCausalLmTrainingStep",

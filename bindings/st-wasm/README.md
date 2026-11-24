@@ -37,6 +37,10 @@ target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invokin
 
 ## Examples
 
+- [Native causal LM](tests/native_causal_lm.html): run a GPT-2-format decoder and
+  train its geometry in WASM host memory (`nn`, no WebGPU). See the
+  [API and four runnable controls](tests/native_causal_lm.md).
+
 - [Language MLOps](../../docs/wasm_byte_language_mlops.md): packaged
   `ByteCorpusStudy` trains/resumes the Rust byte LM; `ByteCorpusModelArtifact`
   retains learned geometry and routers. `ResidentByteServing` measures explicit

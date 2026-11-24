@@ -1,0 +1,214 @@
+{
+  "back": 4,
+  "cases": {
+    "geometry": {
+      "endpoint": {
+        "a": [
+          -0.125,
+          0.0625,
+          0.25,
+          -0.125,
+          0.0625,
+          0.25
+        ],
+        "b": [
+          0.0625,
+          0.25,
+          -0.125,
+          0.0625,
+          0.25,
+          -0.125
+        ],
+        "geometry": [
+          [
+            1.0286679,
+            1.9980526,
+            3.0002856
+          ],
+          [
+            2.000008,
+            -1.0000077,
+            0.50000966
+          ]
+        ],
+        "logits": [
+          -0.12286747992038727,
+          0.2790854573249817,
+          0.18836328387260437,
+          -0.23488032817840576,
+          -0.24348503351211548,
+          0.1777392327785492,
+          0.2851969003677368,
+          -0.11080918461084366,
+          -0.31120163202285767,
+          0.03777635470032692,
+          0.32006698846817017
+        ]
+      },
+      "final_pin": "sha256:8aa38757c6e924fa439fec04a764a26e293667f3006ffb0ce76ab2b12c3344fe",
+      "id": "sha256:7a282604750ff0ea4d48d82379c2bb16240351e3cadc6a8f49266f63ab1e9218",
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v3\",\"plan_id\":\"sha256:eafc6f869474c6c5465bb39bb545446413db51413b28d6f02e0fff1890344278\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"mode\":\"geometry\",\"readout_accumulator\":\"f32\",\"updates\":2,\"lora\":{\"origin_id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"weights\":null},\"geometry\":{\"origin_id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"id\":\"sha256:0dc2b13e3e91ad77d4b9cea653a3648fdb13cd6771e6cfd860bfb43142b39e12\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.wave_gate_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"curvature\\\":-1.0,\\\"saturation\\\":1.0,\\\"porosity\\\":0.05,\\\"max_values\\\":64}},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"bias\\\",\\\"shape\\\":[3],\\\"values\\\":[1.0204455,1.9999217,3.0000315],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.0000033,-1.0000095,0.50000155],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}}",
+      "plan": "{\"epochs\":2,\"examples\":[{\"candidates\":[[1],[1,2],[3,4]],\"objective\":{\"kind\":\"set\"},\"prompt_ids\":[1,2],\"stop_id\":0},{\"candidates\":[[1,2],[1,3],[7]],\"objective\":{\"gold_index\":1,\"kind\":\"menu\",\"mix\":0.5},\"prompt_ids\":[2,4],\"stop_id\":9},{\"candidates\":[[2],[2,3],[4,5]],\"objective\":{\"accepted_indices\":[0,2],\"kind\":\"subset\"},\"prompt_ids\":[2,1,3],\"stop_id\":0}],\"max_tile_values\":11,\"mode\":\"geometry\",\"schema\":\"spiraltorch.native_causal_lm_line_plan.v3\",\"update\":{\"kind\":\"parameter_gradient_l2\",\"target_l2\":0.00390625}}",
+      "steps": [
+        4.568400859832764,
+        2.566887855529785,
+        0.11478594690561295,
+        4.568363189697266,
+        2.5632259845733643,
+        0.11472809314727783
+      ]
+    },
+    "joint": {
+      "endpoint": {
+        "a": [
+          -0.120152675,
+          0.06733704,
+          0.2478239,
+          -0.12720491,
+          0.057823516,
+          0.24533601
+        ],
+        "b": [
+          0.06248901,
+          0.24601744,
+          -0.12145017,
+          0.057313263,
+          0.25088567,
+          -0.12111158
+        ],
+        "geometry": [
+          [
+            1.0183529,
+            1.9999076,
+            3.0000381
+          ],
+          [
+            2.0000036,
+            -1.0000033,
+            0.50000244
+          ]
+        ],
+        "logits": [
+          -0.12280252575874329,
+          0.2791823744773865,
+          0.1883210837841034,
+          -0.23498713970184326,
+          -0.24346788227558136,
+          0.17785006761550903,
+          0.28520578145980835,
+          -0.11091791838407516,
+          -0.31123602390289307,
+          0.03787701949477196,
+          0.3201249837875366
+        ]
+      },
+      "final_pin": "sha256:0637822b9118c464e587dd323c713bd981bc2e95a5f5e890243d16cad191ddee",
+      "id": "sha256:f9d9b534d9da229c78d9925c0eabdef6274d53d9605909a8406841321a70bfcd",
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v3\",\"plan_id\":\"sha256:d09df976eb9b5c434546e5a6a9775f8a134cf4a53545f32e61e285bec51c3c40\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"mode\":\"joint\",\"readout_accumulator\":\"f32\",\"updates\":2,\"lora\":{\"origin_id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"id\":\"sha256:456ff5744b0f0ed8db7652b835f9a93016a3ebc9f4907bb4f1146650a632ad6a\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.native_lora.attention_output.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"layer\\\":0,\\\"width\\\":3,\\\"rank\\\":2,\\\"alpha\\\":2.0,\\\"a\\\":[-0.12431404,0.06318058,0.24894196,-0.1260577,0.061896868,0.24940221],\\\"b\\\":[0.06265689,0.24882331,-0.12415589,0.060116086,0.25119126,-0.12398848]}\"},\"geometry\":{\"origin_id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"id\":\"sha256:0005adea8524894097d243b4c8c3391e2667278f5a20a1aa4ac6da79f1f61b2b\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.wave_gate_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"curvature\\\":-1.0,\\\"saturation\\\":1.0,\\\"porosity\\\":0.05,\\\"max_values\\\":64}},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"bias\\\",\\\"shape\\\":[3],\\\"values\\\":[1.0164133,1.9999688,3.0000222],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.0000029,-1.0000033,0.5000011],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}}",
+      "plan": "{\"epochs\":2,\"examples\":[{\"candidates\":[[1],[1,2],[3,4]],\"objective\":{\"kind\":\"set\"},\"prompt_ids\":[1,2],\"stop_id\":0},{\"candidates\":[[1,2],[1,3],[7]],\"objective\":{\"gold_index\":1,\"kind\":\"menu\",\"mix\":0.5},\"prompt_ids\":[2,4],\"stop_id\":9},{\"candidates\":[[2],[2,3],[4,5]],\"objective\":{\"accepted_indices\":[0,2],\"kind\":\"subset\"},\"prompt_ids\":[2,1,3],\"stop_id\":0}],\"max_tile_values\":11,\"mode\":\"joint\",\"schema\":\"spiraltorch.native_causal_lm_line_plan.v3\",\"update\":{\"kind\":\"parameter_gradient_l2\",\"target_l2\":0.00390625}}",
+      "steps": [
+        4.568400859832764,
+        2.5713109970092773,
+        0.11462302505970001,
+        4.568315505981445,
+        2.560295581817627,
+        0.11387050151824951
+      ]
+    },
+    "lora": {
+      "endpoint": {
+        "a": [
+          -0.119855285,
+          0.067626275,
+          0.24770376,
+          -0.1273298,
+          0.057535633,
+          0.24505664
+        ],
+        "b": [
+          0.06232184,
+          0.2458503,
+          -0.121190995,
+          0.05678002,
+          0.25102627,
+          -0.12079581
+        ],
+        "geometry": [
+          [
+            1.0126338,
+            2.0000093,
+            3.0000143
+          ],
+          [
+            2.0000021,
+            -0.99999785,
+            0.5000006
+          ]
+        ],
+        "logits": [
+          -0.12280212342739105,
+          0.2791830003261566,
+          0.1883208155632019,
+          -0.23498786985874176,
+          -0.2434677928686142,
+          0.17785079777240753,
+          0.2852058410644531,
+          -0.11091864854097366,
+          -0.31123626232147217,
+          0.03787769377231598,
+          0.32012540102005005
+        ]
+      },
+      "final_pin": "sha256:c4e69bdcdc5e8665d51bc64d3637d8a59f120dbfb148057071e0e1d2b3e818f8",
+      "id": "sha256:db06cc40cb3aecf2098385d647750a6291620fc0008b100a1ecb36917e7e07a7",
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v3\",\"plan_id\":\"sha256:f759583b7ba441811fb2c5bba9027ef0fa17b53391f084f22f79e0b5807d7f8b\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"mode\":\"lora\",\"readout_accumulator\":\"f32\",\"updates\":2,\"lora\":{\"origin_id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"id\":\"sha256:e79bf3c4915fa58565ed2902ee30a6915aec5be1844b31c97cdcc4493dfdaae0\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.native_lora.attention_output.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"layer\\\":0,\\\"width\\\":3,\\\"rank\\\":2,\\\"alpha\\\":2.0,\\\"a\\\":[-0.12419502,0.06329725,0.24880715,-0.12619247,0.061788406,0.2492961],\\\"b\\\":[0.06262853,0.24867724,-0.124015115,0.05975185,0.25135243,-0.12382134]}\"},\"geometry\":{\"origin_id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"weights\":null}}",
+      "plan": "{\"epochs\":2,\"examples\":[{\"candidates\":[[1],[1,2],[3,4]],\"objective\":{\"kind\":\"set\"},\"prompt_ids\":[1,2],\"stop_id\":0},{\"candidates\":[[1,2],[1,3],[7]],\"objective\":{\"gold_index\":1,\"kind\":\"menu\",\"mix\":0.5},\"prompt_ids\":[2,4],\"stop_id\":9},{\"candidates\":[[2],[2,3],[4,5]],\"objective\":{\"accepted_indices\":[0,2],\"kind\":\"subset\"},\"prompt_ids\":[2,1,3],\"stop_id\":0}],\"max_tile_values\":11,\"mode\":\"lora\",\"schema\":\"spiraltorch.native_causal_lm_line_plan.v3\",\"update\":{\"kind\":\"parameter_gradient_l2\",\"target_l2\":0.00390625}}",
+      "steps": [
+        4.568400859832764,
+        2.5735044479370117,
+        0.11464297771453857,
+        4.568344593048096,
+        2.5628602504730225,
+        0.11376091837882996
+      ]
+    }
+  },
+  "cut": 2,
+  "measurements": {
+    "ray": {
+      "geometry": {
+        "centered_logit_rms": 0.00697868936264993,
+        "endpoint_l2": 0.016155361826616286,
+        "path_l2": 0.023437550445517822
+      },
+      "joint": {
+        "centered_logit_rms": 0.02173752307871192,
+        "endpoint_l2": 0.01428636429196386,
+        "path_l2": 0.02343751522885657
+      },
+      "lora": {
+        "centered_logit_rms": 0.0231638142703104,
+        "endpoint_l2": 0.0139905713445999,
+        "path_l2": 0.02343748950270113
+      }
+    },
+    "sgd": {
+      "geometry": {
+        "centered_logit_rms": 0.016176945500630206,
+        "endpoint_l2": 0.11362450221687705,
+        "path_l2": 0.11386199698749426
+      },
+      "joint": {
+        "centered_logit_rms": 0.02619736408944475,
+        "endpoint_l2": 0.21352708784625146,
+        "path_l2": 0.2667009403755122
+      },
+      "lora": {
+        "centered_logit_rms": 0.03824798079353718,
+        "endpoint_l2": 0.1797092239273509,
+        "path_l2": 0.23835990805705787
+      }
+    }
+  },
+  "total": 6
+}

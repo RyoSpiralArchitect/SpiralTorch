@@ -1,0 +1,466 @@
+{
+  "schema": "spiraltorch.synthetic_line_vjp_memory.v1",
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "weights_sha256": "ea368f69c6e7474a9d8eb9cf28f4b2353f18e22eb1a537e91576a72a79602770",
+  "geometry_id": "sha256:f6ab09c248ffbd54341433381964623b43185bd43cde03c9eb5f462be9019d67",
+  "vocabulary": 50257,
+  "prefix_rows": 129,
+  "objectives": {
+    "set": {},
+    "menu": {
+      "gold_index": 2,
+      "mix": 0.5
+    },
+    "subset": {
+      "accepted_indices": [
+        0,
+        2
+      ]
+    }
+  },
+  "repetitions": 3,
+  "threads_env": 1,
+  "updates": 0,
+  "medians": {
+    "set": {
+      "old_dense": {
+        "ns": 54947250,
+        "rss_before": 49102848,
+        "rss_after": 133660672,
+        "rss_growth": 84508672
+      },
+      "auto": {
+        "ns": 59700708,
+        "rss_before": 49102848,
+        "rss_after": 57622528,
+        "rss_growth": 8601600
+      },
+      "one_row": {
+        "ns": 62176000,
+        "rss_before": 49037312,
+        "rss_after": 57049088,
+        "rss_growth": 7979008
+      }
+    },
+    "menu": {
+      "old_dense": {
+        "ns": 55241458,
+        "rss_before": 49037312,
+        "rss_after": 133644288,
+        "rss_growth": 84590592
+      },
+      "auto": {
+        "ns": 60341709,
+        "rss_before": 49070080,
+        "rss_after": 57704448,
+        "rss_growth": 8634368
+      },
+      "one_row": {
+        "ns": 63418875,
+        "rss_before": 48988160,
+        "rss_after": 57065472,
+        "rss_growth": 8060928
+      }
+    },
+    "subset": {
+      "old_dense": {
+        "ns": 128874625,
+        "rss_before": 49070080,
+        "rss_after": 133758976,
+        "rss_growth": 84688896
+      },
+      "auto": {
+        "ns": 135465041,
+        "rss_before": 49053696,
+        "rss_after": 57753600,
+        "rss_growth": 8749056
+      },
+      "one_row": {
+        "ns": 138939916,
+        "rss_before": 49053696,
+        "rss_after": 57196544,
+        "rss_growth": 8142848
+      }
+    }
+  },
+  "measurements": [
+    {
+      "ns": 64487417,
+      "rss_before": 49037312,
+      "rss_after": 134774784,
+      "rss_growth": 85737472,
+      "kind": "set",
+      "arm": "old_dense",
+      "rotation": 0,
+      "raw_sha256": "bb33a50071c7888ca36a66cc6a07bf58d0d43bcd773c580c6ab224293ddd3440",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 66569292,
+      "rss_before": 49102848,
+      "rss_after": 57966592,
+      "rss_growth": 8863744,
+      "kind": "set",
+      "arm": "auto",
+      "rotation": 0,
+      "raw_sha256": "63fb788ce511cb3367560678b7392eb341398548a2e17fc995794488c116b272",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 64730375,
+      "rss_before": 49037312,
+      "rss_after": 57049088,
+      "rss_growth": 8011776,
+      "kind": "set",
+      "arm": "one_row",
+      "rotation": 0,
+      "raw_sha256": "88eddabf66d0be8e9d1c6af6eba78ebc4e63f92615d3ac12d64312ae30b893da",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 59089041,
+      "rss_before": 49102848,
+      "rss_after": 57622528,
+      "rss_growth": 8519680,
+      "kind": "set",
+      "arm": "auto",
+      "rotation": 1,
+      "raw_sha256": "8ab9e501d8a7be273d78185c03d158f8850ee93c2207acff1799196013394627",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 62176000,
+      "rss_before": 48971776,
+      "rss_after": 56950784,
+      "rss_growth": 7979008,
+      "kind": "set",
+      "arm": "one_row",
+      "rotation": 1,
+      "raw_sha256": "28ac87ae1ba91d89d5c0bef09830844a42d852e85c990b0bf8f12f0fab731671",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 54947250,
+      "rss_before": 49102848,
+      "rss_after": 133611520,
+      "rss_growth": 84508672,
+      "kind": "set",
+      "arm": "old_dense",
+      "rotation": 1,
+      "raw_sha256": "fd77ebff16083d5ea23229ef132d58cedd0ec5149e524b037416bfaeb45a4c6b",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 61856750,
+      "rss_before": 49102848,
+      "rss_after": 57049088,
+      "rss_growth": 7946240,
+      "kind": "set",
+      "arm": "one_row",
+      "rotation": 2,
+      "raw_sha256": "1727931510b7d8fdca832618642a46195d7a2d0ebf8f2838e13adc19ad5f209e",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 54928541,
+      "rss_before": 49168384,
+      "rss_after": 133660672,
+      "rss_growth": 84492288,
+      "kind": "set",
+      "arm": "old_dense",
+      "rotation": 2,
+      "raw_sha256": "9f22312a48548ade5fcc0d58d9c3ec2ff530a0b214131fb9a6b56f7a3e86d97e",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 59700708,
+      "rss_before": 48922624,
+      "rss_after": 57524224,
+      "rss_growth": 8601600,
+      "kind": "set",
+      "arm": "auto",
+      "rotation": 2,
+      "raw_sha256": "3bcd2b2e4ad65ebbdeec61f5c890005da3be80b5b117201ca0f0b3fe152bfd5d",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 55742834,
+      "rss_before": 49168384,
+      "rss_after": 133726208,
+      "rss_growth": 84557824,
+      "kind": "menu",
+      "arm": "old_dense",
+      "rotation": 0,
+      "raw_sha256": "96c8858ccb657b316f5e1887dc7336fc89d3c921251be5c7311c4b78a3fbe56e",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 60227667,
+      "rss_before": 49070080,
+      "rss_after": 57704448,
+      "rss_growth": 8634368,
+      "kind": "menu",
+      "arm": "auto",
+      "rotation": 0,
+      "raw_sha256": "c08cf483a2265ce4b762fc8ed3f531cd9736b863e02e50e4f896c7fd602d15c0",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 63418875,
+      "rss_before": 48971776,
+      "rss_after": 57016320,
+      "rss_growth": 8044544,
+      "kind": "menu",
+      "arm": "one_row",
+      "rotation": 0,
+      "raw_sha256": "d5d8bad191a6ed2e8a0bdbbf63226a2e4a1e6cb9adab78e465f23a729e3c476d",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 61201125,
+      "rss_before": 49070080,
+      "rss_after": 57704448,
+      "rss_growth": 8634368,
+      "kind": "menu",
+      "arm": "auto",
+      "rotation": 1,
+      "raw_sha256": "0247b99c488f85c53da06936c1e3e2a577ff28c4163d29a0ac485d2c12c8280e",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 63022833,
+      "rss_before": 49037312,
+      "rss_after": 57098240,
+      "rss_growth": 8060928,
+      "kind": "menu",
+      "arm": "one_row",
+      "rotation": 1,
+      "raw_sha256": "87eb9f2c8a25664aa53ffe830f368100629d9b1a64a3d85b36331e3e45add258",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 55241458,
+      "rss_before": 49020928,
+      "rss_after": 133644288,
+      "rss_growth": 84623360,
+      "kind": "menu",
+      "arm": "old_dense",
+      "rotation": 1,
+      "raw_sha256": "9070b2b4100e1d01d0752e28892f945387a45de1ad8e212b9019cb5688985e9a",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 63693583,
+      "rss_before": 48988160,
+      "rss_after": 57065472,
+      "rss_growth": 8077312,
+      "kind": "menu",
+      "arm": "one_row",
+      "rotation": 2,
+      "raw_sha256": "4a81239b50362bfd5e25b76fc32bcfe0cacab897f79723f9dbc27dd2182d2eeb",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 55075542,
+      "rss_before": 49037312,
+      "rss_after": 133627904,
+      "rss_growth": 84590592,
+      "kind": "menu",
+      "arm": "old_dense",
+      "rotation": 2,
+      "raw_sha256": "9405cf64315ddd2c92cbbf66cb3762739b79166278ea4dfd215ac0b47b0c9d2c",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 60341709,
+      "rss_before": 49037312,
+      "rss_after": 57720832,
+      "rss_growth": 8683520,
+      "kind": "menu",
+      "arm": "auto",
+      "rotation": 2,
+      "raw_sha256": "1a41142737bcbdd37aa63bb62befeba310d7e902a8d07c19cda7b432d244e1fa",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 129585542,
+      "rss_before": 49070080,
+      "rss_after": 133775360,
+      "rss_growth": 84705280,
+      "kind": "subset",
+      "arm": "old_dense",
+      "rotation": 0,
+      "raw_sha256": "9bdebdc526849aeb4b3d0af86e51fbe7b59ed31c08202bca083c6c8f0c4888ae",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 135465041,
+      "rss_before": 49053696,
+      "rss_after": 57802752,
+      "rss_growth": 8749056,
+      "kind": "subset",
+      "arm": "auto",
+      "rotation": 0,
+      "raw_sha256": "3b364949e46a15c773380316cc5173c6949f2cb8d382a773d1c1b1b5998b85e0",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 138161125,
+      "rss_before": 49053696,
+      "rss_after": 57196544,
+      "rss_growth": 8142848,
+      "kind": "subset",
+      "arm": "one_row",
+      "rotation": 0,
+      "raw_sha256": "83a59f977bd1a3d3223106db76401f6cb2685f76a6b6153d501928d4cbb0bae1",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 133354875,
+      "rss_before": 48988160,
+      "rss_after": 57737216,
+      "rss_growth": 8749056,
+      "kind": "subset",
+      "arm": "auto",
+      "rotation": 1,
+      "raw_sha256": "8ff556484cc4f350d5a12c9e43d0faef0984d46e13ffe14eca1ec6bd37796271",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 138939916,
+      "rss_before": 49086464,
+      "rss_after": 57212928,
+      "rss_growth": 8126464,
+      "kind": "subset",
+      "arm": "one_row",
+      "rotation": 1,
+      "raw_sha256": "90c9e8c89500f8b8266acd08dc6450a5474fb30a694e762cca0e40c61c78b79c",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 126576708,
+      "rss_before": 49070080,
+      "rss_after": 133758976,
+      "rss_growth": 84688896,
+      "kind": "subset",
+      "arm": "old_dense",
+      "rotation": 1,
+      "raw_sha256": "cb581127c3d0819b90adde5eeae0b790d8b966248e6cd843219c12f494303155",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 141034083,
+      "rss_before": 48971776,
+      "rss_after": 57147392,
+      "rss_growth": 8175616,
+      "kind": "subset",
+      "arm": "one_row",
+      "rotation": 2,
+      "raw_sha256": "c416e9fc43243b3874fb9e1ed6450632bde3a1d644fa4563ceb478726db56ecb",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 128874625,
+      "rss_before": 49053696,
+      "rss_after": 133644288,
+      "rss_growth": 84590592,
+      "kind": "subset",
+      "arm": "old_dense",
+      "rotation": 2,
+      "raw_sha256": "bd338220ba70e064fae4fde8a2d31dba19c264488eb221e67bb713c4c861e47b",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    },
+    {
+      "ns": 136856000,
+      "rss_before": 49086464,
+      "rss_after": 57753600,
+      "rss_growth": 8667136,
+      "kind": "subset",
+      "arm": "auto",
+      "rotation": 2,
+      "raw_sha256": "9540acf9739ae229ffba71a163afe9def39132034b8842f7e1154c28f287b587",
+      "report_max_abs": 0,
+      "report_exact": true,
+      "parameters_max_abs": 0.0,
+      "parameters_exact": true
+    }
+  ]
+}

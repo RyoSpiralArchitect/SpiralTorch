@@ -1,4 +1,4 @@
-use super::readout::{PrefixPass, RankingSeed};
+use super::readout::{PrefixPass, PrefixStats, RankingSeed};
 use super::*;
 use crate::causal_lm::sum::Sum;
 
@@ -46,25 +46,35 @@ pub(super) fn costs(
     support: &LineSet,
     paths: &[Path],
     shared: usize,
-    pass: &PrefixPass<'_>,
+    pass: &impl PrefixStats,
 ) -> Costs {
-    costs_with_tokens(support, paths, shared, pass, |_, _| {})
+    costs_with_tokens(
+        support,
+        paths,
+        shared,
+        pass.outcomes(),
+        pass.rows(),
+        |i, k| pass.edge(i, k),
+        |_, _| {},
+    )
 }
 
 pub(super) fn costs_with_tokens(
     support: &LineSet,
     paths: &[Path],
     shared: usize,
-    pass: &PrefixPass<'_>,
+    outcomes: &[Outcome],
+    rows: &[readout::Row],
+    logit: impl Fn(usize, usize) -> f32,
     mut visit: impl FnMut(usize, f64),
 ) -> Costs {
     let (mut lines, mut suffixes, mut conditional) = (Vec::new(), Vec::new(), Vec::new());
     for (line, path) in paths.iter().enumerate() {
         let (mut prefix, mut suffix, mut cost) = (Term::ZERO, Term::ZERO, Term::ZERO);
         for (depth, &(i, k)) in path.iter().enumerate() {
-            let value = Term::logit(pass.row(i)[k]);
-            let s = support.nodes[i].edges[&k].map_or(Term::ZERO, |j| pass.outcomes[j].yes);
-            let row = pass.rows[i];
+            let value = Term::logit(logit(i, k));
+            let s = support.nodes[i].edges[&k].map_or(Term::ZERO, |j| outcomes[j].yes);
+            let row = rows[i];
             let token_nll = row.total.nll(value);
             visit(line, token_nll.rounded());
             if depth < shared {
@@ -86,7 +96,7 @@ pub(super) fn costs_with_tokens(
 }
 
 pub(in crate::causal_lm) struct LineMenu {
-    support: LineSet,
+    pub(super) support: LineSet,
     paths: Vec<Vec<(usize, usize)>>,
     shared: usize,
     gold: usize,
@@ -110,7 +120,7 @@ impl LineMenu {
         }
     }
 
-    fn report(&self, pass: &PrefixPass<'_>) -> CausalLmResult<CausalLmLineMenuReport> {
+    pub(super) fn report(&self, pass: &impl PrefixStats) -> CausalLmResult<CausalLmLineMenuReport> {
         let Costs {
             line: lines,
             suffix: suffixes,
@@ -165,18 +175,27 @@ impl LineMenu {
         let pass = PrefixPass::new(&self.support, logits, true)?;
         let report = self.report(&pass)?;
         let (rows, cols) = logits.shape();
-        let mut gold_tokens = vec![None; rows];
-        for &(i, k) in &self.paths[self.gold] {
-            gold_tokens[i] = Some(k);
-        }
-        let recipe = RankingSeed {
-            gold_tokens: &gold_tokens,
-            mix: self.mix,
-            gold_ce: (1. - self.mix) / self.paths[self.gold].len() as f64,
-        };
+        let gold_tokens = self.gold_tokens();
+        let recipe = self.recipe(&gold_tokens);
         let mut seed = vec![0.; logits.data().len()];
         pass.seed(&self.support, Some(recipe), &mut seed);
         Ok((report, Tensor::from_vec(rows, cols, seed)?))
+    }
+
+    pub(super) fn gold_tokens(&self) -> Vec<Option<usize>> {
+        let mut gold_tokens = vec![None; self.support.nodes.len()];
+        for &(i, k) in &self.paths[self.gold] {
+            gold_tokens[i] = Some(k);
+        }
+        gold_tokens
+    }
+
+    pub(super) fn recipe<'a>(&self, gold_tokens: &'a [Option<usize>]) -> RankingSeed<'a> {
+        RankingSeed {
+            gold_tokens,
+            mix: self.mix,
+            gold_ce: (1. - self.mix) / self.paths[self.gold].len() as f64,
+        }
     }
 }
 

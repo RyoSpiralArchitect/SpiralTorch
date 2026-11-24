@@ -12,12 +12,7 @@ use st_nn::language_windows::MAX_DOCUMENTS;
 use std::collections::BTreeMap;
 
 pub(super) fn mode(value: &str) -> PyResult<CausalLmAdaptationMode> {
-    match value {
-        "lora" => Ok(CausalLmAdaptationMode::Lora),
-        "geometry" => Ok(CausalLmAdaptationMode::Geometry),
-        "joint" => Ok(CausalLmAdaptationMode::Joint),
-        _ => Err(error("adaptation mode must be lora, geometry or joint")),
-    }
+    value.parse().map_err(error)
 }
 fn mode_name(value: CausalLmAdaptationMode) -> &'static str {
     match value {
@@ -37,6 +32,18 @@ pub struct PyNativeCausalLmAdaptationGradients {
 }
 #[pymethods]
 impl PyNativeCausalLmAdaptationGradients {
+    #[getter]
+    fn line_prompt_id(&self) -> Option<String> {
+        self.inner.line_prompt_id()
+    }
+
+    fn paired_token_gap_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .paired_token_gap_report()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
     fn context_token_preference_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.inner
             .context_token_preference_report()
@@ -55,6 +62,13 @@ impl PyNativeCausalLmAdaptationGradients {
     fn competition_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.inner
             .competition()
+            .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
+            .transpose()
+    }
+
+    fn line_training_work(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.inner
+            .line_training_work()
             .map(|r| crate::json::json_to_py(py, &serde_json::to_value(r).map_err(error)?))
             .transpose()
     }

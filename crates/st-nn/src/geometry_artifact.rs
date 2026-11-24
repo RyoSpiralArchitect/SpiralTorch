@@ -18,7 +18,8 @@ pub const GEOMETRY_ADAPTER_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub const GEOMETRY_ADAPTER_MAX_VALUES: usize = 1_048_576;
 pub const GEOMETRY_ADAPTER_MAX_KERNEL_TAPS: usize = 65_536;
 mod displacement;
-pub use displacement::{GeometryDeltaMatch, MAX_RELATIVE_DELTA_ERROR};
+pub(crate) use displacement::ray::{GradientSize, ParameterRay, RayMotion};
+pub use displacement::{GeometryDeltaMatch, GeometryGradientStep, MAX_RELATIVE_DELTA_ERROR};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -100,6 +101,37 @@ pub struct FractionalRecipe {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "schema", deny_unknown_fields)]
 pub enum GeometryAdapterRecipe {
+    #[serde(rename = "spiraltorch.prefix_transport_adapter.v1")]
+    PrefixTransport {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        rotation: PrefixRotation,
+    },
+    #[serde(rename = "spiraltorch.prefix_transport_adapter.v2")]
+    MixedPrefixTransport {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        rotation: PrefixRotation,
+        output_mix: PrefixChannelMix,
+    },
+    /// Transport adjacent site changes; the first source in every document is zero.
+    #[serde(rename = "spiraltorch.prefix_transport_adapter.v3")]
+    DifferencePrefixTransport {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        rotation: PrefixRotation,
+    },
+    /// Gate the decoder's own projected values, leaving the ordinary MLP and attention intact.
+    #[serde(rename = "spiraltorch.attention_value_gate.v1")]
+    AttentionValueGate {
+        features: usize,
+        strength: f64,
+        max_values: usize,
+        route: AttentionValueRoute,
+    },
     #[serde(rename = "spiraltorch.channel_affine_adapter.v1")]
     ChannelAffine {
         features: usize,
@@ -201,6 +233,75 @@ pub enum GeometryAdapterRecipe {
     },
 }
 
+/// Exact relative-lag rotations on adjacent channel pairs. An odd tail is fixed.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrefixRotation {
+    Identity,
+    QuarterTurn,
+    InverseQuarterTurn,
+}
+
+/// Fixed orthogonal output mixing on complete channel triples, after the affine gate.
+/// Leftover channels pass through. No learned matrix or additional streaming state.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrefixChannelMix {
+    CayleyTriples,
+    InverseCayleyTriples,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PrefixTransportSpec {
+    pub rotation: PrefixRotation,
+    pub output_mix: Option<PrefixChannelMix>,
+    pub difference: bool,
+    pub strength: f32,
+    pub max_values: usize,
+}
+
+impl GeometryAdapterRecipe {
+    pub(crate) fn value_gate(&self) -> Option<(AttentionValueRoute, f32)> {
+        match *self {
+            Self::AttentionValueGate {
+                route, strength, ..
+            } => Some((route, strength as f32)),
+            _ => None,
+        }
+    }
+    pub(crate) fn prefix_transport(&self) -> Option<PrefixTransportSpec> {
+        let (rotation, output_mix, difference, strength, max_values) = match *self {
+            Self::PrefixTransport {
+                rotation,
+                strength,
+                max_values,
+                ..
+            } => (rotation, None, false, strength, max_values),
+            Self::MixedPrefixTransport {
+                rotation,
+                output_mix,
+                strength,
+                max_values,
+                ..
+            } => (rotation, Some(output_mix), false, strength, max_values),
+            Self::DifferencePrefixTransport {
+                rotation,
+                strength,
+                max_values,
+                ..
+            } => (rotation, None, true, strength, max_values),
+            _ => return None,
+        };
+        Some(PrefixTransportSpec {
+            rotation,
+            output_mix,
+            difference,
+            strength: strength as f32,
+            max_values,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryAdapterTensor {
@@ -210,6 +311,17 @@ pub struct GeometryAdapterTensor {
     pub values: Vec<f32>,
     pub requires_grad: bool,
     pub role: GeometryAdapterTensorRole,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AttentionValueRoute {
+    Attention,
+    Uniform,
+    /// Zero-based absolute slot. Before this slot exists, read the current one.
+    Fixed {
+        position: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -468,7 +580,19 @@ impl GeometryAdapterPlacement {
     fn validate(&self) -> Result<usize> {
         use GeometryAdapterRecipe::*;
         let (features, strength) = match &self.recipe {
-            ChannelAffine {
+            PrefixTransport {
+                features, strength, ..
+            }
+            | MixedPrefixTransport {
+                features, strength, ..
+            }
+            | DifferencePrefixTransport {
+                features, strength, ..
+            }
+            | AttentionValueGate {
+                features, strength, ..
+            }
+            | ChannelAffine {
                 features, strength, ..
             }
             | Wave {
@@ -522,7 +646,14 @@ impl GeometryAdapterPlacement {
         }
         let mut shapes = BTreeMap::new();
         match &self.recipe {
-            ChannelAffine { .. } | Wave { .. } | WaveRadius { .. } | WaveStage { .. } => {
+            PrefixTransport { .. }
+            | MixedPrefixTransport { .. }
+            | DifferencePrefixTransport { .. }
+            | AttentionValueGate { .. }
+            | ChannelAffine { .. }
+            | Wave { .. }
+            | WaveRadius { .. }
+            | WaveStage { .. } => {
                 shapes.insert("gate", vec![features]);
                 shapes.insert("bias", vec![features]);
             }
@@ -610,6 +741,17 @@ impl GeometryAdapterPlacement {
             return Err("missing geometry tensors".into());
         }
         match &self.recipe {
+            MixedPrefixTransport { .. } if features < 3 => {
+                return Err("prefix output mixing requires at least three channels".into());
+            }
+            PrefixTransport { max_values, .. }
+            | MixedPrefixTransport { max_values, .. }
+            | DifferencePrefixTransport { max_values, .. }
+            | AttentionValueGate { max_values, .. } => {
+                if !(features..=GEOMETRY_ADAPTER_MAX_VALUES).contains(max_values) {
+                    return Err("prefix transport value budget out of bounds".into());
+                }
+            }
             AnchoredWaveProjection {
                 curvature,
                 log_radius,

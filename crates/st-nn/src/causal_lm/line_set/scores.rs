@@ -6,6 +6,7 @@ pub struct CausalLmLineScores {
     pub stop_id: usize,
     pub target_counts: Vec<usize>,
     pub prefix_nodes: usize,
+    /// Number of maximal content paths; only the full-prefix executor pads these into lanes.
     pub decoder_lanes: usize,
     pub shared_content_tokens: usize,
     /// First in input order on an exact tie. Compared before rounding away a shared cost.
@@ -19,18 +20,40 @@ pub struct CausalLmLineScores {
 }
 
 impl LineSet {
-    fn scores(&self, lines: &[Vec<usize>], logits: &Tensor) -> CausalLmResult<CausalLmLineScores> {
+    pub(super) fn scores(
+        &self,
+        lines: &[Vec<usize>],
+        logits: &Tensor,
+    ) -> CausalLmResult<CausalLmLineScores> {
         let pass = readout::PrefixPass::new(self, logits, true)?;
+        Ok(self.scores_from_rows(lines, &pass.outcomes, &pass.rows, |i, k| pass.row(i)[k]))
+    }
+
+    pub(super) fn scores_from_rows(
+        &self,
+        lines: &[Vec<usize>],
+        outcomes: &[Outcome],
+        rows: &[readout::Row],
+        logit: impl Fn(usize, usize) -> f32,
+    ) -> CausalLmLineScores {
         let (shared, paths) = ranking::paths(self, lines);
         let mut tokens: Vec<_> = self
             .counts
             .iter()
             .map(|&len| Vec::with_capacity(len))
             .collect();
-        let costs = ranking::costs_with_tokens(self, &paths, shared, &pass, |line, value| {
-            tokens[line].push(value);
-        });
-        Ok(CausalLmLineScores {
+        let costs = ranking::costs_with_tokens(
+            self,
+            &paths,
+            shared,
+            outcomes,
+            rows,
+            logit,
+            |line, value| {
+                tokens[line].push(value);
+            },
+        );
+        CausalLmLineScores {
             stop_id: self.stop,
             target_counts: self.counts.clone(),
             prefix_nodes: self.nodes.len(),
@@ -40,8 +63,8 @@ impl LineSet {
             line_nlls: costs.line,
             conditional_nlls: costs.conditional.into_iter().map(Term::rounded).collect(),
             token_nlls: tokens,
-            menu_set_nll: -pass.outcomes[0].yes.rounded(),
-        })
+            menu_set_nll: -outcomes[0].yes.rounded(),
+        }
     }
 }
 
@@ -53,7 +76,7 @@ impl NativeCausalLm {
         candidates: &[Vec<usize>],
         stop_id: usize,
     ) -> CausalLmResult<CausalLmLineScores> {
-        let (batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, false)?;
+        let (batch, plan) = self.prepare_line_set(prompt, candidates, stop_id, None)?;
         let hidden = self.decode_hidden(&batch.input, batch.shape)?;
         plan.scores(candidates, &self.causal_logits(hidden, &batch)?)
     }

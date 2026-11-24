@@ -1,0 +1,205 @@
+{
+  "back": 4,
+  "before": [
+    4.568400859832764,
+    2.5707311630249023,
+    0.11492694914340973
+  ],
+  "cases": {
+    "geometry": {
+      "after": [
+        4.568262577056885,
+        2.546018123626709,
+        0.11452639847993851
+      ],
+      "endpoint": {
+        "a": [
+          -0.125,
+          0.0625,
+          0.25,
+          -0.125,
+          0.0625,
+          0.25
+        ],
+        "b": [
+          0.0625,
+          0.25,
+          -0.125,
+          0.0625,
+          0.25,
+          -0.125
+        ],
+        "geometry": [
+          [
+            1.1262572,
+            1.9995924,
+            3.000295
+          ],
+          [
+            2.000035,
+            -1.0000142,
+            0.50003207
+          ]
+        ],
+        "logits": [
+          -0.12274180352687836,
+          0.27927166223526,
+          0.18828129768371582,
+          -0.23508577048778534,
+          -0.24345126748085022,
+          0.1779525876045227,
+          0.2852132022380829,
+          -0.11101871728897095,
+          -0.31126710772514343,
+          0.037970516830682755,
+          0.3201780319213867
+        ]
+      },
+      "final_checkpoint": "sha256:aa56093aa280396335028269c3b858c7ee90d85797945cff5b7e62a8f37c5574",
+      "id": "sha256:e25563d028237aa0dbc2e8fff0860bd1eb263437955c98b2afcead7bd74d190c",
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v2\",\"plan_id\":\"sha256:5ee49759f0d7e5f40058f4368839f4297aa6ad19e16bb37b22b5fddd7b1eec36\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"mode\":\"geometry\",\"readout_accumulator\":\"f32\",\"updates\":2,\"lora\":{\"origin_id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"weights\":null},\"geometry\":{\"origin_id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"id\":\"sha256:1cee4e985f0af43433bd487b94f3a370a435ec7a4a83b242d07314e19473a3b4\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.wave_gate_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"curvature\\\":-1.0,\\\"saturation\\\":1.0,\\\"porosity\\\":0.05,\\\"max_values\\\":64}},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"bias\\\",\\\"shape\\\":[3],\\\"values\\\":[1.1261666,1.9996961,3.0002713],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.000035,-1.0000143,0.5000287],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}}",
+      "plan": "{\"epochs\":2,\"examples\":[{\"candidates\":[[1],[1,2],[3,4]],\"objective\":{\"kind\":\"set\"},\"prompt_ids\":[1,2],\"stop_id\":0},{\"candidates\":[[1,2],[1,3],[7]],\"objective\":{\"gold_index\":1,\"kind\":\"menu\",\"mix\":0.5},\"prompt_ids\":[2,4],\"stop_id\":9},{\"candidates\":[[2],[2,3],[4,5]],\"objective\":{\"accepted_indices\":[0,2],\"kind\":\"subset\"},\"prompt_ids\":[2,1,3],\"stop_id\":0}],\"learning_rate\":0.125,\"max_tile_values\":11,\"mode\":\"geometry\",\"schema\":\"spiraltorch.native_causal_lm_line_plan.v2\"}",
+      "plan_id": "sha256:5ee49759f0d7e5f40058f4368839f4297aa6ad19e16bb37b22b5fddd7b1eec36",
+      "steps": [
+        4.568400859832764,
+        2.565396308898926,
+        0.1145264133810997,
+        4.568262577056885,
+        2.546018362045288,
+        0.1145264059305191
+      ]
+    },
+    "joint": {
+      "after": [
+        4.5733489990234375,
+        2.5569071769714355,
+        0.11348605155944824
+      ],
+      "endpoint": {
+        "a": [
+          -0.056304738,
+          0.12995529,
+          0.25564352,
+          -0.11943106,
+          -0.006575179,
+          0.1821687
+        ],
+        "b": [
+          0.023017805,
+          0.23187064,
+          -0.07749263,
+          0.00489207,
+          0.23372865,
+          -0.062301647
+        ],
+        "geometry": [
+          [
+            1.1360441,
+            1.9997168,
+            3.0002432
+          ],
+          [
+            2.0000386,
+            -1.0000143,
+            0.5000272
+          ]
+        ],
+        "logits": [
+          -0.12682202458381653,
+          0.27309951186180115,
+          0.19091305136680603,
+          -0.22829599678516388,
+          -0.24448959529399872,
+          0.17091916501522064,
+          0.2846009135246277,
+          -0.10412897169589996,
+          -0.3090379238128662,
+          0.03160391002893448,
+          0.3164547383785248
+        ]
+      },
+      "final_checkpoint": "sha256:28e1bcb1eb265335abce65bd2e71c944aab042f06be7ea1bc032e1bcea2fe23e",
+      "id": "sha256:5da91e4bbae6722a82f2fb16886bc69f50f895000521564ad5bc3c8ebdbda5bd",
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v2\",\"plan_id\":\"sha256:c22cc57322f7daa308346d29aee0853885b1c87cf11fd5d15923a0c9d68fc5f3\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"mode\":\"joint\",\"readout_accumulator\":\"f32\",\"updates\":2,\"lora\":{\"origin_id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"id\":\"sha256:d992e3ff5fae807e3aaf07a95c753e859b24be9c45bcc486b5b951703aec14d5\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.native_lora.attention_output.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"layer\\\":0,\\\"width\\\":3,\\\"rank\\\":2,\\\"alpha\\\":2.0,\\\"a\\\":[-0.047145627,0.13926962,0.25611502,-0.11882114,-0.01579316,0.17278637],\\\"b\\\":[0.019803762,0.23218228,-0.07458622,0.007200919,0.23176824,-0.062654905]}\"},\"geometry\":{\"origin_id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"id\":\"sha256:54bb64507d5550613872795d84ad799c8f42789a9e113f41ab4b5ea3dc35cb7d\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.geometry_adapter_artifact.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"policy\\\":\\\"full_prefix_f32_no_cache.v1\\\",\\\"training\\\":true,\\\"placements\\\":[{\\\"path\\\":\\\"transformer.h.0.attn\\\",\\\"recipe\\\":{\\\"schema\\\":\\\"spiraltorch.wave_gate_adapter.v1\\\",\\\"features\\\":3,\\\"strength\\\":0.5,\\\"kernel\\\":{\\\"curvature\\\":-1.0,\\\"saturation\\\":1.0,\\\"porosity\\\":0.05,\\\"max_values\\\":64}},\\\"training\\\":true,\\\"tensors\\\":[{\\\"name\\\":\\\"bias\\\",\\\"shape\\\":[3],\\\"values\\\":[1.1359239,1.9997445,3.0002623],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"},{\\\"name\\\":\\\"gate\\\",\\\"shape\\\":[3],\\\"values\\\":[2.0000386,-1.0000143,0.5000281],\\\"requires_grad\\\":true,\\\"role\\\":\\\"parameter\\\"}]}]}\"}}",
+      "plan": "{\"epochs\":2,\"examples\":[{\"candidates\":[[1],[1,2],[3,4]],\"objective\":{\"kind\":\"set\"},\"prompt_ids\":[1,2],\"stop_id\":0},{\"candidates\":[[1,2],[1,3],[7]],\"objective\":{\"gold_index\":1,\"kind\":\"menu\",\"mix\":0.5},\"prompt_ids\":[2,4],\"stop_id\":9},{\"candidates\":[[2],[2,3],[4,5]],\"objective\":{\"accepted_indices\":[0,2],\"kind\":\"subset\"},\"prompt_ids\":[2,1,3],\"stop_id\":0}],\"learning_rate\":0.125,\"max_tile_values\":11,\"mode\":\"joint\",\"schema\":\"spiraltorch.native_causal_lm_line_plan.v2\"}",
+      "plan_id": "sha256:c22cc57322f7daa308346d29aee0853885b1c87cf11fd5d15923a0c9d68fc5f3",
+      "steps": [
+        4.568400859832764,
+        2.5722575187683105,
+        0.1134365051984787,
+        4.574377059936523,
+        2.558922052383423,
+        0.11348903924226761
+      ]
+    },
+    "lora": {
+      "after": [
+        4.573522567749023,
+        2.561706066131592,
+        0.11186759918928146
+      ],
+      "endpoint": {
+        "a": [
+          -0.05562115,
+          0.12999545,
+          0.2552287,
+          -0.1198578,
+          -0.007230212,
+          0.18215789
+        ],
+        "b": [
+          0.017084684,
+          0.23343872,
+          -0.074769475,
+          -0.0013930958,
+          0.2360609,
+          -0.059645966
+        ],
+        "geometry": [
+          [
+            1.0126338,
+            2.0000093,
+            3.0000143
+          ],
+          [
+            2.0000021,
+            -0.99999785,
+            0.5000006
+          ]
+        ],
+        "logits": [
+          -0.12701979279518127,
+          0.27279189229011536,
+          0.19103863835334778,
+          -0.22795893251895905,
+          -0.24453605711460114,
+          0.17057117819786072,
+          0.2845657169818878,
+          -0.10378924012184143,
+          -0.30892300605773926,
+          0.03129115700721741,
+          0.31626641750335693
+        ]
+      },
+      "final_checkpoint": "sha256:5181f7ae6eee4b2b3fc359b08b7750e79881c44dcb2a082267f4f86c634e8ded",
+      "id": "sha256:a32a99e782f212942312fb7a6aff0d635668352e6dab425b73672be13c6e59f8",
+      "payload": "{\"schema\":\"spiraltorch.native_causal_lm_line_checkpoint.v2\",\"plan_id\":\"sha256:57679c1537ad3a1ed4d5254c398ef74c5f6a903ab8ce0c58f35a9931c7472806\",\"base_id\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"mode\":\"lora\",\"readout_accumulator\":\"f32\",\"updates\":2,\"lora\":{\"origin_id\":\"sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337\",\"id\":\"sha256:623275a6d295002c8b2b8a3144c886bb0b3fa445ac7fe51ece8935220c51098b\",\"weights\":\"{\\\"schema\\\":\\\"spiraltorch.native_lora.attention_output.v1\\\",\\\"base_model_identity\\\":\\\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\\\",\\\"layer\\\":0,\\\"width\\\":3,\\\"rank\\\":2,\\\"alpha\\\":2.0,\\\"a\\\":[-0.046133056,0.13997908,0.25613508,-0.11882243,-0.016807698,0.17207652],\\\"b\\\":[0.014555305,0.23395787,-0.072297476,0.0011744872,0.23386218,-0.060079798]}\"},\"geometry\":{\"origin_id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"id\":\"sha256:44046c11d0e6e8f91640bd7fe6db923960ea3690a2979cba655e3676fd0c0d31\",\"weights\":null}}",
+      "plan": "{\"epochs\":2,\"examples\":[{\"candidates\":[[1],[1,2],[3,4]],\"objective\":{\"kind\":\"set\"},\"prompt_ids\":[1,2],\"stop_id\":0},{\"candidates\":[[1,2],[1,3],[7]],\"objective\":{\"gold_index\":1,\"kind\":\"menu\",\"mix\":0.5},\"prompt_ids\":[2,4],\"stop_id\":9},{\"candidates\":[[2],[2,3],[4,5]],\"objective\":{\"accepted_indices\":[0,2],\"kind\":\"subset\"},\"prompt_ids\":[2,1,3],\"stop_id\":0}],\"learning_rate\":0.125,\"max_tile_values\":11,\"mode\":\"lora\",\"schema\":\"spiraltorch.native_causal_lm_line_plan.v2\"}",
+      "plan_id": "sha256:57679c1537ad3a1ed4d5254c398ef74c5f6a903ab8ce0c58f35a9931c7472806",
+      "steps": [
+        4.568400859832764,
+        2.5778324604034424,
+        0.11183594912290573,
+        4.574646472930908,
+        2.563830852508545,
+        0.11187112331390381
+      ]
+    }
+  },
+  "cut": 2,
+  "host": "ordinary/wave",
+  "lora": "{\"schema\":\"spiraltorch.native_lora.attention_output.v1\",\"base_model_identity\":\"sha256:9f9c4fa145a8df64e56d864d65484617dacdc653ae8f0383d9271e0207146df5\",\"layer\":0,\"width\":3,\"rank\":2,\"alpha\":2.0,\"a\":[-0.125,0.0625,0.25,-0.125,0.0625,0.25],\"b\":[0.0625,0.25,-0.125,0.0625,0.25,-0.125]}",
+  "lora_id": "sha256:2d5e02f430376e9476bc4bddbaaaec7db5ac72b1d568f373132e867136976337",
+  "seed_id": "sha256:ac3b809e757ff001b1c2cbcc9e1a3023a4483a5f873e92de6ed1998a3e546e54",
+  "total": 6
+}
