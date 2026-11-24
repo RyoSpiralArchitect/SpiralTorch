@@ -7,6 +7,38 @@ use thiserror::Error;
 mod backward;
 pub use backward::{attention_key_lag_vjp_reference, attention_vjp_reference, AttentionGradients};
 
+/// Exponential implementation in the host attention reference and its VJP, not in GPU shaders.
+pub const HOST_ATTENTION_EXP: &str = if cfg!(feature = "portable-host-attention-exp") {
+    "portable_libm_exp_f64.v1"
+} else {
+    "platform_f32_f64.v1"
+};
+
+#[inline]
+fn adjoint_exp(x: f64) -> f64 {
+    #[cfg(feature = "portable-host-attention-exp")]
+    {
+        libm::exp(x)
+    }
+    #[cfg(not(feature = "portable-host-attention-exp"))]
+    {
+        x.exp()
+    }
+}
+
+#[inline]
+fn forward_exp(x: f32) -> f32 {
+    #[cfg(feature = "portable-host-attention-exp")]
+    {
+        // Only this leaf is shared with the f64 VJP. The online recurrence stays f32.
+        adjoint_exp(f64::from(x)) as f32
+    }
+    #[cfg(not(feature = "portable-host-attention-exp"))]
+    {
+        x.exp()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttentionMask {
     None,
@@ -263,8 +295,8 @@ pub fn attention_key_lag_reference(
                     lag,
                 )?;
                 let next_maximum = maximum.max(score);
-                let previous = sum * (maximum - next_maximum).exp();
-                let current = (score - next_maximum).exp();
+                let previous = sum * forward_exp(maximum - next_maximum);
+                let current = forward_exp(score - next_maximum);
                 sum = finite(previous + current)?;
                 let alpha = previous / sum;
                 let weight = current / sum;

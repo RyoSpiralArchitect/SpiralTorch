@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [features]
 nn = ["dep:st-nn", "dep:wasm-bindgen-futures"]
 portable-host-gelu = ["st-tensor/portable-host-gelu"]
+portable-host-attention-exp = ["st-tensor/portable-host-attention-exp"]
 webgpu = ["dep:st-backend-wgpu", "dep:st-vision", "st-vision/nn", "dep:wasm-bindgen-futures", "nn", "st-nn/wgpu"]
 
 [dependencies]

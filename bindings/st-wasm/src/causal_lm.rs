@@ -193,6 +193,11 @@ impl NativeCausalLm {
         self.model.base_model_identity().to_owned()
     }
 
+    #[wasm_bindgen(getter, js_name = hostAttentionExp)]
+    pub fn host_attention_exp(&self) -> String {
+        self.model.host_attention_exp().to_owned()
+    }
+
     #[wasm_bindgen(js_name = withGeometry)]
     pub fn with_geometry(&self, artifact: &GeometryAdapterArtifact) -> Result<Self, JsValue> {
         self.model

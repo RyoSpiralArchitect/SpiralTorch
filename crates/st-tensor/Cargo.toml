@@ -14,6 +14,7 @@ default = ["cpu", "faer", "wgpu_frac", "wgpu_dense"]
 faer = ["dep:faer"]
 simd = []
 portable-host-gelu = ["st-kernel-contracts/portable-host-gelu"]
+portable-host-attention-exp = ["st-kernel-contracts/portable-host-attention-exp"]
 
 # CPU execution is always available, but expose a feature so that downstream
 # crates can opt into a uniform interface when selecting backends.

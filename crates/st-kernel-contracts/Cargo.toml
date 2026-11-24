@@ -8,6 +8,7 @@ description = "Pure cross-backend kernel semantics and reference contracts for S
 
 [features]
 portable-host-gelu = ["dep:libm"]
+portable-host-attention-exp = ["dep:libm"]
 
 [dependencies]
 thiserror = "2"

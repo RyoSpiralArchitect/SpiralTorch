@@ -1750,6 +1750,11 @@ impl PyNativeCausalLm {
         self.inner.forward_readout_storage().as_str()
     }
 
+    #[getter]
+    fn host_attention_exp(&self) -> &'static str {
+        self.inner.host_attention_exp()
+    }
+
     fn with_forward_readout_storage(&self, storage: &str) -> PyResult<Self> {
         Ok(Self {
             inner: self.inner.with_forward_readout_storage(

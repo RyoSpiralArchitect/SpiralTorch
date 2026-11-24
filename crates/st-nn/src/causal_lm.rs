@@ -364,6 +364,11 @@ impl NativeCausalLm {
         &self.base_id
     }
 
+    /// Build-level host attention math, independent of the checkpoint and vocabulary head.
+    pub fn host_attention_exp(&self) -> &'static str {
+        st_kernel_contracts::attention::HOST_ATTENTION_EXP
+    }
+
     pub fn geometry_artifact_id(&self) -> Option<&str> {
         self.geometry
             .as_ref()
