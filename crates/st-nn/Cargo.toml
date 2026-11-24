@@ -21,6 +21,7 @@ wgpu = ["st-core/wgpu-rt", "st-tensor/wgpu", "dep:st-backend-wgpu"]
 cuda = ["st-core/cuda", "st-tensor/cuda"]
 hip = ["st-core/hip", "st-tensor/hip"]
 selfsup = []
+portable-host-gelu = ["st-tensor/portable-host-gelu"]
 
 [dependencies]
 st-kernel-contracts = { path = "../st-kernel-contracts" }
