@@ -504,10 +504,13 @@ on a miss. Each axis has a parameter path, tensor, optional coordinate, loss
 gradient norm and measured KL vector. A null vector means a skipped zero
 gradient; a measured zero vector has no radius prediction. A raw success
 does no probe work and emits no sensitivity record. Probe readouts are
-already in the parent total. Rust bounds a plan to 32 axes, 2^20 selected
-owner parameter values (including frozen scratch blocks), and 2^23 probe
-logit values. A too-wide coordinate plan is rejected up front, never
-silently truncated. Try an explicit block plan for larger adapters.
+already in the parent total. Rust admits plans with at most 32 axes and 2^20
+selected owner parameter values (including frozen scratch blocks). Each
+sensitivity rescue is limited to 2^23 probe logit values
+(`axes * anchors * vocabulary`). This is not a cumulative session budget:
+calling again after a refusal can probe the same cursor again. A too-wide
+coordinate plan is rejected up front, never silently truncated. Try an
+explicit block plan for larger adapters.
 See the [matched geometry and LoRA comparison](../../../benchmarks/results/2026-11-23-native-wave-agreement/matched-rival/declared-set/LINE_SENSITIVITY.md).
 
 ## Finite-checked learning

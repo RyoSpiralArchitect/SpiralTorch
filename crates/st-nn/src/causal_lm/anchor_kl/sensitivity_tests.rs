@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn equal_cap_fractions_break_ties_by_predicted_loss_decrease() {
+    let cfg = Settings {
+        target: 1.,
+        cap: 2.,
+        h: 1.,
+        ceiling: 4.,
+        basis: CausalLmSensitivityBasis::Coordinate,
+        select: CausalLmSensitivitySelect::Envelope,
+    };
+    let axes = [0.125, 8.].map(|peak| CausalLmSensitivityAxis {
+        path: "a".into(),
+        tensor: "b".into(),
+        coordinate: None,
+        gradient_l2: 1.,
+        probe_per_anchor_kl: Some(vec![0., 0., peak]),
+        prediction: cfg.predict(&[0., 0., peak], 1.),
+    });
+    let [slow, fast] = axes.each_ref().map(|a| a.prediction.unwrap());
+    assert!((slow.radius - 4.).abs() < 1e-14 && (fast.radius - 0.5).abs() < 1e-14);
+    assert_eq!(select(&axes, cfg.select), Some(0), "{slow:?} {fast:?}");
+    assert_eq!(
+        select(&[axes[1].clone(), axes[0].clone()], cfg.select),
+        Some(1)
+    );
+}
+
+#[test]
+fn fraction_survives_overflowing_stretch_and_underflowing_peak_ratio() {
+    let cfg = Settings {
+        target: f64::MAX,
+        cap: f64::MAX,
+        h: 2f64.powi(-512),
+        ceiling: 2f64.powi(512),
+        basis: CausalLmSensitivityBasis::Coordinate,
+        select: CausalLmSensitivitySelect::Envelope,
+    };
+    let p = cfg.predict(&[0., 0., f64::MIN_POSITIVE], 1.).unwrap();
+    assert_eq!(p.target_fraction, 1. / 3.);
+    assert!(p.radius > 0. && p.radius < cfg.ceiling);
+}
+
+#[test]
 fn ranking_separates_cap_from_ceiling_and_never_promotes_a_zero_row() {
     let cfg = Settings {
         target: 1.,

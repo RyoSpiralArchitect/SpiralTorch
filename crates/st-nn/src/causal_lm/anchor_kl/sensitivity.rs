@@ -51,6 +51,7 @@ pub struct CausalLmSensitivityReport {
 
 const MAX_AXES: usize = 32;
 const MAX_SCRATCH: usize = 1 << 20;
+// Bounds one full sensitivity probe bank, not cumulative session readouts.
 const MAX_PROBE_LOGITS: usize = 1 << 23;
 
 fn within_budget(axes: usize, scratch: usize, vocabulary: usize, anchors: usize) -> bool {
@@ -141,9 +142,24 @@ impl Settings {
             .min(h + 0.5 * (self.target.ln() - mean.ln()))
             .min(h + 0.5 * (self.cap.ln() - peak.ln()));
         let radius = log_r.exp().min(self.ceiling);
-        let fraction = (mean.ln() - self.target.ln() + 2. * (log_r - h))
-            .min(0.)
-            .exp();
+        // Separate the shape (mean/peak) from the allowed peak. Proportional
+        // cap-limited probes should tie, independent of their absolute radii.
+        let mut shape = sum::Sum::default();
+        for &v in values {
+            shape.add(v / peak);
+        }
+        let peak_ratio = peak / self.target;
+        let stretch = self.ceiling / self.h;
+        let ceiling_peak_ratio = if stretch == 1. {
+            peak_ratio
+        } else if peak_ratio.is_normal() && stretch.is_finite() {
+            peak_ratio * stretch * stretch
+        } else {
+            (peak.ln() - self.target.ln() + 2. * (self.ceiling.ln() - h)).exp()
+        };
+        let fraction = (shape.mean(values.len() as u64)
+            * ceiling_peak_ratio.min(self.cap / self.target))
+        .min(1.);
         Some(CausalLmSensitivityPrediction {
             radius,
             target_fraction: fraction,
