@@ -1,5 +1,12 @@
 //! Finite f32 elementwise semantics shared by host and resident tensors.
 
+/// Scalar tanh policy for the host GELU forward and derivative.
+pub const HOST_GELU_TANH: &str = if cfg!(feature = "portable-host-gelu") {
+    "portable_libm_tanh_f32.v1"
+} else {
+    "platform_tanh_f32.v1"
+};
+
 /// Scalar tanh used inside host GELU and its input derivative. The opt-in
 /// implementation is shared by native and WASM; it does not change GPU shaders.
 #[inline]
@@ -110,9 +117,10 @@ mod tests {
     #[test]
     fn host_gelu_uses_the_selected_tanh_for_values_and_partials() {
         #[cfg(feature = "portable-host-gelu")]
-        let tanh = libm::tanhf;
+        let (tanh, policy) = (libm::tanhf, "portable_libm_tanh_f32.v1");
         #[cfg(not(feature = "portable-host-gelu"))]
-        let tanh = f32::tanh;
+        let (tanh, policy) = (f32::tanh, "platform_tanh_f32.v1");
+        assert_eq!(HOST_GELU_TANH, policy);
         // Includes the three distinct inputs where the two fixture hosts disagreed.
         for x in [
             f32::from_bits(0xbe22c063),

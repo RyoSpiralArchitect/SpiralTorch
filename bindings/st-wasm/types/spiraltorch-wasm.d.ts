@@ -24,6 +24,10 @@ declare module "spiraltorch-wasm" {
         private constructor();
         static fromGpt2(config: string, weights: Uint8Array): NativeCausalLm;
         readonly baseModelIdentity: string;
+        /** Build-level policy for the host attention reference and VJP. */
+        readonly hostAttentionExp: "platform_f32_f64.v1" | "portable_libm_exp_f64.v1";
+        /** Build-level policy for scalar tanh in host GELU and its derivative. */
+        readonly hostGeluTanh: "platform_tanh_f32.v1" | "portable_libm_tanh_f32.v1";
         withLora(layer: number, rank: number, alpha: number): NativeCausalLm;
         /** Promote the current LoRA to fixed base state without merging or rounding its weights. */
         freezeLora(): NativeCausalLm;
