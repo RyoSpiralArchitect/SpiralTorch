@@ -1,5 +1,10 @@
 import {CausalLmDeclaredBatch, GeometryAdapterArtifact, NativeCausalLm, NativeCausalLmContext, NativeCausalLmLineTrainingSession} from 'spiraltorch-wasm';
 
+export function usesPortableHostMath(model: NativeCausalLm): boolean {
+    return model.hostAttentionExp === 'portable_libm_exp_f64.v1'
+        && model.hostGeluTanh === 'portable_libm_tanh_f32.v1';
+}
+
 export function jointLine(geometry: NativeCausalLm, prompt: Uint32Array, flat: Uint32Array, lengths: Uint32Array) {
     const m = geometry.withLora(0, 2, 2);
     try {

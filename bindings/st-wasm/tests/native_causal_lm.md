@@ -7,6 +7,53 @@ Serve the resulting `bindings/st-wasm` directory over loopback HTTP and open
 `node bindings/st-wasm/tests/native_causal_lm_node.mjs bindings/st-wasm/pkg/spiraltorch_wasm.js`.
 Both execute the same four artificial controls and compare against native Python results.
 
+## Portable host math
+
+The host decoder can opt into two independent, Rust-owned build features:
+`portable-host-gelu` uses pinned `libm::tanhf` for scalar GELU and its
+derivative; `portable-host-attention-exp` uses pinned `libm::exp` for the
+attention reference and its VJP. Attention forward rounds the exponential
+to f32 before the existing f32 recurrence; backward retains f64
+probabilities until the existing output boundary. GPU kernels, reduction
+order, and default builds are unchanged.
+
+Check the compiled policies on a model:
+
+| Rust | Python | WASM | Both opt-ins |
+| --- | --- | --- | --- |
+| `host_gelu_tanh()` | `host_gelu_tanh` | `hostGeluTanh` | `portable_libm_tanh_f32.v1` |
+| `host_attention_exp()` | `host_attention_exp` | `hostAttentionExp` | `portable_libm_exp_f64.v1` |
+
+These are build identifiers, not model or checkpoint settings. Record them
+with the build hashes when comparing or resuming across clients; checkpoint
+IDs alone do not identify the math policy.
+
+The generated-weight smoke test below checks the same fifth joint
+LoRA/WaveGate update in CPU Python and WASM in Node. It checks 18 f32
+gradient words, anchor logits, and exact checkpoint bytes, then restores
+the WASM checkpoint back in Python. It uses no pretrained weights, GPU,
+PyTorch or NumPy. This is a replay check for this fixture, not a general
+bitwise guarantee or a speed/quality claim.
+
+```sh
+flags=portable-host-gelu,portable-host-attention-exp
+out=$(mktemp -d)
+maturin build --locked --profile dev --manifest-path bindings/st-py/Cargo.toml \
+  --no-default-features --features "python-default,cpu,$flags" --out "$out/wheels"
+python3 -m venv "$out/env"
+"$out/env/bin/python" -m pip install --no-deps "$out"/wheels/*.whl
+cargo build --locked -p spiraltorch-wasm --lib --target wasm32-unknown-unknown \
+  --no-default-features --features "nn,$flags"
+wasm-bindgen --target web --out-dir "$out/web" \
+  "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/debug/spiraltorch_wasm.wasm"
+tests=bindings/st-wasm/tests
+"$out/env/bin/python" -I -B "$tests/native_portable_host_math.py" issue "$out/native.json"
+node "$tests/native_portable_host_math.mjs" "$out/web/spiraltorch_wasm.js" \
+  "$out/native.json" "$out/wasm.json"
+"$out/env/bin/python" -I -B "$tests/native_portable_host_math.py" receive \
+  "$out/native.json" "$out/wasm.json"
+```
+
 ## Cached continuation
 
 For a trainable, order-sensitive residual at an existing GPT-2 block, attach
