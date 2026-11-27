@@ -147,7 +147,7 @@ and their checks are not evaluated; Q/K/V projection remains checked.
 const cacheValues = 1024; // reserve for prompt and intended continuations
 const plan = JSON.parse(model.planChunkedPrefillJson(ids.length, cacheValues));
 const ctx = model.prefillChunkedLastOutput(ids, cacheValues);
-try { console.log(plan.chunk_steps, plan.chunks, plan.attention_pairs, ctx.nextLogits()); }
+try { console.log(plan.chunk_steps, plan.attention_pairs, plan.geometry_prefix_work, ctx.nextLogits()); }
 finally { ctx.free(); }
 ```
 
@@ -155,18 +155,23 @@ Both routes keep the ordinary non-shared `Uint32Array` and 1,048,576-value
 cache limit. The optional chunk cap is 1 to 64 tokens (default 64). Rust
 selects the actual chunk size subject to model activation and attention
 limits, and refuses schedules over 8,388,608 rectangular attention pairs
-in total. Planning takes a token count, not token IDs, so it cannot validate
-their values. The reported pair count includes masked pairs and is the
-same conservative bound for both routes, not measured work or memory.
-The plan does not bound total geometry replay or temporary buffers.
+in total. A separate limit of 8,388,608 work units bounds repeated geometry
+prefix work across chunks and sites: each elliptic score cell, fractional
+product or scalar scanned by a uniform value read is one unit. Compact
+incremental transport and row-local geometry do not replay a prefix.
+Planning takes a token count, not token IDs, so it cannot validate their
+values. The pair count includes masked pairs; both counters are conservative
+admission bounds shared by the two routes, not timings or peak-memory limits.
 The existing small-model archive limit and ordinary `prefill` are unchanged.
 
 The `chunked_prefill` report exercises both schedules on the same binary
 and checks exact logit words, logical cache sizes and continuation, with
 independent existing decoder outputs as references. Its generated
 259-token prompt exceeds the ordinary full-prefix attention cap, but runs
-as five chunks with the default cap. This is not a timing benchmark or
-validation of a pretrained GPT-2 checkpoint on this route.
+as five chunks with the default cap. A 512-token elliptic replay plan passes
+with 64-row chunks and is refused with 1-row chunks even though its ordinary
+attention work fits. This is not a timing benchmark or validation of a
+pretrained GPT-2 checkpoint on this route.
 
 ## Score complete answers
 

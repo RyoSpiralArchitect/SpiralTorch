@@ -182,13 +182,14 @@ export function checkChunkedPrefill(M, fixture) {
   const longPrefix = Array.from({length: 259}, (_, i) => (3 + i * 7) % 11);
   const longTails = [[3], [8, 4]];
   const longCache = 32 * (longPrefix.length + 2);
-  let longPlan;
+  let longPlan, geometryBudget;
   using(M.NativeCausalLm.fromGpt2(long.config, long.weights), model => {
     const ids = Uint32Array.from(longPrefix);
     rejects(() => model.prefill(ids, longCache), /attention pairs/);
     longPlan = JSON.parse(model.planChunkedPrefillJson(ids.length, longCache));
     need(longPlan.schema === schema && longPlan.chunk_steps === 64 && longPlan.chunks === 5 &&
-      longPlan.attention_pairs === 667792, 'long prompt did not use the expected plan');
+      longPlan.attention_pairs === 667792 && longPlan.geometry_prefix_work === 0,
+      'long prompt did not use the expected plan');
     const refs = using(model.prefill(ids.subarray(0, 64), longCache), root =>
       using(root.withSuffix(ids.subarray(64)), oracle =>
         [oracle.nextLogits(), ...longTails.map(t =>
@@ -201,9 +202,47 @@ export function checkChunkedPrefill(M, fixture) {
       rejects(() => model[route](new Uint32Array(1152), 32 * 1152), /total attention pairs/);
     }
     rejects(() => model.planChunkedPrefillJson(1152, 32 * 1152), /total attention pairs/);
+
+    const artifact = M.GeometryAdapterArtifact.createJson(JSON.stringify({
+      schema: 'spiraltorch.geometry_adapter_artifact.v1',
+      base_model_identity: model.baseModelIdentity,
+      policy: 'full_prefix_f32_no_cache.v1',
+      training: false,
+      placements: [{
+        path: 'transformer.h.0.attn', training: false,
+        recipe: {schema: 'spiraltorch.elliptic_causal_residual_adapter.v1',
+          features: 8, strength: 0.5,
+          warp: {curvature_radius: 1.25, sheet_count: 2, spin_harmonics: 2}},
+        tensors: [['orientation.weight', [2, 8]], ['orientation.bias', [2]], ['readout.weight', [8, 9]]]
+          .map(([name, shape]) => ({name, shape, role: 'parameter', requires_grad: false,
+            values: Array.from({length: shape.reduce((a, b) => a * b, 1)}, (_, i) => (i % 7 - 3) / 64)})),
+      }],
+    }));
+    using(artifact, a => using(model.withGeometry(a), decorated => {
+      const n = 512, unit = 40;
+      const plain = JSON.parse(model.planChunkedPrefillJson(n, unit * n, 1));
+      need(plain.attention_pairs === 2101248 && plain.geometry_prefix_work === 0,
+        'ordinary one-token chunks should pass the attention cap');
+      const coarse = JSON.parse(decorated.planChunkedPrefillJson(n, unit * n));
+      need(coarse.chunks === 8 && coarse.geometry_prefix_work === 835584,
+        'elliptic prefix work did not accumulate over chunks');
+      rejects(() => decorated.planChunkedPrefillJson(n, unit * n, 1), /geometry prefix work/);
+      for (const route of routes) {
+        rejects(() => decorated[route](new Uint32Array(n), unit * n, 1), /geometry prefix work/);
+      }
+      geometryBudget = {prompt_tokens: n, ordinary_attention_pairs: plain.attention_pairs,
+        accepted_chunk_steps: coarse.chunk_steps, geometry_prefix_work: coarse.geometry_prefix_work,
+        refused_chunk_steps: 1};
+      const small = longPrefix.slice(0, 9);
+      const refs = [small, ...longTails.map(t => [...small, ...t])]
+        .map(p => decorated.nextLogits(JSON.stringify(p)));
+      compare(decorated, {prefix: small, tails: longTails, refs, cap: 3, unit, cache: unit * 11,
+        geometry: a.artifactId, label: 'elliptic causal replay'});
+    }));
   });
-  need(fixture.cases.length === 6 && roots === 33 && forks === 66 &&
-    refusals === (hasSharedBuffers ? 47 : 45), 'incomplete chunked prefill checks');
+  need(fixture.cases.length === 6 && roots === 34 && forks === 68 &&
+    refusals === (hasSharedBuffers ? 50 : 48), 'incomplete chunked prefill checks');
   return {roots, forks, refusals, max_abs_reference: maxAbsReference, exact: true,
-    shared_buffers_checked: hasSharedBuffers, long_plan: longPlan, eager_refused: true};
+    shared_buffers_checked: hasSharedBuffers, long_plan: longPlan, eager_refused: true,
+    geometry_budget: geometryBudget};
 }

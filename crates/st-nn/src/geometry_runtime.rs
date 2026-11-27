@@ -6,7 +6,7 @@
 
 use crate::execution::{push_backend_policy, BackendPolicy};
 use crate::geometry_artifact::{
-    GeometryAdapterArtifact, GeometryAdapterPlacement, GeometryAdapterRecipe,
+    AttentionValueRoute, GeometryAdapterArtifact, GeometryAdapterPlacement, GeometryAdapterRecipe,
     GeometryAdapterTensorRole,
 };
 use crate::loss::{Loss, MeanSquaredError};
@@ -43,9 +43,62 @@ pub enum GeometrySequenceDependency {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GeometryCacheKind {
     RowLocal,
-    Replay,
+    Replay(GeometryReplayWork),
     Transport { difference: bool },
-    DecoderValues,
+    DecoderValues(AttentionValueRoute),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GeometryReplayWork {
+    EllipticPairs,
+    FractionalProducts { kernel_len: usize },
+}
+
+#[derive(Default)]
+pub(crate) struct GeometryPrefixWork {
+    quadratic_sites: usize,
+    linear_units_per_row: usize,
+}
+
+impl GeometryPrefixWork {
+    pub(crate) fn units_at(&self, steps: usize) -> Result<usize> {
+        self.quadratic_sites
+            .checked_mul(steps)
+            .and_then(|n| n.checked_add(self.linear_units_per_row))
+            .and_then(|n| n.checked_mul(steps))
+            .ok_or_else(|| "geometry prefix work overflow".into())
+    }
+}
+
+impl GeometryCacheKind {
+    fn for_recipe(recipe: &GeometryAdapterRecipe) -> Self {
+        use GeometryAdapterRecipe::*;
+        match recipe {
+            AttentionValueGate { route, .. } => Self::DecoderValues(*route),
+            PrefixTransport { .. } | MixedPrefixTransport { .. } => {
+                Self::Transport { difference: false }
+            }
+            DifferencePrefixTransport { .. } => Self::Transport { difference: true },
+            ChannelAffine { .. }
+            | Wave { .. }
+            | WaveRadius { .. }
+            | WaveStage { .. }
+            | AnchoredWaveProjection { .. }
+            | Topos { .. }
+            | Elliptic { .. }
+            | EllipticAnchored { .. } => Self::RowLocal,
+            EllipticCausal { .. } | EllipticGated { .. } => {
+                Self::Replay(GeometryReplayWork::EllipticPairs)
+            }
+            Fractional { kernel, .. }
+            | History { kernel, .. }
+            | HistoryL2 { kernel, .. }
+            | HistoryGain { kernel, .. }
+            | HistoryAngle { kernel, .. } => Self::Replay(GeometryReplayWork::FractionalProducts {
+                kernel_len: kernel.kernel_len,
+            }),
+        }
+    }
 }
 #[cfg(test)]
 mod anchored_tests;
@@ -153,30 +206,36 @@ impl NativeGeometryRuntime {
     }
 
     pub(crate) fn cache_kind(&self, path: &str) -> Result<GeometryCacheKind> {
-        use GeometryCacheKind::{Replay, RowLocal, Transport};
-        Ok(match &self.placement(path)?.recipe {
-            GeometryAdapterRecipe::AttentionValueGate { .. } => GeometryCacheKind::DecoderValues,
-            GeometryAdapterRecipe::PrefixTransport { .. }
-            | GeometryAdapterRecipe::MixedPrefixTransport { .. } => Transport { difference: false },
-            GeometryAdapterRecipe::DifferencePrefixTransport { .. } => {
-                Transport { difference: true }
-            }
-            GeometryAdapterRecipe::ChannelAffine { .. }
-            | GeometryAdapterRecipe::Wave { .. }
-            | GeometryAdapterRecipe::WaveRadius { .. }
-            | GeometryAdapterRecipe::WaveStage { .. }
-            | GeometryAdapterRecipe::AnchoredWaveProjection { .. }
-            | GeometryAdapterRecipe::Topos { .. }
-            | GeometryAdapterRecipe::Elliptic { .. }
-            | GeometryAdapterRecipe::EllipticAnchored { .. } => RowLocal,
-            GeometryAdapterRecipe::EllipticCausal { .. }
-            | GeometryAdapterRecipe::EllipticGated { .. }
-            | GeometryAdapterRecipe::Fractional { .. }
-            | GeometryAdapterRecipe::History { .. }
-            | GeometryAdapterRecipe::HistoryL2 { .. }
-            | GeometryAdapterRecipe::HistoryGain { .. }
-            | GeometryAdapterRecipe::HistoryAngle { .. } => Replay,
-        })
+        Ok(GeometryCacheKind::for_recipe(&self.placement(path)?.recipe))
+    }
+
+    /// Work that reads an entire prefix each time a cached chunk is evaluated.
+    pub(crate) fn cached_prefix_work(&self, width: usize) -> Result<GeometryPrefixWork> {
+        let mut work = GeometryPrefixWork::default();
+        for p in &self.artifact.record().placements {
+            let linear = match GeometryCacheKind::for_recipe(&p.recipe) {
+                GeometryCacheKind::Replay(GeometryReplayWork::EllipticPairs) => {
+                    work.quadratic_sites += 1;
+                    0
+                }
+                GeometryCacheKind::Replay(GeometryReplayWork::FractionalProducts {
+                    kernel_len,
+                }) => width
+                    .checked_mul(kernel_len)
+                    .ok_or("geometry prefix work overflow")?,
+                GeometryCacheKind::DecoderValues(AttentionValueRoute::Uniform) => width,
+                GeometryCacheKind::RowLocal
+                | GeometryCacheKind::Transport { .. }
+                | GeometryCacheKind::DecoderValues(
+                    AttentionValueRoute::Attention | AttentionValueRoute::Fixed { .. },
+                ) => 0,
+            };
+            work.linear_units_per_row = work
+                .linear_units_per_row
+                .checked_add(linear)
+                .ok_or("geometry prefix work overflow")?;
+        }
+        Ok(work)
     }
 
     /// Return the feature width and allocation budget before binding extraction.

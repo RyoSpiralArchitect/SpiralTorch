@@ -3,25 +3,36 @@ use super::*;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
-/// Schedule and conservative rectangular attention work for a single prompt.
+/// Work limits for admission of a single chunked prompt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CausalLmChunkedPrefillLimits {
+    pub max_chunk_steps: usize,
+    pub max_total_attention_pairs: usize,
+    /// Each elliptic score cell, fractional product or scanned value costs one unit.
+    pub max_total_geometry_work: usize,
+}
+
+/// Schedule and conservative work accounting for a single prompt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CausalLmChunkedPrefillPlan {
     pub chunk_steps: usize,
     pub chunks: usize,
     pub attention_pairs: usize,
+    /// Work of prefix replay or full-prefix value scans, summed over all placements.
+    pub geometry_prefix_work: usize,
 }
 
 impl NativeCausalLm {
     /// Admit the entire cache and every chunk before executing any decoder work.
-    /// The total limit counts rectangular attention pairs across layers, including
-    /// masked pairs. It does not measure geometry work or transient allocation.
-    /// The total limit refuses an oversized schedule rather than changing chunk boundaries.
+    /// Attention charges rectangular pairs across layers, including masked pairs.
+    /// Replayed geometry and full-prefix value scans have a separate work limit.
+    /// These bounds are not elapsed time or transient allocation estimates.
+    /// An oversized schedule is refused rather than changing chunk boundaries.
     pub fn context_chunked_prefill_plan(
         &self,
         steps: usize,
         max_cache_values: usize,
-        max_chunk_steps: usize,
-        max_total_attention_pairs: usize,
+        limits: CausalLmChunkedPrefillLimits,
     ) -> CausalLmResult<CausalLmChunkedPrefillPlan> {
         self.context_cache_values(steps, max_cache_values)?;
         let c = &self.config;
@@ -33,26 +44,37 @@ impl NativeCausalLm {
             .ok_or("chunked activation width overflow")?
             .max(c.intermediate);
         let chunk_steps = steps
-            .min(max_chunk_steps)
+            .min(limits.max_chunk_steps)
             .min(self.limits.max_attention_pairs / last_query_cost)
             .min(self.limits.max_activation_elements / row_cost);
-        if chunk_steps == 0 || max_total_attention_pairs == 0 {
+        if chunk_steps == 0 || limits.max_total_attention_pairs == 0 {
             return Err("invalid chunked prefill work budget".into());
         }
 
+        let work = self
+            .geometry
+            .as_deref()
+            .map(|r| r.cached_prefix_work(c.width))
+            .transpose()?
+            .unwrap_or_default();
         let mut attention_pairs = 0usize;
+        let mut geometry_prefix_work = 0usize;
         for start in (0..steps).step_by(chunk_steps) {
             let count = (steps - start).min(chunk_steps);
             let end = start + count;
             let pairs = product(
                 &[heads, count, end],
-                max_total_attention_pairs,
+                limits.max_total_attention_pairs,
                 "chunked prefill total attention pairs",
             )?;
             attention_pairs = attention_pairs
                 .checked_add(pairs)
-                .filter(|&n| n <= max_total_attention_pairs)
+                .filter(|&n| n <= limits.max_total_attention_pairs)
                 .ok_or("chunked prefill total attention pairs exceeds budget")?;
+            geometry_prefix_work = geometry_prefix_work
+                .checked_add(work.units_at(end)?)
+                .filter(|&n| n <= limits.max_total_geometry_work)
+                .ok_or("chunked prefill geometry prefix work exceeds budget")?;
             if start == 0 {
                 self.context_prefill_count(end, max_cache_values)?;
             } else {
@@ -63,6 +85,7 @@ impl NativeCausalLm {
             chunk_steps,
             chunks: steps.div_ceil(chunk_steps),
             attention_pairs,
+            geometry_prefix_work,
         })
     }
 
@@ -85,17 +108,9 @@ impl NativeCausalLmContext {
         model: NativeCausalLm,
         prompt: Vec<usize>,
         max_cache_values: usize,
-        max_chunk_steps: usize,
-        max_total_attention_pairs: usize,
+        limits: CausalLmChunkedPrefillLimits,
     ) -> CausalLmResult<Self> {
-        Self::chunked_prefill(
-            model,
-            prompt,
-            max_cache_values,
-            max_chunk_steps,
-            max_total_attention_pairs,
-            false,
-        )
+        Self::chunked_prefill(model, prompt, max_cache_values, limits, false)
     }
 
     /// Opt in to omitting unused final-block outputs while retaining all K/V.
@@ -108,33 +123,19 @@ impl NativeCausalLmContext {
         model: NativeCausalLm,
         prompt: Vec<usize>,
         max_cache_values: usize,
-        max_chunk_steps: usize,
-        max_total_attention_pairs: usize,
+        limits: CausalLmChunkedPrefillLimits,
     ) -> CausalLmResult<Self> {
-        Self::chunked_prefill(
-            model,
-            prompt,
-            max_cache_values,
-            max_chunk_steps,
-            max_total_attention_pairs,
-            true,
-        )
+        Self::chunked_prefill(model, prompt, max_cache_values, limits, true)
     }
 
     fn chunked_prefill(
         model: NativeCausalLm,
         prompt: Vec<usize>,
         max_cache_values: usize,
-        max_chunk_steps: usize,
-        max_total_attention_pairs: usize,
+        limits: CausalLmChunkedPrefillLimits,
         last_output: bool,
     ) -> CausalLmResult<Self> {
-        let plan = model.context_chunked_prefill_plan(
-            prompt.len(),
-            max_cache_values,
-            max_chunk_steps,
-            max_total_attention_pairs,
-        )?;
+        let plan = model.context_chunked_prefill_plan(prompt.len(), max_cache_values, limits)?;
         if prompt.iter().any(|&id| id >= model.config.vocabulary) {
             return Err("chunked prefill contains an out-of-range token ID".into());
         }

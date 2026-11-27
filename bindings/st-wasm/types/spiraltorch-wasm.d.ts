@@ -41,7 +41,7 @@ declare module "spiraltorch-wasm" {
         geometryArtifact(): GeometryAdapterArtifact | undefined;
         nextLogits(promptJson: string): Float32Array;
         prefill(promptIds: Uint32Array, maxCacheValues: number): NativeCausalLmContext;
-        /** Preflight only: selected chunk size, number of chunks and rectangular attention pairs. */
+        /** Preflight only: chunk schedule, rectangular attention pairs and geometry prefix work. */
         planChunkedPrefillJson(promptTokens: number, maxCacheValues: number, maxChunkSteps?: number): string;
         /** Prefill a known prompt in bounded chunks with one terminal vocabulary projection. */
         prefillChunked(promptIds: Uint32Array, maxCacheValues: number, maxChunkSteps?: number): NativeCausalLmContext;

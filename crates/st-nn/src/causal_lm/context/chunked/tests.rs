@@ -6,6 +6,17 @@ use crate::geometry_artifact::{
 };
 use st_tensor::{TensorError, Tile};
 
+fn limits(
+    max_chunk_steps: usize,
+    max_total_attention_pairs: usize,
+) -> CausalLmChunkedPrefillLimits {
+    CausalLmChunkedPrefillLimits {
+        max_chunk_steps,
+        max_total_attention_pairs,
+        max_total_geometry_work: 1024,
+    }
+}
+
 fn placed(model: &NativeCausalLm, path: &str, recipe: GeometryAdapterRecipe) -> NativeCausalLm {
     let mut record = artifact(model, path, 0.3).record().clone();
     let p = &mut record.placements[0];
@@ -143,8 +154,7 @@ fn chunked_schedules_preserve_outputs_cache_and_forks() {
                 model.clone(),
                 ids.to_vec(),
                 1024,
-                cap,
-                1024,
+                limits(cap, 1024),
             )
             .unwrap();
             assert_eq!(decoder::work_counts::take(), [0, 0, 1], "{case}");
@@ -153,8 +163,7 @@ fn chunked_schedules_preserve_outputs_cache_and_forks() {
                 model.clone(),
                 ids.to_vec(),
                 1024,
-                cap,
-                1024,
+                limits(cap, 1024),
             )
             .unwrap();
             assert_eq!(decoder::work_counts::take(), [0, 0, 1], "{case}");
@@ -173,11 +182,13 @@ fn chunked_schedules_preserve_outputs_cache_and_forks() {
                 "{case}: changed canonical prefill"
             );
             for suffix in [[0, 3], [6, 9]] {
-                assert_same_context(
-                    &reference.with_suffix(&suffix).unwrap(),
-                    &optimized.with_suffix(&suffix).unwrap(),
-                    &case,
-                );
+                let reference_child = reference.with_suffix(&suffix).unwrap();
+                let optimized_child = optimized.with_suffix(&suffix).unwrap();
+                assert_same_context(&reference_child, &optimized_child, &case);
+                if name.ends_with("transport") {
+                    let eager_child = eager.with_suffix(&suffix).unwrap();
+                    assert_same_context(&eager_child, &optimized_child, &case);
+                }
             }
             assert_same_context(&reference, &optimized, &case);
         }
@@ -191,23 +202,26 @@ fn chunked_planner_bounds_every_chunk_before_execution() {
     let ids = vec![1, 4, 2, 6];
     assert!(NativeCausalLmContext::new(model.clone(), ids.clone(), 64).is_err());
     assert_eq!(
-        model.context_chunked_prefill_plan(4, 64, 4, 48).unwrap(),
+        model
+            .context_chunked_prefill_plan(4, 64, limits(4, 48))
+            .unwrap(),
         CausalLmChunkedPrefillPlan {
             chunk_steps: 2,
             chunks: 2,
             attention_pairs: 48,
+            geometry_prefix_work: 0,
         },
     );
     assert_eq!(
         model
-            .context_chunked_prefill_plan(4, 64, 1, 40)
+            .context_chunked_prefill_plan(4, 64, limits(1, 40))
             .unwrap()
             .attention_pairs,
         40
     );
     assert_eq!(
         model
-            .context_chunked_prefill_plan(3, 64, 2, 28)
+            .context_chunked_prefill_plan(3, 64, limits(2, 28))
             .unwrap()
             .attention_pairs,
         28
@@ -216,8 +230,7 @@ fn chunked_planner_bounds_every_chunk_before_execution() {
         model.clone(),
         ids.clone(),
         64,
-        4,
-        48,
+        limits(4, 48),
     )
     .unwrap();
     assert_eq!(context.cache_values(), 64);
@@ -230,19 +243,117 @@ fn chunked_planner_bounds_every_chunk_before_execution() {
     decoder::work_counts::take();
     decoder::work_counts::take_cache_rows();
     for bad in [
-        model.context_chunked_prefill_plan(0, 64, 4, 48),
-        model.context_chunked_prefill_plan(4, 63, 4, 48),
-        model.context_chunked_prefill_plan(4, 64, 0, 48),
-        model.context_chunked_prefill_plan(4, 64, 4, 47),
-        model.context_chunked_prefill_plan(usize::MAX, 64, 4, usize::MAX),
+        model.context_chunked_prefill_plan(0, 64, limits(4, 48)),
+        model.context_chunked_prefill_plan(4, 63, 4, limits(4, 48)),
+        model.context_chunked_prefill_plan(4, 64, limits(0, 48)),
+        model.context_chunked_prefill_plan(4, 64, limits(4, 47)),
+        model.context_chunked_prefill_plan(usize::MAX, 64, limits(4, usize::MAX)),
     ] {
         assert!(bad.is_err());
     }
     let make = NativeCausalLmContext::new_chunked_prefill_last_output;
-    assert!(make(model.clone(), ids, 64, 4, 47).is_err());
-    assert!(make(model, vec![1, 4, 2, 11], 64, 4, 48).is_err());
+    assert!(make(model.clone(), ids, 64, limits(4, 47)).is_err());
+    assert!(make(model, vec![1, 4, 2, 11], 64, limits(4, 48)).is_err());
     assert_eq!(decoder::work_counts::take_cache_rows(), [0, 0]);
     assert_eq!(decoder::work_counts::take(), [0, 0, 0]);
+}
+
+#[test]
+fn chunked_geometry_budget_sums_replay_and_uniform_scans_before_decoder_work() {
+    let base = load();
+    let replay = placed(
+        &base,
+        "transformer.h.0.attn",
+        GeometryAdapterRecipe::Fractional {
+            features: 4,
+            strength: 0.5,
+            kernel: FractionalRecipe {
+                kernel_len: 4,
+                step: 1.,
+                max_values: 64,
+                max_products: 256,
+            },
+        },
+    );
+    let read = placed(
+        &base,
+        "transformer.h.0.mlp",
+        GeometryAdapterRecipe::AttentionValueGate {
+            features: 4,
+            strength: 0.5,
+            max_values: 64,
+            route: AttentionValueRoute::Uniform,
+        },
+    );
+    let transport = placed(
+        &base,
+        "transformer.h.1",
+        GeometryAdapterRecipe::PrefixTransport {
+            features: 4,
+            strength: 0.5,
+            max_values: 64,
+            rotation: PrefixRotation::QuarterTurn,
+        },
+    );
+    let scope = CausalLmChunkedPrefillLimits {
+        max_chunk_steps: 2,
+        max_total_attention_pairs: 48,
+        max_total_geometry_work: 120,
+    };
+    for (model, expected) in [(&replay, 96), (&read, 24), (&transport, 0)] {
+        let exact = CausalLmChunkedPrefillLimits {
+            max_total_geometry_work: expected,
+            ..scope
+        };
+        assert_eq!(
+            model
+                .context_chunked_prefill_plan(4, 1024, exact)
+                .unwrap()
+                .geometry_prefix_work,
+            expected,
+        );
+    }
+    let mut record = replay.geometry_artifact().unwrap().record().clone();
+    for m in [read, transport] {
+        record
+            .placements
+            .extend_from_slice(&m.geometry_artifact().unwrap().record().placements);
+    }
+    let model = base
+        .with_geometry(GeometryAdapterArtifact::create(record).unwrap())
+        .unwrap();
+    let ids = vec![2, 3, 4, 5];
+    assert_eq!(
+        model
+            .context_chunked_prefill_plan(4, 1024, scope)
+            .unwrap()
+            .geometry_prefix_work,
+        120,
+    );
+    let short = CausalLmChunkedPrefillLimits {
+        max_total_geometry_work: 119,
+        ..scope
+    };
+    decoder::work_counts::take_cache_rows();
+    decoder::work_counts::take();
+    for last_output in [false, true] {
+        let error = NativeCausalLmContext::chunked_prefill(
+            model.clone(),
+            ids.clone(),
+            1024,
+            short,
+            last_output,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("geometry prefix work"));
+    }
+    assert_eq!(decoder::work_counts::take_cache_rows(), [0, 0]);
+    assert_eq!(decoder::work_counts::take(), [0, 0, 0]);
+    let a = NativeCausalLmContext::new_chunked_prefill(model.clone(), ids.clone(), 1024, scope)
+        .unwrap();
+    let b =
+        NativeCausalLmContext::new_chunked_prefill_last_output(model, ids, 1024, scope).unwrap();
+    assert_same_context(&a, &b, "geometry cap boundary");
 }
 
 #[test]
@@ -261,8 +372,7 @@ fn chunked_pruning_still_rejects_nonfinite_projected_queries() {
                 model.clone(),
                 vec![1, 2, 3],
                 64,
-                chunk,
-                64,
+                limits(chunk, 64),
                 last_output,
             )
             .unwrap_err();

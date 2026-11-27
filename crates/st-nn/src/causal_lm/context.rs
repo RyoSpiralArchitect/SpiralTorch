@@ -5,7 +5,7 @@ use crate::geometry_runtime::{GeometryCacheKind, GeometrySequenceDependency, Tra
 use st_kernel_contracts::attention::attention_key_lag_reference;
 
 mod chunked;
-pub use chunked::CausalLmChunkedPrefillPlan;
+pub use chunked::{CausalLmChunkedPrefillLimits, CausalLmChunkedPrefillPlan};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LastBlockWork {
@@ -99,7 +99,7 @@ impl NativeCausalLm {
             .checked_sub(added)
             .ok_or("invalid cached geometry suffix")?;
         match runtime.cache_kind(path)? {
-            GeometryCacheKind::DecoderValues => {
+            GeometryCacheKind::DecoderValues(_) => {
                 Err("cached value gate requires decoder values".into())
             }
             GeometryCacheKind::RowLocal => Ok((
@@ -118,7 +118,7 @@ impl NativeCausalLm {
                 let (out, s) = runtime.extend_transport(path, rows, prev, steps)?;
                 Ok((out, Some(GeometryHistory::Transport(s))))
             }
-            GeometryCacheKind::Replay => {
+            GeometryCacheKind::Replay(_) => {
                 let input = match previous {
                     None if start == 0 => rows,
                     Some(GeometryHistory::Replay(t)) if t.shape() == (start, self.config.width) => {
@@ -164,8 +164,8 @@ impl NativeCausalLm {
         if let Some(runtime) = &self.geometry {
             for p in &runtime.artifact().record().placements {
                 let count = match runtime.cache_kind(&p.path)? {
-                    GeometryCacheKind::RowLocal | GeometryCacheKind::DecoderValues => 0,
-                    GeometryCacheKind::Replay => steps,
+                    GeometryCacheKind::RowLocal | GeometryCacheKind::DecoderValues(_) => 0,
+                    GeometryCacheKind::Replay(_) => steps,
                     GeometryCacheKind::Transport { difference } => 2 + usize::from(difference),
                 };
                 n = count

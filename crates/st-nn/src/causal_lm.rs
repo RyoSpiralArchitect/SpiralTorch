@@ -69,7 +69,9 @@ pub use common_geometry::{
     MAX_COMMON_GEOMETRY_GROUPS,
 };
 pub use competition_pair::{CausalLmGeometryCompetitionPair, CausalLmGeometryCompetitionStep};
-pub use context::{CausalLmChunkedPrefillPlan, NativeCausalLmContext};
+pub use context::{
+    CausalLmChunkedPrefillLimits, CausalLmChunkedPrefillPlan, NativeCausalLmContext,
+};
 pub use declared_set_step::CausalLmDeclaredSetStep;
 pub use evaluation::{
     CausalLmAnswerComparison, CausalLmAnswerContrast, CausalLmAnswerScore, CausalLmEvaluation,
