@@ -244,7 +244,7 @@ fn chunked_planner_bounds_every_chunk_before_execution() {
     decoder::work_counts::take_cache_rows();
     for bad in [
         model.context_chunked_prefill_plan(0, 64, limits(4, 48)),
-        model.context_chunked_prefill_plan(4, 63, 4, limits(4, 48)),
+        model.context_chunked_prefill_plan(4, 63, limits(4, 48)),
         model.context_chunked_prefill_plan(4, 64, limits(0, 48)),
         model.context_chunked_prefill_plan(4, 64, limits(4, 47)),
         model.context_chunked_prefill_plan(usize::MAX, 64, limits(4, usize::MAX)),
@@ -298,9 +298,9 @@ fn chunked_geometry_budget_sums_replay_and_uniform_scans_before_decoder_work() {
     let scope = CausalLmChunkedPrefillLimits {
         max_chunk_steps: 2,
         max_total_attention_pairs: 48,
-        max_total_geometry_work: 120,
+        max_total_geometry_work: 216,
     };
-    for (model, expected) in [(&replay, 96), (&read, 24), (&transport, 0)] {
+    for (model, expected) in [(&replay, 192), (&read, 24), (&transport, 0)] {
         let exact = CausalLmChunkedPrefillLimits {
             max_total_geometry_work: expected,
             ..scope
@@ -328,10 +328,10 @@ fn chunked_geometry_budget_sums_replay_and_uniform_scans_before_decoder_work() {
             .context_chunked_prefill_plan(4, 1024, scope)
             .unwrap()
             .geometry_prefix_work,
-        120,
+        216,
     );
     let short = CausalLmChunkedPrefillLimits {
-        max_total_geometry_work: 119,
+        max_total_geometry_work: 215,
         ..scope
     };
     decoder::work_counts::take_cache_rows();

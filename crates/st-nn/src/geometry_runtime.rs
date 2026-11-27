@@ -14,6 +14,7 @@ use crate::{
     ChannelAffineKernel, ChannelAffineLearningBatch, WaveGateKernel, WaveGateLearningBatch,
 };
 use st_core::backend::device_caps::DeviceCaps;
+use st_frac::learning::FractionalGlKernel;
 use st_tensor::{Tensor, TensorUtilBackend};
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -222,6 +223,7 @@ impl NativeGeometryRuntime {
                     kernel_len,
                 }) => width
                     .checked_mul(kernel_len)
+                    .and_then(|n| n.checked_mul(FractionalGlKernel::FORWARD_TAP_PRODUCT_STREAMS))
                     .ok_or("geometry prefix work overflow")?,
                 GeometryCacheKind::DecoderValues(AttentionValueRoute::Uniform) => width,
                 GeometryCacheKind::RowLocal

@@ -8,7 +8,7 @@ mod tests;
 pub struct CausalLmChunkedPrefillLimits {
     pub max_chunk_steps: usize,
     pub max_total_attention_pairs: usize,
-    /// Each elliptic score cell, fractional product or scanned value costs one unit.
+    /// One unit per elliptic score cell, fractional tap product, or scanned value.
     pub max_total_geometry_work: usize,
 }
 

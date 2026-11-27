@@ -157,7 +157,8 @@ selects the actual chunk size subject to model activation and attention
 limits, and refuses schedules over 8,388,608 rectangular attention pairs
 in total. A separate limit of 8,388,608 work units bounds repeated geometry
 prefix work across chunks and sites: each elliptic score cell, fractional
-product or scalar scanned by a uniform value read is one unit. Compact
+tap product (both output and order derivative), or scalar scanned by a
+uniform value read is one unit. Compact
 incremental transport and row-local geometry do not replay a prefix.
 Planning takes a token count, not token IDs, so it cannot validate their
 values. The pair count includes masked pairs; both counters are conservative
