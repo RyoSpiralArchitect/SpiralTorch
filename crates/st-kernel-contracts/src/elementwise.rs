@@ -1,5 +1,26 @@
 //! Finite f32 elementwise semantics shared by host and resident tensors.
 
+/// Scalar tanh policy for the host GELU forward and derivative.
+pub const HOST_GELU_TANH: &str = if cfg!(feature = "portable-host-gelu") {
+    "portable_libm_tanh_f32.v1"
+} else {
+    "platform_tanh_f32.v1"
+};
+
+/// Scalar tanh used inside host GELU and its input derivative. The opt-in
+/// implementation is shared by native and WASM; it does not change GPU shaders.
+#[inline]
+pub fn gelu_tanh(inner: f32) -> f32 {
+    #[cfg(feature = "portable-host-gelu")]
+    {
+        libm::tanhf(inner)
+    }
+    #[cfg(not(feature = "portable-host-gelu"))]
+    {
+        inner.tanh()
+    }
+}
+
 /// Discriminants are the backend dispatch contract, not a runtime route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -46,7 +67,7 @@ impl ElementwiseOp {
                 if !square.is_finite() || !cubic.is_finite() || !inner.is_finite() {
                     return None;
                 }
-                0.5 * a * (1.0 + inner.clamp(-10.0, 10.0).tanh())
+                0.5 * a * (1.0 + gelu_tanh(inner.clamp(-10.0, 10.0)))
             }
         };
         value.is_finite().then_some(value)
@@ -83,7 +104,7 @@ pub fn gelu_derivative(x: f32) -> Option<f32> {
     }
     let square = x * x;
     let inner = 0.7978846 * (x + 0.044715 * x * square);
-    let t = inner.tanh();
+    let t = gelu_tanh(inner);
     let derivative =
         0.5 * (1. + t) + 0.5 * x * (1. - t * t) * 0.7978846 * (1. + 3. * 0.044715 * square);
     derivative.is_finite().then_some(derivative)
@@ -92,6 +113,43 @@ pub fn gelu_derivative(x: f32) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_gelu_uses_the_selected_tanh_for_values_and_partials() {
+        #[cfg(feature = "portable-host-gelu")]
+        let (tanh, policy) = (libm::tanhf, "portable_libm_tanh_f32.v1");
+        #[cfg(not(feature = "portable-host-gelu"))]
+        let (tanh, policy) = (f32::tanh, "platform_tanh_f32.v1");
+        assert_eq!(HOST_GELU_TANH, policy);
+        // Includes the three distinct inputs where the two fixture hosts disagreed.
+        for x in [
+            f32::from_bits(0xbe22c063),
+            f32::from_bits(0xbe3ce4af),
+            f32::from_bits(0x3df3a458),
+            -2.5,
+            -0.0,
+            0.0,
+            0.125,
+            3.0,
+        ] {
+            let square = x * x;
+            let cubic = square * x;
+            let forward =
+                0.5 * x * (1. + tanh((0.7978846 * (x + 0.044715 * cubic)).clamp(-10., 10.)));
+            let t = tanh(0.7978846 * (x + 0.044715 * x * square));
+            let derivative =
+                0.5 * (1. + t) + 0.5 * x * (1. - t * t) * 0.7978846 * (1. + 3. * 0.044715 * square);
+            assert_eq!(
+                ElementwiseOp::Gelu.apply(x, 0.).unwrap().to_bits(),
+                forward.to_bits()
+            );
+            assert_eq!(gelu_derivative(x).unwrap().to_bits(), derivative.to_bits());
+        }
+        assert_eq!(gelu_tanh(-0.).to_bits(), (-0f32).to_bits());
+        assert_eq!(gelu_derivative(-10.), Some(0.));
+        assert_eq!(gelu_derivative(10.), Some(1.));
+        assert_eq!(gelu_derivative(f32::NAN), None);
+    }
 
     #[test]
     fn subtract_and_divide_check_forward_and_local_partials() {

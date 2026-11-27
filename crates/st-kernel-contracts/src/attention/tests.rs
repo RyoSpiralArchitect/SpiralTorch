@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn forward_exponential_policy_covers_the_recorded_last_key() {
+    let arg = f32::from_bits(0xbd6c_f8da);
+    if cfg!(feature = "portable-host-attention-exp") {
+        assert_eq!(HOST_ATTENTION_EXP, "portable_libm_exp_f64.v1");
+        assert_eq!(forward_exp(arg).to_bits(), 0x3f71_9c0b);
+    } else {
+        assert_eq!(HOST_ATTENTION_EXP, "platform_f32_f64.v1");
+        assert_eq!(forward_exp(arg).to_bits(), arg.exp().to_bits());
+    }
+    assert_eq!(forward_exp(f32::NEG_INFINITY), 0.);
+    assert_eq!(forward_exp(-0.), 1.);
+    let query = [f32::from_bits(0xbe6b_20da)];
+    let key = [0xbea5_84e9, 0x3bb7_97e0, 0xbd92_0fd6].map(f32::from_bits);
+    let value = [0x3cc3_8580, 0xbeab_4c2b, 0x3e59_fd4a].map(f32::from_bits);
+    let spec = AttentionSpec::new(
+        &[1, 1, 1, 1],
+        &[1, 1, 3, 1],
+        &[1, 1, 3, 1],
+        1.,
+        AttentionMask::Causal { query_offset: 2 },
+    )
+    .unwrap();
+    let out = attention_reference(spec, &query, &key, &value, None, None).unwrap();
+    #[cfg(feature = "portable-host-attention-exp")]
+    assert_eq!(out[0].to_bits(), 0xbcf3_d048);
+    assert!(out[0].is_finite());
+}
+
+#[test]
+fn backward_exponential_keeps_a_probability_below_the_smallest_f32() {
+    let spec = AttentionSpec::new(
+        &[1, 1, 1, 1],
+        &[1, 1, 2, 1],
+        &[1, 1, 2, 1],
+        1.,
+        AttentionMask::None,
+    )
+    .unwrap();
+    let upstream = 2.0_f32.powi(80);
+    let grad =
+        attention_vjp_reference(spec, &[1.], &[0., -110.], &[0.; 2], None, None, &[upstream])
+            .unwrap();
+    let p = adjoint_exp(-110.);
+    #[cfg(feature = "portable-host-attention-exp")]
+    assert_eq!(p.to_bits(), libm::exp(-110.).to_bits());
+    #[cfg(not(feature = "portable-host-attention-exp"))]
+    assert_eq!(p.to_bits(), (-110f64).exp().to_bits());
+    assert_eq!(p as f32, 0.);
+    assert!(grad.value[1] > 0.);
+    assert_eq!(
+        grad.value[1].to_bits(),
+        ((p / (1. + p) * f64::from(upstream)) as f32).to_bits()
+    );
+}
+
+#[test]
 fn attention_vjp_matches_all_input_finite_differences_with_batches_heads_and_offsets() {
     for mask in [
         AttentionMask::None,

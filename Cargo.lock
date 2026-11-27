@@ -3301,6 +3301,7 @@ dependencies = [
 name = "st-kernel-contracts"
 version = "0.1.0"
 dependencies = [
+ "libm",
  "thiserror 2.0.17",
 ]
 

@@ -12169,7 +12169,8 @@ fn gelu(x: f32) -> f32 {
     const COEFF: f32 = 0.044_715;
     const SQRT_2_OVER_PI: f32 = 0.797_884_6;
     let x_cubed = x * x * x;
-    0.5 * x * (1.0 + (SQRT_2_OVER_PI * (x + COEFF * x_cubed)).tanh())
+    let t = st_kernel_contracts::elementwise::gelu_tanh(SQRT_2_OVER_PI * (x + COEFF * x_cubed));
+    0.5 * x * (1.0 + t)
 }
 
 // Called only after validating every input, so input errors keep precedence over
@@ -12184,7 +12185,7 @@ fn checked_gelu_finite(value: f32) -> PureResult<f32> {
     Tensor::validate_finite_tensor_util_value("gelu_inner_arg", inner_arg)?;
     let inner = SQRT_2_OVER_PI * inner_arg;
     Tensor::validate_finite_tensor_util_value("gelu_inner", inner)?;
-    let tanh_inner = inner.tanh();
+    let tanh_inner = st_kernel_contracts::elementwise::gelu_tanh(inner);
     Tensor::validate_finite_tensor_util_value("gelu_tanh", tanh_inner)?;
     let output = 0.5 * value * (1.0 + tanh_inner);
     Tensor::validate_finite_tensor_util_value("gelu_output", output)?;
@@ -12795,6 +12796,30 @@ mod tests {
         ];
         for (observed, expected) in output.data().iter().zip(expected.iter()) {
             assert!((observed - expected).abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn host_gelu_tensor_entry_points_agree_on_observed_f32_inputs() {
+        let vals = [0xbe22_c063, 0xbe3c_e4af, 0x3df3_a458, 0x8000_0000].map(f32::from_bits);
+        let input = unwrap_ok(Tensor::from_vec(1, vals.len(), vals.to_vec()));
+        let expected = vals.map(|x| {
+            st_kernel_contracts::elementwise::ElementwiseOp::Gelu
+                .apply(x, 0.)
+                .unwrap()
+                .to_bits()
+        });
+        let mut inplace = input.clone();
+        inplace.gelu_inplace();
+        for out in [
+            inplace,
+            unwrap_ok(input.try_gelu()),
+            unwrap_ok(input.try_into_gelu()),
+        ] {
+            assert_eq!(
+                out.data().iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                expected
+            );
         }
     }
 

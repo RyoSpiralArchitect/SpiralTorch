@@ -82,7 +82,7 @@ pub fn attention_key_lag_vjp_reference(
             }
             let mut sum = 0.0;
             for p in &mut probabilities[..visible] {
-                *p = (*p - maximum).exp();
+                *p = super::adjoint_exp(*p - maximum);
                 sum += *p;
             }
             let mut center = 0.0;
