@@ -13,7 +13,14 @@ pub(super) enum BlockPass<'a> {
     },
     BackwardReplay,
     Prefill,
+    PrefillLastQuery,
     Projection(projection_probe::ProjectionDelta<'a>),
+}
+
+impl BlockPass<'_> {
+    fn is_prefill(&self) -> bool {
+        matches!(self, Self::Prefill | Self::PrefillLastQuery)
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -21,6 +28,21 @@ pub(super) mod work_counts {
     use std::cell::Cell;
     thread_local! { static COUNTS: Cell<[usize; 3]> = const { Cell::new([0; 3]) }; }
     thread_local! { static SUFFIXES: Cell<(usize,usize)> = const { Cell::new((0,0)) }; }
+    thread_local! { static CACHE_ROWS: Cell<[usize; 2]> = const { Cell::new([0; 2]) }; }
+
+    pub(in crate::causal_lm) fn cached_attention(rows: usize) {
+        let [q, mlp] = CACHE_ROWS.get();
+        CACHE_ROWS.set([q + rows, mlp]);
+    }
+
+    pub(in crate::causal_lm) fn cached_mlp(rows: usize) {
+        let [q, mlp] = CACHE_ROWS.get();
+        CACHE_ROWS.set([q, mlp + rows]);
+    }
+
+    pub(in crate::causal_lm) fn take_cache_rows() -> [usize; 2] {
+        CACHE_ROWS.with(Cell::take)
+    }
 
     pub(crate) fn suffix(queries: usize) {
         SUFFIXES.with(|c| {
@@ -72,6 +94,14 @@ pub(super) struct BlockOutput {
     pub inference_cache: Option<InferenceBlockCache>,
 }
 
+pub(super) fn keep_last_query(query: &mut Vec<f32>, rows: usize, heads: usize, dim: usize) {
+    for head in 0..heads {
+        let end = (head + 1) * rows * dim;
+        query.copy_within(end - dim..end, head * dim);
+    }
+    query.truncate(heads * dim);
+}
+
 impl NativeCausalLm {
     pub(super) fn embed(&self, ids: &[usize], shape: [usize; 2]) -> CausalLmResult<Tensor> {
         self.embed_at(ids, shape, 0)
@@ -98,11 +128,7 @@ impl NativeCausalLm {
         )?)
     }
 
-    pub(super) fn attention_spec(
-        &self,
-        layer: usize,
-        shape: [usize; 2],
-    ) -> CausalLmResult<AttentionSpec> {
+    fn attention_scale(&self, layer: usize) -> f32 {
         let c = &self.config;
         let head_dim = c.width / c.heads;
         let mut scale = if c.scale_attention {
@@ -113,14 +139,61 @@ impl NativeCausalLm {
         if c.inverse_layer_scale {
             scale /= (layer + 1) as f32;
         }
-        let heads = [shape[0], c.heads, shape[1], head_dim];
+        scale
+    }
+
+    pub(super) fn attention_spec(
+        &self,
+        layer: usize,
+        shape: [usize; 2],
+    ) -> CausalLmResult<AttentionSpec> {
+        let c = &self.config;
+        let heads = [shape[0], c.heads, shape[1], c.width / c.heads];
         Ok(AttentionSpec::new(
             &heads,
             &heads,
             &heads,
-            scale,
+            self.attention_scale(layer),
             AttentionMask::Causal { query_offset: 0 },
         )?)
+    }
+
+    pub(super) fn attention_suffix_spec(
+        &self,
+        layer: usize,
+        queries: usize,
+        steps: usize,
+    ) -> CausalLmResult<AttentionSpec> {
+        let c = &self.config;
+        let dim = c.width / c.heads;
+        let query = [1, c.heads, queries, dim];
+        let kv = [1, c.heads, steps, dim];
+        let query_offset = steps
+            .checked_sub(queries)
+            .ok_or("invalid attention suffix")?;
+        Ok(AttentionSpec::new(
+            &query,
+            &kv,
+            &kv,
+            self.attention_scale(layer),
+            AttentionMask::Causal { query_offset },
+        )?)
+    }
+
+    pub(super) fn prefill_last_block_kv(
+        &self,
+        input: &Tensor,
+        steps: usize,
+    ) -> CausalLmResult<InferenceBlockCache> {
+        let block = &self.blocks[self.config.layers - 1];
+        let norm = block.first_norm.forward(input, self.config.norm_epsilon)?;
+        // Even discarded Q rows pass through the checked dense projection.
+        let [_, key, value] = self.split_heads::<3>(&block.qkv.forward(&norm)?, [1, steps])?;
+        Ok(InferenceBlockCache {
+            key,
+            value,
+            history: [None, None, None],
+        })
     }
 
     // These permutations are exact inverses in both the primal and adjoint.
@@ -226,7 +299,7 @@ impl NativeCausalLm {
         history: &mut Option<context::GeometryHistory>,
         source: Option<&Tensor>,
     ) -> CausalLmResult<(Tensor, Option<NativeGeometryBatch>)> {
-        if matches!(pass, BlockPass::Prefill) && source.is_none() {
+        if pass.is_prefill() && source.is_none() {
             if shape[0] != 1 {
                 return Err("prefill requires exactly one sequence".into());
             }
@@ -247,7 +320,7 @@ impl NativeCausalLm {
         #[cfg(all(test, not(target_arch = "wasm32")))]
         work_counts::block(&pass);
         let capture = matches!(pass, BlockPass::BackwardReplay);
-        let inference = matches!(pass, BlockPass::Prefill);
+        let inference = pass.is_prefill();
         let block = &self.blocks[index];
         let norm = block.first_norm.forward(&input, self.config.norm_epsilon)?;
         let mut fused = block.qkv.forward(&norm)?;
@@ -258,8 +331,25 @@ impl NativeCausalLm {
         }
         let mut qkv = self.split_heads::<3>(&fused, shape)?;
         drop(fused);
+        let kv_steps = shape[1];
+        let (spec, input, shape) = if matches!(pass, BlockPass::PrefillLastQuery) {
+            debug_assert_eq!((shape[0], index + 1), (1, self.config.layers));
+            let c = &self.config;
+            keep_last_query(&mut qkv[0], kv_steps, c.heads, c.width / c.heads);
+            (
+                self.attention_suffix_spec(index, 1, kv_steps)?,
+                input.gather_rows(&[kv_steps - 1])?,
+                [1, 1],
+            )
+        } else {
+            (self.attention_spec(index, shape)?, input, shape)
+        };
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        if inference {
+            work_counts::cached_attention(shape[1]);
+        }
         let attended = attention_key_lag_reference(
-            self.attention_spec(index, shape)?,
+            spec,
             &qkv[0],
             &qkv[1],
             &qkv[2],
@@ -277,7 +367,7 @@ impl NativeCausalLm {
         let path = format!("transformer.h.{index}");
         let mlp_path = format!("{path}.mlp");
         let value_read =
-            self.mlp_value_source(&mlp_path, &attention_input, &qkv[2], shape, shape[1])?;
+            self.mlp_value_source(&mlp_path, &attention_input, &qkv[2], shape, kv_steps)?;
         let attention_input = capture.then_some(attention_input);
         let mut history = std::array::from_fn(|_| None);
         let (attention, attention_geometry) = self.block_geometry_output(
@@ -292,6 +382,10 @@ impl NativeCausalLm {
         let norm = block
             .second_norm
             .forward(&after_attention, self.config.norm_epsilon)?;
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        if inference {
+            work_counts::cached_mlp(norm.shape().0);
+        }
         let expanded = block.expand.forward(&norm)?;
         let pre_gelu = capture.then(|| expanded.clone());
         let mlp = block.contract.forward(&expanded.try_into_gelu()?)?;
