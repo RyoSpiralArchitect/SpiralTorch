@@ -5,6 +5,17 @@ export function usesPortableHostMath(model: NativeCausalLm): boolean {
         && model.hostGeluTanh === 'portable_libm_tanh_f32.v1';
 }
 
+export function chunkedPrefill(model: NativeCausalLm, ids: Uint32Array) {
+    const plan: string = model.planChunkedPrefillJson(ids.length, 1024, 2);
+    const baseline: NativeCausalLmContext = model.prefillChunked(ids, 1024);
+    try {
+        const optimized: NativeCausalLmContext = model.prefillChunkedLastOutput(ids, 1024, 2);
+        try {
+            return {plan, baseline: baseline.nextLogits(), optimized: optimized.nextLogits()};
+        } finally { optimized.free(); }
+    } finally { baseline.free(); }
+}
+
 export function jointLine(geometry: NativeCausalLm, prompt: Uint32Array, flat: Uint32Array, lengths: Uint32Array) {
     const m = geometry.withLora(0, 2, 2);
     try {

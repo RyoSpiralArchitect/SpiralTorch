@@ -41,6 +41,12 @@ declare module "spiraltorch-wasm" {
         geometryArtifact(): GeometryAdapterArtifact | undefined;
         nextLogits(promptJson: string): Float32Array;
         prefill(promptIds: Uint32Array, maxCacheValues: number): NativeCausalLmContext;
+        /** Preflight only: selected chunk size, number of chunks and rectangular attention pairs. */
+        planChunkedPrefillJson(promptTokens: number, maxCacheValues: number, maxChunkSteps?: number): string;
+        /** Prefill a known prompt in bounded chunks with one terminal vocabulary projection. */
+        prefillChunked(promptIds: Uint32Array, maxCacheValues: number, maxChunkSteps?: number): NativeCausalLmContext;
+        /** Opt in to skipping unused final-block outputs; preserves complete K/V. */
+        prefillChunkedLastOutput(promptIds: Uint32Array, maxCacheValues: number, maxChunkSteps?: number): NativeCausalLmContext;
         /** Geometry-only full-vocabulary VJP. Objective JSON kind: set, menu (gold_index, mix), or subset (accepted_indices). */
         geometryLineGradients(prompt: Uint32Array, content: Uint32Array, lengths: Uint32Array, stopId: number, objective: string, maxTileValues?: number): CausalLmLineGradients;
         geometryTokenMenuGradients(prompt: Uint32Array, choices: Uint32Array, goldIndex: number, mix: number): CausalLmLineGradients;

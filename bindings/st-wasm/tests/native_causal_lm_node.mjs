@@ -3,6 +3,7 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {checkNativeCausalLm} from './native_causal_lm.mjs';
 import {checkCachedSuffix} from './native_causal_lm_cache.mjs';
+import {checkChunkedPrefill} from './native_chunked_prefill.mjs';
 import {checkPrefixTransport} from './native_prefix_transport.mjs';
 import {checkCachedLines} from './native_cached_lines.mjs';
 import {checkLineGradients} from './native_line_gradients.mjs';
@@ -19,6 +20,7 @@ const selected = [];
 const report = checkNativeCausalLm(M, fixture, item => selected.push(item));
 const models = JSON.parse(readFileSync(new URL('./native_causal_lm_cache_fixture.json', import.meta.url)));
 report.cached = checkCachedSuffix(M, models);
+report.chunked_prefill = checkChunkedPrefill(M, models);
 report.prefix_transport = checkPrefixTransport(M, models, JSON.parse(readFileSync(new URL('./native_prefix_transport_fixture.json', import.meta.url))));
 const owners = JSON.parse(readFileSync(new URL('./native_line_owners_bridge.json',import.meta.url)));
 report.line_envelope=checkLineEnvelope(M,models,owners,process.env.ST_SYNTHETIC_ENVELOPE_CUTS

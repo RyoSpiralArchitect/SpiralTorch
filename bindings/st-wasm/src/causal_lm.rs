@@ -4,9 +4,9 @@ use crate::utils::{bounded_json_string_from_js, js_error, js_u32};
 use js_sys::{JsString, Uint32Array, Uint8Array};
 use serde::Deserialize;
 use st_nn::causal_lm::{
-    CausalLmDeclaredSetStep, CausalLmLimits, DeclaredRivalRow, NativeCausalLm as Decoder,
-    NativeCausalLmContext as CoreContext, MAX_DECLARED_RIVAL_IDS, MAX_LINE_MENU_CANDIDATES,
-    MAX_LINE_MENU_TARGETS,
+    CausalLmChunkedPrefillPlan, CausalLmDeclaredSetStep, CausalLmLimits, DeclaredRivalRow,
+    NativeCausalLm as Decoder, NativeCausalLmContext as CoreContext, MAX_DECLARED_RIVAL_IDS,
+    MAX_LINE_MENU_CANDIDATES, MAX_LINE_MENU_TARGETS,
 };
 use st_nn::weights::{SafeTensorArchive, WeightLoadLimits};
 use wasm_bindgen::prelude::*;
@@ -15,6 +15,8 @@ const FILE_BYTES: usize = 64 << 20;
 const PARAMETERS: usize = 8 << 20;
 const WINDOW_IDS: usize = 65_536;
 const CACHE_VALUES: usize = 1 << 20;
+const MAX_CHUNK_STEPS: usize = 64;
+const TOTAL_CHUNK_ATTENTION_PAIRS: usize = 1 << 23;
 
 #[wasm_bindgen(inline_js = r#"
 const proto = Object.getPrototypeOf(Uint8Array.prototype);
@@ -60,6 +62,25 @@ fn admitted_ids(ids: &Uint32Array, admitted: usize) -> Result<Vec<usize>, JsValu
         .into_iter()
         .map(|id| id as usize)
         .collect())
+}
+
+fn cache_value_limit(value: &JsValue) -> Result<usize, JsValue> {
+    let budget = js_u32(value, "cache value limit")? as usize;
+    if !(1..=CACHE_VALUES).contains(&budget) {
+        return Err(js_error("invalid WASM cache value limit"));
+    }
+    Ok(budget)
+}
+
+fn chunk_step_limit(value: &JsValue) -> Result<usize, JsValue> {
+    if value.is_undefined() {
+        return Ok(MAX_CHUNK_STEPS);
+    }
+    let steps = js_u32(value, "chunk step limit")? as usize;
+    if !(1..=MAX_CHUNK_STEPS).contains(&steps) {
+        return Err(js_error("invalid WASM chunk step limit"));
+    }
+    Ok(steps)
 }
 
 #[path = "causal_lm_lines.rs"]
@@ -318,10 +339,7 @@ impl NativeCausalLm {
         prompt: &Uint32Array,
         #[wasm_bindgen(unchecked_param_type = "number")] max_cache_values: &JsValue,
     ) -> Result<NativeCausalLmContext, JsValue> {
-        let budget = js_u32(max_cache_values, "cache value limit")? as usize;
-        if !(1..=CACHE_VALUES).contains(&budget) {
-            return Err(js_error("invalid WASM cache value limit"));
-        }
+        let budget = cache_value_limit(max_cache_values)?;
         let count = self
             .model
             .context_prefill_count(id_count(prompt, WINDOW_IDS)?, budget)
@@ -329,6 +347,52 @@ impl NativeCausalLm {
         CoreContext::new(self.model.clone(), admitted_ids(prompt, count)?, budget)
             .map(|inner| NativeCausalLmContext { inner })
             .map_err(js_error)
+    }
+
+    /// Inspect the same admission and chunk schedule used by both chunked entry points.
+    #[wasm_bindgen(js_name = planChunkedPrefillJson)]
+    pub fn plan_chunked_prefill_json(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "number")] prompt_tokens: &JsValue,
+        #[wasm_bindgen(unchecked_param_type = "number")] max_cache_values: &JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "number")] max_chunk_steps: &JsValue,
+    ) -> Result<String, JsValue> {
+        let count = js_u32(prompt_tokens, "prompt token count")? as usize;
+        let plan = self.admit_chunked_plan(
+            count,
+            cache_value_limit(max_cache_values)?,
+            chunk_step_limit(max_chunk_steps)?,
+        )?;
+        Ok(serde_json::json!({
+            "schema": "spiraltorch.native_causal_lm.chunked_prefill_plan.v1",
+            "chunk_steps": plan.chunk_steps,
+            "chunks": plan.chunks,
+            "attention_pairs": plan.attention_pairs,
+        })
+        .to_string())
+    }
+
+    /// Process a known prompt in bounded chunks and keep K/V and geometry history.
+    #[wasm_bindgen(js_name = prefillChunked)]
+    pub fn prefill_chunked(
+        &self,
+        prompt: &Uint32Array,
+        #[wasm_bindgen(unchecked_param_type = "number")] max_cache_values: &JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "number")] max_chunk_steps: &JsValue,
+    ) -> Result<NativeCausalLmContext, JsValue> {
+        self.chunked_prefill(prompt, max_cache_values, max_chunk_steps, false)
+    }
+
+    /// Opt in to omitting unused final-block outputs without dropping K/V.
+    /// A final-block geometry placement retains the full chunk schedule.
+    #[wasm_bindgen(js_name = prefillChunkedLastOutput)]
+    pub fn prefill_chunked_last_output(
+        &self,
+        prompt: &Uint32Array,
+        #[wasm_bindgen(unchecked_param_type = "number")] max_cache_values: &JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "number")] max_chunk_steps: &JsValue,
+    ) -> Result<NativeCausalLmContext, JsValue> {
+        self.chunked_prefill(prompt, max_cache_values, max_chunk_steps, true)
     }
 
     #[wasm_bindgen(js_name = declaredSetNllJson)]
@@ -360,6 +424,50 @@ impl NativeCausalLm {
             )
             .map_err(js_error)?;
         Ok(CausalLmDeclaredStep { model, report })
+    }
+}
+
+impl NativeCausalLm {
+    fn admit_chunked_plan(
+        &self,
+        count: usize,
+        budget: usize,
+        chunk_steps: usize,
+    ) -> Result<CausalLmChunkedPrefillPlan, JsValue> {
+        if !(1..=WINDOW_IDS).contains(&count) {
+            return Err(js_error("invalid cached token count"));
+        }
+        self.model
+            .context_chunked_prefill_plan(count, budget, chunk_steps, TOTAL_CHUNK_ATTENTION_PAIRS)
+            .map_err(js_error)
+    }
+
+    fn chunked_prefill(
+        &self,
+        prompt: &Uint32Array,
+        max_cache_values: &JsValue,
+        max_chunk_steps: &JsValue,
+        last_output: bool,
+    ) -> Result<NativeCausalLmContext, JsValue> {
+        let budget = cache_value_limit(max_cache_values)?;
+        let chunk_steps = chunk_step_limit(max_chunk_steps)?;
+        let count = id_count(prompt, WINDOW_IDS)?;
+        self.admit_chunked_plan(count, budget, chunk_steps)?;
+        let ids = admitted_ids(prompt, count)?;
+        let new_context = if last_output {
+            CoreContext::new_chunked_prefill_last_output
+        } else {
+            CoreContext::new_chunked_prefill
+        };
+        new_context(
+            self.model.clone(),
+            ids,
+            budget,
+            chunk_steps,
+            TOTAL_CHUNK_ATTENTION_PAIRS,
+        )
+        .map(|inner| NativeCausalLmContext { inner })
+        .map_err(js_error)
     }
 }
 

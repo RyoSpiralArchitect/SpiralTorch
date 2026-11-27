@@ -132,6 +132,42 @@ and key-lag attention; bare, trained WaveGate and trained fractional history).
 Their fixture was generated with the original full-prefix and one-token Python
 interfaces using `native_causal_lm_fixture.py --cache OUTPUT`.
 
+## Bounded prompt prefill
+
+`prefillChunked(ids, maxCacheValues, maxChunkSteps?)` processes a known prompt
+without projecting logits at intermediate chunk boundaries. The returned
+context uses the same `nextLogits()` and `withSuffix()` API as `prefill`.
+The explicit `prefillChunkedLastOutput` route also skips final-block outputs
+that neither the final logit nor continuation reads. It keeps all projected
+K/V and earlier geometry history. If there is any geometry placement on the
+last block, this route uses the full chunk schedule. Unused activations
+and their checks are not evaluated; Q/K/V projection remains checked.
+
+```js
+const cacheValues = 1024; // reserve for prompt and intended continuations
+const plan = JSON.parse(model.planChunkedPrefillJson(ids.length, cacheValues));
+const ctx = model.prefillChunkedLastOutput(ids, cacheValues);
+try { console.log(plan.chunk_steps, plan.chunks, plan.attention_pairs, ctx.nextLogits()); }
+finally { ctx.free(); }
+```
+
+Both routes keep the ordinary non-shared `Uint32Array` and 1,048,576-value
+cache limit. The optional chunk cap is 1 to 64 tokens (default 64). Rust
+selects the actual chunk size subject to model activation and attention
+limits, and refuses schedules over 8,388,608 rectangular attention pairs
+in total. Planning takes a token count, not token IDs, so it cannot validate
+their values. The reported pair count includes masked pairs and is the
+same conservative bound for both routes, not measured work or memory.
+The plan does not bound total geometry replay or temporary buffers.
+The existing small-model archive limit and ordinary `prefill` are unchanged.
+
+The `chunked_prefill` report exercises both schedules on the same binary
+and checks exact logit words, logical cache sizes and continuation, with
+independent existing decoder outputs as references. Its generated
+259-token prompt exceeds the ordinary full-prefix attention cap, but runs
+as five chunks with the default cap. This is not a timing benchmark or
+validation of a pretrained GPT-2 checkpoint on this route.
+
 ## Score complete answers
 
 To compare answers after the same prompt, score their content **and the stop**
