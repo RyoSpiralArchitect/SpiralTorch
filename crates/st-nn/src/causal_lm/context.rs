@@ -2,7 +2,17 @@
 //! Updates are built separately and published only after successful execution.
 use super::*;
 use crate::geometry_runtime::{GeometryCacheKind, GeometrySequenceDependency, TransportState};
-use st_kernel_contracts::attention::{attention_key_lag_reference, AttentionMask, AttentionSpec};
+use st_kernel_contracts::attention::attention_key_lag_reference;
+
+mod chunked;
+pub use chunked::{CausalLmChunkedPrefillLimits, CausalLmChunkedPrefillPlan};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LastBlockWork {
+    Full,
+    LastQuery,
+    KvOnly,
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct InferenceBlockCache {
@@ -89,7 +99,7 @@ impl NativeCausalLm {
             .checked_sub(added)
             .ok_or("invalid cached geometry suffix")?;
         match runtime.cache_kind(path)? {
-            GeometryCacheKind::DecoderValues => {
+            GeometryCacheKind::DecoderValues(_) => {
                 Err("cached value gate requires decoder values".into())
             }
             GeometryCacheKind::RowLocal => Ok((
@@ -108,7 +118,7 @@ impl NativeCausalLm {
                 let (out, s) = runtime.extend_transport(path, rows, prev, steps)?;
                 Ok((out, Some(GeometryHistory::Transport(s))))
             }
-            GeometryCacheKind::Replay => {
+            GeometryCacheKind::Replay(_) => {
                 let input = match previous {
                     None if start == 0 => rows,
                     Some(GeometryHistory::Replay(t)) if t.shape() == (start, self.config.width) => {
@@ -154,8 +164,8 @@ impl NativeCausalLm {
         if let Some(runtime) = &self.geometry {
             for p in &runtime.artifact().record().placements {
                 let count = match runtime.cache_kind(&p.path)? {
-                    GeometryCacheKind::RowLocal | GeometryCacheKind::DecoderValues => 0,
-                    GeometryCacheKind::Replay => steps,
+                    GeometryCacheKind::RowLocal | GeometryCacheKind::DecoderValues(_) => 0,
+                    GeometryCacheKind::Replay(_) => steps,
                     GeometryCacheKind::Transport { difference } => 2 + usize::from(difference),
                 };
                 n = count
@@ -234,6 +244,16 @@ fn extend_head_rows(previous: &[f32], suffix: &[f32], heads: usize) -> CausalLmR
     Ok(values)
 }
 
+fn checked_suffix_end(
+    model: &NativeCausalLm,
+    start: usize,
+    added: usize,
+    max_cache_values: usize,
+) -> CausalLmResult<usize> {
+    let steps = start.checked_add(added).ok_or("context length overflow")?;
+    model.cached_query_count(steps, added, max_cache_values)
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[test]
 fn key_substitution_matches_manual_cache_edit_before_any_append() {
@@ -276,27 +296,58 @@ impl NativeCausalLmContext {
         prompt: Vec<usize>,
         max_cache_values: usize,
     ) -> CausalLmResult<Self> {
-        model.context_prefill_count(prompt.len(), max_cache_values)?;
-        let mut hidden = model.embed(&prompt, [1, prompt.len()])?;
+        let (branch, hidden) =
+            Self::prefill_hidden(&model, &prompt, max_cache_values, LastBlockWork::Full)?;
+        Self::finish_prefill(model, prompt, max_cache_values, branch, hidden)
+    }
+
+    fn prefill_hidden(
+        model: &NativeCausalLm,
+        prompt: &[usize],
+        max_cache_values: usize,
+        work: LastBlockWork,
+    ) -> CausalLmResult<(KvBranch, Option<Tensor>)> {
+        let steps = prompt.len();
+        model.context_prefill_count(steps, max_cache_values)?;
+        let shape = [1, steps];
+        let mut hidden = model.embed(prompt, shape)?;
         let mut blocks = Vec::with_capacity(model.config.layers);
         for index in 0..model.config.layers {
-            let result = model.run_block(
-                index,
-                hidden,
-                [1, prompt.len()],
-                decoder::BlockPass::Prefill,
-            )?;
+            let pass = if index + 1 != model.config.layers {
+                decoder::BlockPass::Prefill
+            } else {
+                match work {
+                    LastBlockWork::Full => decoder::BlockPass::Prefill,
+                    LastBlockWork::LastQuery => decoder::BlockPass::PrefillLastQuery,
+                    LastBlockWork::KvOnly => {
+                        blocks.push(Arc::new(model.prefill_last_block_kv(&hidden, steps)?));
+                        return Ok((KvBranch { steps, blocks }, None));
+                    }
+                }
+            };
+            let result = model.run_block(index, hidden, shape, pass)?;
             hidden = result.output;
             blocks.push(Arc::new(
                 result.inference_cache.ok_or("missing prefill KV state")?,
             ));
         }
-        let logits = model.context_readout(&hidden.gather_rows(&[prompt.len() - 1])?)?;
+        Ok((KvBranch { steps, blocks }, Some(hidden)))
+    }
+
+    fn finish_prefill(
+        model: NativeCausalLm,
+        prompt: Vec<usize>,
+        max_cache_values: usize,
+        branch: KvBranch,
+        hidden: Option<Tensor>,
+    ) -> CausalLmResult<Self> {
+        let hidden = hidden.ok_or("missing terminal prefill output")?;
+        let logits = model.context_readout(&hidden.gather_rows(&[hidden.shape().0 - 1])?)?;
         Ok(Self {
             model,
             max_cache_values,
             tokens: prompt,
-            blocks,
+            blocks: branch.blocks,
             logits,
         })
     }
@@ -363,14 +414,8 @@ impl NativeCausalLmContext {
     /// Admit suffix work before a client extracts IDs. This is rectangular cached attention,
     /// not full-prefix admission and not a promise that many one-token calls fit as one chunk.
     pub fn suffix_input_count(&self, added: usize) -> CausalLmResult<usize> {
-        self.suffix_end(self.tokens.len(), added)?;
+        checked_suffix_end(&self.model, self.tokens.len(), added, self.max_cache_values)?;
         Ok(added)
-    }
-
-    fn suffix_end(&self, start: usize, added: usize) -> CausalLmResult<usize> {
-        let steps = start.checked_add(added).ok_or("context length overflow")?;
-        self.model
-            .cached_query_count(steps, added, self.max_cache_values)
     }
 
     /// Fork with a known, nonempty suffix. Only its last position is projected into vocabulary
@@ -499,21 +544,40 @@ impl NativeCausalLmContext {
         suffix: &[usize],
         edit: Option<(usize, usize, &[f32])>,
     ) -> CausalLmResult<(KvBranch, Tensor)> {
-        let model = &self.model;
+        let (branch, hidden) = Self::suffix_hidden_for(
+            &self.model,
+            self.max_cache_values,
+            prefix,
+            suffix,
+            edit,
+            LastBlockWork::Full,
+        )?;
+        Ok((branch, hidden.ok_or("missing cached suffix output")?))
+    }
+
+    fn suffix_hidden_for(
+        model: &NativeCausalLm,
+        max_cache_values: usize,
+        prefix: KvPrefix<'_>,
+        suffix: &[usize],
+        edit: Option<(usize, usize, &[f32])>,
+        work: LastBlockWork,
+    ) -> CausalLmResult<(KvBranch, Option<Tensor>)> {
         let c = &model.config;
         let added = suffix.len();
         let start = prefix.steps;
-        let steps = self.suffix_end(start, added)?;
-        let shape = [1, added];
-        let mut hidden = model.embed_at(suffix, shape, start)?;
+        let steps = checked_suffix_end(model, start, added, max_cache_values)?;
+        let mut hidden = model.embed_at(suffix, [1, added], start)?;
         #[cfg(all(test, not(target_arch = "wasm32")))]
         decoder::work_counts::suffix(added);
         let mut blocks = Vec::with_capacity(c.layers);
         for (index, previous) in prefix.blocks.iter().enumerate() {
             let block = &model.blocks[index];
             let norm = block.first_norm.forward(&hidden, c.norm_epsilon)?;
-            let qkv = model.split_heads::<3>(&block.qkv.forward(&norm)?, shape)?;
-            let mut key = extend_head_rows(&previous.key, &qkv[1], c.heads)?;
+            let [mut query, new_key, new_value] =
+                model.split_heads::<3>(&block.qkv.forward(&norm)?, [1, added])?;
+            let last = index + 1 == c.layers;
+            let mut key = extend_head_rows(&previous.key, &new_key, c.heads)?;
             if let Some((_, pos, row)) = edit.filter(|(layer, _, _)| *layer == index) {
                 let dim = c.width / c.heads;
                 for (head, replacement) in
@@ -522,21 +586,31 @@ impl NativeCausalLmContext {
                     head[pos * dim..(pos + 1) * dim].copy_from_slice(replacement);
                 }
             }
-            let value = extend_head_rows(&previous.value, &qkv[2], c.heads)?;
-            let qshape = [1, c.heads, added, c.width / c.heads];
-            let kshape = [1, c.heads, steps, c.width / c.heads];
-            let spec = AttentionSpec::new(
-                &qshape,
-                &kshape,
-                &kshape,
-                model.attention_spec(index, shape)?.scale(),
-                AttentionMask::Causal {
-                    query_offset: start,
-                },
-            )?;
+            let value = extend_head_rows(&previous.value, &new_value, c.heads)?;
+            if last && work == LastBlockWork::KvOnly {
+                blocks.push(Arc::new(InferenceBlockCache {
+                    key,
+                    value,
+                    history: [None, None, None],
+                }));
+                return Ok((KvBranch { steps, blocks }, None));
+            }
+            let queries = if last && work == LastBlockWork::LastQuery {
+                decoder::keep_last_query(&mut query, added, c.heads, c.width / c.heads);
+                if added > 1 {
+                    hidden = hidden.gather_rows(&[added - 1])?;
+                }
+                1
+            } else {
+                added
+            };
+            let shape = [1, queries];
+            let spec = model.attention_suffix_spec(index, queries, steps)?;
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            decoder::work_counts::cached_attention(queries);
             let attended = attention_key_lag_reference(
                 spec,
-                &qkv[0],
+                &query,
                 &key,
                 &value,
                 None,
@@ -556,6 +630,8 @@ impl NativeCausalLmContext {
             let norm = block
                 .second_norm
                 .forward(&after_attention, c.norm_epsilon)?;
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            decoder::work_counts::cached_mlp(norm.shape().0);
             let mlp = block
                 .contract
                 .forward(&block.expand.forward(&norm)?.try_into_gelu()?)?;
@@ -586,7 +662,7 @@ impl NativeCausalLmContext {
                 history: [attention_history, mlp_history, block_history],
             }));
         }
-        Ok((KvBranch { steps, blocks }, hidden))
+        Ok((KvBranch { steps, blocks }, Some(hidden)))
     }
 
     fn finish_suffix(

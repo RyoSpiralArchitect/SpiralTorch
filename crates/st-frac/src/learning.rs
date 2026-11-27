@@ -86,6 +86,10 @@ pub struct FractionalGlGainGradients {
 }
 
 impl FractionalGlKernel {
+    /// Upper bound on tap products per input channel and visited lag in the
+    /// paired forward convolution: one for the output and one for d/d(alpha).
+    pub const FORWARD_TAP_PRODUCT_STREAMS: usize = 2;
+
     /// Check representability using the same coefficient builders as forward.
     /// Allocates O(kernel_len), within the caller-configured kernel budget.
     /// Input-dependent overflow is still checked by the actual forward/VJP.
